@@ -54,7 +54,8 @@ export function HelpOverlay() {
           </Box>
         ))}
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>Your downloaded files always stay on disk.</Text>
         <Text dimColor>Press ? or esc to close</Text>
       </Box>
     </Box>

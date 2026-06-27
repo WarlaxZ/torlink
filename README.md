@@ -6,7 +6,7 @@ torlink is a torrent finder that lives in your terminal, with zero setup and not
 
 ## Get started
 
-1. **Install Node** (a free, one-time download from [nodejs.org](https://nodejs.org)), it's all torlink needs.
+1. **Install Node** (from [nodejs.org](https://nodejs.org)), it's all torlink needs.
 2. **Open your terminal.**
 3. **Start it:**
 
@@ -28,7 +28,7 @@ Type what you're looking for and press Enter. Results stream in from every sourc
 
 Active downloads sit up top with their progress, speed, and time left; when one finishes it drops into Recently downloaded just below, so the list stays tidy. Everything's still there when you come back, and anything interrupted picks up where it left off.
 
-Downloads run in the background while you keep searching, so you can queue up as many as you want. They save to your downloads folder, and the Downloads pane keeps tabs on each one. When something finishes it keeps seeding automatically so the next person can find it too, and the Seeding tab lets you pause or stop that anytime. Pressing `c` on a finished item removes it from your history and stops seeding it, the same whether you do it in Downloads or Seeding.
+Downloads run in the background while you keep searching, so you can queue up as many as you want. They save to your downloads folder, and the Downloads pane keeps tabs on each one. When something finishes it keeps seeding automatically so the next person can find it too, and the Seeding tab lets you pause or stop that anytime.
 
 <p align="center">
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">

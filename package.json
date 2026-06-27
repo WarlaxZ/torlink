@@ -1,7 +1,7 @@
 {
   "name": "torlink",
   "version": "1.0.0",
-  "description": "Terminal-native torrent discovery. No browser, no ads, no hunting: search and download torrents from a clean terminal UI.",
+  "description": "A sleek, zero-setup torrent finder and downloader that lives right in your terminal.",
   "type": "module",
   "bin": {
     "torlink": "./dist/index.js"
@@ -25,13 +25,20 @@
   },
   "keywords": [
     "torrent",
-    "magnet",
-    "webtorrent",
-    "tui",
-    "cli",
-    "terminal",
+    "torrent-client",
+    "torrent-search",
     "downloader",
-    "search",
+    "magnet",
+    "magnet-links",
+    "p2p",
+    "webtorrent",
+    "seeding",
+    "tui",
+    "terminal",
+    "cli",
+    "ink",
+    "zero-configuration",
+    "zero-setup",
     "fitgirl"
   ],
   "author": "bairon",

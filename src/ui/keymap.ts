@@ -33,7 +33,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "Downloads",
     hints: [
       { keys: "p", label: "Pause/resume" },
-      { keys: "c", label: "Cancel active, else remove" },
+      { keys: "c", label: "Cancel or remove from list" },
       { keys: "f", label: "Retry failed" },
       { keys: "d", label: "Download again" },
       { keys: "x", label: "Clear recent" },
@@ -43,7 +43,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "Seeding",
     hints: [
       { keys: "p", label: "Pause/resume" },
-      { keys: "c", label: "Remove (same as Downloads)" },
+      { keys: "c", label: "Remove from list" },
     ],
   },
 ];
