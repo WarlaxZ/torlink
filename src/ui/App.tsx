@@ -9,9 +9,10 @@ import {
   type Config,
 } from "../config/config";
 import { normalizeDownloadDir } from "../config/folder";
-import { validateToken, isPremiumActive, resolveMagnet } from "../integrations/realdebrid";
+import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
-import { detectPlayer, launchPlayer, pickStreamFile } from "../util/player";
+import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
+import type { ResolvedFile } from "../integrations/realdebrid";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -46,6 +47,7 @@ import { FolderPrompt } from "./components/FolderPrompt";
 import { TokenPrompt } from "./components/TokenPrompt";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
+import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -110,6 +112,9 @@ export function App({
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
+  const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
+  const [preparing, setPreparing] = useState<{ label: string; phase: "caching" | "fetching"; pct: number } | null>(null);
+  const prepareAbort = useRef<AbortController | null>(null);
   const booting = useRef(false);
 
   useEffect(() => {
@@ -304,6 +309,23 @@ export function App({
     [config],
   );
 
+  // Hand a resolved file to the player path and clear any picker/preparing UI.
+  const finishStream = useCallback(
+    (file: ResolvedFile, name?: string) => {
+      setStreamFiles(null);
+      setPreparing(null);
+      void playStream(file.url, name ?? file.filename);
+    },
+    [playStream],
+  );
+
+  const cancelPreparing = useCallback(() => {
+    prepareAbort.current?.abort();
+    prepareAbort.current = null;
+    setPreparing(null);
+    setNotice("Stream cancelled.");
+  }, []);
+
   const streamResult = useCallback(
     (input: DownloadInput) => {
       if (!config) return;
@@ -313,27 +335,53 @@ export function App({
         return;
       }
       const label = truncate(cleanText(input.name), 32);
-      setNotice(`Preparing stream: ${label}…`);
+      const controller = new AbortController();
+      prepareAbort.current = controller;
+      setPreparing({ label, phase: "caching", pct: 0 });
       void (async () => {
         try {
           const files = await resolveMagnet(token, input.magnet, {
             knownHash: input.id,
-            // Keep feedback alive while RD caches an uncached torrent.
+            signal: controller.signal,
+            // 0<pct<100 means RD is still caching server-side; otherwise we're
+            // about to fetch the direct link.
             onProgress: (pct) =>
-              setNotice(pct > 0 && pct < 100 ? `Preparing stream: ${label}… ${pct}%` : `Preparing stream: ${label}…`),
+              setPreparing((p) =>
+                p ? { ...p, phase: pct > 0 && pct < 100 ? "caching" : "fetching", pct } : p,
+              ),
           });
-          const file = pickStreamFile(files);
-          if (!file) {
+          if (controller.signal.aborted) return;
+          prepareAbort.current = null;
+          const candidates = streamCandidates(files).sort((a, b) => b.bytes - a.bytes);
+          if (candidates.length === 0) {
+            setPreparing(null);
             setNotice("Real-Debrid returned nothing to stream.");
             return;
           }
-          await playStream(file.url, input.name);
+          if (candidates.length > 1) {
+            setPreparing(null);
+            setStreamFiles(candidates);
+            return;
+          }
+          finishStream(candidates[0]!, input.name);
         } catch (e) {
+          prepareAbort.current = null;
+          setPreparing(null);
+          // A user-initiated cancel already surfaced its own notice; don't
+          // clobber it with the cancellation error this throws.
+          if (controller.signal.aborted) return;
+          if (isTokenRejection(e)) {
+            setRdStatus(null);
+            setNotice("Real-Debrid token expired — re-enter it.");
+            setShowHelp(false);
+            setEditingToken(true);
+            return;
+          }
           setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "couldn't prepare stream"}`);
         }
       })();
     },
-    [config, playStream],
+    [config, finishStream],
   );
 
   const closePlayerPrompt = useCallback(() => {
@@ -446,6 +494,17 @@ export function App({
     return () => clearTimeout(t);
   }, [notice]);
 
+  const [prepElapsed, setPrepElapsed] = useState(0);
+  useEffect(() => {
+    if (!preparing) {
+      setPrepElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const t = setInterval(() => setPrepElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [preparing]);
+
   const compact = rows < 18;
   const showTopRule = !compact;
   const showFooter = rows >= 12;
@@ -472,7 +531,9 @@ export function App({
       section,
       setSection,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P ? "help" : region,
+        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
+          ? "help"
+          : region,
       setRegion,
       captureMode,
       setCaptureMode,
@@ -510,6 +571,7 @@ export function App({
     editingToken,
     editingPlayer,
     pendingP2P,
+    streamFiles,
     captureMode,
     downloadFocus,
     seedFocus,
@@ -540,6 +602,11 @@ export function App({
       if (editingToken) return; // the token prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
+      if (streamFiles) return; // the file picker owns input
+      if (preparing) {
+        if (key.escape) cancelPreparing();
+        return; // swallow other keys while preparing
+      }
       if (captureMode === "text") return;
       if (showHelp) {
         setShowHelp(false);
@@ -620,6 +687,17 @@ export function App({
             {notice ? <Text color={COLOR.good}>{`  ${notice}`}</Text> : null}
           </Box>
         </Box>
+        {preparing ? (
+          <Box>
+            <Spinner
+              label={
+                preparing.phase === "caching"
+                  ? `Caching on Real-Debrid… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
+                  : `Fetching link… ${prepElapsed}s  (esc cancels)`
+              }
+            />
+          </Box>
+        ) : null}
         {showTopRule ? <Rule width={ruleWidth} /> : null}
 
         {showHelp ? (
@@ -661,6 +739,20 @@ export function App({
           </Box>
         ) : null}
 
+        {streamFiles ? (
+          <Box marginTop={1}>
+            <StreamFilePrompt
+              width={Math.max(24, Math.min(cols - 4, 72))}
+              files={streamFiles}
+              onSelect={(file) => finishStream(file)}
+              onCancel={() => {
+                setStreamFiles(null);
+                setNotice("Stream cancelled.");
+              }}
+            />
+          </Box>
+        ) : null}
+
         {pendingP2P ? (
           <Box marginTop={1}>
             <ConfirmPrompt
@@ -688,7 +780,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P
+            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
               ? "none"
               : "flex"
           }
@@ -709,7 +801,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P
+              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
                 ? "none"
                 : "flex"
             }

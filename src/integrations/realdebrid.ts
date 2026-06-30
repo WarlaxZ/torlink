@@ -59,6 +59,14 @@ export class RealDebridError extends Error {
   }
 }
 
+// True for an error that means the token was rejected — by HTTP status when we
+// have the typed error, or by message when only the surfaced string survives.
+export function isTokenRejection(e: unknown): boolean {
+  if (e instanceof RealDebridError && (e.status === 401 || e.status === 403)) return true;
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return msg.includes(TOKEN_REJECTED_MESSAGE);
+}
+
 export interface RequestOptions {
   fetchImpl?: RealDebridFetch;
   sleepImpl?: (ms: number) => Promise<void>;
@@ -85,9 +93,13 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new RealDebridError("Real-Debrid request cancelled.");
 }
 
+// Exported so the UI can recognise an expired/invalid token from a surfaced
+// error message (e.g. one stored on a failed download item) and re-prompt.
+export const TOKEN_REJECTED_MESSAGE = "Real-Debrid rejected the token (invalid or expired).";
+
 function mapStatus(status: number, code?: string): RealDebridError {
   if (status === 401 || status === 403) {
-    return new RealDebridError("Real-Debrid rejected the token (invalid or expired).", status, code);
+    return new RealDebridError(TOKEN_REJECTED_MESSAGE, status, code);
   }
   if (status === 404) {
     return new RealDebridError("Real-Debrid could not find this resource.", status, code);
