@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Box, Text, useInput } from "ink";
-import { useStore, CATEGORIES } from "../store";
+import { useStore, useQueueItems, useQueueHistory, CATEGORIES } from "../store";
 import { Spinner } from "./Spinner";
 import { SearchBar } from "./SearchBar";
 import { Panel } from "./Panel";
@@ -10,10 +10,27 @@ import { getSource, SOURCES } from "../../sources/registry";
 import { wrapStep, windowStart } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type Sort, type SortField } from "../sort";
 import { COLOR, GUTTER, ICON, SOURCE_STYLE } from "../theme";
+import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatRelative, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
 
 type Mode = "list" | "search" | "detail";
+
+// Glyph + colour for a result row's download state. Returns null for untouched.
+function stateMark(state: DownloadState | null): { icon: string; color?: string; dim?: boolean } | null {
+  switch (state) {
+    case "downloading":
+      return { icon: ICON.down, color: COLOR.accent };
+    case "paused":
+      return { icon: ICON.pause, dim: true };
+    case "failed":
+      return { icon: ICON.error, color: COLOR.bad };
+    case "done":
+      return { icon: ICON.done, color: COLOR.good };
+    default:
+      return null;
+  }
+}
 
 const PLACEHOLDER = "Search or paste a magnet link…";
 
@@ -32,10 +49,12 @@ function Detail({
   r,
   width,
   debridConfigured,
+  mark,
 }: {
   r: TorrentResult;
   width: number;
   debridConfigured: boolean;
+  mark: { icon: string; color?: string; dim?: boolean } | null;
 }) {
   const ss = SOURCE_STYLE[r.source];
   const date = formatRelative(r.added);
@@ -53,6 +72,11 @@ function Detail({
   return (
     <Box flexDirection="column">
       <Box>
+        {mark ? (
+          <Box marginRight={1} flexShrink={0}>
+            <Text color={mark.color} dimColor={mark.dim}>{mark.icon}</Text>
+          </Box>
+        ) : null}
         <Box flexGrow={1} minWidth={0}>
           <Text bold color={COLOR.text} wrap="truncate-end">
             {cleanText(r.name)}
@@ -145,9 +169,15 @@ export function Results() {
     copyMagnet,
     contentWidth,
     listRows,
+    queue,
   } = useStore();
 
   const search = useConcurrentSearch(query);
+
+  const queueItems = useQueueItems(queue);
+  const queueHistory = useQueueHistory(queue);
+  const stateFor = (hash: string): DownloadState | null =>
+    downloadStateFor(hash, queueItems, queueHistory);
 
   const [sort, setSort] = useState<Sort>("none");
   const results = useMemo(() => {
@@ -369,6 +399,7 @@ export function Results() {
               r={detail}
               width={Math.max(10, contentWidth - 4)}
               debridConfigured={debridConfigured}
+              mark={stateMark(stateFor(detail.infoHash))}
             />
           ) : (
             <>
@@ -380,6 +411,7 @@ export function Results() {
                     <Box width={numW} flexShrink={0} justifyContent="flex-end">
                       <Text bold dimColor>#</Text>
                     </Box>
+                    <Box width={1} flexShrink={0} marginLeft={1} />
                     <Box flexGrow={1} minWidth={0} marginLeft={1}>
                       <Text bold dimColor>Name</Text>
                     </Box>
@@ -413,6 +445,12 @@ export function Results() {
                       </Box>
                       <Box width={numW} flexShrink={0} justifyContent="flex-end">
                         <Text dimColor>{index + 1}</Text>
+                      </Box>
+                      <Box width={1} flexShrink={0} marginLeft={1}>
+                        {(() => {
+                          const m = stateMark(stateFor(r.infoHash));
+                          return m ? <Text color={m.color} dimColor={m.dim}>{m.icon}</Text> : <Text> </Text>;
+                        })()}
                       </Box>
                       <Box flexGrow={1} minWidth={0} marginLeft={1}>
                         <Text
