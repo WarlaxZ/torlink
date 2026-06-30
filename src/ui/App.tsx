@@ -329,6 +329,7 @@ export function App({
   const streamResult = useCallback(
     (input: DownloadInput) => {
       if (!config) return;
+      if (preparing || streamFiles) return; // one prepare/pick at a time
       const token = resolveRealDebridToken(config);
       if (!token) {
         setNotice("Set a Real-Debrid token first (press k).");
@@ -381,7 +382,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream],
+    [config, finishStream, preparing, streamFiles],
   );
 
   const closePlayerPrompt = useCallback(() => {
