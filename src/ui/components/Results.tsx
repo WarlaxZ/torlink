@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore, useQueueItems, useQueueHistory, CATEGORIES, isCategory } from "../store";
 import { Spinner } from "./Spinner";
@@ -193,9 +193,23 @@ export function Results() {
   const [cursor, setCursor] = useState(0);
   const [detail, setDetail] = useState<TorrentResult | null>(null);
 
+  // A new search jumps back to the top.
   useEffect(() => {
     setCursor(0);
-  }, [results]);
+  }, [query]);
+
+  // Switching to a *different* category tab jumps to the top — but returning
+  // from the Downloads/Seeding views must not, so the scroll position survives
+  // that round-trip. We remember the last category and only reset when it
+  // actually changes (downloads/seeding don't update it).
+  const lastCategory = useRef(isCategory(section) ? section : "");
+  useEffect(() => {
+    if (!isCategory(section)) return;
+    if (lastCategory.current !== section) {
+      lastCategory.current = section;
+      setCursor(0);
+    }
+  }, [section]);
 
   useEffect(() => {
     if (!focused) return;
