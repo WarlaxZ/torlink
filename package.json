@@ -16,7 +16,7 @@
   "scripts": {
     "dev": "tsx src/index.tsx",
     "build": "tsup",
-    "postbuild": "cp scripts/cli-entry.cjs dist/cli.cjs && chmod +x dist/cli.cjs",
+    "postbuild": "node scripts/postbuild.cjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
