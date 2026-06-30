@@ -55,6 +55,12 @@ function write(cmd: string, args: string[], text: string): Promise<boolean> {
   });
 }
 
+// Under WSL there's usually no X/Wayland, so wl-copy/xclip/xsel aren't
+// installed and the native commands silently fail. Windows' clip.exe and
+// powershell.exe are always reachable via WSL interop and target the Windows
+// clipboard the user actually pastes into, so prefer them when running there.
+const isWsl = process.platform === "linux" && !!process.env.WSL_DISTRO_NAME;
+
 const LINUX_READ: [string, string[]][] = [
   ["wl-paste", ["--no-newline"]],
   ["xclip", ["-selection", "clipboard", "-o"]],
@@ -67,6 +73,12 @@ const LINUX_WRITE: [string, string[]][] = [
   ["xsel", ["-b", "-i"]],
 ];
 
+const WSL_READ: [string, string[]][] = [
+  ["powershell.exe", ["-NoProfile", "-Command", "Get-Clipboard"]],
+];
+
+const WSL_WRITE: [string, string[]][] = [["clip.exe", []]];
+
 export async function readClipboard(): Promise<string> {
   if (process.platform === "win32") {
     return (await run("powershell", ["-NoProfile", "-Command", "Get-Clipboard"])).trim();
@@ -74,7 +86,8 @@ export async function readClipboard(): Promise<string> {
   if (process.platform === "darwin") {
     return (await run("pbpaste", [])).trim();
   }
-  for (const [cmd, args] of LINUX_READ) {
+  const readers = isWsl ? [...WSL_READ, ...LINUX_READ] : LINUX_READ;
+  for (const [cmd, args] of readers) {
     const out = (await run(cmd, args)).trim();
     if (out) return out;
   }
@@ -92,7 +105,8 @@ export async function writeClipboard(text: string): Promise<boolean> {
   if (process.platform === "darwin") {
     return write("pbcopy", [], text);
   }
-  for (const [cmd, args] of LINUX_WRITE) {
+  const writers = isWsl ? [...WSL_WRITE, ...LINUX_WRITE] : LINUX_WRITE;
+  for (const [cmd, args] of writers) {
     if (await write(cmd, args, text)) return true;
   }
   return false;

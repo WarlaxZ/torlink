@@ -36,6 +36,19 @@ Downloads run in the background while you keep searching, so you can queue up as
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
+## Real-Debrid (optional)
+
+torlink works great on its own, but if you have a [Real-Debrid](https://real-debrid.com) account you can plug it in for a noticeably better ride. Real-Debrid pulls the torrent onto its own servers and hands you back a plain, direct download. That means full speed even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because Real-Debrid does the torrenting, not you — your IP never touches the network.
+
+Connecting it is two keys. Press `k`, paste your API token from [real-debrid.com/apitoken](https://real-debrid.com/apitoken), and torlink checks it and remembers it. (Prefer to keep the token off disk? Set `REALDEBRID_API_TOKEN` in your environment instead and torlink picks it up.)
+
+Once it's connected, every result gains two new moves:
+
+- **`r` — download via Real-Debrid.** torlink hands the magnet to Real-Debrid, waits for it to be ready, and downloads the direct link straight to your folder. If it's already in Real-Debrid's cache it's basically instant. The plain `d` download still works exactly as before, but now it warns you first, since that route is peer-to-peer and exposes your IP.
+- **`v` — stream it.** For a movie or an episode, skip the download entirely: torlink resolves the largest video file and opens it in your media player. The first time, it'll ask which player to use (`mpv`, `iina`, `vlc`, or a path); after that it just plays. You can also set one ahead of time with `TORLINK_PLAYER`.
+
+Real-Debrid torrents are fetched, not seeded, so they land in Recently downloaded and never join the Seeding tab. Heads up: Real-Debrid's torrent features need an active **premium** account — torlink will tell you if yours isn't.
+
 ## What it searches
 
 A short, hand-picked list of trusted sources:

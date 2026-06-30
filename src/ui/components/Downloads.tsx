@@ -35,16 +35,28 @@ function statusIcon(status: QueueItem["status"]): string {
 
 function rightStats(it: QueueItem): string {
   if (it.status === "downloading") {
+    // Real-Debrid first caches the torrent on its cloud (resolving), then we
+    // pull it over HTTP — no swarm, so no peer count.
+    if (it.via === "realdebrid" && it.phase === "resolving") {
+      return `preparing on Real-Debrid… ${it.progress}%`;
+    }
     const speed = formatBytesPerSec(it.speed) || "…";
     const eta = it.eta ? `  ${formatEtaShort(it.eta)}` : "";
+    if (it.via === "realdebrid") return `${it.progress}%  ${speed}${eta}`;
     return `${it.progress}%  ${speed}  ${ICON.peer}${it.peers}${eta}`;
   }
   if (it.status === "paused") return `paused  ${it.progress}%`;
   return truncate(it.error || "failed", 28);
 }
 
+// Short tag shown in the source column: real source, "rd" for Real-Debrid, or
+// "mag" for a bare magnet.
+function sourceTag(via: QueueItem["via"]): string {
+  return via === "realdebrid" ? "rd" : "mag";
+}
+
 export function Downloads() {
-  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus } = useStore();
+  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus, copyLink, setNotice } = useStore();
   const active = useQueueItems(queue);
   const recent = useQueueHistory(queue);
   const focused = region === "content";
@@ -66,6 +78,11 @@ export function Downloads() {
         if (!it) return;
         if (input === "c") queue.cancel(it.id);
         else if (input === "p") queue.togglePause(it.id);
+        else if (input === "y") {
+          if (it.directUrl) copyLink(it.directUrl, it.name);
+          else if (it.via === "realdebrid") setNotice("Preparing the link… try again in a moment.");
+          else setNotice("No direct link — that's a peer-to-peer download.");
+        }
       } else {
         const h = recent[recentCursor];
         if (!h) return;
@@ -173,7 +190,7 @@ export function Downloads() {
               </Box>
               <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
                 <Text color={it.source ? ss.color : undefined} dimColor={!it.source || !here}>
-                  {it.source ? ss.tag : "mag"}
+                  {it.source ? ss.tag : sourceTag(it.via)}
                 </Text>
               </Box>
             </Box>

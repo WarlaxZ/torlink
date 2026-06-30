@@ -5,6 +5,9 @@ export interface TextFieldProps {
   isDisabled?: boolean;
   defaultValue?: string;
   placeholder?: string;
+  // Render every character as a bullet so secrets (e.g. an API token) aren't
+  // shown on screen. The underlying value and editing behaviour are unchanged.
+  mask?: boolean;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
   onExitDown?: () => void;
@@ -48,6 +51,7 @@ export function TextField({
   isDisabled = false,
   defaultValue = "",
   placeholder = "",
+  mask = false,
   onChange,
   onSubmit,
   onExitDown,
@@ -55,6 +59,7 @@ export function TextField({
 }: TextFieldProps) {
   const [value, setValue] = useState(defaultValue);
   const [cursor, setCursor] = useState(defaultValue.length);
+  const shown = (text: string): string => (mask ? "•".repeat(text.length) : text);
 
   function apply(next: Edit): void {
     setValue(next.value);
@@ -122,7 +127,7 @@ export function TextField({
   );
 
   if (isDisabled) {
-    return value ? <Text>{value}</Text> : <Text dimColor>{placeholder}</Text>;
+    return value ? <Text>{shown(value)}</Text> : <Text dimColor>{placeholder}</Text>;
   }
 
   if (value.length === 0) {
@@ -137,9 +142,9 @@ export function TextField({
     return <Text inverse>{CURSOR}</Text>;
   }
 
-  const before = value.slice(0, cursor);
-  const atChar = value[cursor] ?? CURSOR;
-  const after = cursor < value.length ? value.slice(cursor + 1) : "";
+  const before = shown(value.slice(0, cursor));
+  const atChar = cursor < value.length ? shown(value[cursor] ?? "") : CURSOR;
+  const after = cursor < value.length ? shown(value.slice(cursor + 1)) : "";
   return (
     <Text>
       {before}

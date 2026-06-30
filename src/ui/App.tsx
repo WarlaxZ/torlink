@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout, useStdin } from "ink";
 import { promises as fs } from "node:fs";
-import { loadConfig, saveConfig, type Config } from "../config/config";
+import {
+  loadConfig,
+  saveConfig,
+  resolveRealDebridToken,
+  resolveMediaPlayer,
+  type Config,
+} from "../config/config";
 import { normalizeDownloadDir } from "../config/folder";
+import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
+import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
+import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
+import type { ResolvedFile } from "../integrations/realdebrid";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -22,6 +32,7 @@ import {
   type View,
 } from "./store";
 import { Logo } from "./components/Logo";
+import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
 import { Rule } from "./components/Rule";
 import { Footer } from "./components/Footer";
@@ -33,10 +44,22 @@ import { Spinner } from "./components/Spinner";
 import { TabTitle } from "./components/TabTitle";
 import { Splash } from "./views/Splash";
 import { FolderPrompt } from "./components/FolderPrompt";
+import { TokenPrompt } from "./components/TokenPrompt";
+import { ConfirmPrompt } from "./components/ConfirmPrompt";
+import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
+import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
 import type { SourceId } from "../sources/types";
+
+export interface DownloadInput {
+  id: string;
+  name: string;
+  magnet: string;
+  source?: SourceId;
+  sizeBytes?: number;
+}
 
 export function App({
   initialMagnet,
@@ -83,7 +106,15 @@ export function App({
   const [seedFocus, setSeedFocus] = useState<SeedFocus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [editingFolder, setEditingFolder] = useState(false);
+  const [editingToken, setEditingToken] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState(false);
+  const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
+  const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
+  const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
+  const [preparing, setPreparing] = useState<{ label: string; phase: "caching" | "fetching"; pct: number } | null>(null);
+  const prepareAbort = useRef<AbortController | null>(null);
   const booting = useRef(false);
 
   useEffect(() => {
@@ -101,6 +132,16 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      const launchToken = resolveRealDebridToken(cfg);
+      if (launchToken) {
+        void validateToken(launchToken)
+          .then((u) => {
+            if (alive) setRdStatus(rdStatusFromUser(u, new Date()));
+          })
+          .catch(() => {
+            /* offline or bad token at launch: leave the badge hidden, no toast */
+          });
+      }
       setQueue(q);
       const launch = initialMagnet
         ? parseMagnet(initialMagnet)
@@ -133,12 +174,43 @@ export function App({
     };
   }, [queue]);
 
+  // If a Real-Debrid download fails because the token was rejected, clear the
+  // stale status and re-open the token prompt — once per failure, not on every
+  // queue tick.
+  const reauthSeen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!queue) return;
+    const onUpdate = (): void => {
+      for (const it of queue.getItems()) {
+        if (it.status !== "failed" || it.via !== "realdebrid" || !it.error) continue;
+        if (reauthSeen.current.has(it.id)) continue;
+        if (isTokenRejection(it.error)) {
+          reauthSeen.current.add(it.id);
+          setRdStatus(null);
+          setNotice("Real-Debrid token expired — re-enter it.");
+          setShowHelp(false);
+          setEditingToken(true);
+        }
+      }
+    };
+    queue.on("update", onUpdate);
+    return () => {
+      queue.off("update", onUpdate);
+    };
+  }, [queue]);
+
   useEffect(
     () => () => {
       queue?.suspend();
     },
     [queue],
   );
+
+  // Keep the queue's Real-Debrid token in step with config (and the env var), so
+  // a retry can re-run the pipeline without the UI handing it back in.
+  useEffect(() => {
+    if (queue && config) queue.setRealDebridToken(resolveRealDebridToken(config));
+  }, [queue, config]);
 
   const quitAll = useCallback(() => {
     // Flush all state synchronously up front so nothing is lost to the hard
@@ -179,14 +251,58 @@ export function App({
     [config, setConfig, closeFolderPrompt],
   );
 
+  const closeTokenPrompt = useCallback(() => {
+    setEditingToken(false);
+  }, []);
+
+  const openTokenPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setEditingToken(true);
+  }, []);
+
+  const setRealDebridToken = useCallback(
+    (raw: string) => {
+      closeTokenPrompt();
+      if (!config) return;
+      const token = raw.trim();
+      if (!token) {
+        setNotice("Real-Debrid token unchanged.");
+        return;
+      }
+      setConfig({ ...config, realDebridToken: token });
+      void (async () => {
+        try {
+          const user = await validateToken(token);
+          setRdStatus(rdStatusFromUser(user, new Date()));
+          if (!isPremiumActive(user)) {
+            setNotice(`Real-Debrid: ${user.username}'s account isn't premium — torrents need premium.`);
+            return;
+          }
+          setNotice(`${ICON.done} Real-Debrid connected as ${user.username}`);
+        } catch (e) {
+          setRdStatus(null);
+          setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "could not validate token"}`);
+        }
+      })();
+    },
+    [config, setConfig, closeTokenPrompt],
+  );
+
+  const clearRealDebridToken = useCallback(() => {
+    closeTokenPrompt();
+    if (!config) return;
+    if (process.env["REALDEBRID_API_TOKEN"]?.trim()) {
+      setNotice("Token is set via REALDEBRID_API_TOKEN — unset the env var to clear it.");
+      return;
+    }
+    setConfig({ ...config, realDebridToken: undefined });
+    setRdStatus(null);
+    setNotice("Real-Debrid token cleared.");
+  }, [config, setConfig, closeTokenPrompt]);
+
   const startDownload = useCallback(
-    (input: {
-      id: string;
-      name: string;
-      magnet: string;
-      source?: SourceId;
-      sizeBytes?: number;
-    }) => {
+    (input: DownloadInput) => {
       if (!config || !queue) return;
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       queue.add(input, config.downloadDir);
@@ -195,6 +311,165 @@ export function App({
       setRegion("content");
     },
     [config, queue],
+  );
+
+  const startDebridDownload = useCallback(
+    (input: DownloadInput) => {
+      if (!config || !queue) return;
+      const token = resolveRealDebridToken(config);
+      if (!token) {
+        setNotice("Set a Real-Debrid token first (press k).");
+        return;
+      }
+      void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
+      void queue.addDebrid(input, config.downloadDir, token);
+      setNotice(`Real-Debrid: ${truncate(cleanText(input.name), 40)}`);
+      setSection("downloads");
+      setRegion("content");
+    },
+    [config, queue],
+  );
+
+  // Try to play a resolved stream URL: use the configured/detected player, else
+  // copy the link to the clipboard and prompt for a player command.
+  const playStream = useCallback(
+    async (url: string, name?: string) => {
+      if (!config) return;
+      let player = resolveMediaPlayer(config);
+      if (!player) player = (await detectPlayer()) ?? "";
+      if (player && (await launchPlayer(player, url))) {
+        const copied = await writeClipboard(url);
+        setNotice(
+          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player}${copied ? " · link copied" : ""}`,
+        );
+        return;
+      }
+      // No player available (or it failed to launch): stash the URL, put it on
+      // the clipboard, and ask the user for a command to use.
+      setPendingStreamUrl(url);
+      await writeClipboard(url);
+      setEditingPlayer(true);
+    },
+    [config],
+  );
+
+  // Hand a resolved file to the player path and clear any picker/preparing UI.
+  const finishStream = useCallback(
+    (file: ResolvedFile, name?: string) => {
+      setStreamFiles(null);
+      setPreparing(null);
+      void playStream(file.url, name ?? file.filename);
+    },
+    [playStream],
+  );
+
+  const cancelPreparing = useCallback(() => {
+    prepareAbort.current?.abort();
+    prepareAbort.current = null;
+    setPreparing(null);
+    setNotice("Stream cancelled.");
+  }, []);
+
+  const streamResult = useCallback(
+    (input: DownloadInput) => {
+      if (!config) return;
+      if (preparing || streamFiles) return; // one prepare/pick at a time
+      const token = resolveRealDebridToken(config);
+      if (!token) {
+        setNotice("Set a Real-Debrid token first (press k).");
+        return;
+      }
+      const label = truncate(cleanText(input.name), 32);
+      const controller = new AbortController();
+      prepareAbort.current = controller;
+      setPreparing({ label, phase: "caching", pct: 0 });
+      void (async () => {
+        try {
+          const files = await resolveMagnet(token, input.magnet, {
+            knownHash: input.id,
+            signal: controller.signal,
+            // 0<pct<100 means RD is still caching server-side; otherwise we're
+            // about to fetch the direct link.
+            onProgress: (pct) =>
+              setPreparing((p) =>
+                p ? { ...p, phase: pct > 0 && pct < 100 ? "caching" : "fetching", pct } : p,
+              ),
+          });
+          if (controller.signal.aborted) return;
+          prepareAbort.current = null;
+          const candidates = streamCandidates(files).sort((a, b) => b.bytes - a.bytes);
+          if (candidates.length === 0) {
+            setPreparing(null);
+            setNotice("Real-Debrid returned nothing to stream.");
+            return;
+          }
+          if (candidates.length > 1) {
+            setPreparing(null);
+            setStreamFiles(candidates);
+            return;
+          }
+          finishStream(candidates[0]!, input.name);
+        } catch (e) {
+          prepareAbort.current = null;
+          setPreparing(null);
+          // A user-initiated cancel already surfaced its own notice; don't
+          // clobber it with the cancellation error this throws.
+          if (controller.signal.aborted) return;
+          if (isTokenRejection(e)) {
+            setRdStatus(null);
+            setNotice("Real-Debrid token expired — re-enter it.");
+            setShowHelp(false);
+            setEditingToken(true);
+            return;
+          }
+          setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "couldn't prepare stream"}`);
+        }
+      })();
+    },
+    [config, finishStream, preparing, streamFiles],
+  );
+
+  const closePlayerPrompt = useCallback(() => {
+    setEditingPlayer(false);
+    setPendingStreamUrl(null);
+    setNotice("Stream link is on your clipboard.");
+  }, []);
+
+  const setMediaPlayer = useCallback(
+    (raw: string) => {
+      setEditingPlayer(false);
+      if (!config) return;
+      const cmd = raw.trim();
+      const url = pendingStreamUrl;
+      setPendingStreamUrl(null);
+      if (!cmd) {
+        setNotice("Stream link is on your clipboard.");
+        return;
+      }
+      setConfig({ ...config, mediaPlayer: cmd });
+      void (async () => {
+        if (!url) {
+          setNotice(`Media player set: ${cmd}`);
+          return;
+        }
+        const ok = await launchPlayer(cmd, url);
+        setNotice(ok ? `${ICON.done} Streaming in ${cmd}` : `Couldn't launch ${cmd}. Link is on your clipboard.`);
+      })();
+    },
+    [config, setConfig, pendingStreamUrl],
+  );
+
+  // The plain (P2P) download button: when Real-Debrid is configured, route
+  // through a warning first since P2P exposes the user's IP to the swarm.
+  const requestP2PDownload = useCallback(
+    (input: DownloadInput) => {
+      if (config && resolveRealDebridToken(config)) {
+        setPendingP2P(input);
+        return;
+      }
+      startDownload(input);
+    },
+    [config, startDownload],
   );
 
   const copyMagnet = useCallback((input: { name: string; magnet: string }) => {
@@ -208,13 +483,24 @@ export function App({
     })();
   }, []);
 
+  const copyLink = useCallback((url: string, name: string) => {
+    void (async () => {
+      const ok = await writeClipboard(url);
+      setNotice(
+        ok
+          ? `Copied link: ${truncate(cleanText(name), 40)}`
+          : `Couldn't copy the link for ${truncate(cleanText(name), 32)}.`,
+      );
+    })();
+  }, []);
+
   const submitQuery = useCallback(
     (raw: string) => {
       const q = raw.trim();
       if (q) {
         const magnet = parseMagnet(q);
         if (magnet) {
-          startDownload({
+          requestP2PDownload({
             id: magnet.infoHash,
             name: magnet.name,
             magnet: magnet.magnet,
@@ -228,7 +514,7 @@ export function App({
       if (section === "downloads") setSection("all");
       setRegion("content");
     },
-    [section, startDownload],
+    [section, requestP2PDownload],
   );
 
   const pasteFromClipboard = useCallback(async () => {
@@ -240,18 +526,29 @@ export function App({
     const found = text.match(/magnet:\?xt=urn:btih:[^\s"'<>]+/i)?.[0];
     const magnet = found ? parseMagnet(found) : null;
     if (magnet) {
-      startDownload({ id: magnet.infoHash, name: magnet.name, magnet: magnet.magnet });
+      requestP2PDownload({ id: magnet.infoHash, name: magnet.name, magnet: magnet.magnet });
       setView("browser");
       return;
     }
     setNotice("No magnet link on the clipboard.");
-  }, [startDownload]);
+  }, [requestP2PDownload]);
 
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 4000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  const [prepElapsed, setPrepElapsed] = useState(0);
+  useEffect(() => {
+    if (!preparing) {
+      setPrepElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const t = setInterval(() => setPrepElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [preparing]);
 
   const compact = rows < 18;
   const showTopRule = !compact;
@@ -276,9 +573,13 @@ export function App({
       setView,
       query,
       submitQuery,
+      openTokenPrompt,
       section,
       setSection,
-      region: showHelp || editingFolder ? "help" : region,
+      region:
+        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+          ? "help"
+          : region,
       setRegion,
       captureMode,
       setCaptureMode,
@@ -287,6 +588,12 @@ export function App({
       seedFocus,
       setSeedFocus,
       startDownload,
+      requestP2PDownload,
+      startDebridDownload,
+      streamResult,
+      debridConfigured: resolveRealDebridToken(config) !== "",
+      rdStatus,
+      copyLink,
       copyMagnet,
       notice,
       setNotice,
@@ -303,14 +610,25 @@ export function App({
     view,
     query,
     submitQuery,
+    openTokenPrompt,
     section,
     region,
     showHelp,
     editingFolder,
+    editingToken,
+    editingPlayer,
+    pendingP2P,
+    streamFiles,
+    preparing,
     captureMode,
     downloadFocus,
     seedFocus,
     startDownload,
+    requestP2PDownload,
+    startDebridDownload,
+    streamResult,
+    rdStatus,
+    copyLink,
     copyMagnet,
     notice,
     listRows,
@@ -329,6 +647,14 @@ export function App({
         return;
       }
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
+      if (editingToken) return; // the token prompt owns input
+      if (editingPlayer) return; // the media-player prompt owns input
+      if (pendingP2P) return; // the P2P warning owns input
+      if (streamFiles) return; // the file picker owns input
+      if (preparing) {
+        if (key.escape) cancelPreparing();
+        return; // swallow other keys while preparing
+      }
       if (captureMode === "text") return;
       if (showHelp) {
         setShowHelp(false);
@@ -341,6 +667,11 @@ export function App({
       if (input === "o") {
         setShowHelp(false);
         setEditingFolder(true);
+        return;
+      }
+      if (input === "k") {
+        setShowHelp(false);
+        setEditingToken(true);
         return;
       }
       if (input === "m") {
@@ -399,8 +730,22 @@ export function App({
       <Box flexDirection="column" paddingX={1}>
         <Box justifyContent="space-between">
           <Logo />
-          {notice ? <Text color={COLOR.good}>{notice}</Text> : null}
+          <Box>
+            <RdBadge status={rdStatus} />
+            {notice ? <Text color={COLOR.good}>{`  ${notice}`}</Text> : null}
+          </Box>
         </Box>
+        {preparing ? (
+          <Box>
+            <Spinner
+              label={
+                preparing.phase === "caching"
+                  ? `Caching on Real-Debrid… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
+                  : `Fetching link… ${prepElapsed}s  (esc cancels)`
+              }
+            />
+          </Box>
+        ) : null}
         {showTopRule ? <Rule width={ruleWidth} /> : null}
 
         {showHelp ? (
@@ -420,10 +765,75 @@ export function App({
           </Box>
         ) : null}
 
+        {editingToken ? (
+          <Box marginTop={1}>
+            <TokenPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              value={store.config.realDebridToken ?? ""}
+              status={rdStatus}
+              onSubmit={setRealDebridToken}
+              onClear={clearRealDebridToken}
+              onCancel={closeTokenPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {editingPlayer ? (
+          <Box marginTop={1}>
+            <StreamPlayerPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              value={resolveMediaPlayer(store.config)}
+              onSubmit={setMediaPlayer}
+              onCancel={closePlayerPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {streamFiles ? (
+          <Box marginTop={1}>
+            <StreamFilePrompt
+              width={Math.max(24, Math.min(cols - 4, 72))}
+              files={streamFiles}
+              onSelect={(file) => finishStream(file)}
+              onCancel={() => {
+                setStreamFiles(null);
+                setNotice("Stream cancelled.");
+              }}
+            />
+          </Box>
+        ) : null}
+
+        {pendingP2P ? (
+          <Box marginTop={1}>
+            <ConfirmPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              title="peer-to-peer download"
+              message="This download uses peer-to-peer, so your IP is visible to the swarm. Real-Debrid keeps it private. Continue with P2P?"
+              altKey="r"
+              altLabel="use Real-Debrid"
+              onConfirm={() => {
+                const input = pendingP2P;
+                setPendingP2P(null);
+                startDownload(input);
+              }}
+              onAlt={() => {
+                const input = pendingP2P;
+                setPendingP2P(null);
+                startDebridDownload(input);
+              }}
+              onCancel={() => setPendingP2P(null)}
+            />
+          </Box>
+        ) : null}
+
         <Box
           height={bodyH}
           marginTop={compact ? 0 : 1}
-          display={showHelp || editingFolder ? "none" : "flex"}
+          display={
+            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+              ? "none"
+              : "flex"
+          }
           overflow="hidden"
         >
           <Sidebar />
@@ -439,8 +849,16 @@ export function App({
         </Box>
 
         {showFooter ? (
-          <Box display={showHelp || editingFolder ? "none" : "flex"}>
-            <Footer hints={footerHints(region, section, downloadFocus, seedFocus)} />
+          <Box
+            display={
+              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+                ? "none"
+                : "flex"
+            }
+          >
+            <Footer
+              hints={footerHints(region, section, downloadFocus, seedFocus, store.debridConfigured)}
+            />
           </Box>
         ) : null}
       </Box>

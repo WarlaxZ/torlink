@@ -4,6 +4,7 @@ import type { DownloadQueue } from "../download/queue";
 import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
+import type { RdStatus } from "../integrations/rdStatus";
 
 export type View = "splash" | "browser";
 
@@ -36,6 +37,9 @@ export interface Store {
   setView: (v: View) => void;
   query: string;
   submitQuery: (q: string) => void;
+  // Jump to the browser view and open the Real-Debrid token prompt (used by the
+  // splash CTA, where the token prompt itself isn't rendered).
+  openTokenPrompt: () => void;
 
   section: Section;
   setSection: (s: Section) => void;
@@ -56,6 +60,37 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
+  // The plain (P2P) download button. Gated behind an IP-safety warning when a
+  // Real-Debrid token is configured; otherwise downloads immediately.
+  requestP2PDownload: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // Download via Real-Debrid (resolve magnet -> direct links -> HTTP).
+  startDebridDownload: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // Stream via Real-Debrid: resolve, then play the largest video in a player.
+  streamResult: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // True when an RD token is available (config or env var).
+  debridConfigured: boolean;
+  // The validated Real-Debrid account, or null when unknown/not connected.
+  rdStatus: RdStatus | null;
+  // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.
+  copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;
 
   notice: string | null;

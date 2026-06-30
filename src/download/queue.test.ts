@@ -1,5 +1,6 @@
+import path from "node:path";
 import { describe, it, expect } from "vitest";
-import { DownloadQueue, strayDownload } from "./queue";
+import { DownloadQueue, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 
 function h(over: Partial<HistoryItem> = {}): HistoryItem {
@@ -39,6 +40,57 @@ describe("DownloadQueue seeding", () => {
     q.restoreSeeds([{ id: "h4", status: "paused" }]);
     expect(q.getSeed("h4")?.status).toBe("paused");
     expect(q.seedingCount).toBe(0);
+    q.suspend();
+  });
+});
+
+describe("DownloadQueue Real-Debrid path", () => {
+  const input = {
+    id: "rd1",
+    name: "Movie",
+    magnet: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
+  };
+
+  it("completes a Real-Debrid download into history without ever seeding it", async () => {
+    const q = new DownloadQueue();
+    const deps: DebridDeps = {
+      resolveMagnet: async (_token, _magnet, opts) => {
+        opts?.onProgress?.(100);
+        return [{ url: "https://dl/f", filename: "f.mkv", bytes: 10 }];
+      },
+      downloadFiles: async (_files, dir, opts) => {
+        opts?.onProgress?.({ downloaded: 10, total: 10, speed: 1 });
+        return [path.join(dir, "f.mkv")];
+      },
+    };
+    let completed = "";
+    q.on("completed", (n: string) => (completed = n));
+
+    await q.addDebrid(input, "/downloads", "tok", deps);
+
+    expect(q.has("rd1")).toBe(false); // moved to history
+    expect(q.getHistory().some((h) => h.id === "rd1")).toBe(true);
+    expect(q.getSeed("rd1")).toBeUndefined();
+    expect(q.seedingCount).toBe(0);
+    expect(completed).toBe("Movie");
+    q.suspend();
+  });
+
+  it("marks the item failed when Real-Debrid resolution errors", async () => {
+    const q = new DownloadQueue();
+    const deps: DebridDeps = {
+      resolveMagnet: async () => {
+        throw new Error("dead torrent");
+      },
+      downloadFiles: async () => [],
+    };
+
+    await q.addDebrid(input, "/downloads", "tok", deps);
+
+    const it = q.getItems().find((i) => i.id === "rd1");
+    expect(it?.status).toBe("failed");
+    expect(it?.error).toContain("dead torrent");
+    expect(it?.via).toBe("realdebrid");
     q.suspend();
   });
 });

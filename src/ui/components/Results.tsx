@@ -28,7 +28,15 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function Detail({ r, width }: { r: TorrentResult; width: number }) {
+function Detail({
+  r,
+  width,
+  debridConfigured,
+}: {
+  r: TorrentResult;
+  width: number;
+  debridConfigured: boolean;
+}) {
   const ss = SOURCE_STYLE[r.source];
   const date = formatRelative(r.added);
   const health =
@@ -95,6 +103,20 @@ function Detail({ r, width }: { r: TorrentResult; width: number }) {
           d
         </Text>
         <Text color={COLOR.text}> Download</Text>
+        {debridConfigured ? (
+          <>
+            <Text dimColor>{`     ${ICON.dot}     `}</Text>
+            <Text color={COLOR.accent} bold>
+              r
+            </Text>
+            <Text color={COLOR.text}> Real-Debrid</Text>
+            <Text dimColor>{`     ${ICON.dot}     `}</Text>
+            <Text color={COLOR.accent} bold>
+              v
+            </Text>
+            <Text color={COLOR.text}> Stream</Text>
+          </>
+        ) : null}
         <Text dimColor>{`     ${ICON.dot}     `}</Text>
         <Text color={COLOR.accent} bold>
           y
@@ -116,7 +138,10 @@ export function Results() {
     region,
     setRegion,
     setCaptureMode,
-    startDownload,
+    requestP2PDownload,
+    startDebridDownload,
+    streamResult,
+    debridConfigured,
     copyMagnet,
     contentWidth,
     listRows,
@@ -159,14 +184,19 @@ export function Results() {
   const listHeight = Math.max(3, panelOuter - 4);
   const pageJump = Math.max(1, listHeight - 1);
 
-  const openDownload = (r: TorrentResult): void =>
-    startDownload({
-      id: r.infoHash,
-      name: r.name,
-      magnet: r.magnet,
-      source: r.source,
-      sizeBytes: r.sizeBytes,
-    });
+  const inputFor = (r: TorrentResult) => ({
+    id: r.infoHash,
+    name: r.name,
+    magnet: r.magnet,
+    source: r.source,
+    sizeBytes: r.sizeBytes,
+  });
+
+  const openDownload = (r: TorrentResult): void => requestP2PDownload(inputFor(r));
+
+  const openDebrid = (r: TorrentResult): void => startDebridDownload(inputFor(r));
+
+  const openStream = (r: TorrentResult): void => streamResult(inputFor(r));
 
   const copyResultMagnet = (r: TorrentResult): void =>
     copyMagnet({ name: r.name, magnet: r.magnet });
@@ -195,6 +225,12 @@ export function Results() {
       } else if (input === "d") {
         const r = results[clamped];
         if (r) openDownload(r);
+      } else if (input === "r") {
+        const r = results[clamped];
+        if (r) openDebrid(r);
+      } else if (input === "v") {
+        const r = results[clamped];
+        if (r) openStream(r);
       } else if (input === "y") {
         const r = results[clamped];
         if (r) copyResultMagnet(r);
@@ -211,6 +247,8 @@ export function Results() {
         setMode("list");
         setDetail(null);
       } else if (input === "d" && detail) openDownload(detail);
+      else if (input === "r" && detail) openDebrid(detail);
+      else if (input === "v" && detail) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
     },
     { isActive: focused && mode === "detail" },
@@ -250,10 +288,12 @@ export function Results() {
     return codes.length ? ` (${codes.join(", ")})` : "";
   };
 
+  const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;
+
   const status = () => {
     if (search.loading) {
       if (results.length > 0)
-        return <Text dimColor>{`searching… ${search.done}/${search.total} sources`}</Text>;
+        return <Text dimColor>{`searching… ${search.done}/${search.total} sources${sortNote}`}</Text>;
       return (
         <Spinner label={`${browsing ? "Loading" : "Searching"} ${search.done}/${search.total} sources`} />
       );
@@ -288,7 +328,6 @@ export function Results() {
     const head = browsing
       ? "newest across all sources"
       : `${results.length} result${results.length === 1 ? "" : "s"}`;
-    const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;
     return <Text dimColor>{`${head}${note}${sortNote}`}</Text>;
   };
 
@@ -326,7 +365,11 @@ export function Results() {
           height={panelOuter}
         >
           {mode === "detail" && detail ? (
-            <Detail r={detail} width={Math.max(10, contentWidth - 4)} />
+            <Detail
+              r={detail}
+              width={Math.max(10, contentWidth - 4)}
+              debridConfigured={debridConfigured}
+            />
           ) : (
             <>
               <Box>{status()}</Box>

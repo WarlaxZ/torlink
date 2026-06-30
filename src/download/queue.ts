@@ -12,8 +12,20 @@ import {
   type SeedRecord,
 } from "./persist";
 import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
+import { downloadFiles, sanitizeFilename } from "./http";
+import path from "node:path";
+import { resolveMagnet } from "../integrations/realdebrid";
+import { pickStreamFile } from "../util/player";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
+
+// Injection seam so the Real-Debrid pipeline can be stubbed in tests.
+export interface DebridDeps {
+  resolveMagnet: typeof resolveMagnet;
+  downloadFiles: typeof downloadFiles;
+}
+
+const defaultDebridDeps: DebridDeps = { resolveMagnet, downloadFiles };
 
 /**
  * A real seed never pulls data off the network: verifying on-disk files reads
@@ -53,6 +65,12 @@ export class DownloadQueue extends EventEmitter {
   private seeds = new Map<string, SeedItem>();
   private strayHits = new Map<string, number>();
   private seedStartedAt = new Map<string, number>();
+  // Real-Debrid bookkeeping: an abort handle per in-flight RD download, the
+  // current token (kept fresh by the app so a retry can re-run), and the deps
+  // used to drive the pipeline (overridable in tests).
+  private debridAborts = new Map<string, AbortController>();
+  private debridToken = "";
+  private debridDeps: DebridDeps = defaultDebridDeps;
 
   getItems(): QueueItem[] {
     return [...this.items.values()].sort((a, b) => b.addedAt - a.addedAt);
@@ -103,6 +121,133 @@ export class DownloadQueue extends EventEmitter {
 
   private startEngine(item: QueueItem): void {
     this.engine.add(item.id, item.magnet, item.dir, this.engineHandlers(item.id));
+  }
+
+  // Keep the queue's notion of the current Real-Debrid token in sync with config
+  // so a retry (which has no token in hand) can re-run the pipeline.
+  setRealDebridToken(token: string): void {
+    this.debridToken = token;
+  }
+
+  // Download a magnet through Real-Debrid instead of P2P: resolve it to direct
+  // links on RD's cloud, then pull those over HTTP into `dir`. The returned
+  // promise settles when the whole pipeline finishes (success or failure) so the
+  // app can `void` it while tests can await it.
+  addDebrid(
+    input: AddInput,
+    dir: string,
+    token: string,
+    deps: DebridDeps = defaultDebridDeps,
+  ): Promise<void> {
+    this.debridToken = token;
+    this.debridDeps = deps;
+    if (this.seeds.has(input.id)) {
+      this.engine.remove(input.id);
+      this.seeds.delete(input.id);
+      this.strayHits.delete(input.id);
+      this.seedStartedAt.delete(input.id);
+      void this.persistSeeds();
+    }
+    const existing = this.items.get(input.id);
+    if (existing && existing.status !== "failed") return Promise.resolve();
+    const item: QueueItem = {
+      id: input.id,
+      name: input.name,
+      source: input.source,
+      magnet: input.magnet,
+      dir,
+      via: "realdebrid",
+      phase: "resolving",
+      status: "downloading",
+      progress: 0,
+      totalBytes: input.sizeBytes ?? 0,
+      downloadedBytes: 0,
+      speed: 0,
+      peers: 0,
+      addedAt: existing?.addedAt ?? Date.now(),
+    };
+    this.items.set(item.id, item);
+    this.changed();
+    void this.persist();
+    return this.runDebrid(item.id, token, deps);
+  }
+
+  private async runDebrid(id: string, token: string, deps: DebridDeps): Promise<void> {
+    const ctrl = new AbortController();
+    this.debridAborts.set(id, ctrl);
+    try {
+      const files = await deps.resolveMagnet(token, this.items.get(id)?.magnet ?? "", {
+        signal: ctrl.signal,
+        knownHash: id, // queue item id is the torrent infoHash
+        onProgress: (percent) => {
+          const it = this.items.get(id);
+          if (!it || it.status !== "downloading") return;
+          it.phase = "resolving";
+          // Reserve 100% for the actual file transfer; RD-side caching tops out at 99.
+          it.progress = Math.min(99, Math.max(0, Math.round(percent)));
+          this.changed();
+        },
+      });
+
+      const it = this.items.get(id);
+      if (!it || it.status !== "downloading") return; // cancelled mid-resolve
+      it.phase = "downloading";
+      it.progress = 0;
+      it.directUrl = pickStreamFile(files)?.url;
+      it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
+      this.changed();
+
+      // A multi-file torrent (a season, a movie with extras) gets its own
+      // subfolder so files don't scatter into the download root or collide with
+      // another torrent's files; a single file lands directly in the folder.
+      const dest = files.length > 1 ? path.join(it.dir, sanitizeFilename(it.name)) : it.dir;
+      await deps.downloadFiles(files, dest, {
+        signal: ctrl.signal,
+        onProgress: (p) => {
+          const cur = this.items.get(id);
+          if (!cur || cur.status !== "downloading") return;
+          if (p.total) cur.totalBytes = p.total;
+          cur.downloadedBytes = p.downloaded;
+          cur.speed = p.speed;
+          cur.progress = p.total > 0 ? Math.min(100, Math.round((p.downloaded / p.total) * 100)) : cur.progress;
+          this.changed();
+        },
+      });
+
+      const done = this.items.get(id);
+      if (done) this.completeDebrid(done);
+    } catch (e) {
+      const it = this.items.get(id);
+      // If the item is gone the download was cancelled (item already removed); nothing to mark.
+      if (it) {
+        it.status = "failed";
+        it.error = e instanceof Error ? e.message : String(e);
+        it.speed = 0;
+        it.peers = 0;
+        it.phase = undefined;
+        this.changed();
+        void this.persist();
+      }
+      this.maybeStopPoll();
+    } finally {
+      this.debridAborts.delete(id);
+    }
+  }
+
+  // Finish a Real-Debrid item: record it in history and drop it. Unlike a P2P
+  // download we never seed it — there is no live torrent, and seeding would put
+  // the user back on the swarm, defeating the privacy reason for using RD.
+  private completeDebrid(it: QueueItem): void {
+    if (it.totalBytes) it.downloadedBytes = it.totalBytes;
+    it.progress = 100;
+    it.speed = 0;
+    it.phase = undefined;
+    this.recordHistory(it);
+    this.items.delete(it.id);
+    this.emit("completed", it.name);
+    this.changed();
+    void this.persist();
+    this.maybeStopPoll();
   }
 
   // One torrent serves an item across its whole life (download -> seed ->
@@ -204,6 +349,9 @@ export class DownloadQueue extends EventEmitter {
     let any = false;
     for (const it of this.items.values()) {
       if (it.status !== "downloading") continue;
+      // Real-Debrid items have no webtorrent engine; they push their own
+      // progress through the resolve/download callbacks, so leave them alone.
+      if (it.via === "realdebrid") continue;
       const s = this.engine.stats(it.id);
       if (!s) continue;
       it.progress = Math.min(100, Math.round(s.progress * 100));
@@ -271,6 +419,9 @@ export class DownloadQueue extends EventEmitter {
   pause(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "downloading") return;
+    // Pausing/resuming an HTTP transfer would need range-resume; not in v1, so
+    // a Real-Debrid download can only be cancelled, never paused.
+    if (it.via === "realdebrid") return;
     it.status = "paused";
     it.speed = 0;
     it.peers = 0;
@@ -300,6 +451,9 @@ export class DownloadQueue extends EventEmitter {
 
   cancel(id: string): void {
     if (!this.items.has(id)) return;
+    // Abort an in-flight Real-Debrid transfer first; the HTTP downloader cleans
+    // up its own partial files once the signal fires.
+    this.debridAborts.get(id)?.abort();
     this.engine.remove(id);
     this.items.delete(id);
     deleteTorrentMeta(id);
@@ -313,6 +467,22 @@ export class DownloadQueue extends EventEmitter {
     if (!it || it.status !== "failed") return;
     it.status = "downloading";
     it.error = undefined;
+    if (it.via === "realdebrid") {
+      // No token (e.g. retried after a restart): can't re-run, tell the user.
+      if (!this.debridToken) {
+        it.status = "failed";
+        it.error = "Set a Real-Debrid token, then download again.";
+        this.changed();
+        return;
+      }
+      it.phase = "resolving";
+      it.progress = 0;
+      it.speed = 0;
+      this.changed();
+      void this.persist();
+      void this.runDebrid(id, this.debridToken, this.debridDeps);
+      return;
+    }
     this.startEngine(it);
     this.ensurePoll();
     this.changed();
@@ -446,6 +616,17 @@ export class DownloadQueue extends EventEmitter {
 
   restore(items: QueueItem[]): void {
     for (const raw of items) {
+      // A Real-Debrid transfer can't be resumed across a restart (no resolved
+      // links, possibly no token), so surface it as a retryable failure rather
+      // than handing its magnet to webtorrent (which would silently switch it
+      // to P2P).
+      if (raw.via === "realdebrid" && raw.status === "downloading") {
+        raw.status = "failed";
+        raw.error = "Interrupted — download again via Real-Debrid.";
+        raw.phase = undefined;
+        raw.speed = 0;
+        raw.peers = 0;
+      }
       this.items.set(raw.id, raw);
       if (raw.status === "downloading") this.startEngine(raw);
     }
