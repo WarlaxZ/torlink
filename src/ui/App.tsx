@@ -174,6 +174,31 @@ export function App({
     };
   }, [queue]);
 
+  // If a Real-Debrid download fails because the token was rejected, clear the
+  // stale status and re-open the token prompt — once per failure, not on every
+  // queue tick.
+  const reauthSeen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!queue) return;
+    const onUpdate = (): void => {
+      for (const it of queue.getItems()) {
+        if (it.status !== "failed" || it.via !== "realdebrid" || !it.error) continue;
+        if (reauthSeen.current.has(it.id)) continue;
+        if (isTokenRejection(it.error)) {
+          reauthSeen.current.add(it.id);
+          setRdStatus(null);
+          setNotice("Real-Debrid token expired — re-enter it.");
+          setShowHelp(false);
+          setEditingToken(true);
+        }
+      }
+    };
+    queue.on("update", onUpdate);
+    return () => {
+      queue.off("update", onUpdate);
+    };
+  }, [queue]);
+
   useEffect(
     () => () => {
       queue?.suspend();
