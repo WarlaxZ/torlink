@@ -307,8 +307,6 @@ export function App({
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       queue.add(input, config.downloadDir);
       setNotice(`Added: ${truncate(cleanText(input.name), 40)}`);
-      setSection("downloads");
-      setRegion("content");
     },
     [config, queue],
   );
@@ -324,8 +322,6 @@ export function App({
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       void queue.addDebrid(input, config.downloadDir, token);
       setNotice(`Real-Debrid: ${truncate(cleanText(input.name), 40)}`);
-      setSection("downloads");
-      setRegion("content");
     },
     [config, queue],
   );
