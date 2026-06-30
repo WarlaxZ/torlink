@@ -111,7 +111,7 @@ export function footerHints(
           { keys: "r", label: "Real-Debrid" },
           { keys: "v", label: "Stream" },
         ]
-      : [{ keys: "k", label: "Setup Real-Debrid" }]),
+      : [{ keys: "k", label: "Real-Debrid" }]),
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },
     { keys: "/", label: "Search" },

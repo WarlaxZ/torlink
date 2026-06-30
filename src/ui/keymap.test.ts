@@ -4,7 +4,8 @@ import { footerHints } from "./keymap";
 describe("footerHints results view", () => {
   it("offers the Real-Debrid shortcut only when a token is configured", () => {
     const without = footerHints("content", "all", null, null, false);
-    expect(without.some((h) => h.label === "Real-Debrid")).toBe(false);
+    expect(without.some((h) => h.keys === "r")).toBe(false);
+    expect(without.some((h) => h.keys === "v")).toBe(false);
 
     const withToken = footerHints("content", "all", null, null, true);
     const labels = withToken.map((h) => h.label);
