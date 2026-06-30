@@ -31,6 +31,7 @@ import {
   type View,
 } from "./store";
 import { Logo } from "./components/Logo";
+import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
 import { Rule } from "./components/Rule";
 import { Footer } from "./components/Footer";
@@ -614,7 +615,10 @@ export function App({
       <Box flexDirection="column" paddingX={1}>
         <Box justifyContent="space-between">
           <Logo />
-          {notice ? <Text color={COLOR.good}>{notice}</Text> : null}
+          <Box>
+            <RdBadge status={rdStatus} />
+            {notice ? <Text color={COLOR.good}>{`  ${notice}`}</Text> : null}
+          </Box>
         </Box>
         {showTopRule ? <Rule width={ruleWidth} /> : null}
 
