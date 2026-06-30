@@ -10,6 +10,7 @@ import {
 } from "../config/config";
 import { normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet } from "../integrations/realdebrid";
+import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { detectPlayer, launchPlayer, pickStreamFile } from "../util/player";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
@@ -107,6 +108,7 @@ export function App({
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const booting = useRef(false);
 
   useEffect(() => {
@@ -124,6 +126,16 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      const launchToken = resolveRealDebridToken(cfg);
+      if (launchToken) {
+        void validateToken(launchToken)
+          .then((u) => {
+            if (alive) setRdStatus(rdStatusFromUser(u, new Date()));
+          })
+          .catch(() => {
+            /* offline or bad token at launch: leave the badge hidden, no toast */
+          });
+      }
       setQueue(q);
       const launch = initialMagnet
         ? parseMagnet(initialMagnet)
@@ -225,12 +237,14 @@ export function App({
       void (async () => {
         try {
           const user = await validateToken(token);
+          setRdStatus(rdStatusFromUser(user, new Date()));
           if (!isPremiumActive(user)) {
             setNotice(`Real-Debrid: ${user.username}'s account isn't premium — torrents need premium.`);
             return;
           }
           setNotice(`${ICON.done} Real-Debrid connected as ${user.username}`);
         } catch (e) {
+          setRdStatus(null);
           setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "could not validate token"}`);
         }
       })();
@@ -375,6 +389,17 @@ export function App({
     })();
   }, []);
 
+  const copyLink = useCallback((url: string, name: string) => {
+    void (async () => {
+      const ok = await writeClipboard(url);
+      setNotice(
+        ok
+          ? `Copied link: ${truncate(cleanText(name), 40)}`
+          : `Couldn't copy the link for ${truncate(cleanText(name), 32)}.`,
+      );
+    })();
+  }, []);
+
   const submitQuery = useCallback(
     (raw: string) => {
       const q = raw.trim();
@@ -459,6 +484,8 @@ export function App({
       startDebridDownload,
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
+      rdStatus,
+      copyLink,
       copyMagnet,
       notice,
       setNotice,
@@ -489,6 +516,8 @@ export function App({
     requestP2PDownload,
     startDebridDownload,
     streamResult,
+    rdStatus,
+    copyLink,
     copyMagnet,
     notice,
     listRows,
