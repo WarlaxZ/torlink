@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickStreamFile, detectPlayer } from "./player";
+import { pickStreamFile, detectPlayer, streamCandidates } from "./player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 
 function f(filename: string, bytes: number): ResolvedFile {
@@ -66,5 +66,22 @@ describe("detectPlayer", () => {
       platform: "linux",
     });
     expect(found).toBeNull();
+  });
+});
+
+describe("streamCandidates", () => {
+  it("returns only video files when any are present", () => {
+    const files = [f("readme.txt", 10), f("movie.mkv", 900), f("sample.mp4", 50)];
+    const out = streamCandidates(files);
+    expect(out.map((x) => x.filename).sort()).toEqual(["movie.mkv", "sample.mp4"]);
+  });
+
+  it("falls back to all files when none look like video", () => {
+    const files = [f("disc.iso", 900), f("readme.txt", 10)];
+    expect(streamCandidates(files).length).toBe(2);
+  });
+
+  it("returns an empty array for no files", () => {
+    expect(streamCandidates([])).toEqual([]);
   });
 });

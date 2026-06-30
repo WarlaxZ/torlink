@@ -50,6 +50,16 @@ export function pickStreamFile(files: ResolvedFile[]): ResolvedFile | null {
   return pool.reduce((best, f) => (f.bytes > best.bytes ? f : best), pool[0]!);
 }
 
+/**
+ * The files worth offering for streaming: the video files if any exist,
+ * otherwise every file. Used to decide whether to show a picker (2+ items) and
+ * what to list. Mirrors pickStreamFile's video heuristic.
+ */
+export function streamCandidates(files: ResolvedFile[]): ResolvedFile[] {
+  const videos = files.filter((f) => VIDEO_EXTS.has(ext(f.filename)));
+  return videos.length > 0 ? videos : files;
+}
+
 export type WhichImpl = (cmd: string) => Promise<boolean>;
 
 // Whether a command resolves on PATH. Uses the platform's lookup tool; never
