@@ -11,11 +11,15 @@ const CATEGORIES = sourcesByGroup()
   .join(`  ${ICON.dot}  `);
 
 export function Splash() {
-  const { submitQuery, quitAll, cols, rows, debridConfigured, rdStatus } = useStore();
+  const { submitQuery, quitAll, cols, rows, debridConfigured, rdStatus, openTokenPrompt } = useStore();
   const { isRawModeSupported } = useStdin();
 
   useInput(
     (input, key) => {
+      if (input === "k") {
+        openTokenPrompt();
+        return;
+      }
       if (key.escape || (key.ctrl && input === "c")) quitAll();
     },
     { isActive: isRawModeSupported },

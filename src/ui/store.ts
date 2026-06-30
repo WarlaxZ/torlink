@@ -37,6 +37,9 @@ export interface Store {
   setView: (v: View) => void;
   query: string;
   submitQuery: (q: string) => void;
+  // Jump to the browser view and open the Real-Debrid token prompt (used by the
+  // splash CTA, where the token prompt itself isn't rendered).
+  openTokenPrompt: () => void;
 
   section: Section;
   setSection: (s: Section) => void;

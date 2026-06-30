@@ -86,6 +86,7 @@ function makeStore(
     setView: noop,
     query: "",
     submitQuery: noop,
+    openTokenPrompt: noop,
     section: "all",
     setSection: noop,
     region: "content",

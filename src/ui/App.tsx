@@ -255,6 +255,12 @@ export function App({
     setEditingToken(false);
   }, []);
 
+  const openTokenPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setEditingToken(true);
+  }, []);
+
   const setRealDebridToken = useCallback(
     (raw: string) => {
       closeTokenPrompt();
@@ -567,10 +573,11 @@ export function App({
       setView,
       query,
       submitQuery,
+      openTokenPrompt,
       section,
       setSection,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
+        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -603,6 +610,7 @@ export function App({
     view,
     query,
     submitQuery,
+    openTokenPrompt,
     section,
     region,
     showHelp,
@@ -611,6 +619,7 @@ export function App({
     editingPlayer,
     pendingP2P,
     streamFiles,
+    preparing,
     captureMode,
     downloadFocus,
     seedFocus,
@@ -821,7 +830,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
+            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -842,7 +851,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles
+              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }
