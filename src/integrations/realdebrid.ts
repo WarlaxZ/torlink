@@ -97,15 +97,49 @@ function throwIfAborted(signal?: AbortSignal): void {
 // error message (e.g. one stored on a failed download item) and re-prompt.
 export const TOKEN_REJECTED_MESSAGE = "Real-Debrid rejected the token (invalid or expired).";
 
+// Human-readable, category-accurate copy for a terminal torrent status (one of
+// ERROR_STATUSES). These all read as terminal — retrying won't help.
+export function messageForTorrentStatus(status: string): string {
+  switch (status) {
+    case "dead":
+      return "No seeders — Real-Debrid can't fetch this torrent.";
+    case "magnet_error":
+      return "Real-Debrid couldn't read this magnet (it may be invalid or removed).";
+    case "virus":
+      return "Real-Debrid flagged this torrent's contents.";
+    default:
+      return "Real-Debrid couldn't process this torrent.";
+  }
+}
+
+// Map a Real-Debrid JSON `error` slug to clearer copy where we recognise it.
+// Returns null for unknown/missing slugs so the caller falls back to its generic
+// HTTP message. Slugs are matched conservatively; an unrecognised slug never
+// produces a wrong message.
+export function messageForErrorSlug(slug: string | undefined): string | null {
+  if (!slug) return null;
+  const s = slug.toLowerCase();
+  if (s.includes("infring")) return "This was removed from Real-Debrid (copyright claim).";
+  if (s === "hoster_unavailable" || s === "file_unavailable" || s.includes("no_longer_available")) {
+    return "This is no longer available on Real-Debrid (it may have been removed).";
+  }
+  if (s.includes("too_many") || s === "slow_down" || s.includes("fair_usage")) {
+    return "Real-Debrid rate limit reached — wait a moment and retry.";
+  }
+  return null;
+}
+
 function mapStatus(status: number, code?: string): RealDebridError {
   if (status === 401 || status === 403) {
     return new RealDebridError(TOKEN_REJECTED_MESSAGE, status, code);
   }
+  const slugMsg = messageForErrorSlug(code);
+  if (slugMsg) return new RealDebridError(slugMsg, status, code);
   if (status === 404) {
     return new RealDebridError("Real-Debrid could not find this resource.", status, code);
   }
   if (status === 503) {
-    return new RealDebridError("Real-Debrid is temporarily unavailable.", status, code);
+    return new RealDebridError("Real-Debrid is busy — try again shortly.", status, code);
   }
   return new RealDebridError(
     code
@@ -296,7 +330,7 @@ export async function resolveMagnet(
       break;
     }
     if (ERROR_STATUSES.has(info.status)) {
-      throw new RealDebridError(`Real-Debrid could not fetch this torrent (${info.status}).`);
+      throw new RealDebridError(messageForTorrentStatus(info.status));
     }
     // A reused torrent can reach selection only after conversion; select once it
     // gets there so it doesn't sit waiting forever.
