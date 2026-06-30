@@ -6,9 +6,10 @@ import {
   findTorrentByHash,
   isPremiumActive,
   RealDebridError,
+  messageForTorrentStatus,
+  messageForErrorSlug,
   type RealDebridFetch,
 } from "./realdebrid";
-import { messageForTorrentStatus, messageForErrorSlug } from "./realdebrid";
 
 interface Call {
   url: string;
@@ -363,5 +364,21 @@ describe("messageForErrorSlug", () => {
   it("returns null for unknown/missing slugs so the caller uses its generic message", () => {
     expect(messageForErrorSlug(undefined)).toBeNull();
     expect(messageForErrorSlug("some_unknown_code")).toBeNull();
+  });
+
+  it("matches no_longer_available as a substring", () => {
+    expect(messageForErrorSlug("content_no_longer_available")).toBe(
+      "This is no longer available on Real-Debrid (it may have been removed).",
+    );
+  });
+
+  it("matches fair_usage as a substring for rate limiting", () => {
+    expect(messageForErrorSlug("fair_usage_limit")).toBe(
+      "Real-Debrid rate limit reached — wait a moment and retry.",
+    );
+  });
+
+  it("does not misclassify hoster_temporarily_unavailable as permanently removed", () => {
+    expect(messageForErrorSlug("hoster_temporarily_unavailable")).toBeNull();
   });
 });
