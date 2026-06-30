@@ -11,7 +11,7 @@ const CATEGORIES = sourcesByGroup()
   .join(`  ${ICON.dot}  `);
 
 export function Splash() {
-  const { submitQuery, quitAll, cols, rows } = useStore();
+  const { submitQuery, quitAll, cols, rows, debridConfigured, rdStatus } = useStore();
   const { isRawModeSupported } = useStdin();
 
   useInput(
@@ -43,6 +43,15 @@ export function Splash() {
       </Box>
       <Box>
         <Text dimColor>{CATEGORIES}</Text>
+      </Box>
+      <Box marginTop={1}>
+        {debridConfigured ? (
+          <Text dimColor>
+            {`Real-Debrid: connected${rdStatus?.username ? ` as ${rdStatus.username}` : ""}`}
+          </Text>
+        ) : (
+          <Text dimColor>Tip — press k to connect Real-Debrid for instant, private streaming.</Text>
+        )}
       </Box>
 
       <Box marginTop={1} width={barWidth}>
