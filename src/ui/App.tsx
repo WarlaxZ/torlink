@@ -21,6 +21,7 @@ import { parseMagnet } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { cleanText, truncate } from "../util/format";
+import { isCategory } from "./store";
 import {
   StoreContext,
   type CaptureMode,
@@ -837,7 +838,7 @@ export function App({
             <Box
               flexGrow={1}
               flexDirection="column"
-              display={section !== "downloads" && section !== "seeding" ? "flex" : "none"}
+              display={isCategory(section) ? "flex" : "none"}
             >
               <Results />
             </Box>

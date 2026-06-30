@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Box, Text, useInput } from "ink";
-import { useStore, useQueueItems, useQueueHistory, CATEGORIES } from "../store";
+import { useStore, useQueueItems, useQueueHistory, CATEGORIES, isCategory } from "../store";
 import { Spinner } from "./Spinner";
 import { SearchBar } from "./SearchBar";
 import { Panel } from "./Panel";
@@ -188,7 +188,7 @@ export function Results() {
     return sortResults(base, sort);
   }, [search.results, section, sort]);
 
-  const focused = region === "content" && section !== "downloads" && section !== "seeding";
+  const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
   const [cursor, setCursor] = useState(0);
   const [detail, setDetail] = useState<TorrentResult | null>(null);

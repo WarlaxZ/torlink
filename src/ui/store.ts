@@ -12,6 +12,12 @@ export type Category = "all" | "games" | "movies" | "tv" | "anime";
 
 export type Section = Category | "downloads" | "seeding";
 
+// The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
+// as opposed to the downloads/seeding views.
+export function isCategory(section: Section): boolean {
+  return section !== "downloads" && section !== "seeding";
+}
+
 export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[] = [
   { key: "all", label: "All" },
   { key: "games", label: "Games", group: "Games" },
