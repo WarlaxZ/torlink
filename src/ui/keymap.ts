@@ -101,7 +101,13 @@ export function footerHints(
         ALWAYS,
       ];
     }
-    return [{ keys: "p", label: "Pause" }, { keys: "c", label: "Cancel" }, SWITCH, ALWAYS];
+    return [
+      { keys: "p", label: "Pause" },
+      { keys: "c", label: "Cancel" },
+      { keys: "y", label: "Link" },
+      SWITCH,
+      ALWAYS,
+    ];
   }
   return [
     NAVIGATE,

@@ -15,6 +15,7 @@ import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
 import { downloadFiles, sanitizeFilename } from "./http";
 import path from "node:path";
 import { resolveMagnet } from "../integrations/realdebrid";
+import { pickStreamFile } from "../util/player";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
 
@@ -192,6 +193,7 @@ export class DownloadQueue extends EventEmitter {
       if (!it || it.status !== "downloading") return; // cancelled mid-resolve
       it.phase = "downloading";
       it.progress = 0;
+      it.directUrl = pickStreamFile(files)?.url;
       it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
       this.changed();
 

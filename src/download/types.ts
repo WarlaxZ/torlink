@@ -45,4 +45,7 @@ export interface QueueItem {
   // Real-Debrid support existed.
   via?: DownloadVia;
   phase?: DownloadPhase;
+  // For Real-Debrid items: the primary resolved direct URL, so it can be copied
+  // from the downloads pane. Set once links are resolved.
+  directUrl?: string;
 }

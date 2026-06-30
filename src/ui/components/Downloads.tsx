@@ -56,7 +56,7 @@ function sourceTag(via: QueueItem["via"]): string {
 }
 
 export function Downloads() {
-  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus } = useStore();
+  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus, copyLink } = useStore();
   const active = useQueueItems(queue);
   const recent = useQueueHistory(queue);
   const focused = region === "content";
@@ -78,6 +78,9 @@ export function Downloads() {
         if (!it) return;
         if (input === "c") queue.cancel(it.id);
         else if (input === "p") queue.togglePause(it.id);
+        else if (input === "y") {
+          if (it.directUrl) copyLink(it.directUrl, it.name);
+        }
       } else {
         const h = recent[recentCursor];
         if (!h) return;

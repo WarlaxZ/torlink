@@ -283,6 +283,18 @@ export function App({
     [config, setConfig, closeTokenPrompt],
   );
 
+  const clearRealDebridToken = useCallback(() => {
+    closeTokenPrompt();
+    if (!config) return;
+    if (process.env["REALDEBRID_API_TOKEN"]?.trim()) {
+      setNotice("Token is set via REALDEBRID_API_TOKEN — unset the env var to clear it.");
+      return;
+    }
+    setConfig({ ...config, realDebridToken: undefined });
+    setRdStatus(null);
+    setNotice("Real-Debrid token cleared.");
+  }, [config, setConfig, closeTokenPrompt]);
+
   const startDownload = useCallback(
     (input: DownloadInput) => {
       if (!config || !queue) return;
@@ -320,8 +332,9 @@ export function App({
       let player = resolveMediaPlayer(config);
       if (!player) player = (await detectPlayer()) ?? "";
       if (player && (await launchPlayer(player, url))) {
+        await writeClipboard(url);
         setNotice(
-          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player}`,
+          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player} · link copied`,
         );
         return;
       }
@@ -748,7 +761,9 @@ export function App({
             <TokenPrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
               value={store.config.realDebridToken ?? ""}
+              status={rdStatus}
               onSubmit={setRealDebridToken}
+              onClear={clearRealDebridToken}
               onCancel={closeTokenPrompt}
             />
           </Box>

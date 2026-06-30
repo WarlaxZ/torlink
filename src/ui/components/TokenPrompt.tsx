@@ -2,11 +2,15 @@ import { Box, Text, useInput } from "ink";
 import { TextField } from "./TextField";
 import { Panel } from "./Panel";
 import { COLOR, ICON } from "../theme";
+import { hyperlink } from "../../util/terminal";
+import { formatAccountStatus, type RdStatus } from "../../integrations/rdStatus";
 
 interface TokenPromptProps {
   width: number;
   value: string;
+  status: RdStatus | null;
   onSubmit: (value: string) => void;
+  onClear: () => void;
   onCancel: () => void;
 }
 
@@ -18,9 +22,10 @@ function masked(token: string): string {
   return `${"•".repeat(token.length - 4)}${token.slice(-4)}`;
 }
 
-export function TokenPrompt({ width, value, onSubmit, onCancel }: TokenPromptProps) {
-  useInput((_input, key) => {
+export function TokenPrompt({ width, value, status, onSubmit, onClear, onCancel }: TokenPromptProps) {
+  useInput((input, key) => {
     if (key.escape) onCancel();
+    else if (key.ctrl && input === "x") onClear();
   });
 
   return (
@@ -38,14 +43,25 @@ export function TokenPrompt({ width, value, onSubmit, onCancel }: TokenPromptPro
         </Box>
       </Panel>
       <Box marginTop={1} flexDirection="column">
+        <Text dimColor>{`account: ${formatAccountStatus(status, new Date())}`}</Text>
         <Box>
           <Text color={COLOR.alt}>↵</Text>
           <Text dimColor> save</Text>
+          {value ? (
+            <>
+              <Text dimColor>{`     ${ICON.dot}     `}</Text>
+              <Text color={COLOR.alt}>^x</Text>
+              <Text dimColor> clear</Text>
+            </>
+          ) : null}
           <Text dimColor>{`     ${ICON.dot}     `}</Text>
           <Text color={COLOR.alt}>esc</Text>
           <Text dimColor> cancel</Text>
         </Box>
-        <Text dimColor>Get a token at real-debrid.com/apitoken</Text>
+        <Text dimColor>
+          Get a token at{" "}
+          {hyperlink("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}
+        </Text>
       </Box>
     </Box>
   );
