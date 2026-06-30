@@ -31,12 +31,21 @@ describe("rdStatusFromUser", () => {
     expect(s.premium).toBe(false);
     expect(s.premiumUntil).toBeNull();
   });
+
+  it("falls back to the seconds estimate when expiration is unparseable", () => {
+    const s = rdStatusFromUser(user({ premium: 10 * 86_400, expiration: "not-a-date" }), NOW);
+    expect(s.premiumUntil?.toISOString()).toBe("2026-07-10T00:00:00.000Z");
+  });
 });
 
 describe("daysUntil", () => {
   it("rounds up and never goes negative", () => {
     expect(daysUntil(new Date("2026-07-10T00:00:00.000Z"), NOW)).toBe(10);
     expect(daysUntil(new Date("2026-06-29T00:00:00.000Z"), NOW)).toBe(0);
+  });
+
+  it("rounds a partial day up to 1", () => {
+    expect(daysUntil(new Date("2026-06-30T23:00:00.000Z"), NOW)).toBe(1);
   });
 });
 

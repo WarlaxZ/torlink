@@ -1,6 +1,6 @@
 import { isPremiumActive, type RealDebridUser } from "./realdebrid";
 
-// Below this many days of premium left, the header badge nudges the user.
+// At or below this many days of premium left, the header badge nudges the user.
 const EXPIRY_WARN_DAYS = 14;
 
 // A compact, render-ready view of the connected Real-Debrid account.
@@ -40,5 +40,6 @@ export function formatAccountStatus(status: RdStatus | null, now: Date): string 
   if (!status) return "not connected";
   if (!status.premium) return "free account";
   if (status.premiumUntil) return `premium · ${daysUntil(status.premiumUntil, now)}d left`;
+  // Defensive: premium accounts always have premiumUntil set above; this guards the type.
   return "premium";
 }
