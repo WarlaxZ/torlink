@@ -56,7 +56,7 @@ function sourceTag(via: QueueItem["via"]): string {
 }
 
 export function Downloads() {
-  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus, copyLink } = useStore();
+  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus, copyLink, setNotice } = useStore();
   const active = useQueueItems(queue);
   const recent = useQueueHistory(queue);
   const focused = region === "content";
@@ -80,6 +80,8 @@ export function Downloads() {
         else if (input === "p") queue.togglePause(it.id);
         else if (input === "y") {
           if (it.directUrl) copyLink(it.directUrl, it.name);
+          else if (it.via === "realdebrid") setNotice("Preparing the link… try again in a moment.");
+          else setNotice("No direct link — that's a peer-to-peer download.");
         }
       } else {
         const h = recent[recentCursor];

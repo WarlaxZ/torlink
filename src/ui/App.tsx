@@ -332,9 +332,9 @@ export function App({
       let player = resolveMediaPlayer(config);
       if (!player) player = (await detectPlayer()) ?? "";
       if (player && (await launchPlayer(player, url))) {
-        await writeClipboard(url);
+        const copied = await writeClipboard(url);
         setNotice(
-          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player} · link copied`,
+          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player}${copied ? " · link copied" : ""}`,
         );
         return;
       }
