@@ -834,13 +834,27 @@ export function App({
         >
           <Sidebar />
           <Box flexGrow={1} flexDirection="column">
-            {section === "downloads" ? (
-              <Downloads />
-            ) : section === "seeding" ? (
-              <Seeding />
-            ) : (
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={section !== "downloads" && section !== "seeding" ? "flex" : "none"}
+            >
               <Results />
-            )}
+            </Box>
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={section === "downloads" ? "flex" : "none"}
+            >
+              <Downloads />
+            </Box>
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={section === "seeding" ? "flex" : "none"}
+            >
+              <Seeding />
+            </Box>
           </Box>
         </Box>
 

@@ -188,7 +188,7 @@ export function Results() {
     return sortResults(base, sort);
   }, [search.results, section, sort]);
 
-  const focused = region === "content";
+  const focused = region === "content" && section !== "downloads" && section !== "seeding";
   const [mode, setMode] = useState<Mode>("list");
   const [cursor, setCursor] = useState(0);
   const [detail, setDetail] = useState<TorrentResult | null>(null);

@@ -54,10 +54,10 @@ function sourceTag(via: QueueItem["via"]): string {
 }
 
 export function Downloads() {
-  const { queue, region, contentWidth, listRows, startDownload, setDownloadFocus, copyLink, setNotice } = useStore();
+  const { queue, region, section, contentWidth, listRows, startDownload, setDownloadFocus, copyLink, setNotice } = useStore();
   const active = useQueueItems(queue);
   const recent = useQueueHistory(queue);
-  const focused = region === "content";
+  const focused = region === "content" && section === "downloads";
 
   const total = active.length + recent.length;
   const [cursor, setCursor] = useState(0);

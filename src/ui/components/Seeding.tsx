@@ -28,10 +28,10 @@ function statusCell(seed: SeedItem | undefined): { text: string; color?: string;
 }
 
 export function Seeding() {
-  const { queue, region, contentWidth, listRows, setNotice, setSeedFocus } = useStore();
+  const { queue, region, section, contentWidth, listRows, setNotice, setSeedFocus } = useStore();
   const history = useQueueHistory(queue);
   const seeds = useSeeds(queue);
-  const focused = region === "content";
+  const focused = region === "content" && section === "seeding";
 
   const total = history.length;
   const [cursor, setCursor] = useState(0);
