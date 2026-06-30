@@ -35,12 +35,24 @@ function statusIcon(status: QueueItem["status"]): string {
 
 function rightStats(it: QueueItem): string {
   if (it.status === "downloading") {
+    // Real-Debrid first caches the torrent on its cloud (resolving), then we
+    // pull it over HTTP — no swarm, so no peer count.
+    if (it.via === "realdebrid" && it.phase === "resolving") {
+      return `preparing on Real-Debrid… ${it.progress}%`;
+    }
     const speed = formatBytesPerSec(it.speed) || "…";
     const eta = it.eta ? `  ${formatEtaShort(it.eta)}` : "";
+    if (it.via === "realdebrid") return `${it.progress}%  ${speed}${eta}`;
     return `${it.progress}%  ${speed}  ${ICON.peer}${it.peers}${eta}`;
   }
   if (it.status === "paused") return `paused  ${it.progress}%`;
   return truncate(it.error || "failed", 28);
+}
+
+// Short tag shown in the source column: real source, "rd" for Real-Debrid, or
+// "mag" for a bare magnet.
+function sourceTag(via: QueueItem["via"]): string {
+  return via === "realdebrid" ? "rd" : "mag";
 }
 
 export function Downloads() {
@@ -173,7 +185,7 @@ export function Downloads() {
               </Box>
               <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
                 <Text color={it.source ? ss.color : undefined} dimColor={!it.source || !here}>
-                  {it.source ? ss.tag : "mag"}
+                  {it.source ? ss.tag : sourceTag(it.via)}
                 </Text>
               </Box>
             </Box>

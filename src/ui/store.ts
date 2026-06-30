@@ -56,6 +56,33 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
+  // The plain (P2P) download button. Gated behind an IP-safety warning when a
+  // Real-Debrid token is configured; otherwise downloads immediately.
+  requestP2PDownload: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // Download via Real-Debrid (resolve magnet -> direct links -> HTTP).
+  startDebridDownload: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // Stream via Real-Debrid: resolve, then play the largest video in a player.
+  streamResult: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
+  // True when an RD token is available (config or env var).
+  debridConfigured: boolean;
   copyMagnet: (input: { name: string; magnet: string }) => void;
 
   notice: string | null;

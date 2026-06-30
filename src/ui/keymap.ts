@@ -19,6 +19,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "tab", label: "Switch pane" },
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Download folder" },
+      { keys: "k", label: "Real-Debrid token" },
       { keys: "q", label: "Quit" },
     ],
   },
@@ -28,6 +29,9 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "/", label: "Edit search" },
       { keys: "↵", label: "Run search" },
       { keys: "s", label: "Sort results" },
+      { keys: "d", label: "Download (P2P)" },
+      { keys: "r", label: "Download via Real-Debrid" },
+      { keys: "v", label: "Stream via Real-Debrid" },
       { keys: "y", label: "Copy magnet" },
       { keys: "m", label: "Paste magnet" },
     ],
@@ -64,6 +68,7 @@ export function footerHints(
   section: Section,
   downloadFocus?: DownloadFocus | null,
   seedFocus?: SeedFocus | null,
+  debridConfigured = false,
 ): Hint[] {
   if (region === "sidebar") {
     return [
@@ -101,6 +106,12 @@ export function footerHints(
   return [
     NAVIGATE,
     { keys: "d", label: "Download" },
+    ...(debridConfigured
+      ? [
+          { keys: "r", label: "Real-Debrid" },
+          { keys: "v", label: "Stream" },
+        ]
+      : []),
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },
     { keys: "/", label: "Search" },
