@@ -9,7 +9,7 @@ import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { getSource, SOURCES } from "../../sources/registry";
 import { wrapStep, windowStart } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type Sort, type SortField } from "../sort";
-import { COLOR, GUTTER, ICON, SOURCE_STYLE } from "../theme";
+import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatRelative, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
@@ -22,7 +22,7 @@ function stateMark(state: DownloadState | null): { icon: string; color?: string;
     case "downloading":
       return { icon: ICON.down, color: COLOR.accent };
     case "paused":
-      return { icon: ICON.pause, dim: true };
+      return { icon: ICON.pause, color: PAUSED };
     case "failed":
       return { icon: ICON.error, color: COLOR.bad };
     case "done":

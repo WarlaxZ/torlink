@@ -4,7 +4,7 @@ import { useStore, useQueueItems, useQueueHistory, type DownloadFocus } from "..
 import { Panel } from "./Panel";
 import { ProgressBar } from "./ProgressBar";
 import { wrapStep, windowStart } from "../move";
-import { COLOR, GUTTER, ICON, SOURCE_STYLE } from "../theme";
+import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
 import {
   cleanText,
   formatBytes,
@@ -18,8 +18,6 @@ import type { HistoryItem } from "../../download/history";
 
 const ROWS_PER_ACTIVE = 2;
 const MARK = 2;
-
-const PAUSED = "#7c7785";
 
 function statusColor(status: QueueItem["status"]): string {
   if (status === "failed") return COLOR.bad;
