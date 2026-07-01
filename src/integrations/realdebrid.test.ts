@@ -414,3 +414,48 @@ describe("idempotent RD calls retry past two failures", () => {
     expect(calls).toBe(4); // 3 × 503 then success — impossible with the old retries:2
   });
 });
+
+// Minimal RD API stub. `infoSeq` supplies successive /torrents/info payloads.
+function rdFetch(infoSeq: Array<Record<string, unknown>>): (url: string) => Promise<Response> {
+  let i = 0;
+  return async (url: string) => {
+    if (url.includes("/torrents/addMagnet")) return jsonRes(200, { id: "x" });
+    if (url.includes("/torrents/selectFiles")) return emptyRes(204);
+    if (url.includes("/torrents/info")) {
+      const body = infoSeq[Math.min(i, infoSeq.length - 1)];
+      i++;
+      return jsonRes(200, body);
+    }
+    if (url.includes("/unrestrict/link")) {
+      return jsonRes(200, { download: "https://dl/f", filename: "f.mkv", filesize: 1 });
+    }
+    return emptyRes(200);
+  };
+}
+
+describe("resolveMagnet stall timeout", () => {
+  const magnet = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111";
+
+  it("throws when Real-Debrid reports no caching progress within the window", async () => {
+    const fetchImpl = rdFetch([{ status: "downloading", progress: 0 }]);
+    await expect(
+      resolveMagnet("tok", magnet, { fetchImpl, sleepImpl: async () => {}, pollIntervalMs: 1000, stallMs: 3000 }),
+    ).rejects.toThrow(/isn't caching/i);
+  });
+
+  it("keeps polling while progress increases, then resolves", async () => {
+    const fetchImpl = rdFetch([
+      { status: "downloading", progress: 20 },
+      { status: "downloading", progress: 55 },
+      { status: "downloaded", progress: 100, links: ["https://rd/link"] },
+    ]);
+    const files = await resolveMagnet("tok", magnet, {
+      fetchImpl,
+      sleepImpl: async () => {},
+      pollIntervalMs: 1000,
+      stallMs: 3000,
+    });
+    expect(files).toHaveLength(1);
+    expect(files[0]?.url).toBe("https://dl/f");
+  });
+});

@@ -11,6 +11,11 @@ const ERROR_STATUSES = new Set(["error", "magnet_error", "virus", "dead"]);
 
 const DEFAULT_POLL_MS = 2000;
 
+// Give up on a resolve if Real-Debrid reports no caching progress for this long
+// (it usually means the torrent has no seeders / was removed). Only inactivity
+// counts — a torrent that keeps making progress is never timed out.
+const DEFAULT_STALL_MS = 180_000;
+
 export interface ResolvedFile {
   url: string;
   filename: string;
@@ -94,6 +99,8 @@ export interface ResolveOptions extends RequestOptions {
   // same hash is reused instead of adding a duplicate to the user's RD account
   // (and a cached one resolves instantly).
   knownHash?: string;
+  // Fail if RD-side caching makes no progress for this many ms (default 3 min).
+  stallMs?: number;
 }
 
 function realSleep(ms: number): Promise<void> {
@@ -295,8 +302,14 @@ export async function resolveMagnet(
   magnet: string,
   opts: ResolveOptions = {},
 ): Promise<ResolvedFile[]> {
-  const { onProgress, pollIntervalMs = DEFAULT_POLL_MS, sleepImpl = realSleep, signal, knownHash } =
-    opts;
+  const {
+    onProgress,
+    pollIntervalMs = DEFAULT_POLL_MS,
+    sleepImpl = realSleep,
+    signal,
+    knownHash,
+    stallMs = DEFAULT_STALL_MS,
+  } = opts;
 
   throwIfAborted(signal);
 
@@ -332,10 +345,13 @@ export async function resolveMagnet(
   }
 
   let links: string[] = [];
+  let lastProgress = -1;
+  let stalledMs = 0;
   for (;;) {
     throwIfAborted(signal);
     const info = await getInfo(token, id, opts);
-    onProgress?.(info.progress ?? 0);
+    const progress = info.progress ?? 0;
+    onProgress?.(progress);
     if (info.status === DONE_STATUS) {
       links = info.links ?? [];
       break;
@@ -348,6 +364,17 @@ export async function resolveMagnet(
     if (info.status === "waiting_files_selection" && !selected) {
       await selectFiles(token, id, opts);
       selected = true;
+    }
+    if (progress > lastProgress) {
+      lastProgress = progress;
+      stalledMs = 0;
+    } else {
+      stalledMs += pollIntervalMs;
+      if (stalledMs >= stallMs) {
+        throw new RealDebridError(
+          "Real-Debrid isn't caching this torrent — it may have no seeders (removed or dead).",
+        );
+      }
     }
     await sleepImpl(pollIntervalMs);
   }
