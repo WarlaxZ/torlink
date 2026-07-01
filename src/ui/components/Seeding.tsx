@@ -3,7 +3,7 @@ import { Box, Text, useInput } from "ink";
 import { useStore, useQueueHistory, useSeeds, type SeedFocus } from "../store";
 import { Panel } from "./Panel";
 import { wrapStep, windowStart } from "../move";
-import { COLOR, GUTTER, ICON, SOURCE_STYLE } from "../theme";
+import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
 import { cleanText, formatBytes, formatBytesPerSec, truncate } from "../../util/format";
 import type { SeedItem } from "../../download/types";
 
@@ -11,8 +11,6 @@ const MARK = 2;
 const SIZE_W = 10;
 const STATUS_W = 14;
 const SRC_W = 4;
-const PAUSED = "#7c7785";
-
 function glyph(seed: SeedItem | undefined): { icon: string; color: string } {
   if (!seed) return { icon: ICON.done, color: COLOR.good };
   if (seed.status === "seeding") return { icon: ICON.up, color: COLOR.good };
@@ -30,10 +28,10 @@ function statusCell(seed: SeedItem | undefined): { text: string; color?: string;
 }
 
 export function Seeding() {
-  const { queue, region, contentWidth, listRows, setNotice, setSeedFocus } = useStore();
+  const { queue, region, section, contentWidth, listRows, setNotice, setSeedFocus } = useStore();
   const history = useQueueHistory(queue);
   const seeds = useSeeds(queue);
-  const focused = region === "content";
+  const focused = region === "content" && section === "seeding";
 
   const total = history.length;
   const [cursor, setCursor] = useState(0);

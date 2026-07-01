@@ -6,6 +6,8 @@ import {
   findTorrentByHash,
   isPremiumActive,
   RealDebridError,
+  messageForTorrentStatus,
+  messageForErrorSlug,
   type RealDebridFetch,
 } from "./realdebrid";
 
@@ -322,5 +324,61 @@ describe("resolveMagnet", () => {
         signal: ctrl.signal,
       }),
     ).rejects.toBeTruthy();
+  });
+});
+
+describe("messageForTorrentStatus", () => {
+  it("gives specific, terminal-sounding copy per status", () => {
+    expect(messageForTorrentStatus("dead")).toBe("No seeders — Real-Debrid can't fetch this torrent.");
+    expect(messageForTorrentStatus("magnet_error")).toBe(
+      "Real-Debrid couldn't read this magnet (it may be invalid or removed).",
+    );
+    expect(messageForTorrentStatus("virus")).toBe("Real-Debrid flagged this torrent's contents.");
+  });
+
+  it("falls back for an unknown/error status", () => {
+    expect(messageForTorrentStatus("error")).toBe("Real-Debrid couldn't process this torrent.");
+    expect(messageForTorrentStatus("whatever")).toBe("Real-Debrid couldn't process this torrent.");
+  });
+});
+
+describe("messageForErrorSlug", () => {
+  it("maps known unavailable/removed slugs", () => {
+    expect(messageForErrorSlug("infringing_file")).toBe(
+      "This was removed from Real-Debrid (copyright claim).",
+    );
+    expect(messageForErrorSlug("hoster_unavailable")).toBe(
+      "This is no longer available on Real-Debrid (it may have been removed).",
+    );
+    expect(messageForErrorSlug("file_unavailable")).toBe(
+      "This is no longer available on Real-Debrid (it may have been removed).",
+    );
+  });
+
+  it("maps rate-limit slugs", () => {
+    expect(messageForErrorSlug("too_many_requests")).toBe(
+      "Real-Debrid rate limit reached — wait a moment and retry.",
+    );
+  });
+
+  it("returns null for unknown/missing slugs so the caller uses its generic message", () => {
+    expect(messageForErrorSlug(undefined)).toBeNull();
+    expect(messageForErrorSlug("some_unknown_code")).toBeNull();
+  });
+
+  it("matches no_longer_available as a substring", () => {
+    expect(messageForErrorSlug("content_no_longer_available")).toBe(
+      "This is no longer available on Real-Debrid (it may have been removed).",
+    );
+  });
+
+  it("matches fair_usage as a substring for rate limiting", () => {
+    expect(messageForErrorSlug("fair_usage_limit")).toBe(
+      "Real-Debrid rate limit reached — wait a moment and retry.",
+    );
+  });
+
+  it("does not misclassify hoster_temporarily_unavailable as permanently removed", () => {
+    expect(messageForErrorSlug("hoster_temporarily_unavailable")).toBeNull();
   });
 });

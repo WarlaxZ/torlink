@@ -26,6 +26,9 @@ export const ICON = {
 
 export const RULE = "#6b6577";
 
+// Muted grey for paused/idle states.
+export const PAUSED = "#7c7785";
+
 export const GUTTER = 2;
 
 export const SOURCE_STYLE: Record<SourceId, { tag: string; color: string }> = {

@@ -21,6 +21,7 @@ import { parseMagnet } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { cleanText, truncate } from "../util/format";
+import { isCategory } from "./store";
 import {
   StoreContext,
   type CaptureMode,
@@ -307,8 +308,6 @@ export function App({
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       queue.add(input, config.downloadDir);
       setNotice(`Added: ${truncate(cleanText(input.name), 40)}`);
-      setSection("downloads");
-      setRegion("content");
     },
     [config, queue],
   );
@@ -324,8 +323,6 @@ export function App({
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       void queue.addDebrid(input, config.downloadDir, token);
       setNotice(`Real-Debrid: ${truncate(cleanText(input.name), 40)}`);
-      setSection("downloads");
-      setRegion("content");
     },
     [config, queue],
   );
@@ -838,13 +835,27 @@ export function App({
         >
           <Sidebar />
           <Box flexGrow={1} flexDirection="column">
-            {section === "downloads" ? (
-              <Downloads />
-            ) : section === "seeding" ? (
-              <Seeding />
-            ) : (
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={isCategory(section) ? "flex" : "none"}
+            >
               <Results />
-            )}
+            </Box>
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={section === "downloads" ? "flex" : "none"}
+            >
+              <Downloads />
+            </Box>
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              display={section === "seeding" ? "flex" : "none"}
+            >
+              <Seeding />
+            </Box>
           </Box>
         </Box>
 
