@@ -14,6 +14,7 @@ import {
 import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
 import { downloadFiles, sanitizeFilename } from "./http";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { resolveMagnet, isTransient } from "../integrations/realdebrid";
 import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
@@ -277,16 +278,17 @@ export class DownloadQueue extends EventEmitter {
 
       const it = this.items.get(id);
       if (!it || it.status !== "downloading") return; // cancelled mid-resolve
-      it.phase = "downloading";
-      it.progress = 0;
-      it.directUrl = pickStreamFile(files)?.url;
-      it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
-      this.changed();
-
       // A multi-file torrent (a season, a movie with extras) gets its own
       // subfolder so files don't scatter into the download root or collide with
       // another torrent's files; a single file lands directly in the folder.
       const dest = files.length > 1 ? path.join(it.dir, sanitizeFilename(it.name)) : it.dir;
+      it.phase = "downloading";
+      it.progress = 0;
+      it.directUrl = pickStreamFile(files)?.url;
+      it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
+      it.paths = files.map((f) => path.join(dest, sanitizeFilename(f.filename)));
+      this.changed();
+
       await deps.downloadFiles(files, dest, {
         signal: ctrl.signal,
         onProgress: (p) => {
@@ -573,12 +575,28 @@ export class DownloadQueue extends EventEmitter {
     else if (it.status === "paused") this.resume(id);
   }
 
+  // Delete a Real-Debrid item's partial files on disk (used when cancelling a
+  // paused item whose pipeline has already unwound). Best-effort; never throws.
+  private cleanupDebridFiles(it: QueueItem): void {
+    if (it.via !== "realdebrid" || !it.paths || it.paths.length === 0) return;
+    const paths = it.paths;
+    void (async () => {
+      for (const p of paths) await fs.rm(p, { force: true }).catch(() => {});
+      // Remove a now-empty per-item subfolder (multi-file downloads); never the
+      // shared download root (single-file downloads write directly into it.dir).
+      const parent = path.dirname(paths[0]!);
+      if (parent !== it.dir) await fs.rm(parent, { recursive: true, force: true }).catch(() => {});
+    })();
+  }
+
   cancel(id: string): void {
-    if (!this.items.has(id)) return;
+    const it = this.items.get(id);
+    if (!it) return;
     // Abort an in-flight Real-Debrid transfer first; the HTTP downloader cleans
     // up its own partial files once the signal fires.
     this.debridAborts.get(id)?.abort("cancel");
     this.debridAttempts.delete(id);
+    this.cleanupDebridFiles(it);
     this.engine.remove(id);
     this.items.delete(id);
     deleteTorrentMeta(id);
