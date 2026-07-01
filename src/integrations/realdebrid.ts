@@ -198,6 +198,9 @@ async function request(
       sleepImpl: opts.sleepImpl,
       retries: opts.retries ?? 2,
       retryCdn503: true,
+      baseMs: 2000,
+      capMs: 30000,
+      minBackoffMs: 2000,
       onAttempt: ({ status, attempt, retries, retryAfterMs, willRetry }) =>
         log.warn(
           `rd ${method} ${path} status=${status} attempt=${attempt + 1}/${retries + 1}` +

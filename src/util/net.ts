@@ -13,6 +13,10 @@ export interface FetchResilientOptions extends RequestInit {
   // backoff instead of throwing. For trusted APIs behind Cloudflare (e.g. the
   // Real-Debrid REST API) where a 503 is a transient rate-limit, not a block page.
   retryCdn503?: boolean;
+  // Minimum backoff (ms) for a retryable response that has no Retry-After
+  // header — a floor so retries aren't near-instant. Off by default; set by
+  // trusted APIs (Real-Debrid) whose 503s are rate limits with no Retry-After.
+  minBackoffMs?: number;
   // Called on each retryable response (before the backoff sleep) and on the
   // final give-up. Lets callers observe retries without this layer knowing about
   // logging. `delayMs` is 0 when giving up; `willRetry` distinguishes the two.
@@ -89,6 +93,7 @@ export async function fetchResilient(
     sleepImpl = realSleep,
     retryCdn503 = false,
     onAttempt,
+    minBackoffMs,
     signal,
     ...init
   } = opts;
@@ -128,7 +133,8 @@ export async function fetchResilient(
 
     const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
     const willRetry = attempt < retries;
-    const delayMs = willRetry ? backoffDelay(attempt, baseMs, capMs, retryAfterMs) : 0;
+    const floorMs = retryAfterMs ?? minBackoffMs;
+    const delayMs = willRetry ? backoffDelay(attempt, baseMs, capMs, floorMs) : 0;
     onAttempt?.({ status: res.status, attempt, retries, retryAfterMs, delayMs, willRetry });
     if (!willRetry) {
       throw new HttpError(
