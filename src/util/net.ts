@@ -27,6 +27,7 @@ export interface FetchResilientOptions extends RequestInit {
     retryAfterMs?: number;
     delayMs: number;
     willRetry: boolean;
+    bodySnippet?: string;
   }) => void;
 }
 
@@ -44,6 +45,7 @@ export const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const DEFAULT_RETRIES = 5;
 const DEFAULT_BASE_MS = 500;
 const DEFAULT_CAP_MS = 20000;
+const BODY_SNIPPET_MAX = 200;
 
 function realSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +56,18 @@ function isAbortError(e: unknown): boolean {
     e instanceof Error &&
     (e.name === "AbortError" || /aborted/i.test(e.message))
   );
+}
+
+// Best-effort short snippet of a response body, for diagnostics. Never throws —
+// a missing/failed body yields undefined. Truncated so a stray HTML page can't
+// bloat a log line.
+async function readBodySnippet(res: Response): Promise<string | undefined> {
+  try {
+    const text = await res.text();
+    return text.slice(0, BODY_SNIPPET_MAX).trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseRetryAfter(
@@ -135,7 +149,8 @@ export async function fetchResilient(
     const willRetry = attempt < retries;
     const floorMs = retryAfterMs ?? minBackoffMs;
     const delayMs = willRetry ? backoffDelay(attempt, baseMs, capMs, floorMs) : 0;
-    onAttempt?.({ status: res.status, attempt, retries, retryAfterMs, delayMs, willRetry });
+    const bodySnippet = willRetry ? undefined : await readBodySnippet(res);
+    onAttempt?.({ status: res.status, attempt, retries, retryAfterMs, delayMs, willRetry, bodySnippet });
     if (!willRetry) {
       throw new HttpError(
         res.status,
