@@ -3,6 +3,7 @@ import path from "node:path";
 import { historyFile } from "../config/paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import type { SourceId } from "../sources/types";
+import type { DownloadVia } from "./types";
 
 export const HISTORY_CAP = 500;
 
@@ -10,6 +11,9 @@ export interface HistoryItem {
   id: string;
   name: string;
   source?: SourceId;
+  // Delivery method of the completed download, so the history row can show
+  // RD vs P2P. Optional: entries written before this existed load as undefined.
+  via?: DownloadVia;
   sizeBytes: number;
   magnet: string;
   dir: string;
