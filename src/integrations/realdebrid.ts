@@ -201,11 +201,12 @@ async function request(
       baseMs: 2000,
       capMs: 30000,
       minBackoffMs: 2000,
-      onAttempt: ({ status, attempt, retries, retryAfterMs, willRetry }) =>
+      onAttempt: ({ status, attempt, retries, retryAfterMs, willRetry, bodySnippet }) =>
         log.warn(
           `rd ${method} ${path} status=${status} attempt=${attempt + 1}/${retries + 1}` +
             (retryAfterMs !== undefined ? ` retryAfter=${Math.round(retryAfterMs / 1000)}s` : "") +
-            (willRetry ? " retrying" : " giving up"),
+            (willRetry ? " retrying" : " giving up") +
+            (bodySnippet ? ` body=${bodySnippet}` : ""),
         ),
     });
   } catch (e) {

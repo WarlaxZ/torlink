@@ -496,3 +496,25 @@ describe("request logging", () => {
     }
   });
 });
+
+describe("request logging — error body", () => {
+  it("logs the RD error body on the give-up line", async () => {
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      const fetchImpl = async (): Promise<Response> =>
+        ({
+          status: 503,
+          ok: false,
+          headers: { get: () => null },
+          text: async () => '{"error":"fair_usage_limit"}',
+        }) as unknown as Response;
+      await expect(getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} })).rejects.toThrow();
+      const lines = spy.mock.calls.map((c) => String(c[0]));
+      expect(
+        lines.some((l) => l.includes("giving up") && l.includes('body={"error":"fair_usage_limit"}')),
+      ).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
