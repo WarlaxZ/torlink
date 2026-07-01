@@ -35,6 +35,9 @@ function rightStats(it: QueueItem): string {
   if (it.status === "downloading") {
     // Real-Debrid first caches the torrent on its cloud (resolving), then we
     // pull it over HTTP — no swarm, so no peer count.
+    if (it.via === "realdebrid" && it.phase === "queued") {
+      return "queued — waiting for Real-Debrid";
+    }
     if (it.via === "realdebrid" && it.phase === "resolving") {
       return `preparing on Real-Debrid… ${it.progress}%`;
     }

@@ -6,9 +6,10 @@ export type DownloadStatus = "downloading" | "paused" | "completed" | "failed";
 // Real-Debrid (resolve the magnet to direct links, then download over HTTP).
 export type DownloadVia = "p2p" | "realdebrid";
 
-// Real-Debrid downloads have two phases: "resolving" while RD caches the
-// torrent on its cloud, then "downloading" while we pull the direct links.
-export type DownloadPhase = "resolving" | "downloading";
+// Real-Debrid downloads move through: "queued" (waiting for a concurrency slot),
+// "resolving" (RD caches the torrent on its cloud), then "downloading" (we pull
+// the direct links).
+export type DownloadPhase = "queued" | "resolving" | "downloading";
 
 export type SeedStatus = "seeding" | "paused" | "missing";
 

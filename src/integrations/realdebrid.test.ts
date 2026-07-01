@@ -8,6 +8,8 @@ import {
   RealDebridError,
   messageForTorrentStatus,
   messageForErrorSlug,
+  isTransient,
+  getInfo,
   type RealDebridFetch,
 } from "./realdebrid";
 
@@ -380,5 +382,80 @@ describe("messageForErrorSlug", () => {
 
   it("does not misclassify hoster_temporarily_unavailable as permanently removed", () => {
     expect(messageForErrorSlug("hoster_temporarily_unavailable")).toBeNull();
+  });
+});
+
+describe("isTransient", () => {
+  it("flags Real-Debrid 5xx/429 responses as transient", () => {
+    for (const s of [429, 500, 502, 503, 504]) {
+      expect(isTransient(new RealDebridError("busy", s))).toBe(true);
+    }
+  });
+
+  it("treats token / not-found / status-less / non-RD errors as terminal", () => {
+    expect(isTransient(new RealDebridError("bad token", 401))).toBe(false);
+    expect(isTransient(new RealDebridError("gone", 404))).toBe(false);
+    expect(isTransient(new RealDebridError("No seeders"))).toBe(false); // no status
+    expect(isTransient(new Error("boom"))).toBe(false);
+    expect(isTransient("nope")).toBe(false);
+  });
+});
+
+describe("idempotent RD calls retry past two failures", () => {
+  it("getInfo retries a 503 more than twice before succeeding", async () => {
+    let calls = 0;
+    const fetchImpl = async (): Promise<Response> => {
+      calls++;
+      if (calls <= 3) return new Response("", { status: 503 });
+      return new Response(JSON.stringify({ status: "downloaded", links: [] }), { status: 200 });
+    };
+    const info = await getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} });
+    expect(info.status).toBe("downloaded");
+    expect(calls).toBe(4); // 3 × 503 then success — impossible with the old retries:2
+  });
+});
+
+// Minimal RD API stub. `infoSeq` supplies successive /torrents/info payloads.
+function rdFetch(infoSeq: Array<Record<string, unknown>>): (url: string) => Promise<Response> {
+  let i = 0;
+  return async (url: string) => {
+    if (url.includes("/torrents/addMagnet")) return jsonRes(200, { id: "x" });
+    if (url.includes("/torrents/selectFiles")) return emptyRes(204);
+    if (url.includes("/torrents/info")) {
+      const body = infoSeq[Math.min(i, infoSeq.length - 1)];
+      i++;
+      return jsonRes(200, body);
+    }
+    if (url.includes("/unrestrict/link")) {
+      return jsonRes(200, { download: "https://dl/f", filename: "f.mkv", filesize: 1 });
+    }
+    return emptyRes(200);
+  };
+}
+
+describe("resolveMagnet stall timeout", () => {
+  const magnet = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111";
+
+  it("throws when Real-Debrid reports no caching progress within the window", async () => {
+    const fetchImpl = rdFetch([{ status: "downloading", progress: 0 }]);
+    await expect(
+      resolveMagnet("tok", magnet, { fetchImpl, sleepImpl: async () => {}, pollIntervalMs: 1000, stallMs: 3000 }),
+    ).rejects.toThrow(/isn't caching/i);
+  });
+
+  it("keeps polling while progress increases, then resolves", async () => {
+    const fetchImpl = rdFetch([
+      { status: "downloading", progress: 20 },
+      { status: "downloading", progress: 55 },
+      { status: "downloaded", progress: 100, links: ["https://rd/link"] },
+    ]);
+    const files = await resolveMagnet("tok", magnet, {
+      fetchImpl,
+      sleepImpl: async () => {},
+      pollIntervalMs: 1000,
+      stallMs: 3000,
+    });
+    expect(files).toHaveLength(1);
+    expect(files[0]?.url).toBe("https://dl/f");
   });
 });
