@@ -213,6 +213,9 @@ export class DownloadQueue extends EventEmitter {
         await this.runDebrid(id, token, deps); // completes on success, throws on failure
         return;
       } catch (e) {
+        // A pause aborted the pipeline: the item is already marked paused; leave
+        // it (don't fail or requeue). The finally still releases the slot.
+        if (this.items.get(id)?.status === "paused") return;
         const attempts = (this.debridAttempts.get(id) ?? 0) + 1;
         this.debridAttempts.set(id, attempts);
         const stillHere = this.items.get(id)?.status === "downloading";
@@ -511,9 +514,19 @@ export class DownloadQueue extends EventEmitter {
   pause(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "downloading") return;
-    // Pausing/resuming an HTTP transfer would need range-resume; not in v1, so
-    // a Real-Debrid download can only be cancelled, never paused.
-    if (it.via === "realdebrid") return;
+    if (it.via === "realdebrid") {
+      // Abort the in-flight pipeline with a "pause" reason so downloadFiles keeps
+      // the partial file(s); driveDebrid sees the paused status and won't fail it.
+      it.status = "paused";
+      it.speed = 0;
+      it.peers = 0;
+      it.eta = undefined;
+      this.debridAborts.get(id)?.abort("pause");
+      this.changed();
+      void this.persist();
+      this.maybeStopPoll();
+      return;
+    }
     it.status = "paused";
     it.speed = 0;
     it.peers = 0;
@@ -527,6 +540,23 @@ export class DownloadQueue extends EventEmitter {
   resume(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "paused") return;
+    if (it.via === "realdebrid") {
+      if (!this.debridToken) {
+        it.status = "failed";
+        it.error = "Set a Real-Debrid token, then download again.";
+        this.changed();
+        return;
+      }
+      // Re-run the pipeline: re-resolve for a fresh link, then downloadFiles
+      // continues each partial file via HTTP Range from its on-disk size.
+      it.status = "downloading";
+      it.error = undefined;
+      this.debridAttempts.set(id, 0);
+      this.changed();
+      void this.persist();
+      void this.driveDebrid(id, this.debridToken, this.debridDeps);
+      return;
+    }
     it.status = "downloading";
     this.startEngine(it);
     this.ensurePoll();
@@ -545,7 +575,7 @@ export class DownloadQueue extends EventEmitter {
     if (!this.items.has(id)) return;
     // Abort an in-flight Real-Debrid transfer first; the HTTP downloader cleans
     // up its own partial files once the signal fires.
-    this.debridAborts.get(id)?.abort();
+    this.debridAborts.get(id)?.abort("cancel");
     this.debridAttempts.delete(id);
     this.engine.remove(id);
     this.items.delete(id);

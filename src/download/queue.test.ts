@@ -209,6 +209,42 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     await all;
     q.suspend();
   });
+
+  it("pauses an in-progress Real-Debrid download and resumes it to completion", async () => {
+    const q = new DownloadQueue();
+    let downloadCalls = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: async () => [{ url: "u", filename: "f.mkv", bytes: 10 }],
+      downloadFiles: async (_files, _dir, opts) => {
+        downloadCalls++;
+        if (downloadCalls === 1) {
+          // First run: block until the pause aborts us, then throw like a real abort.
+          await new Promise<void>((_res, rej) => {
+            opts?.signal?.addEventListener("abort", () =>
+              rej(Object.assign(new Error("Download aborted."), { name: "AbortError" })),
+            );
+          });
+        }
+        opts?.onProgress?.({ downloaded: 10, total: 10, speed: 0 });
+        return ["/downloads/f.mkv"];
+      },
+      sleep: async () => {},
+    };
+
+    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    await tick();
+    await tick();
+
+    q.pause("rd1");
+    await p; // driveDebrid returns once the pause abort unwinds
+    expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("paused");
+
+    q.resume("rd1");
+    for (let n = 0; n < 5 && q.has("rd1"); n++) await tick();
+    expect(q.has("rd1")).toBe(false); // second download run completed → history
+    expect(downloadCalls).toBe(2);
+    q.suspend();
+  });
 });
 
 describe("strayDownload (missing-file safety-net)", () => {
