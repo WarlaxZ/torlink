@@ -59,6 +59,17 @@ export class RealDebridError extends Error {
   }
 }
 
+// Real-Debrid HTTP statuses worth retrying (rate limit / transient server load).
+const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504]);
+
+// A transient Real-Debrid failure worth requeuing, vs a terminal one (bad token,
+// dead/removed torrent, not found, stall). Only RD's own 5xx/429 responses count:
+// network-level blips are already retried inside `request()` via fetchResilient,
+// and status-less RealDebridErrors (dead torrent, stall) are deliberately terminal.
+export function isTransient(e: unknown): boolean {
+  return e instanceof RealDebridError && e.status !== undefined && TRANSIENT_STATUS.has(e.status);
+}
+
 // True for an error that means the token was rejected — by HTTP status when we
 // have the typed error, or by message when only the surfaced string survives.
 export function isTokenRejection(e: unknown): boolean {
@@ -218,7 +229,7 @@ export async function selectFiles(
   opts: RequestOptions = {},
   files = "all",
 ): Promise<void> {
-  await request(token, "POST", `/torrents/selectFiles/${id}`, { files }, opts);
+  await request(token, "POST", `/torrents/selectFiles/${id}`, { files }, { ...opts, retries: opts.retries ?? 4 });
 }
 
 export async function listTorrents(
@@ -227,7 +238,7 @@ export async function listTorrents(
   limit = 100,
   page = 1,
 ): Promise<TorrentListItem[]> {
-  const res = await request(token, "GET", `/torrents?limit=${limit}&page=${page}`, undefined, opts);
+  const res = await request(token, "GET", `/torrents?limit=${limit}&page=${page}`, undefined, { ...opts, retries: opts.retries ?? 4 });
   const parsed = (await res.json()) as unknown;
   return Array.isArray(parsed) ? (parsed as TorrentListItem[]) : [];
 }
@@ -259,7 +270,7 @@ export async function getInfo(
   id: string,
   opts: RequestOptions = {},
 ): Promise<TorrentInfo> {
-  const res = await request(token, "GET", `/torrents/info/${id}`, undefined, opts);
+  const res = await request(token, "GET", `/torrents/info/${id}`, undefined, { ...opts, retries: opts.retries ?? 4 });
   return (await res.json()) as TorrentInfo;
 }
 
@@ -268,7 +279,7 @@ export async function unrestrictLink(
   link: string,
   opts: RequestOptions = {},
 ): Promise<ResolvedFile> {
-  const res = await request(token, "POST", "/unrestrict/link", { link }, opts);
+  const res = await request(token, "POST", "/unrestrict/link", { link }, { ...opts, retries: opts.retries ?? 4 });
   const parsed = (await res.json()) as { download: string; filename: string; filesize?: number };
   return { url: parsed.download, filename: parsed.filename, bytes: parsed.filesize ?? 0 };
 }

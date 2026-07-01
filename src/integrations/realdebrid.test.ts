@@ -8,6 +8,8 @@ import {
   RealDebridError,
   messageForTorrentStatus,
   messageForErrorSlug,
+  isTransient,
+  getInfo,
   type RealDebridFetch,
 } from "./realdebrid";
 
@@ -380,5 +382,35 @@ describe("messageForErrorSlug", () => {
 
   it("does not misclassify hoster_temporarily_unavailable as permanently removed", () => {
     expect(messageForErrorSlug("hoster_temporarily_unavailable")).toBeNull();
+  });
+});
+
+describe("isTransient", () => {
+  it("flags Real-Debrid 5xx/429 responses as transient", () => {
+    for (const s of [429, 500, 502, 503, 504]) {
+      expect(isTransient(new RealDebridError("busy", s))).toBe(true);
+    }
+  });
+
+  it("treats token / not-found / status-less / non-RD errors as terminal", () => {
+    expect(isTransient(new RealDebridError("bad token", 401))).toBe(false);
+    expect(isTransient(new RealDebridError("gone", 404))).toBe(false);
+    expect(isTransient(new RealDebridError("No seeders"))).toBe(false); // no status
+    expect(isTransient(new Error("boom"))).toBe(false);
+    expect(isTransient("nope")).toBe(false);
+  });
+});
+
+describe("idempotent RD calls retry past two failures", () => {
+  it("getInfo retries a 503 more than twice before succeeding", async () => {
+    let calls = 0;
+    const fetchImpl = async (): Promise<Response> => {
+      calls++;
+      if (calls <= 3) return new Response("", { status: 503 });
+      return new Response(JSON.stringify({ status: "downloaded", links: [] }), { status: 200 });
+    };
+    const info = await getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} });
+    expect(info.status).toBe("downloaded");
+    expect(calls).toBe(4); // 3 × 503 then success — impossible with the old retries:2
   });
 });
