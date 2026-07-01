@@ -17,6 +17,7 @@ import path from "node:path";
 import { resolveMagnet, isTransient } from "../integrations/realdebrid";
 import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
+import { log } from "../util/logger";
 import { pickStreamFile } from "../util/player";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
@@ -30,6 +31,12 @@ export interface DebridDeps {
 }
 
 const defaultDebridDeps: DebridDeps = { resolveMagnet, downloadFiles };
+
+// Compact, log-safe label for a queue item (short infoHash + short name). The
+// name already lives in queue.json, so this leaks nothing new.
+function rdLabel(id: string, name: string): string {
+  return `${id.slice(0, 8)} ${name.slice(0, 40)}`;
+}
 
 /**
  * A real seed never pulls data off the network: verifying on-disk files reads
@@ -181,6 +188,7 @@ export class DownloadQueue extends EventEmitter {
     this.items.set(item.id, item);
     this.debridAttempts.set(item.id, 0);
     this.changed();
+    log.info(`queue ${rdLabel(item.id, item.name)} queued`);
     void this.persist();
     return this.driveDebrid(item.id, token, deps);
   }
@@ -215,6 +223,9 @@ export class DownloadQueue extends EventEmitter {
             it.phase = "queued";
             it.speed = 0;
             this.changed();
+            log.warn(
+              `queue ${rdLabel(id, it.name)} requeue reason=transient attempt=${attempts}/${MAX_DEBRID_ATTEMPTS}`,
+            );
           }
         } else {
           this.failDebrid(id, e);
@@ -224,14 +235,14 @@ export class DownloadQueue extends EventEmitter {
         this.debridSem.release();
       }
       if (!retry) return;
-      await sleep(
-        backoffDelay(
-          this.debridAttempts.get(id) ?? 1,
-          DEBRID_BACKOFF_BASE_MS,
-          DEBRID_BACKOFF_CAP_MS,
-          DEBRID_BACKOFF_BASE_MS,
-        ),
+      const backoff = backoffDelay(
+        this.debridAttempts.get(id) ?? 1,
+        DEBRID_BACKOFF_BASE_MS,
+        DEBRID_BACKOFF_CAP_MS,
+        DEBRID_BACKOFF_BASE_MS,
       );
+      log.debug(`queue ${id.slice(0, 8)} backoff=${Math.round(backoff / 1000)}s`);
+      await sleep(backoff);
     }
   }
 
@@ -246,6 +257,7 @@ export class DownloadQueue extends EventEmitter {
       if (start) {
         start.phase = "resolving";
         this.changed();
+        log.info(`queue ${rdLabel(id, start.name)} resolving`);
       }
       const files = await deps.resolveMagnet(token, this.items.get(id)?.magnet ?? "", {
         signal: ctrl.signal,
@@ -306,6 +318,7 @@ export class DownloadQueue extends EventEmitter {
     it.speed = 0;
     it.peers = 0;
     it.phase = undefined;
+    log.warn(`queue ${rdLabel(id, it.name)} failed reason="${it.error}"`);
     this.changed();
     void this.persist();
     this.maybeStopPoll();
@@ -320,6 +333,7 @@ export class DownloadQueue extends EventEmitter {
     it.progress = 100;
     it.speed = 0;
     it.phase = undefined;
+    log.info(`queue ${rdLabel(it.id, it.name)} complete`);
     this.recordHistory(it);
     this.items.delete(it.id);
     this.emit("completed", it.name);

@@ -92,4 +92,40 @@ describe("fetchResilient", () => {
     expect(res.status).toBe(200);
     expect(calls).toBe(2);
   });
+
+  it("reports each retryable response to onAttempt (retry then success)", async () => {
+    let n = 0;
+    const seen: Array<{ status: number; attempt: number; willRetry: boolean; retryAfterMs?: number }> = [];
+    const res = await fetchResilient("http://x", {
+      ...opts,
+      retries: 3,
+      onAttempt: (i) => seen.push({ status: i.status, attempt: i.attempt, willRetry: i.willRetry, retryAfterMs: i.retryAfterMs }),
+      fetchImpl: async () => (++n === 1 ? fakeRes(503, { "retry-after": "2" }) : fakeRes(200)),
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([{ status: 503, attempt: 0, willRetry: true, retryAfterMs: 2000 }]);
+  });
+
+  it("reports the final give-up to onAttempt with willRetry=false", async () => {
+    const seen: boolean[] = [];
+    await expect(
+      fetchResilient("http://x", {
+        ...opts,
+        retries: 1,
+        onAttempt: (i) => seen.push(i.willRetry),
+        fetchImpl: async () => fakeRes(503),
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(seen).toEqual([true, false]);
+  });
+
+  it("does not call onAttempt on a first-try success", async () => {
+    let called = false;
+    await fetchResilient("http://x", {
+      ...opts,
+      onAttempt: () => (called = true),
+      fetchImpl: async () => fakeRes(200),
+    });
+    expect(called).toBe(false);
+  });
 });

@@ -23,6 +23,8 @@ export const historyFile = path.join(dataDir, "history.json");
 
 export const seedsFile = path.join(dataDir, "seeds.json");
 
+export const logFile = path.join(dataDir, "torlink.log");
+
 // Per-torrent .torrent metadata, captured during download so a re-seed can
 // verify the on-disk file locally instead of re-fetching it from the swarm.
 export const torrentsDir = path.join(dataDir, "torrents");
