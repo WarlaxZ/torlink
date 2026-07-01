@@ -128,4 +128,52 @@ describe("fetchResilient", () => {
     });
     expect(called).toBe(false);
   });
+
+  it("floors the backoff at minBackoffMs when there is no Retry-After", async () => {
+    const delays: number[] = [];
+    let n = 0;
+    await fetchResilient("http://x", {
+      baseMs: 1,
+      capMs: 1,
+      retries: 3,
+      minBackoffMs: 1000,
+      sleepImpl: async (ms: number) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => (++n === 1 ? fakeRes(503) : fakeRes(200)),
+    });
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("honors a Retry-After larger than minBackoffMs", async () => {
+    const delays: number[] = [];
+    let n = 0;
+    await fetchResilient("http://x", {
+      baseMs: 1,
+      capMs: 1,
+      retries: 3,
+      minBackoffMs: 1000,
+      sleepImpl: async (ms: number) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => (++n === 1 ? fakeRes(503, { "retry-after": "5" }) : fakeRes(200)),
+    });
+    expect(delays[0]).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("without minBackoffMs the backoff can be below a second (unchanged default)", async () => {
+    const delays: number[] = [];
+    let n = 0;
+    await fetchResilient("http://x", {
+      baseMs: 1,
+      capMs: 1,
+      retries: 3,
+      sleepImpl: async (ms: number) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => (++n === 1 ? fakeRes(503) : fakeRes(200)),
+    });
+    expect(delays[0]).toBeLessThan(1000);
+  });
 });
