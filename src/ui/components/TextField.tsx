@@ -27,6 +27,14 @@ export function deleteBefore(value: string, cursor: number): Edit {
   };
 }
 
+export function deleteAfter(value: string, cursor: number): Edit {
+  if (cursor >= value.length) return { value, cursor };
+  return {
+    value: value.slice(0, cursor) + value.slice(cursor + 1),
+    cursor,
+  };
+}
+
 export function deleteWordBefore(value: string, cursor: number): Edit {
   let i = cursor;
   while (i > 0 && value[i - 1] === " ") i--;
@@ -102,6 +110,15 @@ export function TextField({
         }
       }
 
+      if (key.home) {
+        setCursor(0);
+        return;
+      }
+      if (key.end) {
+        setCursor(value.length);
+        return;
+      }
+
       if (key.leftArrow) {
         if (cursor === 0) {
           onExitLeft?.();
@@ -114,7 +131,11 @@ export function TextField({
         setCursor(Math.min(value.length, cursor + 1));
         return;
       }
-      if (key.backspace || key.delete) {
+      if (key.delete) {
+        apply(deleteAfter(value, cursor));
+        return;
+      }
+      if (key.backspace) {
         apply(deleteBefore(value, cursor));
         return;
       }
