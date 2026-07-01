@@ -188,6 +188,7 @@ export class DownloadQueue extends EventEmitter {
     this.items.set(item.id, item);
     this.debridAttempts.set(item.id, 0);
     this.changed();
+    log.info(`queue ${rdLabel(item.id, item.name)} queued`);
     void this.persist();
     return this.driveDebrid(item.id, token, deps);
   }
@@ -256,7 +257,7 @@ export class DownloadQueue extends EventEmitter {
       if (start) {
         start.phase = "resolving";
         this.changed();
-        log.debug(`queue ${rdLabel(id, start.name)} resolving`);
+        log.info(`queue ${rdLabel(id, start.name)} resolving`);
       }
       const files = await deps.resolveMagnet(token, this.items.get(id)?.magnet ?? "", {
         signal: ctrl.signal,
