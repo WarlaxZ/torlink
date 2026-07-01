@@ -744,6 +744,7 @@ export class DownloadQueue extends EventEmitter {
       sizeBytes: it.totalBytes,
       magnet: it.magnet,
       dir: it.dir,
+      via: it.via ?? "p2p",
       completedAt: Date.now(),
     };
     this.history = [rec, ...this.history.filter((h) => h.id !== it.id)].slice(0, HISTORY_MAX);
