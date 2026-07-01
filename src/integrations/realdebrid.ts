@@ -1,4 +1,5 @@
 import { fetchResilient, HttpError, USER_AGENT, type FetchImpl } from "../util/net";
+import { log } from "../util/logger";
 
 export type RealDebridFetch = FetchImpl;
 
@@ -175,6 +176,7 @@ async function request(
   body: Record<string, string> | undefined,
   opts: RequestOptions,
 ): Promise<Response> {
+  log.debug(`rd ${method} ${path} →`);
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     "User-Agent": USER_AGENT,
@@ -196,9 +198,19 @@ async function request(
       sleepImpl: opts.sleepImpl,
       retries: opts.retries ?? 2,
       retryCdn503: true,
+      onAttempt: ({ status, attempt, retries, retryAfterMs, willRetry }) =>
+        log.warn(
+          `rd ${method} ${path} status=${status} attempt=${attempt + 1}/${retries + 1}` +
+            (retryAfterMs !== undefined ? ` retryAfter=${Math.round(retryAfterMs / 1000)}s` : "") +
+            (willRetry ? " retrying" : " giving up"),
+        ),
     });
   } catch (e) {
-    if (e instanceof HttpError) throw mapStatus(e.status, e.message);
+    if (e instanceof HttpError) {
+      log.warn(`rd ${method} ${path} failed status=${e.status}`);
+      throw mapStatus(e.status, e.message);
+    }
+    log.warn(`rd ${method} ${path} error=${e instanceof Error ? e.message : String(e)}`);
     throw new RealDebridError(e instanceof Error ? e.message : String(e));
   }
 
@@ -210,8 +222,10 @@ async function request(
     } catch {
       /* body may be empty or non-JSON */
     }
+    log.warn(`rd ${method} ${path} failed status=${res.status}${code ? ` slug=${code}` : ""}`);
     throw mapStatus(res.status, code);
   }
+  log.debug(`rd ${method} ${path} ${res.status}`);
   return res;
 }
 

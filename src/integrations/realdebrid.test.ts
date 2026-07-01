@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { log } from "../util/logger";
 import {
   validateToken,
   resolveMagnet,
@@ -473,5 +474,25 @@ describe("resolveMagnet stall timeout", () => {
     });
     expect(files).toHaveLength(1);
     expect(files[0]?.url).toBe("https://dl/f");
+  });
+});
+
+describe("request logging", () => {
+  it("logs a warning when a Real-Debrid call fails", async () => {
+    const spy = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      const fetchImpl = async (): Promise<Response> =>
+        ({
+          status: 404,
+          ok: false,
+          headers: { get: () => null },
+          json: async () => ({ error: "unknown_ressource" }),
+        }) as unknown as Response;
+      await expect(getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} })).rejects.toThrow();
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls.some((c) => String(c[0]).includes("/torrents/info"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
