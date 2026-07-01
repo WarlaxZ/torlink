@@ -9,6 +9,10 @@ export interface FetchResilientOptions extends RequestInit {
   capMs?: number;
   fetchImpl?: FetchImpl;
   sleepImpl?: SleepImpl;
+  // Opt out of the Cloudflare/ddos-guard 503 short-circuit: retry those 503s with
+  // backoff instead of throwing. For trusted APIs behind Cloudflare (e.g. the
+  // Real-Debrid REST API) where a 503 is a transient rate-limit, not a block page.
+  retryCdn503?: boolean;
 }
 
 export class HttpError extends Error {
@@ -72,6 +76,7 @@ export async function fetchResilient(
     capMs = DEFAULT_CAP_MS,
     fetchImpl = fetch as FetchImpl,
     sleepImpl = realSleep,
+    retryCdn503 = false,
     signal,
     ...init
   } = opts;
@@ -98,7 +103,11 @@ export async function fetchResilient(
     if (!RETRY_STATUS.has(res.status)) return res;
 
     const server = res.headers.get("server")?.toLowerCase() || "";
-    if (res.status === 503 && (server.includes("ddos-guard") || server.includes("cloudflare"))) {
+    if (
+      res.status === 503 &&
+      !retryCdn503 &&
+      (server.includes("ddos-guard") || server.includes("cloudflare"))
+    ) {
       throw new HttpError(
         res.status,
         `Request to ${url} blocked by ${server} (HTTP ${res.status}).`,
