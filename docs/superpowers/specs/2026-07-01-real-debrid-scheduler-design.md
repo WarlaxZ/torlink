@@ -120,10 +120,13 @@ queue.
 
 ### 3. Transient-error classification — `src/integrations/realdebrid.ts`
 
-- Export `isTransient(e: unknown): boolean` — true for `RealDebridError` with
-  `status` in {429, 500, 502, 503, 504}, or a non-RD network error (no status).
-  False for token (401/403), 404, and the torrent-status messages
-  (dead/magnet_error/virus) which are terminal.
+- Export `isTransient(e: unknown): boolean` — true **only** for `RealDebridError`
+  with `status` in {429, 500, 502, 503, 504}. Everything else is terminal:
+  token (401/403), 404, and status-less `RealDebridError`s (the torrent-status
+  messages dead/magnet_error/virus, and the stall error). Network-level blips are
+  NOT classified here — they're already retried inside `request()` via
+  `fetchResilient`, so anything status-less that reaches `isTransient` is a
+  genuine terminal condition and must not be requeued.
 - Bump the retry budget for idempotent RD calls: `getInfo`, `selectFiles`,
   `unrestrictLink`, `listTorrents` pass `retries: 4` (via their `RequestOptions`);
   `addMagnet` stays `retries: 0`. (`resolveMagnet`'s own calls inherit these.)
