@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { DownloadQueue, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
+import { RealDebridError } from "../integrations/realdebrid";
 
 function h(over: Partial<HistoryItem> = {}): HistoryItem {
   return {
@@ -91,6 +92,79 @@ describe("DownloadQueue Real-Debrid path", () => {
     expect(it?.status).toBe("failed");
     expect(it?.error).toContain("dead torrent");
     expect(it?.via).toBe("realdebrid");
+    q.suspend();
+  });
+});
+
+describe("DownloadQueue Real-Debrid scheduling", () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it("runs at most two Real-Debrid downloads at once; the rest wait as queued", async () => {
+    const q = new DownloadQueue();
+    const gates: Array<() => void> = [];
+    let started = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: async (_t, _m, opts) => {
+        started++;
+        await new Promise<void>((res) => gates.push(res)); // block until released
+        opts?.onProgress?.(100);
+        return [{ url: "u", filename: "f.mkv", bytes: 1 }];
+      },
+      downloadFiles: async () => [],
+      sleep: async () => {},
+    };
+    const inputs = [1, 2, 3, 4].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
+    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
+
+    await tick();
+    await tick();
+    expect(started).toBe(2);
+    expect(q.getItems().filter((it) => it.phase === "queued")).toHaveLength(2);
+
+    for (let released = 0; released < 4; released++) {
+      while (gates.length === 0) await tick();
+      gates.shift()!();
+      await tick();
+    }
+    await all;
+    expect(started).toBe(4);
+    expect(q.getItems()).toHaveLength(0);
+    q.suspend();
+  });
+
+  it("auto-requeues a transient (503) failure and eventually succeeds", async () => {
+    const q = new DownloadQueue();
+    let calls = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: async (_t, _m, opts) => {
+        calls++;
+        if (calls < 3) throw new RealDebridError("busy", 503);
+        opts?.onProgress?.(100);
+        return [{ url: "u", filename: "f.mkv", bytes: 1 }];
+      },
+      downloadFiles: async () => [],
+      sleep: async () => {},
+    };
+    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    expect(calls).toBe(3);
+    expect(q.has("rd1")).toBe(false);
+    q.suspend();
+  });
+
+  it("fails a terminal error immediately without requeuing", async () => {
+    const q = new DownloadQueue();
+    let calls = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: async () => {
+        calls++;
+        throw new RealDebridError("No seeders — Real-Debrid can't fetch this torrent."); // no status = terminal
+      },
+      downloadFiles: async () => [],
+      sleep: async () => {},
+    };
+    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    expect(calls).toBe(1);
+    expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("failed");
     q.suspend();
   });
 });
