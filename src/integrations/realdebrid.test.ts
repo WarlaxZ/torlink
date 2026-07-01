@@ -9,6 +9,7 @@ import {
   RealDebridError,
   messageForTorrentStatus,
   messageForErrorSlug,
+  parseErrorSlug,
   isTransient,
   getInfo,
   type RealDebridFetch,
@@ -348,19 +349,19 @@ describe("messageForTorrentStatus", () => {
 describe("messageForErrorSlug", () => {
   it("maps known unavailable/removed slugs", () => {
     expect(messageForErrorSlug("infringing_file")).toBe(
-      "This was removed from Real-Debrid (copyright claim).",
+      "Removed from Real-Debrid (copyright claim).",
     );
     expect(messageForErrorSlug("hoster_unavailable")).toBe(
-      "This is no longer available on Real-Debrid (it may have been removed).",
+      "Real-Debrid host unavailable — try again later.",
     );
     expect(messageForErrorSlug("file_unavailable")).toBe(
-      "This is no longer available on Real-Debrid (it may have been removed).",
+      "No longer available on Real-Debrid (removed).",
     );
   });
 
   it("maps rate-limit slugs", () => {
     expect(messageForErrorSlug("too_many_requests")).toBe(
-      "Real-Debrid rate limit reached — wait a moment and retry.",
+      "Real-Debrid rate limit — wait a moment and retry.",
     );
   });
 
@@ -371,13 +372,13 @@ describe("messageForErrorSlug", () => {
 
   it("matches no_longer_available as a substring", () => {
     expect(messageForErrorSlug("content_no_longer_available")).toBe(
-      "This is no longer available on Real-Debrid (it may have been removed).",
+      "No longer available on Real-Debrid (removed).",
     );
   });
 
   it("matches fair_usage as a substring for rate limiting", () => {
     expect(messageForErrorSlug("fair_usage_limit")).toBe(
-      "Real-Debrid rate limit reached — wait a moment and retry.",
+      "Real-Debrid rate limit — wait a moment and retry.",
     );
   });
 
@@ -516,5 +517,31 @@ describe("request logging — error body", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("parseErrorSlug", () => {
+  it("extracts the error slug from an RD JSON body", () => {
+    expect(parseErrorSlug('{"error":"hoster_unavailable","error_code":19}')).toBe("hoster_unavailable");
+  });
+  it("returns undefined for missing or non-JSON bodies", () => {
+    expect(parseErrorSlug(undefined)).toBeUndefined();
+    expect(parseErrorSlug("not json")).toBeUndefined();
+    expect(parseErrorSlug("{}")).toBeUndefined();
+  });
+});
+
+describe("request surfaces the RD reason on a 503", () => {
+  it("maps a hoster_unavailable 503 body to the host-unavailable message (not 'busy')", async () => {
+    const fetchImpl = async (): Promise<Response> =>
+      ({
+        status: 503,
+        ok: false,
+        headers: { get: () => null },
+        text: async () => '{"error":"hoster_unavailable","error_code":19}',
+      }) as unknown as Response;
+    await expect(getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} })).rejects.toThrow(
+      /host unavailable/i,
+    );
   });
 });

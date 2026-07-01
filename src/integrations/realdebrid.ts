@@ -138,14 +138,27 @@ export function messageForTorrentStatus(status: string): string {
 export function messageForErrorSlug(slug: string | undefined): string | null {
   if (!slug) return null;
   const s = slug.toLowerCase();
-  if (s.includes("infring")) return "This was removed from Real-Debrid (copyright claim).";
-  if (s === "hoster_unavailable" || s === "file_unavailable" || s.includes("no_longer_available")) {
-    return "This is no longer available on Real-Debrid (it may have been removed).";
+  if (s.includes("infring")) return "Removed from Real-Debrid (copyright claim).";
+  if (s === "hoster_unavailable") return "Real-Debrid host unavailable — try again later.";
+  if (s === "file_unavailable" || s.includes("no_longer_available")) {
+    return "No longer available on Real-Debrid (removed).";
   }
   if (s.includes("too_many") || s === "slow_down" || s.includes("fair_usage")) {
-    return "Real-Debrid rate limit reached — wait a moment and retry.";
+    return "Real-Debrid rate limit — wait a moment and retry.";
   }
   return null;
+}
+
+// Extract Real-Debrid's `error` slug from a captured response body, if present.
+// Best-effort: missing or non-JSON bodies yield undefined.
+export function parseErrorSlug(body: string | undefined): string | undefined {
+  if (!body) return undefined;
+  try {
+    const parsed = JSON.parse(body) as { error?: string };
+    return parsed?.error;
+  } catch {
+    return undefined;
+  }
 }
 
 function mapStatus(status: number, code?: string): RealDebridError {
@@ -211,8 +224,9 @@ async function request(
     });
   } catch (e) {
     if (e instanceof HttpError) {
-      log.warn(`rd ${method} ${path} failed status=${e.status}`);
-      throw mapStatus(e.status, e.message);
+      const slug = parseErrorSlug(e.body);
+      log.warn(`rd ${method} ${path} failed status=${e.status}${slug ? ` slug=${slug}` : ""}`);
+      throw mapStatus(e.status, slug);
     }
     log.warn(`rd ${method} ${path} error=${e instanceof Error ? e.message : String(e)}`);
     throw new RealDebridError(e instanceof Error ? e.message : String(e));
