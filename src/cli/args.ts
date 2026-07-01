@@ -1,3 +1,5 @@
+import { logFile } from "../config/paths";
+
 export type CliCommand =
   | { kind: "version" }
   | { kind: "help" }
@@ -26,4 +28,5 @@ usage
 once open: type to search every source at once, enter to run, arrows to move,
 d to download, ? for keys
 tip: quote magnet links (they contain & characters)
+logs: ${logFile}
 `;

@@ -1,6 +1,7 @@
 import { render } from "ink";
 import { parseCliArgs, HELP_TEXT } from "./cli/args";
 import { VERSION } from "./version";
+import { log } from "./util/logger";
 import { App } from "./ui/App";
 
 const cmd = parseCliArgs(process.argv.slice(2));
@@ -25,6 +26,7 @@ if (cmd.kind === "invalid") {
 // cursor (the search field block, list pointers), so the terminal's should
 // stay hidden. restoreTerminal shows it again on exit.
 process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[22;0t\x1b]0;torlink\x07");
+log.info(`session start — torlink v${VERSION}`);
 if (process.platform === "win32") process.title = "torlink";
 
 let restored = false;
