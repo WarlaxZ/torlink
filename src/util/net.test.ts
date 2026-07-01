@@ -176,4 +176,68 @@ describe("fetchResilient", () => {
     });
     expect(delays[0]).toBeLessThan(1000);
   });
+
+  // A response-like object that exposes a body via text().
+  function bodyRes(status: number, body: string): Response {
+    return {
+      status,
+      ok: status >= 200 && status < 300,
+      headers: { get: () => null },
+      text: async () => body,
+    } as unknown as Response;
+  }
+
+  it("passes the response body snippet to onAttempt only on give-up", async () => {
+    const seen: Array<{ willRetry: boolean; bodySnippet?: string }> = [];
+    await expect(
+      fetchResilient("http://x", {
+        ...opts,
+        retries: 1,
+        onAttempt: (i) => seen.push({ willRetry: i.willRetry, bodySnippet: i.bodySnippet }),
+        fetchImpl: async () => bodyRes(503, '{"error":"fair_usage_limit","error_code":35}'),
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual({ willRetry: true, bodySnippet: undefined });
+    expect(seen[1]!.willRetry).toBe(false);
+    expect(seen[1]!.bodySnippet).toContain("fair_usage_limit");
+  });
+
+  it("truncates the body snippet to 200 chars", async () => {
+    let snippet: string | undefined;
+    await expect(
+      fetchResilient("http://x", {
+        ...opts,
+        retries: 0,
+        onAttempt: (i) => {
+          if (!i.willRetry) snippet = i.bodySnippet;
+        },
+        fetchImpl: async () => bodyRes(503, "x".repeat(500)),
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(snippet).toHaveLength(200);
+  });
+
+  it("yields undefined bodySnippet when the body read fails (best-effort)", async () => {
+    let snippet: string | undefined = "sentinel";
+    await expect(
+      fetchResilient("http://x", {
+        ...opts,
+        retries: 0,
+        onAttempt: (i) => {
+          if (!i.willRetry) snippet = i.bodySnippet;
+        },
+        fetchImpl: async () =>
+          ({
+            status: 503,
+            ok: false,
+            headers: { get: () => null },
+            text: async () => {
+              throw new Error("boom");
+            },
+          }) as unknown as Response,
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(snippet).toBeUndefined();
+  });
 });
