@@ -195,6 +195,7 @@ async function request(
       fetchImpl: opts.fetchImpl,
       sleepImpl: opts.sleepImpl,
       retries: opts.retries ?? 2,
+      retryCdn503: true,
     });
   } catch (e) {
     if (e instanceof HttpError) throw mapStatus(e.status, e.message);

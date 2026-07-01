@@ -68,4 +68,28 @@ describe("fetchResilient", () => {
     expect(res.status).toBe(404);
     expect(calls).toBe(1);
   });
+
+  it("throws immediately on a Cloudflare 503 by default (scraper protection)", async () => {
+    let calls = 0;
+    await expect(
+      fetchResilient("http://x", {
+        ...opts,
+        retries: 3,
+        fetchImpl: async () => (++calls, fakeRes(503, { server: "cloudflare" })),
+      }),
+    ).rejects.toBeInstanceOf(HttpError);
+    expect(calls).toBe(1); // no retries — thrown on the first hit
+  });
+
+  it("retries a Cloudflare 503 when retryCdn503 is set, instead of throwing", async () => {
+    let calls = 0;
+    const res = await fetchResilient("http://x", {
+      ...opts,
+      retries: 3,
+      retryCdn503: true,
+      fetchImpl: async () => (++calls === 1 ? fakeRes(503, { server: "cloudflare" }) : fakeRes(200)),
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toBe(2);
+  });
 });

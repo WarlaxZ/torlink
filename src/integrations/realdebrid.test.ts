@@ -401,6 +401,22 @@ describe("isTransient", () => {
   });
 });
 
+describe("getInfo retries Cloudflare-fronted 503s (RD is behind Cloudflare)", () => {
+  it("getInfo retries a Cloudflare-fronted 503 (RD is behind Cloudflare)", async () => {
+    let calls = 0;
+    const fetchImpl = async (): Promise<Response> => {
+      calls++;
+      if (calls === 1) {
+        return { status: 503, ok: false, headers: { get: (k: string) => (k.toLowerCase() === "server" ? "cloudflare" : null) } } as unknown as Response;
+      }
+      return { status: 200, ok: true, headers: { get: () => null }, json: async () => ({ status: "downloaded", links: [] }) } as unknown as Response;
+    };
+    const info = await getInfo("tok", "id1", { fetchImpl, sleepImpl: async () => {} });
+    expect(info.status).toBe("downloaded");
+    expect(calls).toBe(2);
+  });
+});
+
 describe("idempotent RD calls retry past two failures", () => {
   it("getInfo retries a 503 more than twice before succeeding", async () => {
     let calls = 0;
