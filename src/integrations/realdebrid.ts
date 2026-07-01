@@ -154,8 +154,8 @@ export function messageForErrorSlug(slug: string | undefined): string | null {
 export function parseErrorSlug(body: string | undefined): string | undefined {
   if (!body) return undefined;
   try {
-    const parsed = JSON.parse(body) as { error?: string };
-    return parsed?.error;
+    const parsed = JSON.parse(body) as { error?: unknown };
+    return typeof parsed?.error === "string" ? parsed.error : undefined;
   } catch {
     return undefined;
   }

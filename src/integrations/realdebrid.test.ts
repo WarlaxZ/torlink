@@ -529,6 +529,10 @@ describe("parseErrorSlug", () => {
     expect(parseErrorSlug("not json")).toBeUndefined();
     expect(parseErrorSlug("{}")).toBeUndefined();
   });
+  it("ignores a non-string error field", () => {
+    expect(parseErrorSlug('{"error":42}')).toBeUndefined();
+    expect(parseErrorSlug("[]")).toBeUndefined();
+  });
 });
 
 describe("request surfaces the RD reason on a 503", () => {
