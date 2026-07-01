@@ -224,7 +224,14 @@ export class DownloadQueue extends EventEmitter {
         this.debridSem.release();
       }
       if (!retry) return;
-      await sleep(backoffDelay(this.debridAttempts.get(id) ?? 1, DEBRID_BACKOFF_BASE_MS, DEBRID_BACKOFF_CAP_MS));
+      await sleep(
+        backoffDelay(
+          this.debridAttempts.get(id) ?? 1,
+          DEBRID_BACKOFF_BASE_MS,
+          DEBRID_BACKOFF_CAP_MS,
+          DEBRID_BACKOFF_BASE_MS,
+        ),
+      );
     }
   }
 

@@ -167,6 +167,48 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("failed");
     q.suspend();
   });
+
+  it("frees the concurrency slot when a running item is cancelled, letting a queued one start", async () => {
+    const q = new DownloadQueue();
+    const gates: Array<() => void> = [];
+    const started: string[] = [];
+    const deps: DebridDeps = {
+      resolveMagnet: async (_t, magnet, opts) => {
+        started.push(magnet);
+        await new Promise<void>((res, rej) => {
+          gates.push(res);
+          // Respect cancellation the way the real resolveMagnet does.
+          opts?.signal?.addEventListener("abort", () =>
+            rej(new RealDebridError("Real-Debrid request cancelled.")),
+          );
+        });
+        opts?.onProgress?.(100);
+        return [{ url: "u", filename: "f.mkv", bytes: 1 }];
+      },
+      downloadFiles: async () => [],
+      sleep: async () => {},
+    };
+    const inputs = [1, 2, 3].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
+    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
+
+    await tick();
+    await tick();
+    expect(started).toHaveLength(2); // cap = 2; rd3 waiting
+
+    q.cancel("rd1"); // cancel a running item → its slot should free
+    await tick();
+    await tick();
+    expect(started).toHaveLength(3); // rd3 acquired the freed slot
+    expect(q.has("rd1")).toBe(false); // cancelled item is gone
+
+    // Let the two remaining pipelines finish so the test settles.
+    while (gates.length > 0) {
+      gates.shift()!();
+      await tick();
+    }
+    await all;
+    q.suspend();
+  });
 });
 
 describe("strayDownload (missing-file safety-net)", () => {
