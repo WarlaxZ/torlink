@@ -13,8 +13,10 @@ import {
   formatRelative,
   truncate,
 } from "../../util/format";
+import { deliveryMethod } from "../downloadState";
 import type { QueueItem } from "../../download/types";
 import type { HistoryItem } from "../../download/history";
+import type { SourceId } from "../../sources/types";
 
 const ROWS_PER_ACTIVE = 2;
 const MARK = 2;
@@ -50,10 +52,37 @@ function rightStats(it: QueueItem): string {
   return truncate(it.error || "failed", 28);
 }
 
-// Short tag shown in the source column: real source, "rd" for Real-Debrid, or
-// "mag" for a bare magnet.
-function sourceTag(via: QueueItem["via"]): string {
-  return via === "realdebrid" ? "rd" : "mag";
+// The source cell: a colored delivery-method marker (RD green / P2P amber) plus
+// the torrent origin tag, e.g. "RD·EZTV" / "P2P·YTS". `method` is null only for
+// legacy history rows with no recorded method (shown origin-only, never
+// mislabeled). With neither method nor source, falls back to a dim "mag".
+function SourceBadge({
+  method,
+  source,
+  dim,
+}: {
+  method: "RD" | "P2P" | null;
+  source?: SourceId;
+  dim?: boolean;
+}) {
+  const ss = source ? SOURCE_STYLE[source] : undefined;
+  const methodColor = method === "RD" ? COLOR.good : COLOR.warn;
+  if (!method && !ss) return <Text dimColor>mag</Text>;
+  return (
+    <Text>
+      {method ? (
+        <Text color={methodColor} dimColor={dim}>
+          {method}
+        </Text>
+      ) : null}
+      {method && ss ? <Text dimColor>·</Text> : null}
+      {ss ? (
+        <Text color={ss.color} dimColor={dim}>
+          {ss.tag}
+        </Text>
+      ) : null}
+    </Text>
+  );
 }
 
 export function Downloads() {
@@ -164,7 +193,6 @@ export function Downloads() {
       {activeVisible.map((it, i) => {
         const here = activeStart + i === clamped && focused && inActive;
         const sc = statusColor(it.status);
-        const ss = SOURCE_STYLE[it.source ?? "fitgirl"];
         return (
           <Box key={it.id} flexDirection="column">
             <Box>
@@ -189,10 +217,8 @@ export function Downloads() {
               <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
                 <Text dimColor>{it.totalBytes > 0 ? formatBytes(it.totalBytes) : "-"}</Text>
               </Box>
-              <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                <Text color={it.source ? ss.color : undefined} dimColor={!it.source || !here}>
-                  {it.source ? ss.tag : sourceTag(it.via)}
-                </Text>
+              <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+                <SourceBadge method={deliveryMethod(it.via)} source={it.source} dim={!here} />
               </Box>
             </Box>
             <Box>
@@ -219,7 +245,6 @@ export function Downloads() {
 
       {recentVisible.map((h: HistoryItem, i) => {
         const here = recentStart + i === recentCursor && focused && !inActive;
-        const ss = SOURCE_STYLE[h.source ?? "fitgirl"];
         const when = formatRelative(h.completedAt / 1000);
         return (
           <Box key={h.id}>
@@ -249,10 +274,12 @@ export function Downloads() {
             <Box width={12} flexShrink={0} marginLeft={1} justifyContent="flex-end">
               <Text dimColor>{when || "-"}</Text>
             </Box>
-            <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-              <Text color={h.source ? ss.color : undefined} dimColor={!h.source || !here}>
-                {h.source ? ss.tag : "mag"}
-              </Text>
+            <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+              <SourceBadge
+                method={h.via === undefined ? null : deliveryMethod(h.via)}
+                source={h.source}
+                dim={!here}
+              />
             </Box>
           </Box>
         );
