@@ -1,8 +1,22 @@
 import path from "node:path";
-import { describe, it, expect } from "vitest";
+import os from "node:os";
+import { promises as fs } from "node:fs";
+import { describe, it, expect, afterEach } from "vitest";
 import { DownloadQueue, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 import { RealDebridError } from "../integrations/realdebrid";
+
+const tmpDirs: string[] = [];
+async function tmpDir(): Promise<string> {
+  const d = path.join(os.tmpdir(), `torlink-queue-${process.pid}-${tmpDirs.length}`);
+  await fs.rm(d, { recursive: true, force: true });
+  tmpDirs.push(d);
+  return d;
+}
+afterEach(async () => {
+  await Promise.all(tmpDirs.map((d) => fs.rm(d, { recursive: true, force: true })));
+  tmpDirs.length = 0;
+});
 
 function h(over: Partial<HistoryItem> = {}): HistoryItem {
   return {
@@ -207,6 +221,72 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       await tick();
     }
     await all;
+    q.suspend();
+  });
+
+  it("pauses an in-progress Real-Debrid download and resumes it to completion", async () => {
+    const q = new DownloadQueue();
+    let downloadCalls = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: async () => [{ url: "u", filename: "f.mkv", bytes: 10 }],
+      downloadFiles: async (_files, _dir, opts) => {
+        downloadCalls++;
+        if (downloadCalls === 1) {
+          // First run: block until the pause aborts us, then throw like a real abort.
+          await new Promise<void>((_res, rej) => {
+            opts?.signal?.addEventListener("abort", () =>
+              rej(Object.assign(new Error("Download aborted."), { name: "AbortError" })),
+            );
+          });
+        }
+        opts?.onProgress?.({ downloaded: 10, total: 10, speed: 0 });
+        return ["/downloads/f.mkv"];
+      },
+      sleep: async () => {},
+    };
+
+    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    await tick();
+    await tick();
+
+    q.pause("rd1");
+    await p; // driveDebrid returns once the pause abort unwinds
+    expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("paused");
+
+    q.resume("rd1");
+    for (let n = 0; n < 5 && q.has("rd1"); n++) await tick();
+    expect(q.has("rd1")).toBe(false); // second download run completed → history
+    expect(downloadCalls).toBe(2);
+    q.suspend();
+  });
+
+  it("deletes the partial file when a paused Real-Debrid download is cancelled", async () => {
+    const q = new DownloadQueue();
+    const dir = await tmpDir();
+    const deps: DebridDeps = {
+      resolveMagnet: async () => [{ url: "u", filename: "f.mkv", bytes: 10 }],
+      downloadFiles: async (_files, destDir, opts) => {
+        await fs.mkdir(destDir, { recursive: true });
+        await fs.writeFile(path.join(destDir, "f.mkv"), "partial");
+        await new Promise<void>((_res, rej) =>
+          opts?.signal?.addEventListener("abort", () =>
+            rej(Object.assign(new Error("Download aborted."), { name: "AbortError" })),
+          ),
+        );
+        return [];
+      },
+      sleep: async () => {},
+    };
+    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, dir, "tok", deps);
+    await tick();
+    await tick();
+    q.pause("rd1");
+    await p;
+    expect(await fs.readFile(path.join(dir, "f.mkv"), "utf8")).toBe("partial"); // kept on pause
+
+    q.cancel("rd1");
+    for (let n = 0; n < 5; n++) await tick(); // cleanup is async best-effort
+    await expect(fs.access(path.join(dir, "f.mkv"))).rejects.toBeTruthy(); // gone after cancel
     q.suspend();
   });
 });

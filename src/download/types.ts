@@ -49,4 +49,7 @@ export interface QueueItem {
   // For Real-Debrid items: the primary resolved direct URL, so it can be copied
   // from the downloads pane. Set once links are resolved.
   directUrl?: string;
+  // For Real-Debrid items: the destination file paths on disk, recorded when the
+  // download starts, so a cancel of a paused item can delete its partials.
+  paths?: string[];
 }

@@ -79,4 +79,75 @@ describe("downloadFiles", () => {
     ).rejects.toBeTruthy();
     await expect(fs.readdir(dir)).resolves.toEqual([]);
   });
+
+  it("resumes a partial file via Range and appends the rest", async () => {
+    const dir = await makeDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "a.txt"), "hel"); // 3 of 5 bytes
+    let seenRange: string | null = null;
+    const written = await downloadFiles([file("https://dl/a", "a.txt", 5)], dir, {
+      fetchImpl: async (_url, init) => {
+        seenRange = ((init?.headers as Record<string, string>) ?? {})["Range"] ?? null;
+        return new Response("lo", { status: 206 });
+      },
+    });
+    expect(seenRange).toBe("bytes=3-");
+    expect(written).toEqual([path.join(dir, "a.txt")]);
+    expect(await fs.readFile(path.join(dir, "a.txt"), "utf8")).toBe("hello");
+  });
+
+  it("restarts a file when the server ignores Range (200)", async () => {
+    const dir = await makeDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "a.txt"), "XX"); // stale partial
+    await downloadFiles([file("https://dl/a", "a.txt", 5)], dir, {
+      fetchImpl: async () => new Response("hello", { status: 200 }),
+    });
+    expect(await fs.readFile(path.join(dir, "a.txt"), "utf8")).toBe("hello");
+  });
+
+  it("skips a file that is already complete on disk", async () => {
+    const dir = await makeDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "a.txt"), "hello"); // complete
+    let fetched = false;
+    const written = await downloadFiles([file("https://dl/a", "a.txt", 5)], dir, {
+      fetchImpl: async () => {
+        fetched = true;
+        return new Response("hello");
+      },
+    });
+    expect(fetched).toBe(false);
+    expect(written).toEqual([path.join(dir, "a.txt")]);
+  });
+
+  it("keeps partial files when aborted with reason 'pause'", async () => {
+    const dir = await makeDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "a.txt"), "hel");
+    const ctrl = new AbortController();
+    ctrl.abort("pause");
+    await expect(
+      downloadFiles([file("https://dl/a", "a.txt", 5)], dir, {
+        fetchImpl: async () => new Response("lo", { status: 206 }),
+        signal: ctrl.signal,
+      }),
+    ).rejects.toBeTruthy();
+    expect(await fs.readFile(path.join(dir, "a.txt"), "utf8")).toBe("hel");
+  });
+
+  it("deletes partial files when aborted with reason 'cancel'", async () => {
+    const dir = await makeDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "a.txt"), "hel");
+    const ctrl = new AbortController();
+    ctrl.abort("cancel");
+    await expect(
+      downloadFiles([file("https://dl/a", "a.txt", 5)], dir, {
+        fetchImpl: async () => new Response("lo", { status: 206 }),
+        signal: ctrl.signal,
+      }),
+    ).rejects.toBeTruthy();
+    await expect(fs.access(path.join(dir, "a.txt"))).rejects.toBeTruthy();
+  });
 });

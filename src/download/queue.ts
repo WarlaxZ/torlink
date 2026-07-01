@@ -14,6 +14,7 @@ import {
 import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
 import { downloadFiles, sanitizeFilename } from "./http";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { resolveMagnet, isTransient } from "../integrations/realdebrid";
 import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
@@ -213,6 +214,9 @@ export class DownloadQueue extends EventEmitter {
         await this.runDebrid(id, token, deps); // completes on success, throws on failure
         return;
       } catch (e) {
+        // A pause aborted the pipeline: the item is already marked paused; leave
+        // it (don't fail or requeue). The finally still releases the slot.
+        if (this.items.get(id)?.status === "paused") return;
         const attempts = (this.debridAttempts.get(id) ?? 0) + 1;
         this.debridAttempts.set(id, attempts);
         const stillHere = this.items.get(id)?.status === "downloading";
@@ -274,16 +278,17 @@ export class DownloadQueue extends EventEmitter {
 
       const it = this.items.get(id);
       if (!it || it.status !== "downloading") return; // cancelled mid-resolve
-      it.phase = "downloading";
-      it.progress = 0;
-      it.directUrl = pickStreamFile(files)?.url;
-      it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
-      this.changed();
-
       // A multi-file torrent (a season, a movie with extras) gets its own
       // subfolder so files don't scatter into the download root or collide with
       // another torrent's files; a single file lands directly in the folder.
       const dest = files.length > 1 ? path.join(it.dir, sanitizeFilename(it.name)) : it.dir;
+      it.phase = "downloading";
+      it.progress = 0;
+      it.directUrl = pickStreamFile(files)?.url;
+      it.totalBytes = files.reduce((sum, f) => sum + (f.bytes || 0), 0) || it.totalBytes;
+      it.paths = files.map((f) => path.join(dest, sanitizeFilename(f.filename)));
+      this.changed();
+
       await deps.downloadFiles(files, dest, {
         signal: ctrl.signal,
         onProgress: (p) => {
@@ -511,9 +516,21 @@ export class DownloadQueue extends EventEmitter {
   pause(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "downloading") return;
-    // Pausing/resuming an HTTP transfer would need range-resume; not in v1, so
-    // a Real-Debrid download can only be cancelled, never paused.
-    if (it.via === "realdebrid") return;
+    if (it.via === "realdebrid") {
+      // Abort the in-flight pipeline with a "pause" reason so downloadFiles keeps
+      // the partial file(s); driveDebrid sees the paused status and won't fail it.
+      it.status = "paused";
+      it.speed = 0;
+      it.peers = 0;
+      it.eta = undefined;
+      it.phase = undefined;
+      it.directUrl = undefined; // resolved link expires; resume re-resolves a fresh one
+      this.debridAborts.get(id)?.abort("pause");
+      this.changed();
+      void this.persist();
+      this.maybeStopPoll();
+      return;
+    }
     it.status = "paused";
     it.speed = 0;
     it.peers = 0;
@@ -527,6 +544,23 @@ export class DownloadQueue extends EventEmitter {
   resume(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "paused") return;
+    if (it.via === "realdebrid") {
+      if (!this.debridToken) {
+        it.status = "failed";
+        it.error = "Set a Real-Debrid token, then download again.";
+        this.changed();
+        return;
+      }
+      // Re-run the pipeline: re-resolve for a fresh link, then downloadFiles
+      // continues each partial file via HTTP Range from its on-disk size.
+      it.status = "downloading";
+      it.error = undefined;
+      this.debridAttempts.set(id, 0);
+      this.changed();
+      void this.persist();
+      void this.driveDebrid(id, this.debridToken, this.debridDeps);
+      return;
+    }
     it.status = "downloading";
     this.startEngine(it);
     this.ensurePoll();
@@ -541,12 +575,28 @@ export class DownloadQueue extends EventEmitter {
     else if (it.status === "paused") this.resume(id);
   }
 
+  // Delete a Real-Debrid item's partial files on disk (used when cancelling a
+  // paused item whose pipeline has already unwound). Best-effort; never throws.
+  private cleanupDebridFiles(it: QueueItem): void {
+    if (it.via !== "realdebrid" || !it.paths || it.paths.length === 0) return;
+    const paths = it.paths;
+    void (async () => {
+      for (const p of paths) await fs.rm(p, { force: true }).catch(() => {});
+      // Remove a now-empty per-item subfolder (multi-file downloads); never the
+      // shared download root (single-file downloads write directly into it.dir).
+      const parent = path.dirname(paths[0]!);
+      if (parent !== it.dir) await fs.rm(parent, { recursive: true, force: true }).catch(() => {});
+    })();
+  }
+
   cancel(id: string): void {
-    if (!this.items.has(id)) return;
+    const it = this.items.get(id);
+    if (!it) return;
     // Abort an in-flight Real-Debrid transfer first; the HTTP downloader cleans
     // up its own partial files once the signal fires.
-    this.debridAborts.get(id)?.abort();
+    this.debridAborts.get(id)?.abort("cancel");
     this.debridAttempts.delete(id);
+    this.cleanupDebridFiles(it);
     this.engine.remove(id);
     this.items.delete(id);
     deleteTorrentMeta(id);
