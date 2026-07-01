@@ -42,6 +42,12 @@ async function cleanup(paths: string[]): Promise<void> {
  * aggregate byte/throughput progress and aborts via `signal`; on any failure or
  * abort it removes the files it had started writing so no partial junk is left.
  * Returns the list of written file paths on success.
+ *
+ * Resume behaviour: if a partial file exists on disk, a Range request is sent.
+ * If the server responds 206 the download continues from the offset; if it
+ * responds 200 the file is overwritten from scratch. A fully-downloaded file
+ * is skipped entirely. On abort, partials are kept when the reason is "pause"
+ * (so the next run can resume) and deleted for any other reason.
  */
 export async function downloadFiles(
   files: ResolvedFile[],
@@ -52,48 +58,74 @@ export async function downloadFiles(
   await fs.mkdir(destDir, { recursive: true });
 
   const total = files.reduce((sum, f) => sum + (f.bytes || 0), 0);
-  const written: string[] = [];
+  const destPaths = files.map((f) => path.join(destDir, sanitizeFilename(f.filename)));
   const startedAt = nowImpl();
   let doneBytes = 0;
 
-  for (const f of files) {
-    if (signal?.aborted) {
-      await cleanup(written);
-      throw abortError();
+  // A pause abort keeps partial files (so resume can continue); any other abort
+  // or error deletes this torrent's files. Distinguished by the signal reason.
+  const bail = async (e: unknown): Promise<never> => {
+    if (signal?.reason !== "pause") await cleanup(destPaths);
+    throw e;
+  };
+
+  const report = (downloaded: number): void => {
+    const elapsed = (nowImpl() - startedAt) / 1000;
+    onProgress?.({ downloaded, total, speed: elapsed > 0 ? downloaded / elapsed : 0 });
+  };
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i]!;
+    const dest = destPaths[i]!;
+
+    let existing = 0;
+    try {
+      existing = (await fs.stat(dest)).size;
+    } catch {
+      existing = 0;
     }
 
+    // Already fully on disk — count it and move on without a request.
+    if (f.bytes > 0 && existing >= f.bytes) {
+      doneBytes += f.bytes;
+      report(doneBytes);
+      continue;
+    }
+
+    if (signal?.aborted) return bail(abortError());
+
+    const wantRange = existing > 0;
     let res: Response;
     try {
-      res = await fetchImpl(f.url, signal ? { signal } : {});
+      const init: RequestInit = {};
+      if (signal) init.signal = signal;
+      if (wantRange) init.headers = { Range: `bytes=${existing}-` };
+      res = await fetchImpl(f.url, init);
     } catch (e) {
-      await cleanup(written);
-      throw e;
+      return bail(e);
     }
     if (!res.ok || !res.body) {
-      await cleanup(written);
-      throw new Error(`Download failed for ${f.filename} (HTTP ${res.status}).`);
+      return bail(new Error(`Download failed for ${f.filename} (HTTP ${res.status}).`));
     }
 
-    const dest = path.join(destDir, sanitizeFilename(f.filename));
-    written.push(dest);
+    // Resume only if the server honored the range (206); a 200 means it's
+    // sending the whole file, so restart this one from scratch (truncate).
+    const append = wantRange && res.status === 206;
+    let fileBytes = append ? existing : 0;
 
-    let fileBytes = 0;
     const source = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
     source.on("data", (chunk: Buffer) => {
       fileBytes += chunk.length;
-      const elapsed = (nowImpl() - startedAt) / 1000;
-      const downloaded = doneBytes + fileBytes;
-      onProgress?.({ downloaded, total, speed: elapsed > 0 ? downloaded / elapsed : 0 });
+      report(doneBytes + fileBytes);
     });
 
     try {
-      await pipeline(source, createWriteStream(dest));
+      await pipeline(source, createWriteStream(dest, { flags: append ? "a" : "w" }));
     } catch (e) {
-      await cleanup(written);
-      throw e;
+      return bail(e);
     }
     doneBytes += fileBytes;
   }
 
-  return written;
+  return destPaths;
 }
