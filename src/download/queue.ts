@@ -521,6 +521,8 @@ export class DownloadQueue extends EventEmitter {
       it.speed = 0;
       it.peers = 0;
       it.eta = undefined;
+      it.phase = undefined;
+      it.directUrl = undefined; // resolved link expires; resume re-resolves a fresh one
       this.debridAborts.get(id)?.abort("pause");
       this.changed();
       void this.persist();
