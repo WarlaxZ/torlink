@@ -49,7 +49,7 @@ function rightStats(it: QueueItem): string {
     return `${it.progress}%  ${speed}  ${ICON.peer}${it.peers}${eta}`;
   }
   if (it.status === "paused") return `paused  ${it.progress}%`;
-  return truncate(it.error || "failed", 28);
+  return it.error || "failed";
 }
 
 // The source cell: a colored delivery-method marker (RD green / P2P amber) plus
