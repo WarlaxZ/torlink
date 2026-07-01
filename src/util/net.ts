@@ -33,10 +33,12 @@ export interface FetchResilientOptions extends RequestInit {
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message?: string) {
+  body?: string;
+  constructor(status: number, message?: string, body?: string) {
     super(message ?? `HTTP ${status}`);
     this.name = "HttpError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -155,6 +157,7 @@ export async function fetchResilient(
       throw new HttpError(
         res.status,
         `Request to ${url} failed after ${retries} retries (HTTP ${res.status}).`,
+        bodySnippet,
       );
     }
     await sleepImpl(delayMs);

@@ -240,4 +240,19 @@ describe("fetchResilient", () => {
     ).rejects.toBeInstanceOf(HttpError);
     expect(snippet).toBeUndefined();
   });
+
+  it("attaches the response body to the HttpError on give-up", async () => {
+    let err: unknown;
+    try {
+      await fetchResilient("http://x", {
+        ...opts,
+        retries: 0,
+        fetchImpl: async () => bodyRes(503, '{"error":"hoster_unavailable"}'),
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).body).toContain("hoster_unavailable");
+  });
 });
