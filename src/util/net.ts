@@ -13,6 +13,17 @@ export interface FetchResilientOptions extends RequestInit {
   // backoff instead of throwing. For trusted APIs behind Cloudflare (e.g. the
   // Real-Debrid REST API) where a 503 is a transient rate-limit, not a block page.
   retryCdn503?: boolean;
+  // Called on each retryable response (before the backoff sleep) and on the
+  // final give-up. Lets callers observe retries without this layer knowing about
+  // logging. `delayMs` is 0 when giving up; `willRetry` distinguishes the two.
+  onAttempt?: (info: {
+    status: number;
+    attempt: number;
+    retries: number;
+    retryAfterMs?: number;
+    delayMs: number;
+    willRetry: boolean;
+  }) => void;
 }
 
 export class HttpError extends Error {
@@ -77,6 +88,7 @@ export async function fetchResilient(
     fetchImpl = fetch as FetchImpl,
     sleepImpl = realSleep,
     retryCdn503 = false,
+    onAttempt,
     signal,
     ...init
   } = opts;
@@ -114,15 +126,17 @@ export async function fetchResilient(
       );
     }
 
-    if (attempt >= retries) {
+    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+    const willRetry = attempt < retries;
+    const delayMs = willRetry ? backoffDelay(attempt, baseMs, capMs, retryAfterMs) : 0;
+    onAttempt?.({ status: res.status, attempt, retries, retryAfterMs, delayMs, willRetry });
+    if (!willRetry) {
       throw new HttpError(
         res.status,
         `Request to ${url} failed after ${retries} retries (HTTP ${res.status}).`,
       );
     }
-
-    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
-    await sleepImpl(backoffDelay(attempt, baseMs, capMs, retryAfterMs));
+    await sleepImpl(delayMs);
   }
 
   throw lastError instanceof Error
