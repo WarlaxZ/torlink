@@ -27,6 +27,21 @@ export function getSource(id: SourceId): Source {
   return SOURCES.find((s) => s.id === id) ?? DEFAULT_SOURCE;
 }
 
+// The sources actually searched, given the user's disabled list. Order is
+// preserved so results and status lines stay stable.
+export function enabledSources(disabled: readonly SourceId[]): Source[] {
+  if (disabled.length === 0) return [...SOURCES];
+  return SOURCES.filter((s) => !disabled.includes(s.id));
+}
+
+// Flip a source's disabled state, returning a new list (never mutates input).
+export function toggleDisabledSource(
+  disabled: readonly SourceId[],
+  id: SourceId,
+): SourceId[] {
+  return disabled.includes(id) ? disabled.filter((d) => d !== id) : [...disabled, id];
+}
+
 const GROUP_ORDER: readonly SourceGroup[] = ["Games", "Movies", "TV", "Anime"];
 
 export function sourcesByGroup(): { group: SourceGroup; sources: Source[] }[] {

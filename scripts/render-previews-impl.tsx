@@ -92,6 +92,8 @@ function makeStore(
     setSection: noop,
     sort: "none",
     setSort: noop,
+    disabledSources: [],
+    toggleSource: noop,
     region: "content",
     setRegion: noop,
     captureMode: "none",

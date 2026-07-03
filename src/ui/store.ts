@@ -61,6 +61,9 @@ export interface Store {
   // The active results sort, persisted across launches.
   sort: Sort;
   setSort: (s: Sort) => void;
+  // Sources the user has switched off (skipped during search), and a toggle.
+  disabledSources: SourceId[];
+  toggleSource: (id: SourceId) => void;
   region: Region;
   setRegion: (r: Region) => void;
   captureMode: CaptureMode;

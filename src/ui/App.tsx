@@ -34,6 +34,7 @@ import {
 } from "./store";
 import { formatSort, parseSort, type Sort } from "./sort";
 import { addToHistory } from "./searchHistory";
+import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
@@ -51,6 +52,7 @@ import { TokenPrompt } from "./components/TokenPrompt";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
+import { SourcesPrompt } from "./components/SourcesPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -112,6 +114,7 @@ export function App({
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState(false);
+  const [editingSources, setEditingSources] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -267,6 +270,20 @@ export function App({
     },
     [persistConfig],
   );
+
+  // Flip a source on/off and persist. Functional update so concurrent toggles
+  // always build on the latest list.
+  const toggleSource = useCallback((id: SourceId) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const next = {
+        ...prev,
+        disabledSources: toggleDisabledSource((prev.disabledSources ?? []) as SourceId[], id),
+      };
+      void saveConfig(next);
+      return next;
+    });
+  }, []);
 
   const closeFolderPrompt = useCallback(() => {
     setEditingFolder(false);
@@ -628,8 +645,10 @@ export function App({
       setSection: changeSection,
       sort,
       setSort,
+      disabledSources: (config.disabledSources ?? []) as SourceId[],
+      toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -672,6 +691,8 @@ export function App({
     editingFolder,
     editingToken,
     editingPlayer,
+    editingSources,
+    toggleSource,
     pendingP2P,
     streamFiles,
     preparing,
@@ -704,6 +725,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
+      if (editingSources) return; // the sources panel owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
@@ -727,6 +749,11 @@ export function App({
       if (input === "k") {
         setShowHelp(false);
         setEditingToken(true);
+        return;
+      }
+      if (input === "S") {
+        setShowHelp(false);
+        setEditingSources(true);
         return;
       }
       if (input === "m") {
@@ -844,6 +871,17 @@ export function App({
           </Box>
         ) : null}
 
+        {editingSources ? (
+          <Box marginTop={1}>
+            <SourcesPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              disabled={(store.config.disabledSources ?? []) as SourceId[]}
+              onToggle={toggleSource}
+              onCancel={() => setEditingSources(false)}
+            />
+          </Box>
+        ) : null}
+
         {streamFiles ? (
           <Box marginTop={1}>
             <StreamFilePrompt
@@ -885,7 +923,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -920,7 +958,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }

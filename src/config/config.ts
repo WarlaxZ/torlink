@@ -20,6 +20,9 @@ export interface Config {
   // Recently-run searches (most-recent first) for up-arrow recall in the
   // search bar.
   searchHistory?: string[];
+  // Sources the user has switched off; they're skipped during search. Stored as
+  // opaque strings — unknown ids are simply ignored by the registry.
+  disabledSources?: string[];
 }
 
 export const defaultConfig: Config = {

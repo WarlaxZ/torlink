@@ -6,7 +6,7 @@ import { SearchBar } from "./SearchBar";
 import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
-import { getSource, SOURCES } from "../../sources/registry";
+import { getSource, enabledSources } from "../../sources/registry";
 import { wrapStep, windowStart } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
 import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
@@ -159,6 +159,7 @@ export function Results() {
     query,
     submitQuery,
     searchHistory,
+    disabledSources,
     section,
     region,
     setRegion,
@@ -175,7 +176,8 @@ export function Results() {
     setSort,
   } = useStore();
 
-  const search = useConcurrentSearch(query);
+  const search = useConcurrentSearch(query, disabledSources);
+  const enabled = useMemo(() => enabledSources(disabledSources), [disabledSources]);
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);
@@ -318,7 +320,7 @@ export function Results() {
     [search.perSource],
   );
   const activeCat = CATEGORIES.find((c) => c.key === section);
-  const tabSources = activeCat?.group ? SOURCES.filter((s) => s.group === activeCat.group) : SOURCES;
+  const tabSources = activeCat?.group ? enabled.filter((s) => s.group === activeCat.group) : enabled;
   const tabErrored =
     tabSources.length > 0 && tabSources.every((s) => search.perSource[s.id]?.error);
   const showStats = useMemo(
@@ -346,7 +348,7 @@ export function Results() {
     }
     if (results.length === 0) {
       if (erroredCount >= search.total) {
-        const downAll = SOURCES.filter((s) => search.perSource[s.id]?.error);
+        const downAll = enabled.filter((s) => search.perSource[s.id]?.error);
         return (
           <Text color={COLOR.warn}>
             {`Couldn't reach any source. They may be down${outageCodes(downAll)}.`}
