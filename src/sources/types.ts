@@ -1,10 +1,12 @@
 export type SourceId =
   | "fitgirl"
+  | "dodi"
   | "yts"
   | "eztv"
   | "nyaa"
   | "subsplease"
   | "solid"
+  | "torrents-csv"
   | "tpb-movies"
   | "tpb-tv"
   | "x1337-movies"
