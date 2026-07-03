@@ -52,9 +52,6 @@ export interface Store {
   submitQuery: (q: string) => void;
   // Recently-run searches (most-recent first) for up-arrow recall.
   searchHistory: string[];
-  // Jump to the browser view and open the Real-Debrid token prompt (used by the
-  // splash CTA, where the token prompt itself isn't rendered).
-  openTokenPrompt: () => void;
   // Jump to the browser view, select the Accounts pane, and focus it.
   openAccounts: () => void;
 

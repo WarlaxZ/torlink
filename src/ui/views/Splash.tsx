@@ -11,13 +11,13 @@ const CATEGORIES = sourcesByGroup()
   .join(`  ${ICON.dot}  `);
 
 export function Splash() {
-  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, openTokenPrompt } = useStore();
+  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, openAccounts } = useStore();
   const { isRawModeSupported } = useStdin();
 
   useInput(
     (input, key) => {
-      if (input === "k") {
-        openTokenPrompt();
+      if (input === "a") {
+        openAccounts();
         return;
       }
       if (key.escape || (key.ctrl && input === "c")) quitAll();
@@ -54,7 +54,7 @@ export function Splash() {
             {`Real-Debrid: connected${rdStatus?.username ? ` as ${rdStatus.username}` : ""}`}
           </Text>
         ) : (
-          <Text dimColor>Tip — press k to connect Real-Debrid for instant, private streaming.</Text>
+          <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid for instant, private streaming.</Text>
         )}
       </Box>
 

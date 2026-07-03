@@ -87,7 +87,6 @@ function makeStore(
     query: "",
     submitQuery: noop,
     searchHistory: [],
-    openTokenPrompt: noop,
     openAccounts: noop,
     section: "all",
     setSection: noop,
