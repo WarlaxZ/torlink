@@ -1,6 +1,18 @@
+import { fetch as undiciFetch } from "undici";
+import { getDnsDispatcher } from "./dns";
+
 export const USER_AGENT = "torlink (+https://www.npmjs.com/package/torlnk)";
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
+
+// torlink's real fetch: undici's fetch, so a custom-DNS dispatcher (when set)
+// and response decompression come from the same undici instance. With no custom
+// DNS it behaves exactly like the platform fetch. Tests inject their own impl.
+const dohFetch: FetchImpl = (url, init) => {
+  const dispatcher = getDnsDispatcher();
+  const opts = dispatcher ? { ...init, dispatcher } : init;
+  return undiciFetch(url, opts as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+};
 export type SleepImpl = (ms: number) => Promise<void>;
 
 export interface FetchResilientOptions extends RequestInit {
@@ -105,7 +117,7 @@ export async function fetchResilient(
     retries = DEFAULT_RETRIES,
     baseMs = DEFAULT_BASE_MS,
     capMs = DEFAULT_CAP_MS,
-    fetchImpl = fetch as FetchImpl,
+    fetchImpl = dohFetch,
     sleepImpl = realSleep,
     retryCdn503 = false,
     onAttempt,

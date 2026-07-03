@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { configFile, defaultDownloadDir } from "./paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
+import { parseDnsServers } from "../util/dns";
 
 export interface Config {
   downloadDir: string;
@@ -23,6 +24,11 @@ export interface Config {
   // Sources the user has switched off; they're skipped during search. Stored as
   // opaque strings — unknown ids are simply ignored by the registry.
   disabledSources?: string[];
+  // Custom DNS resolver(s) for torlink's own HTTP, to get around networks that
+  // sinkhole torrent domains at the OS resolver. IPs or aliases ("cloudflare",
+  // "google", "quad9"). Empty/unset = use the system resolver. A TORLINK_DNS env
+  // var overrides it.
+  dnsServers?: string[];
 }
 
 export const defaultConfig: Config = {
@@ -46,6 +52,16 @@ const MEDIA_PLAYER_ENV = "TORLINK_PLAYER";
 export function resolveMediaPlayer(config: Config): string {
   const env = process.env[MEDIA_PLAYER_ENV];
   return (env?.trim() || config.mediaPlayer?.trim()) ?? "";
+}
+
+const DNS_ENV = "TORLINK_DNS";
+
+// The effective DNS resolver list (env wins over config), expanded from any
+// aliases into concrete IPs. Empty means "use the system resolver".
+export function resolveDnsServers(config: Config): string[] {
+  const env = process.env[DNS_ENV];
+  const raw = env !== undefined ? env : (config.dnsServers ?? []).join(",");
+  return parseDnsServers(raw);
 }
 
 export async function loadConfig(): Promise<Config> {

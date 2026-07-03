@@ -6,8 +6,10 @@ import {
   saveConfig,
   resolveRealDebridToken,
   resolveMediaPlayer,
+  resolveDnsServers,
   type Config,
 } from "../config/config";
+import { setDnsServers } from "../util/dns";
 import { normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
@@ -139,6 +141,8 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      // Apply any custom DNS before the first network call (e.g. token check).
+      setDnsServers(resolveDnsServers(cfg));
       // Restore remembered UI preferences (validated, so stale values degrade
       // to defaults rather than throwing).
       setSortState(parseSort(cfg.sort));
