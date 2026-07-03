@@ -38,12 +38,19 @@ export const SOURCE_STYLE: Record<SourceId, { tag: string; color: string }> = {
   eztv: { tag: "EZTV", color: COLOR.warn },
   nyaa: { tag: "NYAA", color: COLOR.bright },
   subsplease: { tag: "SUB", color: "#b9a7e6" },
-  solid: { tag: "SLD", color: "#60a5fa" },
   "tpb-movies": { tag: "TPB", color: "#5fd0c5" },
   "tpb-tv": { tag: "TPB", color: "#5fd0c5" },
   "x1337-movies": { tag: "1337", color: "#f6a55c" },
   "x1337-tv": { tag: "1337", color: "#f6a55c" },
 };
+
+// Tolerant lookup: a source id may be absent (a pasted magnet / bare infohash) or
+// no longer exist (a removed source persisted in old history/seeds). Fall back to a
+// neutral tag rather than indexing SOURCE_STYLE and crashing on `undefined`.
+export function sourceStyle(id?: SourceId): { tag: string; color: string } {
+  const s = id ? (SOURCE_STYLE as Record<string, { tag: string; color: string }>)[id] : undefined;
+  return s ?? { tag: "•", color: COLOR.alt };
+}
 
 function rgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);

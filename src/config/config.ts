@@ -29,10 +29,14 @@ export interface Config {
   // "google", "quad9"). Empty/unset = use the system resolver. A TORLINK_DNS env
   // var overrides it.
   dnsServers?: string[];
+  // Extra announce URLs (trackers) the user has added; appended to every
+  // torrent added from now on.
+  trackers: string[];
 }
 
 export const defaultConfig: Config = {
   downloadDir: defaultDownloadDir,
+  trackers: [],
 };
 
 const REALDEBRID_TOKEN_ENV = "REALDEBRID_API_TOKEN";
@@ -77,6 +81,11 @@ export async function loadConfig(): Promise<Config> {
     if (!cfg.downloadDir || typeof cfg.downloadDir !== "string") {
       cfg.downloadDir = defaultDownloadDir;
     }
+    // Drop non-string / empty announce URLs so a hand-edited trackers list
+    // can't feed junk into the download engine.
+    cfg.trackers = Array.isArray(parsed.trackers)
+      ? parsed.trackers.filter((t): t is string => typeof t === "string" && t.length > 0)
+      : [];
     return cfg;
   } catch {
     return { ...defaultConfig };

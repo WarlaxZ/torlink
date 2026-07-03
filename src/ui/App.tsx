@@ -19,7 +19,7 @@ import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
 import { reconcileQueue } from "../download/reconcile";
-import { parseMagnet } from "../sources/magnet";
+import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { cleanText, truncate } from "../util/format";
@@ -56,6 +56,7 @@ import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
+import { TrackersPrompt } from "./components/TrackersPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -119,6 +120,7 @@ export function App({
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
+  const [editingTrackers, setEditingTrackers] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -135,6 +137,7 @@ export function App({
     void (async () => {
       const cfg = await loadConfig();
       const q = new DownloadQueue();
+      q.setTrackers(cfg.trackers);
       q.restore(reconcileQueue(await loadQueue()));
       q.restoreHistory(await loadHistory());
       q.restoreSeeds(await loadSeeds());
@@ -160,7 +163,7 @@ export function App({
       }
       setQueue(q);
       const launch = initialMagnet
-        ? parseMagnet(initialMagnet)
+        ? parseInput(initialMagnet)
         : initialTorrent
           ? await magnetFromTorrentFile(initialTorrent)
           : null;
@@ -238,10 +241,14 @@ export function App({
     else exit();
   }, [queue, onQuit, exit]);
 
-  const setConfig = useCallback((c: Config) => {
-    setConfigState(c);
-    void saveConfig(c);
-  }, []);
+  const setConfig = useCallback(
+    (c: Config) => {
+      setConfigState(c);
+      queue?.setTrackers(c.trackers);
+      void saveConfig(c);
+    },
+    [queue],
+  );
 
   // Merge a small patch into config and persist it, skipping the write when
   // nothing actually changed (so idle navigation doesn't churn the disk).
@@ -294,6 +301,27 @@ export function App({
   const closeFolderPrompt = useCallback(() => {
     setEditingFolder(false);
   }, []);
+
+  const closeTrackersPrompt = useCallback(() => {
+    setEditingTrackers(false);
+  }, []);
+
+  const setTrackers = useCallback(
+    (list: string[]) => {
+      closeTrackersPrompt();
+      if (!config) return;
+      const same =
+        list.length === config.trackers.length &&
+        list.every((t, i) => t === config.trackers[i]);
+      if (same) {
+        setNotice("Trackers unchanged.");
+        return;
+      }
+      setConfig({ ...config, trackers: list });
+      setNotice(list.length === 0 ? "Cleared extra trackers." : `Saved ${list.length} tracker${list.length === 1 ? "" : "s"}.`);
+    },
+    [config, setConfig, closeTrackersPrompt],
+  );
 
   const setDownloadDir = useCallback(
     (raw: string) => {
@@ -597,7 +625,7 @@ export function App({
     (raw: string) => {
       const q = raw.trim();
       if (q) {
-        const magnet = parseMagnet(q);
+        const magnet = parseInput(q);
         if (magnet) {
           requestP2PDownload({
             id: magnet.infoHash,
@@ -633,7 +661,7 @@ export function App({
       return;
     }
     const found = text.match(/magnet:\?xt=urn:btih:[^\s"'<>]+/i)?.[0];
-    const magnet = found ? parseMagnet(found) : null;
+    const magnet = parseInput(found ?? text);
     if (magnet) {
       requestP2PDownload({ id: magnet.infoHash, name: magnet.name, magnet: magnet.magnet });
       setView("browser");
@@ -691,7 +719,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -736,6 +764,7 @@ export function App({
     editingPlayer,
     editingSources,
     editingDns,
+    editingTrackers,
     toggleSource,
     pendingP2P,
     streamFiles,
@@ -771,6 +800,7 @@ export function App({
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
+      if (editingTrackers) return; // the trackers prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
@@ -805,6 +835,11 @@ export function App({
         openDnsPrompt();
         return;
       }
+      if (input === "t") {
+        setShowHelp(false);
+        setEditingTrackers(true);
+        return;
+      }
       if (input === "m") {
         void pasteFromClipboard();
         return;
@@ -813,11 +848,11 @@ export function App({
         setRegion(region === "sidebar" ? "content" : "sidebar");
         return;
       }
-      if (key.rightArrow) {
+      if (key.rightArrow || input === "l") {
         if (region === "sidebar") setRegion("content");
         return;
       }
-      if (key.leftArrow) {
+      if (key.leftArrow || input === "h") {
         if (region === "content") setRegion("sidebar");
         return;
       }
@@ -981,11 +1016,22 @@ export function App({
           </Box>
         ) : null}
 
+        {editingTrackers ? (
+          <Box marginTop={1}>
+            <TrackersPrompt
+              width={Math.max(24, Math.min(cols - 4, 78))}
+              value={store.config.trackers}
+              onSubmit={setTrackers}
+              onCancel={closeTrackersPrompt}
+            />
+          </Box>
+        ) : null}
+
         <Box
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -1020,7 +1066,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }
