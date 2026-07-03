@@ -42,9 +42,10 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "s", label: "Sort results" },
       { keys: "d", label: "Download (P2P)" },
       { keys: "r", label: "Download via Real-Debrid" },
-      { keys: "v", label: "Stream via Real-Debrid" },
+      { keys: "v", label: "Stream" },
       { keys: "y", label: "Copy magnet" },
       { keys: "m", label: "Paste magnet" },
+      { keys: "x", label: "Stop active stream" },
     ],
   },
   {

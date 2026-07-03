@@ -15,6 +15,8 @@ import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from 
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
+import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
+import { classifyStreamRoute } from "./streamRoute";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -142,6 +144,11 @@ export function App({
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   const [preparing, setPreparing] = useState<{ label: string; phase: "caching" | "fetching"; pct: number } | null>(null);
+  const [activeStream, setActiveStream] = useState<{ session: TorrentStreamSession; name: string } | null>(null);
+  // Confirm state for the two torrent privacy prompts.
+  const [torrentPrompt, setTorrentPrompt] = useState<
+    { input: DownloadInput; reason?: string } | null
+  >(null);
   const prepareAbort = useRef<AbortController | null>(null);
   const booting = useRef(false);
 
@@ -256,9 +263,10 @@ export function App({
     // Flush all state synchronously up front so nothing is lost to the hard
     // exit; the unmount effect still runs suspend() for the engine teardown.
     queue?.persistSync();
+    void activeStream?.session.stop();
     if (onQuit) onQuit();
     else exit();
-  }, [queue, onQuit, exit]);
+  }, [queue, onQuit, exit, activeStream]);
 
   const setConfig = useCallback(
     (c: Config) => {
@@ -486,10 +494,89 @@ export function App({
     setNotice("Stream cancelled.");
   }, []);
 
+  // Stream a torrent directly (no Real-Debrid): cache metadata, spin up a
+  // local HTTP server for the files, then hand off to the same player/picker
+  // path the Real-Debrid flow uses.
+  const startTorrentStream = useCallback(
+    (input: DownloadInput) => {
+      if (!config) return;
+      if (preparing || streamFiles || activeStream) return;
+      const controller = new AbortController();
+      prepareAbort.current = controller;
+      setPreparing({ label: truncate(cleanText(input.name), 32), phase: "caching", pct: 0 });
+      void (async () => {
+        try {
+          const session = await streamTorrent(input.magnet, { signal: controller.signal });
+          if (controller.signal.aborted) {
+            void session.stop();
+            return;
+          }
+          prepareAbort.current = null;
+          setPreparing(null);
+          const candidates = streamCandidates(session.files).sort((a, b) => b.bytes - a.bytes);
+          if (candidates.length === 0) {
+            setNotice("This torrent has nothing to stream.");
+            void session.stop();
+            return;
+          }
+          setActiveStream({ session, name: input.name });
+          if (candidates.length > 1) {
+            setStreamFiles(candidates);
+          } else {
+            void playStream(candidates[0]!.url, input.name);
+          }
+        } catch (e) {
+          prepareAbort.current = null;
+          setPreparing(null);
+          if (controller.signal.aborted) return;
+          setNotice(e instanceof Error ? e.message : "Couldn't start torrent stream.");
+        }
+      })();
+    },
+    [config, preparing, streamFiles, activeStream, playStream],
+  );
+
+  const stopStream = useCallback(() => {
+    const active = activeStream;
+    if (!active) return;
+    setActiveStream(null);
+    void active.session.stop(); // Task 6 replaces this with an offer-to-keep prompt
+    setNotice("Stream stopped.");
+  }, [activeStream]);
+
+  // Keep a ref to the latest active stream so the unmount-only cleanup effect
+  // below (and quitAll) can reach it without re-running on every change.
+  const activeStreamRef = useRef<typeof activeStream>(null);
+  useEffect(() => {
+    activeStreamRef.current = activeStream;
+  }, [activeStream]);
+
+  // Defensively make sure a live torrent-stream session (and its temp dir)
+  // don't leak past the process if the component unmounts unexpectedly.
+  useEffect(() => {
+    return () => {
+      void activeStreamRef.current?.session.stop();
+    };
+  }, []);
+
   const streamResult = useCallback(
     (input: DownloadInput) => {
       if (!config) return;
       if (preparing || streamFiles) return; // one prepare/pick at a time
+      const route = classifyStreamRoute(config, rdStatus);
+      if (route.kind === "torrent-auto") {
+        if (config.torrentStreamAck) {
+          startTorrentStream(input);
+          return;
+        }
+        setTorrentPrompt({ input }); // one-time warning, remembered on confirm
+        return;
+      }
+      if (route.kind === "torrent-confirm") {
+        setTorrentPrompt({ input, reason: route.reason }); // always warn
+        return;
+      }
+      // route.kind === "realdebrid": fall through to the existing RD flow.
       const token = resolveRealDebridToken(config);
       if (!token) {
         setNotice("Set a Real-Debrid token first — open the Accounts tab.");
@@ -542,7 +629,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles],
+    [config, finishStream, preparing, streamFiles, rdStatus, startTorrentStream],
   );
 
   const closePlayerPrompt = useCallback(() => {
@@ -806,7 +893,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
           ? "help"
           : region,
       setRegion,
@@ -857,6 +944,7 @@ export function App({
     pendingP2P,
     streamFiles,
     preparing,
+    torrentPrompt,
     captureMode,
     downloadFocus,
     seedFocus,
@@ -891,10 +979,15 @@ export function App({
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
+      if (torrentPrompt) return; // the torrent privacy warning owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
         if (key.escape) cancelPreparing();
         return; // swallow other keys while preparing
+      }
+      if (activeStream && (input === "x" || input === "X")) {
+        stopStream();
+        return;
       }
       if (captureMode === "text") return;
       if (showHelp) {
@@ -994,6 +1087,13 @@ export function App({
                   : `Fetching link… ${prepElapsed}s  (esc cancels)`
               }
             />
+          </Box>
+        ) : null}
+        {activeStream ? (
+          <Box>
+            <Text color={COLOR.warn}>
+              {`▶ Streaming ${truncate(cleanText(activeStream.name), 40)} via torrent · your IP is visible to peers · x to stop`}
+            </Text>
           </Box>
         ) : null}
         {showTopRule ? <Rule width={ruleWidth} /> : null}
@@ -1114,6 +1214,31 @@ export function App({
           </Box>
         ) : null}
 
+        {torrentPrompt ? (
+          <Box marginTop={1}>
+            <ConfirmPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              title={torrentPrompt.reason ? "Real-Debrid unavailable" : "Stream via torrent?"}
+              message={
+                torrentPrompt.reason
+                  ? `${torrentPrompt.reason}. Streaming via torrent connects you directly to peers, so your IP is visible to the swarm. Continue via torrent?`
+                  : "Streaming via torrent connects you directly to peers, so your IP is visible to the swarm (Real-Debrid keeps it private). Continue?"
+              }
+              onConfirm={() => {
+                const { input, reason } = torrentPrompt;
+                setTorrentPrompt(null);
+                // Remember the acknowledgement only for the no-RD one-time warning.
+                if (!reason && config) setConfig({ ...config, torrentStreamAck: true });
+                startTorrentStream(input);
+              }}
+              onCancel={() => {
+                setTorrentPrompt(null);
+                setNotice("Stream cancelled.");
+              }}
+            />
+          </Box>
+        ) : null}
+
         {editingTrackers ? (
           <Box marginTop={1}>
             <TrackersPrompt
@@ -1129,7 +1254,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
               ? "none"
               : "flex"
           }
@@ -1175,7 +1300,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
                 ? "none"
                 : "flex"
             }
