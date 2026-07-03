@@ -8,7 +8,7 @@ import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { getSource, SOURCES } from "../../sources/registry";
 import { wrapStep, windowStart } from "../move";
-import { sortResults, nextSort, sortLabel, sortArrow, type Sort, type SortField } from "../sort";
+import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
 import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatRelative, truncate } from "../../util/format";
@@ -170,6 +170,8 @@ export function Results() {
     contentWidth,
     listRows,
     queue,
+    sort,
+    setSort,
   } = useStore();
 
   const search = useConcurrentSearch(query);
@@ -179,7 +181,6 @@ export function Results() {
   const stateFor = (hash: string): DownloadState | null =>
     downloadStateFor(hash, queueItems, queueHistory);
 
-  const [sort, setSort] = useState<Sort>("none");
   const results = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.key === section);
     const base = cat?.group
@@ -279,7 +280,7 @@ export function Results() {
         const r = results[clamped];
         if (r) copyResultMagnet(r);
       } else if (input === "s") {
-        setSort((cur) => nextSort(cur));
+        setSort(nextSort(sort));
       }
     },
     { isActive: focused && mode === "list" },

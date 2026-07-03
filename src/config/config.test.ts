@@ -9,6 +9,15 @@ describe("config realDebridToken", () => {
   });
 });
 
+describe("config UI preferences", () => {
+  it("round-trips the persisted sort and category", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", sort: "seeders:desc", category: "movies" });
+    const cfg = await loadConfig();
+    expect(cfg.sort).toBe("seeders:desc");
+    expect(cfg.category).toBe("movies");
+  });
+});
+
 describe("resolveRealDebridToken", () => {
   const KEY = "REALDEBRID_API_TOKEN";
   afterEach(() => {

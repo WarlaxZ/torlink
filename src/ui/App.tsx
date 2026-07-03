@@ -21,7 +21,7 @@ import { parseMagnet } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { cleanText, truncate } from "../util/format";
-import { isCategory } from "./store";
+import { isCategory, parseCategory } from "./store";
 import {
   StoreContext,
   type CaptureMode,
@@ -32,6 +32,7 @@ import {
   type Store,
   type View,
 } from "./store";
+import { formatSort, parseSort, type Sort } from "./sort";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
@@ -101,6 +102,7 @@ export function App({
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
+  const [sort, setSortState] = useState<Sort>("none");
   const [region, setRegion] = useState<Region>("content");
   const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
   const [downloadFocus, setDownloadFocus] = useState<DownloadFocus | null>(null);
@@ -133,6 +135,9 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      // Restore remembered UI preferences (validated, so stale values degrade
+      // to defaults rather than throwing).
+      setSortState(parseSort(cfg.sort));
       const launchToken = resolveRealDebridToken(cfg);
       if (launchToken) {
         void validateToken(launchToken)
@@ -158,6 +163,8 @@ export function App({
         setView("browser");
         setSection("downloads");
         setRegion("content");
+      } else {
+        setSection(parseCategory(cfg.category));
       }
     })();
     return () => {
@@ -225,6 +232,40 @@ export function App({
     setConfigState(c);
     void saveConfig(c);
   }, []);
+
+  // Merge a small patch into config and persist it, skipping the write when
+  // nothing actually changed (so idle navigation doesn't churn the disk).
+  const persistConfig = useCallback((patch: Partial<Config>) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const changed = (Object.keys(patch) as (keyof Config)[]).some(
+        (k) => prev[k] !== patch[k],
+      );
+      if (!changed) return prev;
+      const next = { ...prev, ...patch };
+      void saveConfig(next);
+      return next;
+    });
+  }, []);
+
+  // Change the sort and remember it for next launch.
+  const setSort = useCallback(
+    (s: Sort) => {
+      setSortState(s);
+      persistConfig({ sort: formatSort(s) });
+    },
+    [persistConfig],
+  );
+
+  // Change the section; remember the last *category* so torlink reopens on it
+  // (downloads/seeding are transient and never persisted).
+  const changeSection = useCallback(
+    (s: Section) => {
+      setSection(s);
+      if (isCategory(s)) persistConfig({ category: s });
+    },
+    [persistConfig],
+  );
 
   const closeFolderPrompt = useCallback(() => {
     setEditingFolder(false);
@@ -572,7 +613,9 @@ export function App({
       submitQuery,
       openTokenPrompt,
       section,
-      setSection,
+      setSection: changeSection,
+      sort,
+      setSort,
       region:
         showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
           ? "help"
@@ -609,6 +652,9 @@ export function App({
     submitQuery,
     openTokenPrompt,
     section,
+    changeSection,
+    sort,
+    setSort,
     region,
     showHelp,
     editingFolder,

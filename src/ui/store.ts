@@ -5,6 +5,7 @@ import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
 import type { RdStatus } from "../integrations/rdStatus";
+import type { Sort } from "./sort";
 
 export type View = "splash" | "browser";
 
@@ -25,6 +26,12 @@ export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[]
   { key: "tv", label: "TV", group: "TV" },
   { key: "anime", label: "Anime", group: "Anime" },
 ];
+
+// Parse a persisted category preference, falling back to "all" for anything
+// that isn't a known result category (unknown values, or downloads/seeding).
+export function parseCategory(raw: string | undefined): Category {
+  return CATEGORIES.some((c) => c.key === raw) ? (raw as Category) : "all";
+}
 
 export type Region = "sidebar" | "content" | "help";
 
@@ -49,6 +56,9 @@ export interface Store {
 
   section: Section;
   setSection: (s: Section) => void;
+  // The active results sort, persisted across launches.
+  sort: Sort;
+  setSort: (s: Sort) => void;
   region: Region;
   setRegion: (r: Region) => void;
   captureMode: CaptureMode;

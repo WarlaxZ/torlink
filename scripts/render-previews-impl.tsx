@@ -89,6 +89,8 @@ function makeStore(
     openTokenPrompt: noop,
     section: "all",
     setSection: noop,
+    sort: "none",
+    setSort: noop,
     region: "content",
     setRegion: noop,
     captureMode: "none",

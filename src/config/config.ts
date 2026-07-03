@@ -12,6 +12,11 @@ export interface Config {
   // or an absolute path). Empty/unset falls back to auto-detection. A
   // TORLINK_PLAYER env var overrides it.
   mediaPlayer?: string;
+  // Remembered UI preferences, so torlink reopens the way you left it. Both are
+  // stored as opaque strings validated by the UI layer (parseSort/parseCategory)
+  // so a hand-edited or stale value degrades gracefully to the default.
+  sort?: string;
+  category?: string;
 }
 
 export const defaultConfig: Config = {
