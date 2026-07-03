@@ -1,6 +1,5 @@
 import { eztv } from "./eztv";
 import { fitgirl } from "./fitgirl";
-import { dodi } from "./dodi";
 import { nyaa } from "./nyaa";
 import { subsplease } from "./subsplease";
 import { solid } from "./solidtorrents";
@@ -12,7 +11,6 @@ import type { Source, SourceGroup, SourceId } from "./types";
 
 export const SOURCES: readonly Source[] = [
   fitgirl,
-  dodi,
   yts,
   tpbMovies,
   x1337Movies,

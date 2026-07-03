@@ -1,6 +1,5 @@
 export type SourceId =
   | "fitgirl"
-  | "dodi"
   | "yts"
   | "eztv"
   | "nyaa"
