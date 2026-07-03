@@ -22,6 +22,8 @@ That's the only thing you'll type. torlink opens straight to a search bar: searc
 
 Type what you're looking for and press Enter. Results stream in from every source as they answer, tagged with size and how many people are sharing each one, so you can see what'll come down fast. Arrow to what you want and press `d` to save it.
 
+Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to bring back a recent search. torlink remembers your sort and last category between runs, so it opens right where you left off.
+
 <p align="center">
   <img src="preview/browse.svg" alt="torlink's browse view: the sidebar, the search bar, and merged results from every source" style="max-width: 832px; width: 100%; height: auto;">
 </p>
@@ -56,7 +58,7 @@ A short, hand-picked list of trusted sources:
 | Category | Sources |
 | --- | --- |
 | Games | FitGirl |
-| Movies | YTS, The Pirate Bay, 1337x |
+| Movies | YTS, The Pirate Bay, 1337x, Torrents.csv |
 | TV | EZTV, SolidTorrents, The Pirate Bay, 1337x |
 | Anime | Nyaa, SubsPlease |
 
@@ -99,10 +101,10 @@ Your files stay on your disk, and nothing routes through a central server; torli
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=baairon%2Ftorlink&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=WarlaxZ%2Ftorlink&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left" />
  </picture>
 </a>
