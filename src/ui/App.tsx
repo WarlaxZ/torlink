@@ -17,6 +17,7 @@ import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { classifyStreamRoute } from "./streamRoute";
+import { keepMovePlan } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -144,10 +145,16 @@ export function App({
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   const [preparing, setPreparing] = useState<{ label: string; phase: "caching" | "fetching"; pct: number } | null>(null);
-  const [activeStream, setActiveStream] = useState<{ session: TorrentStreamSession; name: string } | null>(null);
+  const [activeStream, setActiveStream] = useState<
+    { session: TorrentStreamSession; name: string; input: DownloadInput } | null
+  >(null);
   // Confirm state for the two torrent privacy prompts.
   const [torrentPrompt, setTorrentPrompt] = useState<
     { input: DownloadInput; reason?: string } | null
+  >(null);
+  // Offer to keep a fully-downloaded torrent stream as a real download + seed.
+  const [keepPrompt, setKeepPrompt] = useState<
+    { session: TorrentStreamSession; input: DownloadInput } | null
   >(null);
   const prepareAbort = useRef<AbortController | null>(null);
   const booting = useRef(false);
@@ -264,13 +271,17 @@ export function App({
     // exit; the unmount effect still runs suspend() for the engine teardown.
     queue?.persistSync();
     void activeStream?.session.stop();
+    // A keep prompt awaiting a decision still holds a live (complete) stream
+    // session — discard it too rather than leaking its temp dir on quit.
+    void keepPrompt?.session.stop();
     // Clear so the unmount-only cleanup effect below has nothing left to
     // re-stop (stop() is also idempotent, but this avoids relying on that).
     activeStreamRef.current = null;
     setActiveStream(null);
+    setKeepPrompt(null);
     if (onQuit) onQuit();
     else exit();
-  }, [queue, onQuit, exit, activeStream]);
+  }, [queue, onQuit, exit, activeStream, keepPrompt]);
 
   const setConfig = useCallback(
     (c: Config) => {
@@ -523,7 +534,7 @@ export function App({
             void session.stop();
             return;
           }
-          setActiveStream({ session, name: input.name });
+          setActiveStream({ session, name: input.name, input });
           if (candidates.length > 1) {
             setStreamFiles(candidates);
           } else {
@@ -544,8 +555,14 @@ export function App({
     const active = activeStream;
     if (!active) return;
     setActiveStream(null);
-    void active.session.stop(); // Task 6 replaces this with an offer-to-keep prompt
-    setNotice("Stream stopped.");
+    if (active.session.isComplete()) {
+      // Fully downloaded: offer to keep it as a real download + seed instead
+      // of discarding the temp files.
+      setKeepPrompt({ session: active.session, input: active.input });
+    } else {
+      void active.session.stop(); // partial: discard
+      setNotice("Stream stopped.");
+    }
   }, [activeStream]);
 
   // Keep a ref to the latest active stream so the unmount-only cleanup effect
@@ -897,7 +914,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
           ? "help"
           : region,
       setRegion,
@@ -950,6 +967,7 @@ export function App({
     streamFiles,
     preparing,
     torrentPrompt,
+    keepPrompt,
     activeStream,
     captureMode,
     downloadFocus,
@@ -986,6 +1004,7 @@ export function App({
       if (editingTrackers) return; // the trackers prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
+      if (keepPrompt) return; // the keep-download prompt owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
         if (key.escape) cancelPreparing();
@@ -1253,6 +1272,45 @@ export function App({
           </Box>
         ) : null}
 
+        {keepPrompt ? (
+          <Box marginTop={1}>
+            <ConfirmPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              title="Keep this download?"
+              message={`"${truncate(cleanText(keepPrompt.session.name), 40)}" finished downloading. Keep it in your downloads and seed it?`}
+              onConfirm={() => {
+                const { session, input } = keepPrompt;
+                setKeepPrompt(null);
+                void (async () => {
+                  await session.stop({ keep: true }); // close server/client, leave files
+                  if (!config) return;
+                  const { from, to } = keepMovePlan({
+                    streamDir: session.dir,
+                    torrentName: session.name,
+                    downloadDir: config.downloadDir,
+                  });
+                  try {
+                    await fs.mkdir(config.downloadDir, { recursive: true });
+                    await fs.rename(from, to); // fast path (same volume)
+                  } catch {
+                    // cross-device: fall back to a recursive copy then remove
+                    await fs.cp(from, to, { recursive: true }).catch(() => {});
+                    await fs.rm(from, { recursive: true, force: true }).catch(() => {});
+                  }
+                  startDownload(input); // queue.add verifies on-disk files + seeds
+                  setNotice(`Kept & seeding: ${truncate(cleanText(session.name), 32)}`);
+                })();
+              }}
+              onCancel={() => {
+                const { session } = keepPrompt;
+                setKeepPrompt(null);
+                void session.stop(); // discard temp
+                setNotice("Stream stopped.");
+              }}
+            />
+          </Box>
+        ) : null}
+
         {editingTrackers ? (
           <Box marginTop={1}>
             <TrackersPrompt
@@ -1268,7 +1326,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1315,7 +1373,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }
