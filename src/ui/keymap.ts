@@ -21,6 +21,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "o", label: "Download folder" },
       { keys: "k", label: "Real-Debrid token" },
       { keys: "S", label: "Choose sources" },
+      { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "q", label: "Quit" },
     ],
   },

@@ -10,15 +10,23 @@ torlink is a torrent finder that lives in your terminal, with zero setup and not
 
 ## Get started
 
-1. **Install Node** (from [nodejs.org](https://nodejs.org)), it's all torlink needs.
-2. **Open your terminal.**
+This is a fork, so it isn't published to npm — you build it from source once, then run it. All you need is [Node 22+](https://nodejs.org).
+
+1. **Clone this repo** and open the folder.
+2. **Install and build:**
+
+   ```sh
+   npm install
+   npm run build
+   ```
+
 3. **Start it:**
 
    ```sh
-   npx torlnk
+   npm start
    ```
 
-That's the only thing you'll type. torlink opens straight to a search bar: search for what you want, paste in a magnet link, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
+torlink opens straight to a search bar: search for what you want, paste in a magnet link, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
 
 ## Finding something
 
@@ -68,13 +76,15 @@ Games are the only category that can run code, so they come from FitGirl alone, 
 
 ### Blocked by your network?
 
-Some networks (ISPs, work Wi-Fi, some routers) quietly block torrent sites at the DNS level, so every source looks offline. If that's happening, point torlink's own lookups at a public resolver over DNS-over-HTTPS — it doesn't touch the rest of your system:
+Some networks (ISPs, work Wi-Fi, some routers) quietly block torrent sites at the DNS level, so every source looks offline. If that's happening, point torlink's own lookups at a public resolver over DNS-over-HTTPS — it doesn't touch the rest of your system.
+
+The easiest way is right in the app: press `Shift+D` and enter a resolver alias or IPs. It's saved and applied straight away, no restart. `cloudflare`, `google`, `quad9`, and `opendns` are recognised, or pass resolver IPs directly (e.g. `1.1.1.1,1.0.0.1`).
+
+Prefer an environment variable? Set `TORLINK_DNS` before launching (it takes precedence over the in-app setting):
 
 ```sh
-TORLINK_DNS=cloudflare npx torlnk
+TORLINK_DNS=cloudflare npm start
 ```
-
-`cloudflare`, `google`, and `quad9` are recognised, or pass resolver IPs directly (e.g. `TORLINK_DNS=1.1.1.1,1.0.0.1`). You can also set `"dnsServers"` in the config file to make it stick.
 
 ## Contributing
 
@@ -92,7 +102,7 @@ To run or work on torlink locally:
    Or build it and run the bundled version:
    ```sh
    npm run build
-   npx torlnk
+   npm start
    ```
 
 Before opening a PR, skim [CONTRIBUTING.md](CONTRIBUTING.md); it lays out the bar with examples from real merged PRs.
