@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { footerHints, HELP_GROUPS } from "./keymap";
 
 describe("footerHints results view", () => {
-  it("offers the Real-Debrid shortcut only when a token is configured", () => {
+  it("offers the Real-Debrid shortcut only when a token is configured, but Stream always", () => {
     const without = footerHints("content", "all", null, null, false);
     expect(without.some((h) => h.keys === "r")).toBe(false);
-    expect(without.some((h) => h.keys === "v")).toBe(false);
+    // Torrent streaming needs no Real-Debrid token, so its hint must be
+    // visible for exactly the users who don't have one configured.
+    expect(without.some((h) => h.keys === "v")).toBe(true);
 
     const withToken = footerHints("content", "all", null, null, true);
     const labels = withToken.map((h) => h.label);

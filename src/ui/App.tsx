@@ -264,6 +264,10 @@ export function App({
     // exit; the unmount effect still runs suspend() for the engine teardown.
     queue?.persistSync();
     void activeStream?.session.stop();
+    // Clear so the unmount-only cleanup effect below has nothing left to
+    // re-stop (stop() is also idempotent, but this avoids relying on that).
+    activeStreamRef.current = null;
+    setActiveStream(null);
     if (onQuit) onQuit();
     else exit();
   }, [queue, onQuit, exit, activeStream]);
@@ -908,6 +912,7 @@ export function App({
       startDebridDownload,
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
+      streamActive: activeStream !== null,
       rdStatus,
       copyLink,
       copyMagnet,
@@ -945,6 +950,7 @@ export function App({
     streamFiles,
     preparing,
     torrentPrompt,
+    activeStream,
     captureMode,
     downloadFocus,
     seedFocus,
@@ -1185,6 +1191,14 @@ export function App({
               onSelect={(file) => finishStream(file)}
               onCancel={() => {
                 setStreamFiles(null);
+                // The Real-Debrid path has no activeStream (files are hosted
+                // by RD, not a local torrent session), so this only fires for
+                // the torrent-stream path — leave that path unaffected.
+                if (activeStream) {
+                  void activeStream.session.stop();
+                  activeStreamRef.current = null;
+                  setActiveStream(null);
+                }
                 setNotice("Stream cancelled.");
               }}
             />
@@ -1288,6 +1302,7 @@ export function App({
                 rdToken={resolveRealDebridToken(store.config)}
                 rdStatus={rdStatus}
                 rutrackerUser={rutrackerUser}
+                streamActive={store.streamActive}
                 onManageRd={openTokenPrompt}
                 onSignOutRd={clearRealDebridToken}
                 onManageRutracker={openRutrackerPrompt}

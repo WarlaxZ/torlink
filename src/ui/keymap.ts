@@ -133,12 +133,8 @@ export function footerHints(
   return [
     NAVIGATE,
     { keys: "d", label: "Download" },
-    ...(debridConfigured
-      ? [
-          { keys: "r", label: "Real-Debrid" },
-          { keys: "v", label: "Stream" },
-        ]
-      : []),
+    ...(debridConfigured ? [{ keys: "r", label: "Real-Debrid" }] : []),
+    { keys: "v", label: "Stream" },
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },
     { keys: "/", label: "Search" },

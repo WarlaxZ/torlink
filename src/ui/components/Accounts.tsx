@@ -11,6 +11,9 @@ interface AccountsProps {
   rdToken: string;
   rdStatus: RdStatus | null;
   rutrackerUser?: string;
+  // True while a torrent stream is active; "x" is reserved for stopping it
+  // globally, so sign-out must not also fire on the same keystroke.
+  streamActive?: boolean;
   onManageRd: () => void;
   onSignOutRd: () => void;
   onManageRutracker: () => void;
@@ -32,6 +35,7 @@ export function Accounts({
   rdToken,
   rdStatus,
   rutrackerUser,
+  streamActive = false,
   onManageRd,
   onSignOutRd,
   onManageRutracker,
@@ -71,7 +75,7 @@ export function Accounts({
       if (key.upArrow) setCursor(wrapStep(clamped, -1, rows.length));
       else if (key.downArrow) setCursor(wrapStep(clamped, 1, rows.length));
       else if (key.return) rows[clamped]!.onManage();
-      else if (input === "x" && rows[clamped]!.signedIn) rows[clamped]!.onSignOut();
+      else if (input === "x" && !streamActive && rows[clamped]!.signedIn) rows[clamped]!.onSignOut();
     },
     { isActive: focused },
   );

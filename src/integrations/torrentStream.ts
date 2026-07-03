@@ -128,12 +128,15 @@ export async function streamTorrent(
       const server = client.createServer();
       server.listen(0, host, () => {
         const port = server.address()?.port ?? 0;
+        let stopped = false;
         resolve({
           name: torrent.name,
           files: toStreamFiles(torrent, host, port),
           dir,
           isComplete: () => torrent.done === true,
           stop: async ({ keep = false }: { keep?: boolean } = {}) => {
+            if (stopped) return;
+            stopped = true;
             await new Promise<void>((res) => server.close(() => res()));
             await new Promise<void>((res) => client.destroy(() => res()));
             if (!keep) await rm(dir).catch(() => {});

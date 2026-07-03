@@ -125,6 +125,19 @@ describe("streamTorrent", () => {
     expect(rm).toHaveBeenCalledWith("/tmp/torlink-stream-error");
   });
 
+  it("stop() is idempotent — calling it twice does not throw and only cleans up once", async () => {
+    const torrent = fakeTorrent();
+    const rm = vi.fn(async () => {});
+    const session = await streamTorrent("magnet:?x", {
+      createClient: () => fakeClient(torrent) as any,
+      mkdtemp: async () => "/tmp/torlink-stream-idempotent",
+      rm,
+    });
+    await expect(session.stop()).resolves.not.toThrow();
+    await expect(session.stop()).resolves.not.toThrow();
+    expect(rm).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects and removes the temp dir when the signal is aborted before metadata", async () => {
     const torrent = new EventEmitter() as any; // never emits metadata
     const client = {
