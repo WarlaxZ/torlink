@@ -37,3 +37,15 @@ describe("toggleDisabledSource", () => {
     expect(input).toEqual(["yts"]);
   });
 });
+
+describe("RuTracker sources", () => {
+  it("includes the four RuTracker sources", () => {
+    const ids = SOURCES.map((s) => s.id);
+    expect(ids).toEqual(
+      expect.arrayContaining(["rt-games", "rt-movies", "rt-tv", "rt-anime"]),
+    );
+    for (const s of SOURCES.filter((x) => x.id.startsWith("rt-"))) {
+      expect(s.label).toBe("RuTracker");
+    }
+  });
+});
