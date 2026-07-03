@@ -55,6 +55,7 @@ import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
+import { DnsPrompt } from "./components/DnsPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -117,6 +118,7 @@ export function App({
   const [editingToken, setEditingToken] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
+  const [editingDns, setEditingDns] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -519,6 +521,43 @@ export function App({
     [config, setConfig, pendingStreamUrl],
   );
 
+  const openDnsPrompt = useCallback(() => {
+    setShowHelp(false);
+    setEditingDns(true);
+  }, []);
+
+  // Persist a custom DNS spec and apply it immediately, so the next search uses
+  // it without a restart. An empty value falls back to the system resolver.
+  const setDns = useCallback(
+    (raw: string) => {
+      setEditingDns(false);
+      if (!config) return;
+      const spec = raw.trim();
+      const servers = spec ? spec.split(",").map((s) => s.trim()).filter(Boolean) : [];
+      const next: Config = { ...config, dnsServers: servers.length ? servers : undefined };
+      setConfig(next);
+      setDnsServers(resolveDnsServers(next));
+      if (process.env["TORLINK_DNS"]?.trim()) {
+        setNotice("DNS saved, but TORLINK_DNS is set — unset it for the change to apply.");
+      } else {
+        setNotice(servers.length ? `Custom DNS set: ${servers.join(", ")}` : "Using system DNS.");
+      }
+    },
+    [config, setConfig],
+  );
+
+  const clearDns = useCallback(() => {
+    setEditingDns(false);
+    if (!config) return;
+    setConfig({ ...config, dnsServers: undefined });
+    if (process.env["TORLINK_DNS"]?.trim()) {
+      setNotice("DNS is set via TORLINK_DNS — unset the env var to use system DNS.");
+      return;
+    }
+    setDnsServers([]);
+    setNotice("Using system DNS.");
+  }, [config, setConfig]);
+
   // The plain (P2P) download button: when Real-Debrid is configured, route
   // through a warning first since P2P exposes the user's IP to the swarm.
   const requestP2PDownload = useCallback(
@@ -652,7 +691,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -696,6 +735,7 @@ export function App({
     editingToken,
     editingPlayer,
     editingSources,
+    editingDns,
     toggleSource,
     pendingP2P,
     streamFiles,
@@ -730,6 +770,7 @@ export function App({
       if (editingToken) return; // the token prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
+      if (editingDns) return; // the DNS prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
@@ -758,6 +799,10 @@ export function App({
       if (input === "S") {
         setShowHelp(false);
         setEditingSources(true);
+        return;
+      }
+      if (input === "D") {
+        openDnsPrompt();
         return;
       }
       if (input === "m") {
@@ -886,6 +931,19 @@ export function App({
           </Box>
         ) : null}
 
+        {editingDns ? (
+          <Box marginTop={1}>
+            <DnsPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              value={(store.config.dnsServers ?? []).join(",")}
+              envOverride={!!process.env["TORLINK_DNS"]?.trim()}
+              onSubmit={setDns}
+              onClear={clearDns}
+              onCancel={() => setEditingDns(false)}
+            />
+          </Box>
+        ) : null}
+
         {streamFiles ? (
           <Box marginTop={1}>
             <StreamFilePrompt
@@ -927,7 +985,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -962,7 +1020,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }
