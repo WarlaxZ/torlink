@@ -2,7 +2,12 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
-import type { ResolvedFile } from "../integrations/realdebrid";
+
+export interface StreamFile {
+  url: string;
+  filename: string;
+  bytes: number;
+}
 
 // Extensions we treat as playable video, most-common first.
 const VIDEO_EXTS = new Set([
@@ -43,7 +48,7 @@ function ext(name: string): string {
  * Pick the file most worth streaming: the largest video file, or — if nothing
  * looks like video — the largest file overall. Returns null for an empty list.
  */
-export function pickStreamFile(files: ResolvedFile[]): ResolvedFile | null {
+export function pickStreamFile(files: StreamFile[]): StreamFile | null {
   if (files.length === 0) return null;
   const videos = files.filter((f) => VIDEO_EXTS.has(ext(f.filename)));
   const pool = videos.length > 0 ? videos : files;
@@ -55,7 +60,7 @@ export function pickStreamFile(files: ResolvedFile[]): ResolvedFile | null {
  * otherwise every file. Used to decide whether to show a picker (2+ items) and
  * what to list. Mirrors pickStreamFile's video heuristic.
  */
-export function streamCandidates(files: ResolvedFile[]): ResolvedFile[] {
+export function streamCandidates(files: StreamFile[]): StreamFile[] {
   const videos = files.filter((f) => VIDEO_EXTS.has(ext(f.filename)));
   return videos.length > 0 ? videos : files;
 }
