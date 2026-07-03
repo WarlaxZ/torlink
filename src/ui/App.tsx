@@ -17,7 +17,7 @@ import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { classifyStreamRoute } from "./streamRoute";
-import { keepMovePlan } from "./streamKeep";
+import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -572,11 +572,20 @@ export function App({
     activeStreamRef.current = activeStream;
   }, [activeStream]);
 
+  // Same pattern for a pending keep prompt: it still holds a live (complete)
+  // stream session awaiting a keep/discard decision, so it needs the same
+  // unmount-time cleanup as activeStreamRef.
+  const keepPromptRef = useRef<typeof keepPrompt>(null);
+  useEffect(() => {
+    keepPromptRef.current = keepPrompt;
+  }, [keepPrompt]);
+
   // Defensively make sure a live torrent-stream session (and its temp dir)
   // don't leak past the process if the component unmounts unexpectedly.
   useEffect(() => {
     return () => {
       void activeStreamRef.current?.session.stop();
+      void keepPromptRef.current?.session.stop();
     };
   }, []);
 
@@ -1282,23 +1291,29 @@ export function App({
                 const { session, input } = keepPrompt;
                 setKeepPrompt(null);
                 void (async () => {
-                  await session.stop({ keep: true }); // close server/client, leave files
-                  if (!config) return;
-                  const { from, to } = keepMovePlan({
-                    streamDir: session.dir,
-                    torrentName: session.name,
-                    downloadDir: config.downloadDir,
-                  });
                   try {
-                    await fs.mkdir(config.downloadDir, { recursive: true });
-                    await fs.rename(from, to); // fast path (same volume)
+                    await session.stop({ keep: true }); // close server/client, leave files
+                    if (!config) return;
+                    const plan = keepMovePlan({
+                      streamDir: session.dir,
+                      torrentName: session.name,
+                      downloadDir: config.downloadDir,
+                    });
+                    const ok = await moveKeptFiles(plan, config.downloadDir, {
+                      mkdir: (dir, opts) => fs.mkdir(dir, opts),
+                      rename: (from, to) => fs.rename(from, to),
+                      cp: (from, to, opts) => fs.cp(from, to, opts),
+                      rm: (from, opts) => fs.rm(from, opts),
+                    });
+                    if (!ok) {
+                      setNotice("Couldn't keep the download — files left in a temp folder.");
+                      return;
+                    }
+                    startDownload(input); // queue.add verifies on-disk files + seeds
+                    setNotice(`Kept & seeding: ${truncate(cleanText(session.name), 32)}`);
                   } catch {
-                    // cross-device: fall back to a recursive copy then remove
-                    await fs.cp(from, to, { recursive: true }).catch(() => {});
-                    await fs.rm(from, { recursive: true, force: true }).catch(() => {});
+                    setNotice("Couldn't keep the download — files left in a temp folder.");
                   }
-                  startDownload(input); // queue.add verifies on-disk files + seeds
-                  setNotice(`Kept & seeding: ${truncate(cleanText(session.name), 32)}`);
                 })();
               }}
               onCancel={() => {
