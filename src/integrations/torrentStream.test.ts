@@ -101,4 +101,49 @@ describe("streamTorrent", () => {
     ).rejects.toThrow(/no peers|metadata|timed out/i);
     expect(rm).toHaveBeenCalledWith("/tmp/torlink-stream-timeout");
   });
+
+  it("rejects and removes the temp dir when the torrent errors before metadata", async () => {
+    const torrent = new EventEmitter() as any;
+    const client = {
+      add: (_magnet: string, _opts: unknown) => {
+        queueMicrotask(() => torrent.emit("error", new Error("swarm boom")));
+        return torrent;
+      },
+      createServer: () => fakeServer(),
+      get: () => torrent,
+      remove: (_i: string, cb?: () => void) => cb?.(),
+      destroy: (cb?: () => void) => cb?.(),
+    };
+    const rm = vi.fn(async () => {});
+    await expect(
+      streamTorrent("magnet:?x", {
+        createClient: () => client as any,
+        mkdtemp: async () => "/tmp/torlink-stream-error",
+        rm,
+      }),
+    ).rejects.toThrow(/swarm boom/);
+    expect(rm).toHaveBeenCalledWith("/tmp/torlink-stream-error");
+  });
+
+  it("rejects and removes the temp dir when the signal is aborted before metadata", async () => {
+    const torrent = new EventEmitter() as any; // never emits metadata
+    const client = {
+      add: () => torrent,
+      createServer: () => fakeServer(),
+      get: () => torrent,
+      remove: (_i: string, cb?: () => void) => cb?.(),
+      destroy: (cb?: () => void) => cb?.(),
+    };
+    const rm = vi.fn(async () => {});
+    const controller = new AbortController();
+    const promise = streamTorrent("magnet:?x", {
+      createClient: () => client as any,
+      mkdtemp: async () => "/tmp/torlink-stream-abort",
+      rm,
+      signal: controller.signal,
+    });
+    queueMicrotask(() => controller.abort());
+    await expect(promise).rejects.toThrow(/cancelled/i);
+    expect(rm).toHaveBeenCalledWith("/tmp/torlink-stream-abort");
+  });
 });
