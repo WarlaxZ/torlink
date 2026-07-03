@@ -9,7 +9,11 @@ export type SourceId =
   | "tpb-movies"
   | "tpb-tv"
   | "x1337-movies"
-  | "x1337-tv";
+  | "x1337-tv"
+  | "rt-games"
+  | "rt-movies"
+  | "rt-tv"
+  | "rt-anime";
 
 export type SourceGroup = "Games" | "Movies" | "TV" | "Anime";
 

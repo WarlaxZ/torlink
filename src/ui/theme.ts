@@ -43,6 +43,10 @@ export const SOURCE_STYLE: Record<SourceId, { tag: string; color: string }> = {
   "tpb-tv": { tag: "TPB", color: "#5fd0c5" },
   "x1337-movies": { tag: "1337", color: "#f6a55c" },
   "x1337-tv": { tag: "1337", color: "#f6a55c" },
+  "rt-games": { tag: "RUT", color: "#8fce5a" },
+  "rt-movies": { tag: "RUT", color: "#8fce5a" },
+  "rt-tv": { tag: "RUT", color: "#8fce5a" },
+  "rt-anime": { tag: "RUT", color: "#8fce5a" },
 };
 
 function rgb(hex: string): [number, number, number] {
