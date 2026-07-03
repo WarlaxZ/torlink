@@ -26,3 +26,11 @@ export async function cachedSearch(
   cache.set(k, { at: Date.now(), results });
   return results;
 }
+
+// Drop every cached entry whose source id starts with `prefix`. Used after a
+// RuTracker login so the next search re-fetches with the fresh session.
+export function clearCacheByPrefix(prefix: string): void {
+  for (const k of cache.keys()) {
+    if (k.startsWith(prefix)) cache.delete(k);
+  }
+}

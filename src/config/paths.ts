@@ -23,6 +23,8 @@ export const historyFile = path.join(dataDir, "history.json");
 
 export const seedsFile = path.join(dataDir, "seeds.json");
 
+export const rutrackerFile = path.join(dataDir, "rutracker.json");
+
 export const logFile = path.join(dataDir, "torlink.log");
 
 // Per-torrent .torrent metadata, captured during download so a re-seed can

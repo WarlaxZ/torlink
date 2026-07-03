@@ -336,6 +336,16 @@ export function Results() {
     return codes.length ? ` (${codes.join(", ")})` : "";
   };
 
+  // RuTracker sources fail closed with an auth error rather than an outage
+  // code, so nudge the user toward the login prompt instead of implying the
+  // site is down.
+  const authHint = (sources: readonly Source[]): string =>
+    sources.some(
+      (s) => s.id.startsWith("rt-") && /log in|login|session/i.test(search.perSource[s.id]?.error ?? ""),
+    )
+      ? " Sign in from the Accounts tab to search RuTracker."
+      : "";
+
   const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;
 
   const status = () => {
@@ -351,7 +361,7 @@ export function Results() {
         const downAll = enabled.filter((s) => search.perSource[s.id]?.error);
         return (
           <Text color={COLOR.warn}>
-            {`Couldn't reach any source. They may be down${outageCodes(downAll)}.`}
+            {`Couldn't reach any source. They may be down${outageCodes(downAll)}.${authHint(downAll)}`}
           </Text>
         );
       }
@@ -360,7 +370,7 @@ export function Results() {
         const who = down.length === 1 ? "The source" : `All ${down.length} sources`;
         return (
           <Text color={COLOR.warn}>
-            {`Couldn't reach ${activeCat.label}. ${who} may be down${outageCodes(down)}.`}
+            {`Couldn't reach ${activeCat.label}. ${who} may be down${outageCodes(down)}.${authHint(down)}`}
           </Text>
         );
       }

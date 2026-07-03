@@ -11,12 +11,12 @@ export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime";
 
-export type Section = Category | "downloads" | "seeding";
+export type Section = Category | "downloads" | "seeding" | "accounts";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
-// as opposed to the downloads/seeding views.
+// as opposed to the downloads/seeding/accounts views.
 export function isCategory(section: Section): boolean {
-  return section !== "downloads" && section !== "seeding";
+  return section !== "downloads" && section !== "seeding" && section !== "accounts";
 }
 
 export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[] = [
@@ -52,9 +52,8 @@ export interface Store {
   submitQuery: (q: string) => void;
   // Recently-run searches (most-recent first) for up-arrow recall.
   searchHistory: string[];
-  // Jump to the browser view and open the Real-Debrid token prompt (used by the
-  // splash CTA, where the token prompt itself isn't rendered).
-  openTokenPrompt: () => void;
+  // Jump to the browser view, select the Accounts pane, and focus it.
+  openAccounts: () => void;
 
   section: Section;
   setSection: (s: Section) => void;

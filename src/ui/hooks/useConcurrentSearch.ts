@@ -3,6 +3,7 @@ import { enabledSources } from "../../sources/registry";
 import { cachedSearch } from "../../sources/cache";
 import { isSkipped, recordFailure, recordSuccess, sourceHealth } from "../../sources/sourceHealth";
 import { HttpError } from "../../util/net";
+import { AuthRequiredError } from "../../sources/rutracker";
 import type { Source, SourceId, TorrentResult } from "../../sources/types";
 
 export interface SourceState {
@@ -16,6 +17,13 @@ function errorCode(e: unknown, timedOut: boolean): string {
   if (timedOut) return "timed out";
   if (e instanceof HttpError && e.status > 0) return `HTTP ${e.status}`;
   return "no response";
+}
+
+// An auth requirement (e.g. RuTracker not logged in) is not a source
+// outage — it must not bench the source, or a later successful login would
+// be hidden behind the failure cooldown. Timeouts and real errors still count.
+export function shouldBench(e: unknown): boolean {
+  return !(e instanceof AuthRequiredError);
 }
 
 export interface ConcurrentSearchState {
@@ -114,7 +122,9 @@ export function useConcurrentSearch(
             count: 0,
           };
           // A genuine failure (timeout or error) counts toward benching it.
-          recordFailure(sourceHealth, source.id, Date.now());
+          if (shouldBench(e)) {
+            recordFailure(sourceHealth, source.id, Date.now());
+          }
         })
         .finally(() => {
           clearTimeout(timer);

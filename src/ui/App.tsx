@@ -56,11 +56,22 @@ import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
+import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
+import { Accounts } from "./components/Accounts";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
 import type { SourceId } from "../sources/types";
+import {
+  login as rutrackerLogin,
+  getSession as getRutrackerSession,
+  loadSession as loadRutrackerSession,
+  clearSession as clearRutrackerSession,
+  type Captcha,
+} from "../sources/rutracker/session";
+import { clearRutrackerCache } from "../sources/rutracker";
+import { clearCacheByPrefix } from "../sources/cache";
 
 export interface DownloadInput {
   id: string;
@@ -120,6 +131,10 @@ export function App({
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
+  const [editingRutracker, setEditingRutracker] = useState(false);
+  const [rutrackerStatus, setRutrackerStatus] = useState<LoginStatus>({ kind: "idle" });
+  const [rutrackerCaptcha, setRutrackerCaptcha] = useState<Captcha | undefined>(undefined);
+  const [rutrackerUser, setRutrackerUser] = useState<string | undefined>(undefined);
   const [editingTrackers, setEditingTrackers] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
@@ -184,6 +199,10 @@ export function App({
       alive = false;
     };
   }, [initialMagnet, initialTorrent]);
+
+  useEffect(() => {
+    void loadRutrackerSession().then((s) => setRutrackerUser(s?.username));
+  }, []);
 
   useEffect(() => {
     if (!queue) return;
@@ -355,6 +374,13 @@ export function App({
     setEditingToken(true);
   }, []);
 
+  const openAccounts = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setSection("accounts");
+    setRegion("content");
+  }, []);
+
   const setRealDebridToken = useCallback(
     (raw: string) => {
       closeTokenPrompt();
@@ -410,7 +436,7 @@ export function App({
       if (!config || !queue) return;
       const token = resolveRealDebridToken(config);
       if (!token) {
-        setNotice("Set a Real-Debrid token first (press k).");
+        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
         return;
       }
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
@@ -466,7 +492,7 @@ export function App({
       if (preparing || streamFiles) return; // one prepare/pick at a time
       const token = resolveRealDebridToken(config);
       if (!token) {
-        setNotice("Set a Real-Debrid token first (press k).");
+        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
         return;
       }
       const label = truncate(cleanText(input.name), 32);
@@ -585,6 +611,67 @@ export function App({
     setDnsServers([]);
     setNotice("Using system DNS.");
   }, [config, setConfig]);
+
+  const openRutrackerPrompt = useCallback(() => {
+    setRutrackerCaptcha(undefined);
+    setRutrackerStatus({ kind: "idle" });
+    setRutrackerUser(getRutrackerSession()?.username);
+    setShowHelp(false);
+    setEditingRutracker(true);
+  }, []);
+
+  const closeRutrackerPrompt = useCallback(() => {
+    setEditingRutracker(false);
+    setRutrackerStatus({ kind: "idle" });
+    setRutrackerCaptcha(undefined);
+  }, []);
+
+  const signOutRutracker = useCallback(() => {
+    void clearRutrackerSession().then(() => {
+      setRutrackerUser(undefined);
+      clearRutrackerCache();
+      clearCacheByPrefix("rt-");
+      setNotice(`${ICON.done} Signed out of RuTracker`);
+    });
+  }, [setNotice]);
+
+  const submitRutrackerLogin = useCallback(
+    (username: string, password: string, captchaCode?: string) => {
+      setRutrackerStatus({ kind: "busy" });
+      const captchaAnswer =
+        rutrackerCaptcha && captchaCode
+          ? { sid: rutrackerCaptcha.sid, field: rutrackerCaptcha.field, code: captchaCode }
+          : undefined;
+      void rutrackerLogin(username, password, { captcha: captchaAnswer })
+        .then((outcome) => {
+          if (outcome.kind === "ok") {
+            setRutrackerUser(outcome.session.username);
+            clearRutrackerCache();
+            clearCacheByPrefix("rt-");
+            setNotice(`${ICON.done} Signed in to RuTracker`);
+            closeRutrackerPrompt();
+          } else if (outcome.kind === "captcha") {
+            setRutrackerCaptcha(outcome.captcha);
+            setRutrackerStatus({ kind: "idle" });
+          } else {
+            setRutrackerStatus({ kind: "error", message: outcome.message });
+          }
+        })
+        .catch((e: unknown) => {
+          setRutrackerStatus({
+            kind: "error",
+            message: e instanceof Error ? e.message : "Couldn't reach RuTracker.",
+          });
+        });
+    },
+    [rutrackerCaptcha, closeRutrackerPrompt],
+  );
+
+  const copyCaptchaLink = useCallback((url: string) => {
+    void writeClipboard(url).then((ok) =>
+      setNotice(ok ? `${ICON.done} Captcha link copied` : "Couldn't copy the captcha link."),
+    );
+  }, []);
 
   // The plain (P2P) download button: when Real-Debrid is configured, route
   // through a warning first since P2P exposes the user's IP to the swarm.
@@ -711,7 +798,7 @@ export function App({
       query,
       submitQuery,
       searchHistory: config.searchHistory ?? [],
-      openTokenPrompt,
+      openAccounts,
       section,
       setSection: changeSection,
       sort,
@@ -719,7 +806,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -752,7 +839,7 @@ export function App({
     view,
     query,
     submitQuery,
-    openTokenPrompt,
+    openAccounts,
     section,
     changeSection,
     sort,
@@ -764,6 +851,7 @@ export function App({
     editingPlayer,
     editingSources,
     editingDns,
+    editingRutracker,
     editingTrackers,
     toggleSource,
     pendingP2P,
@@ -800,6 +888,7 @@ export function App({
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
+      if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (streamFiles) return; // the file picker owns input
@@ -819,11 +908,6 @@ export function App({
       if (input === "o") {
         setShowHelp(false);
         setEditingFolder(true);
-        return;
-      }
-      if (input === "k") {
-        setShowHelp(false);
-        setEditingToken(true);
         return;
       }
       if (input === "S") {
@@ -979,6 +1063,20 @@ export function App({
           </Box>
         ) : null}
 
+        {editingRutracker ? (
+          <Box marginTop={1}>
+            <RutrackerPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              currentUser={rutrackerUser}
+              status={rutrackerStatus}
+              captcha={rutrackerCaptcha}
+              onSubmit={submitRutrackerLogin}
+              onCopyCaptcha={copyCaptchaLink}
+              onCancel={closeRutrackerPrompt}
+            />
+          </Box>
+        ) : null}
+
         {streamFiles ? (
           <Box marginTop={1}>
             <StreamFilePrompt
@@ -1031,7 +1129,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -1060,13 +1158,24 @@ export function App({
             >
               <Seeding />
             </Box>
+            <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
+              <Accounts
+                rdToken={resolveRealDebridToken(store.config)}
+                rdStatus={rdStatus}
+                rutrackerUser={rutrackerUser}
+                onManageRd={openTokenPrompt}
+                onSignOutRd={clearRealDebridToken}
+                onManageRutracker={openRutrackerPrompt}
+                onSignOutRutracker={signOutRutracker}
+              />
+            </Box>
           </Box>
         </Box>
 
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingTrackers || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }

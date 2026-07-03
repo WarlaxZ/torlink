@@ -6,6 +6,12 @@ import { torrentsCsv } from "./torrentscsv";
 import { tpbMovies, tpbTv } from "./piratebay";
 import { x1337Movies, x1337Tv } from "./x1337";
 import { yts } from "./yts";
+import {
+  rutrackerGames,
+  rutrackerMovies,
+  rutrackerTv,
+  rutrackerAnime,
+} from "./rutracker";
 import type { Source, SourceGroup, SourceId } from "./types";
 
 export const SOURCES: readonly Source[] = [
@@ -19,6 +25,10 @@ export const SOURCES: readonly Source[] = [
   x1337Tv,
   nyaa,
   subsplease,
+  rutrackerGames,
+  rutrackerMovies,
+  rutrackerTv,
+  rutrackerAnime,
 ];
 
 export const DEFAULT_SOURCE: Source = SOURCES[0]!;
