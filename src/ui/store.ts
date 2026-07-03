@@ -107,6 +107,10 @@ export interface Store {
   }) => void;
   // True when an RD token is available (config or env var).
   debridConfigured: boolean;
+  // True while a torrent-stream session is live. While true, "x" is reserved
+  // globally for stopping the stream, so components with their own "x"
+  // handler (clear history, sign out) must ignore it.
+  streamActive: boolean;
   // The validated Real-Debrid account, or null when unknown/not connected.
   rdStatus: RdStatus | null;
   // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.

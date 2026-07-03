@@ -13,6 +13,9 @@ export interface Config {
   // or an absolute path). Empty/unset falls back to auto-detection. A
   // TORLINK_PLAYER env var overrides it.
   mediaPlayer?: string;
+  // Set once the user has acknowledged that streaming via torrent exposes their
+  // IP to the swarm (the no-Real-Debrid path). Absent/false = not yet warned.
+  torrentStreamAck?: boolean;
   // Remembered UI preferences, so torlink reopens the way you left it. Both are
   // stored as opaque strings validated by the UI layer (parseSort/parseCategory)
   // so a hand-edited or stale value degrades gracefully to the default.

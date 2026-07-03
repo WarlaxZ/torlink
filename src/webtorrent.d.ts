@@ -44,6 +44,13 @@ declare module "webtorrent" {
     lsd?: boolean;
   }
 
+  interface TorrentServer {
+    listen(port?: number, hostname?: string, cb?: () => void): void;
+    address(): { port: number } | null;
+    close(cb?: () => void): void;
+    destroy(cb?: () => void): void;
+  }
+
   class WebTorrent extends EventEmitter {
     constructor(opts?: WebTorrentOptions);
     readonly torrents: Torrent[];
@@ -63,8 +70,9 @@ declare module "webtorrent" {
     get(torrentId: string): Torrent | null;
     remove(torrentId: string, cb?: (err?: Error) => void): void;
     destroy(cb?: (err?: Error) => void): void;
+    createServer(opts?: { hostname?: string; pathname?: string }): TorrentServer;
   }
 
   export default WebTorrent;
-  export type { Torrent, TorrentFile };
+  export type { Torrent, TorrentFile, TorrentServer };
 }

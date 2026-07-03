@@ -1,5 +1,6 @@
 import { fetchResilient, HttpError, USER_AGENT, type FetchImpl } from "../util/net";
 import { log } from "../util/logger";
+import type { StreamFile } from "../util/player";
 
 export type RealDebridFetch = FetchImpl;
 
@@ -17,11 +18,9 @@ const DEFAULT_POLL_MS = 2000;
 // counts — a torrent that keeps making progress is never timed out.
 const DEFAULT_STALL_MS = 180_000;
 
-export interface ResolvedFile {
-  url: string;
-  filename: string;
-  bytes: number;
-}
+// A resolved, directly-fetchable file (Real-Debrid direct link, or a
+// local torrent-stream URL). Structurally identical to StreamFile.
+export type ResolvedFile = StreamFile;
 
 export interface RealDebridUser {
   username: string;
