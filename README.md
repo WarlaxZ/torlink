@@ -26,7 +26,7 @@ This is a fork, so it isn't published to npm — you build it from source once, 
    npm start
    ```
 
-torlink opens straight to a search bar: search for what you want, paste in a magnet link, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
+That's the only thing you'll type. torlink opens straight to a search bar: search for what you want, paste in a magnet link or a bare infohash, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
 
 ## Finding something
 
@@ -69,7 +69,7 @@ A short, hand-picked list of trusted sources:
 | --- | --- |
 | Games | FitGirl |
 | Movies | YTS, The Pirate Bay, 1337x, Torrents.csv |
-| TV | EZTV, SolidTorrents, The Pirate Bay, 1337x |
+| TV | EZTV, The Pirate Bay, 1337x |
 | Anime | Nyaa, SubsPlease |
 
 Games are the only category that can run code, so they come from FitGirl alone, a repacker with a long, trusted track record; everything else is plain video and subtitles. If a source is down, the search carries on without it, and torlink tells you which one is offline. A source that keeps failing is set aside automatically for a while so it stops slowing searches down; you can also switch sources on and off yourself with `Shift+S`.

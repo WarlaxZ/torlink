@@ -23,7 +23,14 @@ describe("parseCliArgs", () => {
       initialTorrent: "./Foo.torrent",
     });
   });
+  it("launches a bare infohash as a magnet (DHT)", () => {
+    const hash = "abcdef0123456789abcdef0123456789abcdef01";
+    expect(parseCliArgs([hash])).toEqual({ kind: "run", initialMagnet: hash });
+  });
   it("rejects unknown arguments", () => {
     expect(parseCliArgs(["--nope"])).toEqual({ kind: "invalid", arg: "--nope" });
+  });
+  it("rejects a non-hash bareword", () => {
+    expect(parseCliArgs(["hello"])).toEqual({ kind: "invalid", arg: "hello" });
   });
 });

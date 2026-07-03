@@ -59,3 +59,25 @@ export function parseMagnet(input: string): ParsedMagnet | null {
   } catch {}
   return { infoHash, name, magnet: s };
 }
+
+// Anchored to the whole input so an ordinary search query is never mistaken for a
+// hash: only a string that is *nothing but* a 40-char hex or 32-char base32 info
+// hash counts. Same character classes as MAGNET_RE's xt group.
+const INFOHASH_RE = /^([a-f0-9]{40}|[a-z2-7]{32})$/i;
+
+export function isInfoHash(input: string): boolean {
+  return INFOHASH_RE.test(input.trim());
+}
+
+// Accepts either a magnet URI or a bare info hash. A bare hash is normalized and
+// wrapped with the default public trackers via buildMagnet, so it downloads over
+// the DHT (enabled by default in the Node client) plus those trackers, exactly
+// like any other magnet. Returns null for anything that is neither.
+export function parseInput(input: string): ParsedMagnet | null {
+  const s = input.trim();
+  const magnet = parseMagnet(s);
+  if (magnet) return magnet;
+  if (!isInfoHash(s)) return null;
+  const infoHash = normalizeInfoHash(s);
+  return { infoHash, name: infoHash, magnet: buildMagnet(infoHash, infoHash) };
+}
