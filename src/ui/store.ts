@@ -11,7 +11,7 @@ export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime";
 
-export type Section = Category | "downloads" | "seeding";
+export type Section = Category | "downloads" | "seeding" | "accounts";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
 // as opposed to the downloads/seeding views.
@@ -55,6 +55,8 @@ export interface Store {
   // Jump to the browser view and open the Real-Debrid token prompt (used by the
   // splash CTA, where the token prompt itself isn't rendered).
   openTokenPrompt: () => void;
+  // Jump to the browser view, select the Accounts pane, and focus it.
+  openAccounts: () => void;
 
   section: Section;
   setSection: (s: Section) => void;

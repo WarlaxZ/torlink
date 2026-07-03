@@ -344,6 +344,13 @@ export function App({
     setEditingToken(true);
   }, []);
 
+  const openAccounts = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setSection("accounts");
+    setRegion("content");
+  }, []);
+
   const setRealDebridToken = useCallback(
     (raw: string) => {
       closeTokenPrompt();
@@ -753,6 +760,7 @@ export function App({
       submitQuery,
       searchHistory: config.searchHistory ?? [],
       openTokenPrompt,
+      openAccounts,
       section,
       setSection: changeSection,
       sort,
@@ -794,6 +802,7 @@ export function App({
     query,
     submitQuery,
     openTokenPrompt,
+    openAccounts,
     section,
     changeSection,
     sort,
