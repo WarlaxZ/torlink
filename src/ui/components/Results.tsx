@@ -158,6 +158,7 @@ export function Results() {
   const {
     query,
     submitQuery,
+    searchHistory,
     section,
     region,
     setRegion,
@@ -397,6 +398,7 @@ export function Results() {
         value={query}
         editing={mode === "search"}
         placeholder={PLACEHOLDER}
+        history={searchHistory}
         onSubmit={onSubmit}
         onExitDown={() => setMode("list")}
         onExitLeft={() => setRegion("sidebar")}

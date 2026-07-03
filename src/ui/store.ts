@@ -50,6 +50,8 @@ export interface Store {
   setView: (v: View) => void;
   query: string;
   submitQuery: (q: string) => void;
+  // Recently-run searches (most-recent first) for up-arrow recall.
+  searchHistory: string[];
   // Jump to the browser view and open the Real-Debrid token prompt (used by the
   // splash CTA, where the token prompt itself isn't rendered).
   openTokenPrompt: () => void;

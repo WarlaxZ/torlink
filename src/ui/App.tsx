@@ -33,6 +33,7 @@ import {
   type View,
 } from "./store";
 import { formatSort, parseSort, type Sort } from "./sort";
+import { addToHistory } from "./searchHistory";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
@@ -548,6 +549,16 @@ export function App({
         }
       }
       setQuery(q);
+      if (q) {
+        // Record the search for up-arrow recall. Functional update so it always
+        // extends the latest persisted history, never a stale snapshot.
+        setConfigState((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev, searchHistory: addToHistory(prev.searchHistory ?? [], q) };
+          void saveConfig(next);
+          return next;
+        });
+      }
       setView("browser");
       if (section === "downloads") setSection("all");
       setRegion("content");
@@ -611,6 +622,7 @@ export function App({
       setView,
       query,
       submitQuery,
+      searchHistory: config.searchHistory ?? [],
       openTokenPrompt,
       section,
       setSection: changeSection,

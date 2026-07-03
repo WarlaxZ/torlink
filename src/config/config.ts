@@ -17,6 +17,9 @@ export interface Config {
   // so a hand-edited or stale value degrades gracefully to the default.
   sort?: string;
   category?: string;
+  // Recently-run searches (most-recent first) for up-arrow recall in the
+  // search bar.
+  searchHistory?: string[];
 }
 
 export const defaultConfig: Config = {
