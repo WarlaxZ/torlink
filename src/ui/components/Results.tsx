@@ -7,11 +7,11 @@ import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { getSource, enabledSources } from "../../sources/registry";
-import { wrapStep, windowStart } from "../move";
+import { wrapStep, windowStart, resultsPanelOuter } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
-import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
+import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
-import { cleanText, formatBytes, formatRelative, truncate } from "../../util/format";
+import { cleanText, formatBytes, formatCount, formatRelative, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
 
 type Mode = "list" | "search" | "detail";
@@ -56,7 +56,7 @@ function Detail({
   debridConfigured: boolean;
   mark: { icon: string; color?: string; dim?: boolean } | null;
 }) {
-  const ss = SOURCE_STYLE[r.source];
+  const ss = sourceStyle(r.source);
   const date = formatRelative(r.added);
   const health =
     r.seeders || r.leechers ? (
@@ -228,7 +228,7 @@ export function Results() {
   const clamped = Math.min(cursor, Math.max(0, results.length - 1));
 
   const searchH = 3;
-  const panelOuter = Math.max(5, listRows - searchH - 1);
+  const panelOuter = resultsPanelOuter(listRows, searchH);
   const listHeight = Math.max(3, panelOuter - 4);
   const pageJump = Math.max(1, listHeight - 1);
 
@@ -255,13 +255,13 @@ export function Results() {
         setMode("search");
         return;
       }
-      if (key.upArrow) {
+      if (key.upArrow || input === "k") {
         if (results.length > 0 && clamped > 0) setCursor(clamped - 1);
         else setMode("search");
         return;
       }
       if (results.length === 0) return;
-      if (key.downArrow) setCursor(wrapStep(clamped, 1, results.length));
+      if (key.downArrow || input === "j") setCursor(wrapStep(clamped, 1, results.length));
       else if (key.pageUp) setCursor(Math.max(0, clamped - pageJump));
       else if (key.pageDown) setCursor(Math.min(results.length - 1, clamped + pageJump));
       else if (key.return) {
@@ -466,7 +466,7 @@ export function Results() {
                 {visible.map((r, i) => {
                   const index = start + i;
                   const here = index === clamped && focused && mode === "list";
-                  const ss = SOURCE_STYLE[r.source];
+                  const ss = sourceStyle(r.source);
                   return (
                     <Box key={r.infoHash}>
                       <Box width={GUTTER} flexShrink={0}>
@@ -498,7 +498,9 @@ export function Results() {
                           </Box>
                           <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end">
                             <Text color={r.seeders > 0 ? COLOR.good : undefined} dimColor={r.seeders === 0}>
-                              {r.seeders || r.leechers ? `${r.seeders}:${r.leechers}` : "-"}
+                              {r.seeders || r.leechers
+                                ? `${formatCount(r.seeders)}:${formatCount(r.leechers)}`
+                                : "-"}
                             </Text>
                           </Box>
                         </>

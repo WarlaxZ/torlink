@@ -26,7 +26,7 @@ This is a fork, so it isn't published to npm — you build it from source once, 
    npm start
    ```
 
-torlink opens straight to a search bar: search for what you want, paste in a magnet link, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
+That's the only thing you'll type. torlink opens straight to a search bar: search for what you want, paste in a magnet link or a bare infohash, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
 
 ## Finding something
 
@@ -69,7 +69,7 @@ A short, hand-picked list of trusted sources:
 | --- | --- |
 | Games | FitGirl |
 | Movies | YTS, The Pirate Bay, 1337x, Torrents.csv |
-| TV | EZTV, SolidTorrents, The Pirate Bay, 1337x |
+| TV | EZTV, The Pirate Bay, 1337x |
 | Anime | Nyaa, SubsPlease |
 
 **RuTracker** is available across Games, Movies, TV, and Anime and requires a free account. Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.

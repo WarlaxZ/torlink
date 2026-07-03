@@ -3,6 +3,7 @@ import {
   formatBytes,
   parseSize,
   formatBytesPerSec,
+  formatCount,
   formatRelative,
   formatEtaShort,
   cleanText,
@@ -32,6 +33,29 @@ describe("formatBytesPerSec", () => {
   it("formats rates and blanks zero", () => {
     expect(formatBytesPerSec(0)).toBe("");
     expect(formatBytesPerSec(5.2e6)).toMatch(/MB\/s$/);
+  });
+});
+
+describe("formatCount", () => {
+  it("passes small counts through untouched", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(742)).toBe("742");
+    expect(formatCount(9999)).toBe("9999");
+  });
+
+  it("compacts large counts to k/m", () => {
+    expect(formatCount(11500)).toBe("12k");
+    expect(formatCount(10639)).toBe("11k");
+    expect(formatCount(999_400)).toBe("999k");
+    expect(formatCount(999_600)).toBe("1m");
+    expect(formatCount(1_500_000)).toBe("1.5m");
+    expect(formatCount(12_000_000)).toBe("12m");
+  });
+
+  it("never exceeds 4 characters so seed:leech fits its column", () => {
+    for (const n of [9999, 10_000, 99_499, 999_499, 999_999, 9_949_999, 999_000_000]) {
+      expect(formatCount(n).length).toBeLessThanOrEqual(4);
+    }
   });
 });
 

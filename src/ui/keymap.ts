@@ -14,13 +14,14 @@ export const HELP_GROUPS: HelpGroup[] = [
   {
     title: "Navigate",
     hints: [
-      { keys: "↑ ↓ ← →", label: "Navigate content and panes" },
+      { keys: "↑ ↓ ← →, h j k l", label: "Navigate content and panes" },
       { keys: "↵", label: "Open" },
       { keys: "tab", label: "Switch pane" },
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Download folder" },
       { keys: "S", label: "Choose sources" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
+      { keys: "t", label: "Extra trackers" },
       { keys: "q", label: "Quit" },
     ],
   },

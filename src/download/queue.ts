@@ -91,6 +91,14 @@ export class DownloadQueue extends EventEmitter {
   private debridDeps: DebridDeps = defaultDebridDeps;
   private debridSem = new Semaphore(MAX_ACTIVE_DEBRID);
   private debridAttempts = new Map<string, number>();
+  private trackers: string[] = [];
+
+  // Extra announce URLs appended to every torrent added from now on.
+  // Existing running torrents aren't retro-updated — the change takes effect
+  // for the next add / resume / re-seed.
+  setTrackers(trackers: string[]): void {
+    this.trackers = trackers;
+  }
 
   getItems(): QueueItem[] {
     return [...this.items.values()].sort((a, b) => b.addedAt - a.addedAt);
@@ -140,7 +148,7 @@ export class DownloadQueue extends EventEmitter {
   }
 
   private startEngine(item: QueueItem): void {
-    this.engine.add(item.id, item.magnet, item.dir, this.engineHandlers(item.id));
+    this.engine.add(item.id, item.magnet, item.dir, this.engineHandlers(item.id), this.trackers);
   }
 
   // Keep the queue's notion of the current Real-Debrid token in sync with config
@@ -686,7 +694,7 @@ export class DownloadQueue extends EventEmitter {
     // Seed from the stored .torrent metadata when we have it (verifies the local
     // file immediately, no swarm needed); fall back to the magnet otherwise.
     const source = torrentMetaExists(h.id) ? torrentMetaPath(h.id) : h.magnet;
-    this.engine.add(h.id, source, h.dir, this.engineHandlers(h.id));
+    this.engine.add(h.id, source, h.dir, this.engineHandlers(h.id), this.trackers);
     this.ensurePoll();
     this.changed();
     void this.persistSeeds();

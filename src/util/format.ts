@@ -40,6 +40,15 @@ export function formatBytesPerSec(bytes?: number): string {
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
+export function formatCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n < 10_000) return String(Math.round(n));
+  const k = Math.round(n / 1_000);
+  if (k < 1_000) return `${k}k`;
+  const m = n / 1_000_000;
+  return m < 10 ? `${m.toFixed(1).replace(/\.0$/, "")}m` : `${Math.round(m)}m`;
+}
+
 export function formatRelative(unixSeconds?: number): string {
   if (!unixSeconds || !Number.isFinite(unixSeconds) || unixSeconds <= 0) return "";
   const diff = Date.now() / 1000 - unixSeconds;
