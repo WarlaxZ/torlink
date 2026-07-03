@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { Panel } from "./Panel";
 import { sourcesByGroup } from "../../sources/registry";
+import { isSkipped, sourceHealth } from "../../sources/sourceHealth";
 import { wrapStep } from "../move";
 import { COLOR, ICON, SOURCE_STYLE } from "../theme";
 import type { SourceId } from "../../sources/types";
@@ -45,6 +46,9 @@ export function SourcesPrompt({ width, disabled, onToggle, onCancel }: SourcesPr
               const on = !disabled.includes(src.id);
               const selected = i === clamped;
               const ss = SOURCE_STYLE[src.id];
+              // Auto-benched for repeated failures (only worth showing while the
+              // source is otherwise enabled).
+              const skipped = on && isSkipped(sourceHealth, src.id, Date.now());
               return (
                 <Box key={src.id}>
                   <Text color={selected ? COLOR.accent : undefined}>
@@ -55,6 +59,7 @@ export function SourcesPrompt({ width, disabled, onToggle, onCancel }: SourcesPr
                     {` ${src.label}`}
                   </Text>
                   <Text color={ss.color} dimColor={!on}>{`  ${ss.tag}`}</Text>
+                  {skipped ? <Text color={COLOR.warn} dimColor>{`  ${ICON.warn} unreachable`}</Text> : null}
                 </Box>
               );
             })}

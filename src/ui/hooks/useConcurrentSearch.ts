@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { enabledSources } from "../../sources/registry";
 import { cachedSearch } from "../../sources/cache";
+import { isSkipped, recordFailure, recordSuccess, sourceHealth } from "../../sources/sourceHealth";
 import { HttpError } from "../../util/net";
 import type { Source, SourceId, TorrentResult } from "../../sources/types";
 
@@ -75,18 +76,22 @@ export function useConcurrentSearch(
     const ctrl = new AbortController();
     let alive = true;
     const collected: TorrentResult[] = [];
-    const per = blankPerSource(sources, true);
+    // Skip sources that are currently benched for repeated failures, so a dead
+    // source doesn't stall every search on its timeout. They come back on their
+    // own once the cooldown lapses.
+    const active = sources.filter((s) => !isSkipped(sourceHealth, s.id, Date.now()));
+    const per = blankPerSource(active, true);
     let done = 0;
 
     setState({
       results: [],
       perSource: { ...per },
-      loading: sources.length > 0,
+      loading: active.length > 0,
       done: 0,
-      total: sources.length,
+      total: active.length,
     });
 
-    for (const source of sources) {
+    for (const source of active) {
       const sc = new AbortController();
       const onAbort = (): void => sc.abort();
       ctrl.signal.addEventListener("abort", onAbort);
@@ -97,6 +102,7 @@ export function useConcurrentSearch(
           if (!alive) return;
           collected.push(...res);
           per[source.id] = { loading: false, error: null, code: null, count: res.length };
+          recordSuccess(sourceHealth, source.id);
         })
         .catch((e: unknown) => {
           if (!alive || ctrl.signal.aborted) return;
@@ -107,6 +113,8 @@ export function useConcurrentSearch(
             code: errorCode(e, timedOut),
             count: 0,
           };
+          // A genuine failure (timeout or error) counts toward benching it.
+          recordFailure(sourceHealth, source.id, Date.now());
         })
         .finally(() => {
           clearTimeout(timer);
@@ -116,9 +124,9 @@ export function useConcurrentSearch(
           setState({
             results: defaultOrder(dedupe(collected.slice())),
             perSource: { ...per },
-            loading: done < sources.length,
+            loading: done < active.length,
             done,
-            total: sources.length,
+            total: active.length,
           });
         });
     }
