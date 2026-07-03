@@ -48,16 +48,24 @@ Downloads run in the background while you keep searching, so you can queue up as
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
+## Streaming
+
+Don't want to wait for a download? Press **`v`** on a movie or an episode and torlink opens the largest video file straight in your media player while it downloads. The first time it'll ask which player to use (`mpv`, `iina`, `vlc`, or a path); after that it just plays. You can set one ahead of time with `TORLINK_PLAYER`.
+
+Without Real-Debrid, streaming runs **peer-to-peer** through a local server — the pieces you're watching download to a temporary folder as they play. Because that connects you straight to the swarm, torlink warns you once that your IP is visible to peers before the first torrent stream. While it plays, a banner shows the active stream; press **`x`** to stop. If the file finished downloading by the time you stop, torlink offers to **keep** it — moving it into your downloads folder to seed — otherwise the temporary copy is cleaned up.
+
+With a Real-Debrid account connected (below), `v` streams from Real-Debrid's servers instead: faster, no waiting on seeders, and your IP never touches the swarm. torlink takes that route automatically whenever your account is active, and only falls back to a torrent stream if you confirm it — so setting up Real-Debrid never quietly drops you onto peer-to-peer.
+
 ## Real-Debrid (optional)
 
 torlink works great on its own, but if you have a [Real-Debrid](https://real-debrid.com) account you can plug it in for a noticeably better ride. Real-Debrid pulls the torrent onto its own servers and hands you back a plain, direct download. That means full speed even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because Real-Debrid does the torrenting, not you — your IP never touches the network.
 
 To connect it, open the **Accounts** tab in the sidebar (alongside Downloads and Seeding), select Real-Debrid, paste your API token from [real-debrid.com/apitoken](https://real-debrid.com/apitoken), and torlink checks it and remembers it. (Prefer to keep the token off disk? Set `REALDEBRID_API_TOKEN` in your environment instead and torlink picks it up.)
 
-Once it's connected, every result gains two new moves:
+Once it's connected, downloading and streaming get an upgrade:
 
 - **`r` — download via Real-Debrid.** torlink hands the magnet to Real-Debrid, waits for it to be ready, and downloads the direct link straight to your folder. If it's already in Real-Debrid's cache it's basically instant. The plain `d` download still works exactly as before, but now it warns you first, since that route is peer-to-peer and exposes your IP.
-- **`v` — stream it.** For a movie or an episode, skip the download entirely: torlink resolves the largest video file and opens it in your media player. The first time, it'll ask which player to use (`mpv`, `iina`, `vlc`, or a path); after that it just plays. You can also set one ahead of time with `TORLINK_PLAYER`.
+- **`v` — stream via Real-Debrid.** [Streaming](#streaming) now routes through Real-Debrid's servers instead of the swarm — full-speed even with no seeders, and your IP stays private. If Real-Debrid can't prepare it (or your premium's lapsed), torlink tells you and offers a torrent stream instead rather than switching to peer-to-peer on its own.
 
 Real-Debrid torrents are fetched, not seeded, so they land in Recently downloaded and never join the Seeding tab. Heads up: Real-Debrid's torrent features need an active **premium** account — torlink will tell you if yours isn't.
 
