@@ -8,6 +8,7 @@ interface SearchBarProps {
   value: string;
   placeholder?: string;
   editing: boolean;
+  history?: string[];
   onSubmit: (value: string) => void;
   onChange?: (value: string) => void;
   onExitDown?: () => void;
@@ -19,6 +20,7 @@ export function SearchBar({
   value,
   placeholder = "Search torrents…",
   editing,
+  history,
   onSubmit,
   onChange,
   onExitDown,
@@ -33,6 +35,7 @@ export function SearchBar({
             <TextField
               defaultValue={value}
               placeholder={placeholder}
+              history={history}
               onSubmit={onSubmit}
               onChange={onChange}
               onExitDown={onExitDown}

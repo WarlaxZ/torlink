@@ -5,6 +5,7 @@ import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
 import type { RdStatus } from "../integrations/rdStatus";
+import type { Sort } from "./sort";
 
 export type View = "splash" | "browser";
 
@@ -26,6 +27,12 @@ export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[]
   { key: "anime", label: "Anime", group: "Anime" },
 ];
 
+// Parse a persisted category preference, falling back to "all" for anything
+// that isn't a known result category (unknown values, or downloads/seeding).
+export function parseCategory(raw: string | undefined): Category {
+  return CATEGORIES.some((c) => c.key === raw) ? (raw as Category) : "all";
+}
+
 export type Region = "sidebar" | "content" | "help";
 
 export type CaptureMode = "none" | "text" | "esc";
@@ -43,12 +50,20 @@ export interface Store {
   setView: (v: View) => void;
   query: string;
   submitQuery: (q: string) => void;
+  // Recently-run searches (most-recent first) for up-arrow recall.
+  searchHistory: string[];
   // Jump to the browser view and open the Real-Debrid token prompt (used by the
   // splash CTA, where the token prompt itself isn't rendered).
   openTokenPrompt: () => void;
 
   section: Section;
   setSection: (s: Section) => void;
+  // The active results sort, persisted across launches.
+  sort: Sort;
+  setSort: (s: Sort) => void;
+  // Sources the user has switched off (skipped during search), and a toggle.
+  disabledSources: SourceId[];
+  toggleSource: (id: SourceId) => void;
   region: Region;
   setRegion: (r: Region) => void;
   captureMode: CaptureMode;

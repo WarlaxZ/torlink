@@ -11,7 +11,7 @@ const CATEGORIES = sourcesByGroup()
   .join(`  ${ICON.dot}  `);
 
 export function Splash() {
-  const { submitQuery, quitAll, cols, rows, debridConfigured, rdStatus, openTokenPrompt } = useStore();
+  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, openTokenPrompt } = useStore();
   const { isRawModeSupported } = useStdin();
 
   useInput(
@@ -64,6 +64,7 @@ export function Splash() {
           value=""
           editing
           placeholder="Search or paste a magnet link…"
+          history={searchHistory}
           onSubmit={submitQuery}
         />
       </Box>

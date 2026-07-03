@@ -6,8 +6,10 @@ import {
   saveConfig,
   resolveRealDebridToken,
   resolveMediaPlayer,
+  resolveDnsServers,
   type Config,
 } from "../config/config";
+import { setDnsServers } from "../util/dns";
 import { normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
@@ -21,7 +23,7 @@ import { parseMagnet } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { cleanText, truncate } from "../util/format";
-import { isCategory } from "./store";
+import { isCategory, parseCategory } from "./store";
 import {
   StoreContext,
   type CaptureMode,
@@ -32,6 +34,9 @@ import {
   type Store,
   type View,
 } from "./store";
+import { formatSort, parseSort, type Sort } from "./sort";
+import { addToHistory } from "./searchHistory";
+import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
@@ -49,6 +54,7 @@ import { TokenPrompt } from "./components/TokenPrompt";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
+import { SourcesPrompt } from "./components/SourcesPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -101,6 +107,7 @@ export function App({
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
+  const [sort, setSortState] = useState<Sort>("none");
   const [region, setRegion] = useState<Region>("content");
   const [captureMode, setCaptureMode] = useState<CaptureMode>("none");
   const [downloadFocus, setDownloadFocus] = useState<DownloadFocus | null>(null);
@@ -109,6 +116,7 @@ export function App({
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState(false);
+  const [editingSources, setEditingSources] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -133,6 +141,11 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      // Apply any custom DNS before the first network call (e.g. token check).
+      setDnsServers(resolveDnsServers(cfg));
+      // Restore remembered UI preferences (validated, so stale values degrade
+      // to defaults rather than throwing).
+      setSortState(parseSort(cfg.sort));
       const launchToken = resolveRealDebridToken(cfg);
       if (launchToken) {
         void validateToken(launchToken)
@@ -158,6 +171,8 @@ export function App({
         setView("browser");
         setSection("downloads");
         setRegion("content");
+      } else {
+        setSection(parseCategory(cfg.category));
       }
     })();
     return () => {
@@ -224,6 +239,54 @@ export function App({
   const setConfig = useCallback((c: Config) => {
     setConfigState(c);
     void saveConfig(c);
+  }, []);
+
+  // Merge a small patch into config and persist it, skipping the write when
+  // nothing actually changed (so idle navigation doesn't churn the disk).
+  const persistConfig = useCallback((patch: Partial<Config>) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const changed = (Object.keys(patch) as (keyof Config)[]).some(
+        (k) => prev[k] !== patch[k],
+      );
+      if (!changed) return prev;
+      const next = { ...prev, ...patch };
+      void saveConfig(next);
+      return next;
+    });
+  }, []);
+
+  // Change the sort and remember it for next launch.
+  const setSort = useCallback(
+    (s: Sort) => {
+      setSortState(s);
+      persistConfig({ sort: formatSort(s) });
+    },
+    [persistConfig],
+  );
+
+  // Change the section; remember the last *category* so torlink reopens on it
+  // (downloads/seeding are transient and never persisted).
+  const changeSection = useCallback(
+    (s: Section) => {
+      setSection(s);
+      if (isCategory(s)) persistConfig({ category: s });
+    },
+    [persistConfig],
+  );
+
+  // Flip a source on/off and persist. Functional update so concurrent toggles
+  // always build on the latest list.
+  const toggleSource = useCallback((id: SourceId) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const next = {
+        ...prev,
+        disabledSources: toggleDisabledSource((prev.disabledSources ?? []) as SourceId[], id),
+      };
+      void saveConfig(next);
+      return next;
+    });
   }, []);
 
   const closeFolderPrompt = useCallback(() => {
@@ -507,6 +570,16 @@ export function App({
         }
       }
       setQuery(q);
+      if (q) {
+        // Record the search for up-arrow recall. Functional update so it always
+        // extends the latest persisted history, never a stale snapshot.
+        setConfigState((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev, searchHistory: addToHistory(prev.searchHistory ?? [], q) };
+          void saveConfig(next);
+          return next;
+        });
+      }
       setView("browser");
       if (section === "downloads") setSection("all");
       setRegion("content");
@@ -570,11 +643,16 @@ export function App({
       setView,
       query,
       submitQuery,
+      searchHistory: config.searchHistory ?? [],
       openTokenPrompt,
       section,
-      setSection,
+      setSection: changeSection,
+      sort,
+      setSort,
+      disabledSources: (config.disabledSources ?? []) as SourceId[],
+      toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
           ? "help"
           : region,
       setRegion,
@@ -609,11 +687,16 @@ export function App({
     submitQuery,
     openTokenPrompt,
     section,
+    changeSection,
+    sort,
+    setSort,
     region,
     showHelp,
     editingFolder,
     editingToken,
     editingPlayer,
+    editingSources,
+    toggleSource,
     pendingP2P,
     streamFiles,
     preparing,
@@ -646,6 +729,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
+      if (editingSources) return; // the sources panel owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
@@ -669,6 +753,11 @@ export function App({
       if (input === "k") {
         setShowHelp(false);
         setEditingToken(true);
+        return;
+      }
+      if (input === "S") {
+        setShowHelp(false);
+        setEditingSources(true);
         return;
       }
       if (input === "m") {
@@ -786,6 +875,17 @@ export function App({
           </Box>
         ) : null}
 
+        {editingSources ? (
+          <Box marginTop={1}>
+            <SourcesPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              disabled={(store.config.disabledSources ?? []) as SourceId[]}
+              onToggle={toggleSource}
+              onCancel={() => setEditingSources(false)}
+            />
+          </Box>
+        ) : null}
+
         {streamFiles ? (
           <Box marginTop={1}>
             <StreamFilePrompt
@@ -827,7 +927,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
               ? "none"
               : "flex"
           }
@@ -862,7 +962,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || pendingP2P || streamFiles || preparing
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || pendingP2P || streamFiles || preparing
                 ? "none"
                 : "flex"
             }

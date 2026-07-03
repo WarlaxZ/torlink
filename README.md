@@ -60,7 +60,17 @@ A short, hand-picked list of trusted sources:
 | TV | EZTV, SolidTorrents, The Pirate Bay, 1337x |
 | Anime | Nyaa, SubsPlease |
 
-Games are the only category that can run code, so they come from FitGirl alone, a repacker with a long, trusted track record; everything else is plain video and subtitles. If a source is down, the search carries on without it, and torlink tells you which one is offline.
+Games are the only category that can run code, so they come from FitGirl alone, a repacker with a long, trusted track record; everything else is plain video and subtitles. If a source is down, the search carries on without it, and torlink tells you which one is offline. A source that keeps failing is set aside automatically for a while so it stops slowing searches down; you can also switch sources on and off yourself with `Shift+S`.
+
+### Blocked by your network?
+
+Some networks (ISPs, work Wi-Fi, some routers) quietly block torrent sites at the DNS level, so every source looks offline. If that's happening, point torlink's own lookups at a public resolver over DNS-over-HTTPS — it doesn't touch the rest of your system:
+
+```sh
+TORLINK_DNS=cloudflare npx torlnk
+```
+
+`cloudflare`, `google`, and `quad9` are recognised, or pass resolver IPs directly (e.g. `TORLINK_DNS=1.1.1.1,1.0.0.1`). You can also set `"dnsServers"` in the config file to make it stick.
 
 ## Contributing
 

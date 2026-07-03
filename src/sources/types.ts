@@ -5,6 +5,7 @@ export type SourceId =
   | "nyaa"
   | "subsplease"
   | "solid"
+  | "torrents-csv"
   | "tpb-movies"
   | "tpb-tv"
   | "x1337-movies"

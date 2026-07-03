@@ -6,9 +6,9 @@ import { SearchBar } from "./SearchBar";
 import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
-import { getSource, SOURCES } from "../../sources/registry";
+import { getSource, enabledSources } from "../../sources/registry";
 import { wrapStep, windowStart } from "../move";
-import { sortResults, nextSort, sortLabel, sortArrow, type Sort, type SortField } from "../sort";
+import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
 import { COLOR, GUTTER, ICON, PAUSED, SOURCE_STYLE } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatRelative, truncate } from "../../util/format";
@@ -158,6 +158,8 @@ export function Results() {
   const {
     query,
     submitQuery,
+    searchHistory,
+    disabledSources,
     section,
     region,
     setRegion,
@@ -170,16 +172,18 @@ export function Results() {
     contentWidth,
     listRows,
     queue,
+    sort,
+    setSort,
   } = useStore();
 
-  const search = useConcurrentSearch(query);
+  const search = useConcurrentSearch(query, disabledSources);
+  const enabled = useMemo(() => enabledSources(disabledSources), [disabledSources]);
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);
   const stateFor = (hash: string): DownloadState | null =>
     downloadStateFor(hash, queueItems, queueHistory);
 
-  const [sort, setSort] = useState<Sort>("none");
   const results = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.key === section);
     const base = cat?.group
@@ -279,7 +283,7 @@ export function Results() {
         const r = results[clamped];
         if (r) copyResultMagnet(r);
       } else if (input === "s") {
-        setSort((cur) => nextSort(cur));
+        setSort(nextSort(sort));
       }
     },
     { isActive: focused && mode === "list" },
@@ -316,7 +320,7 @@ export function Results() {
     [search.perSource],
   );
   const activeCat = CATEGORIES.find((c) => c.key === section);
-  const tabSources = activeCat?.group ? SOURCES.filter((s) => s.group === activeCat.group) : SOURCES;
+  const tabSources = activeCat?.group ? enabled.filter((s) => s.group === activeCat.group) : enabled;
   const tabErrored =
     tabSources.length > 0 && tabSources.every((s) => search.perSource[s.id]?.error);
   const showStats = useMemo(
@@ -344,7 +348,7 @@ export function Results() {
     }
     if (results.length === 0) {
       if (erroredCount >= search.total) {
-        const downAll = SOURCES.filter((s) => search.perSource[s.id]?.error);
+        const downAll = enabled.filter((s) => search.perSource[s.id]?.error);
         return (
           <Text color={COLOR.warn}>
             {`Couldn't reach any source. They may be down${outageCodes(downAll)}.`}
@@ -396,6 +400,7 @@ export function Results() {
         value={query}
         editing={mode === "search"}
         placeholder={PLACEHOLDER}
+        history={searchHistory}
         onSubmit={onSubmit}
         onExitDown={() => setMode("list")}
         onExitLeft={() => setRegion("sidebar")}

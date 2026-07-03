@@ -20,6 +20,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Download folder" },
       { keys: "k", label: "Real-Debrid token" },
+      { keys: "S", label: "Choose sources" },
       { keys: "q", label: "Quit" },
     ],
   },
@@ -28,6 +29,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     hints: [
       { keys: "/", label: "Edit search" },
       { keys: "↵", label: "Run search" },
+      { keys: "↑", label: "Recall recent searches (while editing)" },
       { keys: "s", label: "Sort results" },
       { keys: "d", label: "Download (P2P)" },
       { keys: "r", label: "Download via Real-Debrid" },

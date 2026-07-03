@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextSort, sortResults, sortArrow, SORT_CYCLE } from "./sort";
+import { nextSort, sortResults, sortArrow, SORT_CYCLE, formatSort, parseSort } from "./sort";
 import type { Sort } from "./sort";
 import type { SourceId, TorrentResult } from "../sources/types";
 
@@ -39,6 +39,34 @@ describe("nextSort", () => {
   it("SORT_CYCLE has exactly 7 states starting with none", () => {
     expect(SORT_CYCLE).toHaveLength(7);
     expect(SORT_CYCLE[0]).toBe("none");
+  });
+});
+
+describe("formatSort / parseSort", () => {
+  it("round-trips every state in the cycle", () => {
+    for (const s of SORT_CYCLE) {
+      expect(parseSort(formatSort(s))).toEqual(s);
+    }
+  });
+
+  it("serializes to a stable string form", () => {
+    expect(formatSort("none")).toBe("none");
+    expect(formatSort({ field: "seeders", dir: "desc" })).toBe("seeders:desc");
+    expect(formatSort({ field: "size", dir: "asc" })).toBe("size:asc");
+  });
+
+  it("falls back to none for missing or malformed input", () => {
+    expect(parseSort(undefined)).toBe("none");
+    expect(parseSort("")).toBe("none");
+    expect(parseSort("garbage")).toBe("none");
+    expect(parseSort("size:sideways")).toBe("none");
+    expect(parseSort("bogus:asc")).toBe("none");
+    expect(parseSort("size")).toBe("none");
+  });
+
+  it("parses a valid serialized sort", () => {
+    expect(parseSort("seeders:desc")).toEqual({ field: "seeders", dir: "desc" });
+    expect(parseSort("source:asc")).toEqual({ field: "source", dir: "asc" });
   });
 });
 

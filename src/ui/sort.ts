@@ -34,6 +34,28 @@ export function nextSort(current: Sort): Sort {
   return SORT_CYCLE[(i + 1) % SORT_CYCLE.length]!;
 }
 
+const SORT_FIELDS: SortField[] = ["size", "seeders", "source"];
+const SORT_DIRS: SortDir[] = ["asc", "desc"];
+
+/** Serialize a sort for persistence: "none" or "field:dir" (e.g. "seeders:desc"). */
+export function formatSort(sort: Sort): string {
+  if (sort === "none") return "none";
+  return `${sort.field}:${sort.dir}`;
+}
+
+/** Parse a persisted sort string, falling back to "none" for anything invalid. */
+export function parseSort(raw: string | undefined): Sort {
+  if (!raw || raw === "none") return "none";
+  const [field, dir] = raw.split(":");
+  if (
+    SORT_FIELDS.includes(field as SortField) &&
+    SORT_DIRS.includes(dir as SortDir)
+  ) {
+    return { field: field as SortField, dir: dir as SortDir };
+  }
+  return "none";
+}
+
 export function sortArrow(dir: SortDir): string {
   return dir === "asc" ? "▴" : "▾";
 }

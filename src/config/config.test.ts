@@ -1,11 +1,26 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { loadConfig, saveConfig, resolveRealDebridToken, resolveMediaPlayer } from "./config";
+import {
+  loadConfig,
+  saveConfig,
+  resolveRealDebridToken,
+  resolveMediaPlayer,
+  resolveDnsServers,
+} from "./config";
 
 describe("config realDebridToken", () => {
   it("round-trips the token through save and load", async () => {
     await saveConfig({ downloadDir: "/tmp/dl", realDebridToken: "abc123" });
     const cfg = await loadConfig();
     expect(cfg.realDebridToken).toBe("abc123");
+  });
+});
+
+describe("config UI preferences", () => {
+  it("round-trips the persisted sort and category", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", sort: "seeders:desc", category: "movies" });
+    const cfg = await loadConfig();
+    expect(cfg.sort).toBe("seeders:desc");
+    expect(cfg.category).toBe("movies");
   });
 });
 
@@ -35,6 +50,34 @@ describe("resolveRealDebridToken", () => {
     expect(resolveRealDebridToken({ downloadDir: "/d", realDebridToken: "  spaced  " })).toBe(
       "spaced",
     );
+  });
+});
+
+describe("resolveDnsServers", () => {
+  const KEY = "TORLINK_DNS";
+  afterEach(() => {
+    delete process.env[KEY];
+  });
+
+  it("returns the config servers (alias-expanded) when no env var is set", () => {
+    delete process.env[KEY];
+    expect(resolveDnsServers({ downloadDir: "/d" })).toEqual([]);
+    expect(resolveDnsServers({ downloadDir: "/d", dnsServers: ["cloudflare"] })).toEqual([
+      "1.1.1.1",
+      "1.0.0.1",
+    ]);
+  });
+
+  it("lets the env var override config", () => {
+    process.env[KEY] = "9.9.9.9";
+    expect(resolveDnsServers({ downloadDir: "/d", dnsServers: ["cloudflare"] })).toEqual([
+      "9.9.9.9",
+    ]);
+  });
+
+  it("treats an empty env var as 'use system resolver'", () => {
+    process.env[KEY] = "";
+    expect(resolveDnsServers({ downloadDir: "/d", dnsServers: ["cloudflare"] })).toEqual([]);
   });
 });
 
