@@ -144,7 +144,12 @@ export function App({
   const [notice, setNotice] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
-  const [preparing, setPreparing] = useState<{ label: string; phase: "caching" | "fetching"; pct: number } | null>(null);
+  const [preparing, setPreparing] = useState<{
+    label: string;
+    phase: "caching" | "fetching";
+    pct: number;
+    source: "rd" | "torrent";
+  } | null>(null);
   const [activeStream, setActiveStream] = useState<
     { session: TorrentStreamSession; name: string; input: DownloadInput } | null
   >(null);
@@ -518,7 +523,12 @@ export function App({
       if (preparing || streamFiles || activeStream) return;
       const controller = new AbortController();
       prepareAbort.current = controller;
-      setPreparing({ label: truncate(cleanText(input.name), 32), phase: "caching", pct: 0 });
+      setPreparing({
+        label: truncate(cleanText(input.name), 32),
+        phase: "caching",
+        pct: 0,
+        source: "torrent",
+      });
       void (async () => {
         try {
           const session = await streamTorrent(input.magnet, { signal: controller.signal });
@@ -593,6 +603,10 @@ export function App({
     (input: DownloadInput) => {
       if (!config) return;
       if (preparing || streamFiles) return; // one prepare/pick at a time
+      if (activeStream) {
+        setNotice("Stop the current stream first (x).");
+        return;
+      }
       const route = classifyStreamRoute(config, rdStatus);
       if (route.kind === "torrent-auto") {
         if (config.torrentStreamAck) {
@@ -615,7 +629,7 @@ export function App({
       const label = truncate(cleanText(input.name), 32);
       const controller = new AbortController();
       prepareAbort.current = controller;
-      setPreparing({ label, phase: "caching", pct: 0 });
+      setPreparing({ label, phase: "caching", pct: 0, source: "rd" });
       void (async () => {
         try {
           const files = await resolveMagnet(token, input.magnet, {
@@ -655,11 +669,14 @@ export function App({
             setEditingToken(true);
             return;
           }
-          setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "couldn't prepare stream"}`);
+          setTorrentPrompt({
+            input,
+            reason: `Real-Debrid couldn't prepare this stream (${e instanceof Error ? e.message : "unknown error"})`,
+          });
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, rdStatus, startTorrentStream],
+    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream],
   );
 
   const closePlayerPrompt = useCallback(() => {
@@ -1116,9 +1133,11 @@ export function App({
           <Box>
             <Spinner
               label={
-                preparing.phase === "caching"
-                  ? `Caching on Real-Debrid… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
-                  : `Fetching link… ${prepElapsed}s  (esc cancels)`
+                preparing.source === "torrent"
+                  ? `Finding peers… ${preparing.label} · ${prepElapsed}s  (esc cancels)`
+                  : preparing.phase === "caching"
+                    ? `Caching on Real-Debrid… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
+                    : `Fetching link… ${prepElapsed}s  (esc cancels)`
               }
             />
           </Box>
