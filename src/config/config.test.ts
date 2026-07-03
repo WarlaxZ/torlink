@@ -100,3 +100,15 @@ describe("resolveMediaPlayer", () => {
     expect(resolveMediaPlayer({ downloadDir: "/d", mediaPlayer: "mpv", trackers: [] })).toBe("iina");
   });
 });
+
+describe("config torrentStreamAck", () => {
+  it("round-trips torrentStreamAck across a save/load cycle", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      torrentStreamAck: true,
+      trackers: [],
+    });
+    const cfg = await loadConfig();
+    expect(cfg.torrentStreamAck).toBe(true);
+  });
+});
