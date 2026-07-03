@@ -19,11 +19,17 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "tab", label: "Switch pane" },
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Download folder" },
-      { keys: "k", label: "Real-Debrid token" },
       { keys: "S", label: "Choose sources" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
-      { keys: "R", label: "RuTracker login" },
       { keys: "q", label: "Quit" },
+    ],
+  },
+  {
+    title: "Accounts",
+    hints: [
+      { keys: "↑ ↓", label: "Move between services" },
+      { keys: "↵", label: "Sign in / switch account" },
+      { keys: "x", label: "Sign out" },
     ],
   },
   {
@@ -88,6 +94,15 @@ export function footerHints(
       seedFocus === "seeding" ? "Pause" : seedFocus === "missing" ? "Retry" : "Resume";
     return [{ keys: "p", label }, { keys: "c", label: "Remove" }, SWITCH, ALWAYS];
   }
+  if (section === "accounts") {
+    return [
+      NAVIGATE,
+      { keys: "↵", label: "Sign in" },
+      { keys: "x", label: "Sign out" },
+      SWITCH,
+      ALWAYS,
+    ];
+  }
   if (section === "downloads") {
     if (downloadFocus === "paused") {
       return [{ keys: "p", label: "Resume" }, { keys: "c", label: "Cancel" }, SWITCH, ALWAYS];
@@ -121,7 +136,7 @@ export function footerHints(
           { keys: "r", label: "Real-Debrid" },
           { keys: "v", label: "Stream" },
         ]
-      : [{ keys: "k", label: "Real-Debrid" }]),
+      : []),
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },
     { keys: "/", label: "Search" },
