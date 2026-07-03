@@ -93,6 +93,23 @@ export function Downloads() {
 
   const total = active.length + recent.length;
   const [cursor, setCursor] = useState(0);
+  // An active Real-Debrid item whose direct link the user asked to copy before
+  // it had resolved — we copy it automatically the moment it's ready.
+  const [copyWhenReady, setCopyWhenReady] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!copyWhenReady) return;
+    const it = active.find((i) => i.id === copyWhenReady);
+    // Item finished/removed, or failed before a link appeared — drop the intent.
+    if (!it || it.status === "failed") {
+      setCopyWhenReady(null);
+      return;
+    }
+    if (it.directUrl) {
+      copyLink(it.directUrl, it.name);
+      setCopyWhenReady(null);
+    }
+  }, [active, copyWhenReady, copyLink]);
   const clamped = Math.min(cursor, Math.max(0, total - 1));
   const inActive = clamped < active.length;
   const recentCursor = clamped - active.length;
@@ -110,8 +127,10 @@ export function Downloads() {
         else if (input === "p") queue.togglePause(it.id);
         else if (input === "y") {
           if (it.directUrl) copyLink(it.directUrl, it.name);
-          else if (it.via === "realdebrid") setNotice("Preparing the link… try again in a moment.");
-          else setNotice("No direct link — that's a peer-to-peer download.");
+          else if (it.via === "realdebrid") {
+            setCopyWhenReady(it.id);
+            setNotice("Will copy the link once Real-Debrid is ready…");
+          } else setNotice("No direct link — that's a peer-to-peer download.");
         }
       } else {
         const h = recent[recentCursor];
