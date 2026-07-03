@@ -343,7 +343,7 @@ export function Results() {
     sources.some(
       (s) => s.id.startsWith("rt-") && /log in|login|session/i.test(search.perSource[s.id]?.error ?? ""),
     )
-      ? " Press R to log in to RuTracker."
+      ? " Sign in from the Accounts tab to search RuTracker."
       : "";
 
   const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;

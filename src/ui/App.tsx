@@ -408,7 +408,7 @@ export function App({
       if (!config || !queue) return;
       const token = resolveRealDebridToken(config);
       if (!token) {
-        setNotice("Set a Real-Debrid token first (press k).");
+        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
         return;
       }
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
@@ -464,7 +464,7 @@ export function App({
       if (preparing || streamFiles) return; // one prepare/pick at a time
       const token = resolveRealDebridToken(config);
       if (!token) {
-        setNotice("Set a Real-Debrid token first (press k).");
+        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
         return;
       }
       const label = truncate(cleanText(input.name), 32);
@@ -1114,7 +1114,7 @@ export function App({
             </Box>
             <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
               <Accounts
-                rdToken={store.config.realDebridToken ?? ""}
+                rdToken={resolveRealDebridToken(store.config)}
                 rdStatus={rdStatus}
                 rutrackerUser={rutrackerUser}
                 onManageRd={openTokenPrompt}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCategory } from "./store";
+import { isCategory, parseCategory } from "./store";
 
 describe("parseCategory", () => {
   it("accepts the known category keys", () => {
@@ -17,5 +17,21 @@ describe("parseCategory", () => {
     // downloads/seeding are sections but not result categories
     expect(parseCategory("downloads")).toBe("all");
     expect(parseCategory("seeding")).toBe("all");
+  });
+});
+
+describe("isCategory", () => {
+  it("excludes the downloads/seeding/accounts sections", () => {
+    expect(isCategory("accounts")).toBe(false);
+    expect(isCategory("downloads")).toBe(false);
+    expect(isCategory("seeding")).toBe(false);
+  });
+
+  it("includes the result categories", () => {
+    expect(isCategory("all")).toBe(true);
+    expect(isCategory("games")).toBe(true);
+    expect(isCategory("movies")).toBe(true);
+    expect(isCategory("tv")).toBe(true);
+    expect(isCategory("anime")).toBe(true);
   });
 });
