@@ -57,6 +57,7 @@ import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
+import { Accounts } from "./components/Accounts";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -65,6 +66,7 @@ import {
   login as rutrackerLogin,
   getSession as getRutrackerSession,
   loadSession as loadRutrackerSession,
+  clearSession as clearRutrackerSession,
   type Captcha,
 } from "../sources/rutracker/session";
 import { clearRutrackerCache } from "../sources/rutracker";
@@ -596,6 +598,15 @@ export function App({
     setRutrackerCaptcha(undefined);
   }, []);
 
+  const signOutRutracker = useCallback(() => {
+    void clearRutrackerSession().then(() => {
+      setRutrackerUser(undefined);
+      clearRutrackerCache();
+      clearCacheByPrefix("rt-");
+      setNotice(`${ICON.done} Signed out of RuTracker`);
+    });
+  }, [setNotice]);
+
   const submitRutrackerLogin = useCallback(
     (username: string, password: string, captchaCode?: string) => {
       setRutrackerStatus({ kind: "busy" });
@@ -871,11 +882,6 @@ export function App({
         setEditingFolder(true);
         return;
       }
-      if (input === "k") {
-        setShowHelp(false);
-        setEditingToken(true);
-        return;
-      }
       if (input === "S") {
         setShowHelp(false);
         setEditingSources(true);
@@ -883,10 +889,6 @@ export function App({
       }
       if (input === "D") {
         openDnsPrompt();
-        return;
-      }
-      if (input === "R") {
-        openRutrackerPrompt();
         return;
       }
       if (input === "m") {
@@ -1111,6 +1113,17 @@ export function App({
               display={section === "seeding" ? "flex" : "none"}
             >
               <Seeding />
+            </Box>
+            <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
+              <Accounts
+                rdToken={store.config.realDebridToken ?? ""}
+                rdStatus={rdStatus}
+                rutrackerUser={rutrackerUser}
+                onManageRd={openTokenPrompt}
+                onSignOutRd={clearRealDebridToken}
+                onManageRutracker={openRutrackerPrompt}
+                onSignOutRutracker={signOutRutracker}
+              />
             </Box>
           </Box>
         </Box>
