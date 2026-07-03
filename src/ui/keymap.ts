@@ -22,6 +22,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "k", label: "Real-Debrid token" },
       { keys: "S", label: "Choose sources" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
+      { keys: "R", label: "RuTracker login" },
       { keys: "q", label: "Quit" },
     ],
   },
