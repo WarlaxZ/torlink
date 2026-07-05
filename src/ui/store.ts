@@ -116,6 +116,7 @@ export interface Store {
   // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.
   copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;
+  openDownloadFolder: (dir: string) => void;
 
   notice: string | null;
   setNotice: (s: string | null) => void;

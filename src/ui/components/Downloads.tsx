@@ -86,7 +86,19 @@ function SourceBadge({
 }
 
 export function Downloads() {
-  const { queue, region, section, contentWidth, listRows, startDownload, setDownloadFocus, copyLink, setNotice, streamActive } = useStore();
+  const {
+    queue,
+    region,
+    section,
+    contentWidth,
+    listRows,
+    startDownload,
+    openDownloadFolder,
+    setDownloadFocus,
+    copyLink,
+    setNotice,
+    streamActive,
+  } = useStore();
   const active = useQueueItems(queue);
   const recent = useQueueHistory(queue);
   const focused = region === "content" && section === "downloads";
@@ -120,7 +132,10 @@ export function Downloads() {
       else if (key.downArrow || input === "j") setCursor(wrapStep(clamped, 1, total));
       else if (input === "f") queue.retryFailed();
       else if (input === "x" && !streamActive) queue.clearHistory();
-      else if (inActive) {
+      else if (input === "e") {
+        const dir = inActive ? active[clamped]?.dir : recent[recentCursor]?.dir;
+        if (dir) openDownloadFolder(dir);
+      } else if (inActive) {
         const it = active[clamped];
         if (!it) return;
         if (input === "c") queue.cancel(it.id);
