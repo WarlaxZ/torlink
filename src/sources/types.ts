@@ -30,6 +30,8 @@ export interface TorrentResult {
   leechers: number;
   numFiles?: number;
   source: SourceId;
+  /** Every source that returned this infohash; `source` is the healthiest copy. */
+  sources?: SourceId[];
   magnet: string;
   added?: number;
 }

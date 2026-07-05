@@ -105,6 +105,16 @@ function Detail({
           <DetailRow label="Files" value={<Text dimColor>{String(r.numFiles)}</Text>} />
         ) : null}
         {date ? <DetailRow label="Added" value={<Text dimColor>{date}</Text>} /> : null}
+        {(r.sources?.length ?? 0) > 1 ? (
+          <DetailRow
+            label="Sources"
+            value={
+              <Text dimColor>
+                {r.sources!.map((source) => sourceStyle(source).tag).join(", ")}
+              </Text>
+            }
+          />
+        ) : null}
         <DetailRow
           label="Hash"
           value={
