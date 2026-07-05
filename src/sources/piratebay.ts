@@ -6,9 +6,12 @@ const API = "https://apibay.org";
 
 const MOVIE_CATS = new Set([201, 202, 207, 209]);
 const TV_CATS = new Set([205, 208]);
+// Audio Books, E-books, and Comics.
+export const TPB_BOOK_CATEGORIES: ReadonlySet<number> = new Set([102, 601, 602]);
 
 const TOP_MOVIES = `${API}/precompiled/data_top100_207.json`;
 const TOP_TV = `${API}/precompiled/data_top100_208.json`;
+const TOP_BOOKS = `${API}/precompiled/data_top100_601.json`;
 
 interface ApibayItem {
   id?: string;
@@ -55,7 +58,7 @@ async function fetchItems(url: string, opts: SearchOptions): Promise<ApibayItem[
 
 async function search(
   query: string,
-  cats: Set<number>,
+  cats: ReadonlySet<number>,
   browseUrl: string,
   source: SourceId,
   opts: SearchOptions,
@@ -88,4 +91,13 @@ export const tpbTv: Source = {
   group: "TV",
   homepage: "https://thepiratebay.org",
   search: (query, opts = {}) => search(query, TV_CATS, TOP_TV, "tpb-tv", opts),
+};
+
+export const tpbBooks: Source = {
+  id: "tpb-books",
+  label: "TPB",
+  group: "Books",
+  homepage: "https://thepiratebay.org",
+  search: (query, opts = {}) =>
+    search(query, TPB_BOOK_CATEGORIES, TOP_BOOKS, "tpb-books", opts),
 };

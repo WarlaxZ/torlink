@@ -7,14 +7,17 @@ export type SourceId =
   | "torrents-csv"
   | "tpb-movies"
   | "tpb-tv"
+  | "tpb-books"
+  | "nyaa-literature"
   | "x1337-movies"
   | "x1337-tv"
   | "rt-games"
   | "rt-movies"
   | "rt-tv"
-  | "rt-anime";
+  | "rt-anime"
+  | "rt-books";
 
-export type SourceGroup = "Games" | "Movies" | "TV" | "Anime";
+export type SourceGroup = "Games" | "Movies" | "TV" | "Anime" | "Books";
 
 export interface TorrentResult {
   infoHash: string;

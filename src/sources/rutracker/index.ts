@@ -35,6 +35,9 @@ const SECTION_GROUP: Record<string, SourceGroup> = {
   "Игры": "Games",
   "Кино, Видео и ТВ": "Movies",
   "Документалистика и юмор": "Movies",
+  "Книги и журналы": "Books",
+  "Обучение иностранным языкам": "Books",
+  "Аудиокниги": "Books",
 };
 
 const ANIME_RE = /аниме|anime|манга|manga|ранобэ/i;
@@ -44,6 +47,7 @@ const KEYWORD_RULES: { group: SourceGroup; re: RegExp }[] = [
   { group: "TV", re: /сериал|телесериал/i },
   { group: "Games", re: /игр|game|консол|playstation|xbox|nintendo|ps[2345]|repack/i },
   { group: "Movies", re: /кино|фильм|видео|мультфильм|movie/i },
+  { group: "Books", re: /книг|журнал|литератур|аудиокниг|учебник/i },
 ];
 
 const GROUP_SOURCE: Record<SourceGroup, SourceId> = {
@@ -51,6 +55,7 @@ const GROUP_SOURCE: Record<SourceGroup, SourceId> = {
   Movies: "rt-movies",
   TV: "rt-tv",
   Anime: "rt-anime",
+  Books: "rt-books",
 };
 
 interface ForumNode {
@@ -319,3 +324,4 @@ export const rutrackerGames = makeSource("rt-games", "Games");
 export const rutrackerMovies = makeSource("rt-movies", "Movies");
 export const rutrackerTv = makeSource("rt-tv", "TV");
 export const rutrackerAnime = makeSource("rt-anime", "Anime");
+export const rutrackerBooks = makeSource("rt-books", "Books");
