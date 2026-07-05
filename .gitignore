@@ -1,4 +1,5 @@
 node_modules/
 dist/
+sea-prep.blob
 .DS_Store
 package-lock.json

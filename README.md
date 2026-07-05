@@ -10,7 +10,13 @@ torlink is a torrent finder that lives in your terminal, with zero setup and not
 
 ## Get started
 
-This is a fork, so it isn't published to npm — you build it from source once, then run it. All you need is [Node 22+](https://nodejs.org).
+Download a standalone executable from [Releases](https://github.com/WarlaxZ/torlink/releases), or install the latest macOS/Linux build without Node:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/WarlaxZ/torlink/main/scripts/install.sh | sh
+```
+
+You can still build from source with [Node 22+](https://nodejs.org):
 
 1. **Clone this repo** and open the folder.
 2. **Install and build:**

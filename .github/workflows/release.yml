@@ -1,0 +1,78 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: torlnk-linux-x64.tar.gz
+            archive: tar
+          - os: macos-15-intel
+            asset: torlnk-macos-x64.tar.gz
+            archive: tar
+          - os: macos-15
+            asset: torlnk-macos-arm64.tar.gz
+            archive: tar
+          - os: windows-latest
+            asset: torlnk-windows-x64.zip
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm prune --omit=dev
+      - name: Package self-contained runtime (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir torlnk-runtime
+          cp "$(command -v node)" torlnk-runtime/node
+          cp -R dist node_modules package.json LICENSE README.md torlnk-runtime/
+          printf '%s\n' '#!/bin/sh' 'DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)' 'exec "$DIR/node" "$DIR/dist/cli.cjs" "$@"' > torlnk-runtime/torlnk
+          chmod +x torlnk-runtime/node torlnk-runtime/torlnk
+          tar -czf "${{ matrix.asset }}" torlnk-runtime
+      - name: Package self-contained runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory torlnk-runtime
+          Copy-Item (Get-Command node).Source torlnk-runtime/node.exe
+          Copy-Item -Recurse dist,node_modules torlnk-runtime/
+          Copy-Item package.json,LICENSE,README.md torlnk-runtime/
+          Set-Content torlnk-runtime/torlnk.cmd '@echo off`r`n"%~dp0node.exe" "%~dp0dist\cli.cjs" %*'
+          Compress-Archive -Path torlnk-runtime -DestinationPath "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - run: cd artifacts && sha256sum torlnk-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/torlnk-*
+            artifacts/SHA256SUMS
