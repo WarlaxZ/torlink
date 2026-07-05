@@ -2,11 +2,22 @@ import path from "node:path";
 import os from "node:os";
 import { promises as fs } from "node:fs";
 import { describe, it, expect, afterEach } from "vitest";
-import { DownloadQueue, strayDownload, type DebridDeps } from "./queue";
+import { DownloadQueue, seedPolicyReached, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 import { RealDebridError } from "../integrations/realdebrid";
 
 const tmpDirs: string[] = [];
+
+describe("seedPolicyReached", () => {
+  it("stops at either the configured ratio or duration", () => {
+    expect(seedPolicyReached(200, 100, 1_000, 2, 0)).toBe(true);
+    expect(seedPolicyReached(0, 100, 60_000, 0, 1)).toBe(true);
+    expect(seedPolicyReached(50, 100, 30_000, 2, 1)).toBe(false);
+  });
+  it("treats zero values as unlimited", () => {
+    expect(seedPolicyReached(10_000, 100, 10_000_000, 0, 0)).toBe(false);
+  });
+});
 async function tmpDir(): Promise<string> {
   const d = path.join(os.tmpdir(), `torlink-queue-${process.pid}-${tmpDirs.length}`);
   await fs.rm(d, { recursive: true, force: true });

@@ -35,6 +35,10 @@ export interface Config {
   // Extra announce URLs (trackers) the user has added; appended to every
   // torrent added from now on.
   trackers: string[];
+  downloadLimitKbps?: number;
+  uploadLimitKbps?: number;
+  seedRatio?: number;
+  seedMinutes?: number;
 }
 
 export const defaultConfig: Config = {

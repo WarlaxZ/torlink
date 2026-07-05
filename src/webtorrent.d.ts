@@ -74,6 +74,8 @@ declare module "webtorrent" {
     get(torrentId: string): Torrent | null;
     remove(torrentId: string, cb?: (err?: Error) => void): void;
     destroy(cb?: (err?: Error) => void): void;
+    throttleDownload(rate: number): void;
+    throttleUpload(rate: number): void;
     createServer(opts?: { hostname?: string; pathname?: string }): TorrentServer;
   }
 
