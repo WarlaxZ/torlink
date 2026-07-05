@@ -42,6 +42,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "↑", label: "Recall recent searches (while editing)" },
       { keys: "s", label: "Sort results" },
       { keys: "z", label: "Hide results with no seeders" },
+      { keys: "w", label: "Save or remove current search" },
       { keys: "d", label: "Download (P2P)" },
       { keys: "r", label: "Download via Real-Debrid" },
       { keys: "v", label: "Stream" },
@@ -111,6 +112,9 @@ export function footerHints(
       ALWAYS,
     ];
   }
+  if (section === "watchlist") {
+    return [NAVIGATE, { keys: "↵", label: "Run" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+  }
   if (section === "downloads") {
     if (downloadFocus === "paused") {
       return [{ keys: "p", label: "Resume" }, { keys: "c", label: "Cancel" }, FOLDER, SWITCH, ALWAYS];
@@ -146,6 +150,7 @@ export function footerHints(
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },
     { keys: "z", label: "Alive" },
+    { keys: "w", label: "Watch" },
     { keys: "/", label: "Search" },
     SWITCH,
     ALWAYS,

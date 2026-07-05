@@ -25,6 +25,7 @@ describe("parseCategory", () => {
 describe("isCategory", () => {
   it("excludes the downloads/seeding/accounts sections", () => {
     expect(isCategory("accounts")).toBe(false);
+    expect(isCategory("watchlist")).toBe(false);
     expect(isCategory("downloads")).toBe(false);
     expect(isCategory("seeding")).toBe(false);
   });

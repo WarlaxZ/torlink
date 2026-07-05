@@ -87,6 +87,8 @@ function makeStore(
     query: "",
     submitQuery: noop,
     searchHistory: [],
+    savedSearches: [],
+    toggleSavedSearch: noop,
     openAccounts: noop,
     section: "all",
     setSection: noop,
