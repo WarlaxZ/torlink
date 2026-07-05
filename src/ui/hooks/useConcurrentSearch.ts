@@ -42,11 +42,17 @@ function blankPerSource(sources: readonly Source[], loading: boolean): Record<So
   return out;
 }
 
-function dedupe(list: TorrentResult[]): TorrentResult[] {
+export function mergeDuplicateResults(list: TorrentResult[]): TorrentResult[] {
   const byHash = new Map<string, TorrentResult>();
   for (const r of list) {
     const existing = byHash.get(r.infoHash);
-    if (!existing || r.seeders > existing.seeders) byHash.set(r.infoHash, r);
+    if (!existing) {
+      byHash.set(r.infoHash, { ...r, sources: [r.source] });
+      continue;
+    }
+    const sources = [...new Set([...(existing.sources ?? [existing.source]), r.source])];
+    if (r.seeders > existing.seeders) byHash.set(r.infoHash, { ...r, sources });
+    else existing.sources = sources;
   }
   return [...byHash.values()];
 }
@@ -132,7 +138,7 @@ export function useConcurrentSearch(
           if (!alive) return;
           done += 1;
           setState({
-            results: defaultOrder(dedupe(collected.slice())),
+            results: defaultOrder(mergeDuplicateResults(collected.slice())),
             perSource: { ...per },
             loading: done < active.length,
             done,
