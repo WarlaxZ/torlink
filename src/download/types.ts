@@ -1,6 +1,13 @@
 import type { SourceId } from "../sources/types";
 
-export type DownloadStatus = "downloading" | "paused" | "completed" | "failed";
+export type DownloadStatus = "selecting" | "downloading" | "paused" | "completed" | "failed";
+
+export interface TorrentFileChoice {
+  index: number;
+  name: string;
+  path: string;
+  length: number;
+}
 
 // How an item is being fetched: classic peer-to-peer (webtorrent) or via
 // Real-Debrid (resolve the magnet to direct links, then download over HTTP).
@@ -40,6 +47,8 @@ export interface QueueItem {
   peers: number;
   eta?: number;
   files?: number;
+  availableFiles?: TorrentFileChoice[];
+  selectedFileIndices?: number[];
   error?: string;
   addedAt: number;
   // Absent means "p2p" for back-compatibility with items persisted before

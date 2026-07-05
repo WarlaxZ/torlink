@@ -148,7 +148,33 @@ export class DownloadQueue extends EventEmitter {
   }
 
   private startEngine(item: QueueItem): void {
-    this.engine.add(item.id, item.magnet, item.dir, this.engineHandlers(item.id), this.trackers);
+    this.engine.add(
+      item.id,
+      item.magnet,
+      item.dir,
+      this.engineHandlers(item.id),
+      this.trackers,
+      item.selectedFileIndices,
+    );
+  }
+
+  selectFiles(id: string, indices: number[]): boolean {
+    const item = this.items.get(id);
+    if (!item || item.status !== "selecting" || indices.length === 0) return false;
+    const valid = [...new Set(indices)].filter((index) =>
+      item.availableFiles?.some((file) => file.index === index),
+    );
+    if (valid.length === 0) return false;
+    item.selectedFileIndices = valid;
+    item.status = "downloading";
+    item.totalBytes = (item.availableFiles ?? [])
+      .filter((file) => valid.includes(file.index))
+      .reduce((sum, file) => sum + file.length, 0);
+    this.engine.selectFiles(id, valid);
+    this.ensurePoll();
+    this.changed();
+    void this.persist();
+    return true;
   }
 
   // Keep the queue's notion of the current Real-Debrid token in sync with config
@@ -371,6 +397,11 @@ export class DownloadQueue extends EventEmitter {
         if (meta.name) it.name = meta.name;
         if (meta.total) it.totalBytes = meta.total;
         it.files = meta.files;
+        it.availableFiles = meta.fileList;
+        if (meta.fileList.length > 1 && !it.selectedFileIndices?.length) {
+          it.status = "selecting";
+          it.speed = 0;
+        }
         this.changed();
         void this.persist();
       },
@@ -780,7 +811,7 @@ export class DownloadQueue extends EventEmitter {
         raw.peers = 0;
       }
       this.items.set(raw.id, raw);
-      if (raw.status === "downloading") this.startEngine(raw);
+      if (raw.status === "downloading" || raw.status === "selecting") this.startEngine(raw);
     }
     if (this.activeCount > 0) this.ensurePoll();
     this.changed();

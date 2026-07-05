@@ -44,6 +44,8 @@ Active downloads sit up top with their progress, speed, and time left; when one 
 
 Downloads run in the background while you keep searching, so you can queue up as many as you want. They save to your downloads folder, and the Downloads pane keeps tabs on each one. When something finishes it keeps seeding automatically so the next person can find it too, and the Seeding tab lets you pause or stop that anytime.
 
+When a torrent contains several files, torlink pauses before transferring payload data and lets you choose exactly which files to download. Use `Space` to toggle files, `a` to select all, and `Enter` to begin.
+
 <p align="center">
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
