@@ -56,8 +56,6 @@ export interface Store {
   searchHistory: string[];
   savedSearches: string[];
   toggleSavedSearch: (query: string) => void;
-  // Jump to the browser view, select the Accounts pane, and focus it.
-  openAccounts: () => void;
 
   section: Section;
   setSection: (s: Section) => void;
