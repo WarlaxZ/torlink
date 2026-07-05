@@ -50,6 +50,7 @@ export const SOURCE_STYLE: Record<SourceId, { tag: string; color: string }> = {
   "rt-movies": { tag: "RUT", color: "#8fce5a" },
   "rt-tv": { tag: "RUT", color: "#8fce5a" },
   "rt-anime": { tag: "RUT", color: "#8fce5a" },
+  "rt-music": { tag: "RUT", color: "#8fce5a" },
   "rt-books": { tag: "RUT", color: "#8fce5a" },
 };
 
