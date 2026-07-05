@@ -11,13 +11,18 @@ const CATEGORIES = sourcesByGroup()
   .join(`  ${ICON.dot}  `);
 
 export function Splash() {
-  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, openAccounts } = useStore();
+  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion } = useStore();
   const { isRawModeSupported } = useStdin();
 
   useInput(
     (input, key) => {
-      if (input === "a") {
-        openAccounts();
+      // The search field is always focused on the splash, so it owns every
+      // printable keystroke — no single-key shortcuts here, or typing a query
+      // like "alex" would trigger them. Tab drops into the app's sidebar menu
+      // (where the shortcuts live); esc / ^c quit.
+      if (key.tab) {
+        setView("browser");
+        setRegion("sidebar");
         return;
       }
       if (key.escape || (key.ctrl && input === "c")) quitAll();
