@@ -40,6 +40,8 @@ Type what you're looking for and press Enter. Results stream in from every sourc
 
 Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to bring back a recent search. torlink remembers your sort and last category between runs, so it opens right where you left off.
 
+Press `w` on any named search to add or remove it from your Watchlist. The Watchlist pane keeps up to 50 saved searches; press `Enter` to run one again or `x` to remove it.
+
 <p align="center">
   <img src="preview/browse.svg" alt="torlink's browse view: the sidebar, the search bar, and merged results from every source" style="max-width: 832px; width: 100%; height: auto;">
 </p>

@@ -24,6 +24,7 @@ export interface Config {
   // Recently-run searches (most-recent first) for up-arrow recall in the
   // search bar.
   searchHistory?: string[];
+  savedSearches?: string[];
   // Sources the user has switched off; they're skipped during search. Stored as
   // opaque strings — unknown ids are simply ignored by the registry.
   disabledSources?: string[];
@@ -92,6 +93,9 @@ export async function loadConfig(): Promise<Config> {
     // can't feed junk into the download engine.
     cfg.trackers = Array.isArray(parsed.trackers)
       ? parsed.trackers.filter((t): t is string => typeof t === "string" && t.length > 0)
+      : [];
+    cfg.savedSearches = Array.isArray(parsed.savedSearches)
+      ? parsed.savedSearches.filter((query): query is string => typeof query === "string" && query.trim().length > 0).slice(0, 50)
       : [];
     return cfg;
   } catch {

@@ -11,12 +11,12 @@ export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books";
 
-export type Section = Category | "downloads" | "seeding" | "accounts";
+export type Section = Category | "watchlist" | "downloads" | "seeding" | "accounts";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
 // as opposed to the downloads/seeding/accounts views.
 export function isCategory(section: Section): boolean {
-  return section !== "downloads" && section !== "seeding" && section !== "accounts";
+  return section !== "watchlist" && section !== "downloads" && section !== "seeding" && section !== "accounts";
 }
 
 export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[] = [
@@ -54,6 +54,8 @@ export interface Store {
   submitQuery: (q: string) => void;
   // Recently-run searches (most-recent first) for up-arrow recall.
   searchHistory: string[];
+  savedSearches: string[];
+  toggleSavedSearch: (query: string) => void;
   // Jump to the browser view, select the Accounts pane, and focus it.
   openAccounts: () => void;
 

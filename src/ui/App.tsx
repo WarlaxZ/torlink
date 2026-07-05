@@ -40,6 +40,7 @@ import {
 } from "./store";
 import { formatSort, parseSort, type Sort } from "./sort";
 import { addToHistory } from "./searchHistory";
+import { toggleSavedSearches } from "./savedSearches";
 import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
@@ -62,6 +63,7 @@ import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { Accounts } from "./components/Accounts";
+import { Watchlist } from "./components/Watchlist";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
@@ -354,6 +356,20 @@ export function App({
       void saveConfig(next);
       return next;
     });
+  }, []);
+
+  const toggleSavedSearch = useCallback((raw: string) => {
+    const query = raw.trim();
+    if (!query) return;
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const current = prev.savedSearches ?? [];
+      const savedSearches = toggleSavedSearches(current, query);
+      const next = { ...prev, savedSearches };
+      void saveConfig(next);
+      return next;
+    });
+    setNotice("Watchlist updated.");
   }, []);
 
   const closeFolderPrompt = useCallback(() => {
@@ -961,6 +977,8 @@ export function App({
       query,
       submitQuery,
       searchHistory: config.searchHistory ?? [],
+      savedSearches: config.savedSearches ?? [],
+      toggleSavedSearch,
       openAccounts,
       section,
       setSection: changeSection,
@@ -1005,6 +1023,7 @@ export function App({
     query,
     submitQuery,
     openAccounts,
+    toggleSavedSearch,
     section,
     changeSection,
     sort,
@@ -1471,6 +1490,9 @@ export function App({
                 onManageRutracker={openRutrackerPrompt}
                 onSignOutRutracker={signOutRutracker}
               />
+            </Box>
+            <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
+              <Watchlist />
             </Box>
           </Box>
         </Box>

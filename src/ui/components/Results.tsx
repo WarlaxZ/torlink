@@ -184,6 +184,7 @@ export function Results() {
     queue,
     sort,
     setSort,
+    toggleSavedSearch,
   } = useStore();
 
   const search = useConcurrentSearch(query, disabledSources);
@@ -299,6 +300,8 @@ export function Results() {
       } else if (input === "z") {
         setAliveOnly((current) => !current);
         setCursor(0);
+      } else if (input === "w" && query.trim()) {
+        toggleSavedSearch(query.trim());
       }
     },
     { isActive: focused && mode === "list" },
