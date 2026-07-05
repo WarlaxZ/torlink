@@ -183,14 +183,16 @@ export function Results() {
   const queueHistory = useQueueHistory(queue);
   const stateFor = (hash: string): DownloadState | null =>
     downloadStateFor(hash, queueItems, queueHistory);
+  const [aliveOnly, setAliveOnly] = useState(false);
 
   const results = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.key === section);
     const base = cat?.group
       ? search.results.filter((r) => getSource(r.source).group === cat.group)
       : search.results;
-    return sortResults(base, sort);
-  }, [search.results, section, sort]);
+    const filtered = aliveOnly ? base.filter((result) => result.seeders > 0) : base;
+    return sortResults(filtered, sort);
+  }, [search.results, section, sort, aliveOnly]);
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
@@ -284,6 +286,9 @@ export function Results() {
         if (r) copyResultMagnet(r);
       } else if (input === "s") {
         setSort(nextSort(sort));
+      } else if (input === "z") {
+        setAliveOnly((current) => !current);
+        setCursor(0);
       }
     },
     { isActive: focused && mode === "list" },
@@ -347,11 +352,12 @@ export function Results() {
       : "";
 
   const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;
+  const filterNote = aliveOnly ? `  ${ICON.dot} alive only` : "";
 
   const status = () => {
     if (search.loading) {
       if (results.length > 0)
-        return <Text dimColor>{`searching… ${search.done}/${search.total} sources${sortNote}`}</Text>;
+        return <Text dimColor>{`searching… ${search.done}/${search.total} sources${sortNote}${filterNote}`}</Text>;
       return (
         <Spinner label={`${browsing ? "Loading" : "Searching"} ${search.done}/${search.total} sources`} />
       );
@@ -386,7 +392,7 @@ export function Results() {
     const head = browsing
       ? "newest across all sources"
       : `${results.length} result${results.length === 1 ? "" : "s"}`;
-    return <Text dimColor>{`${head}${note}${sortNote}`}</Text>;
+    return <Text dimColor>{`${head}${note}${sortNote}${filterNote}`}</Text>;
   };
 
   const sortMark = (field: SortField, label: string): ReactNode => {
