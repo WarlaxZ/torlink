@@ -9,7 +9,7 @@ import type { Sort } from "./sort";
 
 export type View = "splash" | "browser";
 
-export type Category = "all" | "games" | "movies" | "tv" | "anime" | "books";
+export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books";
 
 export type Section = Category | "downloads" | "seeding" | "accounts";
 
@@ -25,6 +25,7 @@ export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[]
   { key: "movies", label: "Movies", group: "Movies" },
   { key: "tv", label: "TV", group: "TV" },
   { key: "anime", label: "Anime", group: "Anime" },
+  { key: "music", label: "Music", group: "Music" },
   { key: "books", label: "Books", group: "Books" },
 ];
 

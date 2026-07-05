@@ -3,8 +3,8 @@ import { fitgirl } from "./fitgirl";
 import { nyaa, nyaaLiterature } from "./nyaa";
 import { subsplease } from "./subsplease";
 import { torrentsCsv } from "./torrentscsv";
-import { tpbBooks, tpbMovies, tpbTv } from "./piratebay";
-import { x1337Movies, x1337Tv } from "./x1337";
+import { tpbBooks, tpbMovies, tpbMusic, tpbTv } from "./piratebay";
+import { x1337Movies, x1337Music, x1337Tv } from "./x1337";
 import { yts } from "./yts";
 import {
   rutrackerGames,
@@ -26,6 +26,8 @@ export const SOURCES: readonly Source[] = [
   x1337Tv,
   nyaa,
   subsplease,
+  tpbMusic,
+  x1337Music,
   tpbBooks,
   nyaaLiterature,
   rutrackerGames,
@@ -56,7 +58,7 @@ export function toggleDisabledSource(
   return disabled.includes(id) ? disabled.filter((d) => d !== id) : [...disabled, id];
 }
 
-const GROUP_ORDER: readonly SourceGroup[] = ["Games", "Movies", "TV", "Anime", "Books"];
+const GROUP_ORDER: readonly SourceGroup[] = ["Games", "Movies", "TV", "Anime", "Music", "Books"];
 
 export function sourcesByGroup(): { group: SourceGroup; sources: Source[] }[] {
   return GROUP_ORDER.map((group) => ({

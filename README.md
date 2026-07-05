@@ -80,6 +80,7 @@ A short, hand-picked list of trusted sources:
 | TV | EZTV, The Pirate Bay, 1337x |
 | Anime | Nyaa, SubsPlease |
 | Books | The Pirate Bay, Nyaa |
+| Music | The Pirate Bay, 1337x |
 
 **RuTracker** is available across Games, Movies, TV, Anime, and Books and requires a free account. Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.
 

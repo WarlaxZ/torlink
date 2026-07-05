@@ -9,15 +9,17 @@ export type SourceId =
   | "tpb-tv"
   | "tpb-books"
   | "nyaa-literature"
+  | "tpb-music"
   | "x1337-movies"
   | "x1337-tv"
+  | "x1337-music"
   | "rt-games"
   | "rt-movies"
   | "rt-tv"
   | "rt-anime"
   | "rt-books";
 
-export type SourceGroup = "Games" | "Movies" | "TV" | "Anime" | "Books";
+export type SourceGroup = "Games" | "Movies" | "TV" | "Anime" | "Music" | "Books";
 
 export interface TorrentResult {
   infoHash: string;

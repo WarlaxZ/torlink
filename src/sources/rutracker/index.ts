@@ -23,14 +23,16 @@ const MAX_DETAILS = 12;
 interface Row {
   topicId: string;
   name: string;
-  group: SourceGroup;
+  group: RutrackerGroup;
   seeders: number;
   leechers: number;
   sizeBytes: number;
   added?: number;
 }
 
-const SECTION_GROUP: Record<string, SourceGroup> = {
+type RutrackerGroup = Exclude<SourceGroup, "Music">;
+
+const SECTION_GROUP: Record<string, RutrackerGroup> = {
   "Сериалы": "TV",
   "Игры": "Games",
   "Кино, Видео и ТВ": "Movies",
@@ -42,7 +44,7 @@ const SECTION_GROUP: Record<string, SourceGroup> = {
 
 const ANIME_RE = /аниме|anime|манга|manga|ранобэ/i;
 
-const KEYWORD_RULES: { group: SourceGroup; re: RegExp }[] = [
+const KEYWORD_RULES: { group: RutrackerGroup; re: RegExp }[] = [
   { group: "Anime", re: ANIME_RE },
   { group: "TV", re: /сериал|телесериал/i },
   { group: "Games", re: /игр|game|консол|playstation|xbox|nintendo|ps[2345]|repack/i },
@@ -50,7 +52,7 @@ const KEYWORD_RULES: { group: SourceGroup; re: RegExp }[] = [
   { group: "Books", re: /книг|журнал|литератур|аудиокниг|учебник/i },
 ];
 
-const GROUP_SOURCE: Record<SourceGroup, SourceId> = {
+const GROUP_SOURCE: Record<RutrackerGroup, SourceId> = {
   Games: "rt-games",
   Movies: "rt-movies",
   TV: "rt-tv",
@@ -64,7 +66,7 @@ interface ForumNode {
   section: string;
 }
 
-export function buildGroupMap(html: string): Map<number, SourceGroup> {
+export function buildGroupMap(html: string): Map<number, RutrackerGroup> {
   const sel = html.match(/<select[^>]*name="f\[\]"[\s\S]*?<\/select>/i)?.[0];
   if (!sel) return new Map();
 
@@ -99,7 +101,7 @@ export function buildGroupMap(html: string): Map<number, SourceGroup> {
     return false;
   };
 
-  const out = new Map<number, SourceGroup>();
+  const out = new Map<number, RutrackerGroup>();
   for (const [id, node] of nodes) {
     const group =
       node.section === "Сериалы"
@@ -113,7 +115,7 @@ export function buildGroupMap(html: string): Map<number, SourceGroup> {
   return out;
 }
 
-function keywordGroup(forum: string): SourceGroup | null {
+function keywordGroup(forum: string): RutrackerGroup | null {
   for (const r of KEYWORD_RULES) if (r.re.test(forum)) return r.group;
   return null;
 }
@@ -128,7 +130,7 @@ function stripTags(html: string): string {
   );
 }
 
-export function parseRows(html: string, groupMap?: Map<number, SourceGroup>): Row[] {
+export function parseRows(html: string, groupMap?: Map<number, RutrackerGroup>): Row[] {
   const map = groupMap ?? buildGroupMap(html);
   const start = html.indexOf("tor-tbl");
   const body = start >= 0 ? html.slice(start) : html;

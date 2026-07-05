@@ -60,3 +60,10 @@ describe("Books sources", () => {
     ]);
   });
 });
+
+describe("Music sources", () => {
+  it("registers dedicated TPB and 1337x sources", () => {
+    const music = SOURCES.filter((source) => source.group === "Music");
+    expect(music.map((source) => source.id)).toEqual(["tpb-music", "x1337-music"]);
+  });
+});
