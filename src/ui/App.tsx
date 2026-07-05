@@ -25,6 +25,7 @@ import { reconcileQueue } from "../download/reconcile";
 import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
+import { openFolder } from "../util/openFolder";
 import { cleanText, truncate } from "../util/format";
 import { isCategory, parseCategory } from "./store";
 import {
@@ -842,6 +843,17 @@ export function App({
     })();
   }, []);
 
+  const openDownloadFolder = useCallback((dir: string) => {
+    void (async () => {
+      const ok = await openFolder(dir);
+      if (ok) {
+        setNotice(`Opened: ${truncate(dir, 48)}`);
+        return;
+      }
+      setNotice(`Couldn't open folder: ${truncate(dir, 48)}`);
+    })();
+  }, []);
+
   const submitQuery = useCallback(
     (raw: string) => {
       const q = raw.trim();
@@ -959,6 +971,7 @@ export function App({
       rdStatus,
       copyLink,
       copyMagnet,
+      openDownloadFolder,
       notice,
       setNotice,
       quitAll,
@@ -1005,6 +1018,7 @@ export function App({
     rdStatus,
     copyLink,
     copyMagnet,
+    openDownloadFolder,
     notice,
     listRows,
     compact,

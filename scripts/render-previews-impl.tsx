@@ -111,6 +111,7 @@ function makeStore(
     rdStatus: null,
     copyLink: noop,
     copyMagnet: noop,
+    openDownloadFolder: noop,
     notice: null,
     setNotice: noop,
     quitAll: noop,
