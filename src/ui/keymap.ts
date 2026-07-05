@@ -22,6 +22,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "S", label: "Choose sources" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "t", label: "Extra trackers" },
+      { keys: "L", label: "Transfer and seeding limits" },
       { keys: "q", label: "Quit" },
     ],
   },

@@ -36,6 +36,8 @@ function message(e: unknown): string {
 export class TorrentEngine {
   private client: WebTorrent | null = null;
   private torrents = new Map<string, Torrent>();
+  private downloadLimit = -1;
+  private uploadLimit = -1;
 
   private ensureClient(): WebTorrent {
     if (!this.client) {
@@ -49,8 +51,17 @@ export class TorrentEngine {
       const opts = process.platform === "darwin" ? { natPmp: false } : {};
       this.client = new WebTorrent(opts);
       this.client.on("error", () => {});
+      this.client.throttleDownload(this.downloadLimit);
+      this.client.throttleUpload(this.uploadLimit);
     }
     return this.client;
+  }
+
+  setLimits(downloadKbps?: number, uploadKbps?: number): void {
+    this.downloadLimit = downloadKbps && downloadKbps > 0 ? downloadKbps * 1024 : -1;
+    this.uploadLimit = uploadKbps && uploadKbps > 0 ? uploadKbps * 1024 : -1;
+    this.client?.throttleDownload(this.downloadLimit);
+    this.client?.throttleUpload(this.uploadLimit);
   }
 
   // `source` is a magnet URI, an infoHash, or a path to a .torrent file. Seeding

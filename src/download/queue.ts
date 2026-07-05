@@ -75,6 +75,17 @@ export interface AddInput {
   sizeBytes?: number;
 }
 
+export function seedPolicyReached(
+  uploaded: number,
+  sizeBytes: number,
+  ageMs: number,
+  ratio: number,
+  minutes: number,
+): boolean {
+  return (ratio > 0 && sizeBytes > 0 && uploaded / sizeBytes >= ratio) ||
+    (minutes > 0 && ageMs >= minutes * 60_000);
+}
+
 export class DownloadQueue extends EventEmitter {
   private items = new Map<string, QueueItem>();
   private engine = new TorrentEngine();
@@ -92,12 +103,25 @@ export class DownloadQueue extends EventEmitter {
   private debridSem = new Semaphore(MAX_ACTIVE_DEBRID);
   private debridAttempts = new Map<string, number>();
   private trackers: string[] = [];
+  private seedRatio = 0;
+  private seedMinutes = 0;
 
   // Extra announce URLs appended to every torrent added from now on.
   // Existing running torrents aren't retro-updated — the change takes effect
   // for the next add / resume / re-seed.
   setTrackers(trackers: string[]): void {
     this.trackers = trackers;
+  }
+
+  setTransferPolicy(policy: {
+    downloadLimitKbps?: number;
+    uploadLimitKbps?: number;
+    seedRatio?: number;
+    seedMinutes?: number;
+  }): void {
+    this.engine.setLimits(policy.downloadLimitKbps, policy.uploadLimitKbps);
+    this.seedRatio = Math.max(0, policy.seedRatio ?? 0);
+    this.seedMinutes = Math.max(0, policy.seedMinutes ?? 0);
   }
 
   getItems(): QueueItem[] {
@@ -515,6 +539,17 @@ export class DownloadQueue extends EventEmitter {
       // hash-verify on-disk pieces, and during that window progress < 1 with
       // downloadSpeed > 0 is perfectly normal.
       const age = now - (this.seedStartedAt.get(sd.id) ?? 0);
+      if (seedPolicyReached(s.uploaded, sd.sizeBytes, age, this.seedRatio, this.seedMinutes)) {
+        this.engine.remove(sd.id);
+        this.seedStartedAt.delete(sd.id);
+        sd.status = "paused";
+        sd.uploadSpeed = 0;
+        sd.uploaded = s.uploaded;
+        sd.peers = 0;
+        void this.persistSeeds();
+        any = true;
+        continue;
+      }
       if (age > SEED_GRACE_MS && strayDownload(s)) {
         const hits = (this.strayHits.get(sd.id) ?? 0) + 1;
         this.strayHits.set(sd.id, hits);

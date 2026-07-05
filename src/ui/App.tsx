@@ -64,6 +64,7 @@ import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt"
 import { Accounts } from "./components/Accounts";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
+import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -142,6 +143,7 @@ export function App({
   const [rutrackerCaptcha, setRutrackerCaptcha] = useState<Captcha | undefined>(undefined);
   const [rutrackerUser, setRutrackerUser] = useState<string | undefined>(undefined);
   const [editingTrackers, setEditingTrackers] = useState(false);
+  const [editingLimits, setEditingLimits] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
@@ -176,6 +178,7 @@ export function App({
       const cfg = await loadConfig();
       const q = new DownloadQueue();
       q.setTrackers(cfg.trackers);
+      q.setTransferPolicy(cfg);
       q.restore(reconcileQueue(await loadQueue()));
       q.restoreHistory(await loadHistory());
       q.restoreSeeds(await loadSeeds());
@@ -299,6 +302,7 @@ export function App({
     (c: Config) => {
       setConfigState(c);
       queue?.setTrackers(c.trackers);
+      queue?.setTransferPolicy(c);
       void saveConfig(c);
     },
     [queue],
@@ -376,6 +380,13 @@ export function App({
     },
     [config, setConfig, closeTrackersPrompt],
   );
+
+  const setLimits = useCallback((limits: TransferLimits) => {
+    setEditingLimits(false);
+    if (!config) return;
+    setConfig({ ...config, ...limits });
+    setNotice("Transfer and seeding limits saved.");
+  }, [config, setConfig]);
 
   const setDownloadDir = useCallback(
     (raw: string) => {
@@ -958,7 +969,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
           ? "help"
           : region,
       setRegion,
@@ -1007,6 +1018,7 @@ export function App({
     editingDns,
     editingRutracker,
     editingTrackers,
+    editingLimits,
     toggleSource,
     pendingP2P,
     fileSelection,
@@ -1049,6 +1061,7 @@ export function App({
       if (editingDns) return; // the DNS prompt owns input
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
+      if (editingLimits) return; // the limits prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
@@ -1088,6 +1101,11 @@ export function App({
       if (input === "t") {
         setShowHelp(false);
         setEditingTrackers(true);
+        return;
+      }
+      if (input === "L") {
+        setShowHelp(false);
+        setEditingLimits(true);
         return;
       }
       if (input === "m") {
@@ -1398,11 +1416,22 @@ export function App({
           </Box>
         ) : null}
 
+        {editingLimits ? (
+          <Box marginTop={1}>
+            <LimitsPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              value={store.config}
+              onSubmit={setLimits}
+              onCancel={() => setEditingLimits(false)}
+            />
+          </Box>
+        ) : null}
+
         <Box
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1449,7 +1478,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }
