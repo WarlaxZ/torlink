@@ -63,10 +63,12 @@ import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { Accounts } from "./components/Accounts";
 import { TrackersPrompt } from "./components/TrackersPrompt";
+import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
 import type { SourceId } from "../sources/types";
+import type { QueueItem } from "../download/types";
 import {
   login as rutrackerLogin,
   getSession as getRutrackerSession,
@@ -141,6 +143,7 @@ export function App({
   const [rutrackerUser, setRutrackerUser] = useState<string | undefined>(undefined);
   const [editingTrackers, setEditingTrackers] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
+  const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
@@ -241,6 +244,8 @@ export function App({
   useEffect(() => {
     if (!queue) return;
     const onUpdate = (): void => {
+      const selecting = queue.getItems().find((it) => it.status === "selecting");
+      setFileSelection(selecting ? { ...selecting } : null);
       for (const it of queue.getItems()) {
         if (it.status !== "failed" || it.via !== "realdebrid" || !it.error) continue;
         if (reauthSeen.current.has(it.id)) continue;
@@ -254,6 +259,7 @@ export function App({
       }
     };
     queue.on("update", onUpdate);
+    onUpdate();
     return () => {
       queue.off("update", onUpdate);
     };
@@ -952,7 +958,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
           ? "help"
           : region,
       setRegion,
@@ -1003,6 +1009,7 @@ export function App({
     editingTrackers,
     toggleSource,
     pendingP2P,
+    fileSelection,
     streamFiles,
     preparing,
     torrentPrompt,
@@ -1043,6 +1050,7 @@ export function App({
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
+      if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
       if (keepPrompt) return; // the keep-download prompt owns input
       if (streamFiles) return; // the file picker owns input
@@ -1266,6 +1274,26 @@ export function App({
           </Box>
         ) : null}
 
+        {fileSelection?.availableFiles ? (
+          <Box marginTop={1}>
+            <DownloadFilePrompt
+              width={Math.max(30, Math.min(cols - 4, 78))}
+              files={fileSelection.availableFiles}
+              onSubmit={(indices) => {
+                if (queue?.selectFiles(fileSelection.id, indices)) {
+                  setFileSelection(null);
+                  setNotice(`Downloading ${indices.length} selected file${indices.length === 1 ? "" : "s"}.`);
+                }
+              }}
+              onCancel={() => {
+                queue?.cancel(fileSelection.id);
+                setFileSelection(null);
+                setNotice("Download cancelled.");
+              }}
+            />
+          </Box>
+        ) : null}
+
         {pendingP2P ? (
           <Box marginTop={1}>
             <ConfirmPrompt
@@ -1374,7 +1402,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }

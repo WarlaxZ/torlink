@@ -59,6 +59,29 @@ describe("DownloadQueue seeding", () => {
   });
 });
 
+describe("DownloadQueue file selection", () => {
+  it("rejects an empty or unknown selection", () => {
+    const q = new DownloadQueue();
+    q.restore([{
+      id: "pick1",
+      name: "Collection",
+      magnet: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222",
+      dir: "/downloads",
+      status: "selecting",
+      progress: 0,
+      totalBytes: 30,
+      downloadedBytes: 0,
+      speed: 0,
+      peers: 0,
+      addedAt: 1,
+      availableFiles: [{ index: 0, name: "a", path: "a.epub", length: 10 }],
+    }]);
+    expect(q.selectFiles("pick1", [])).toBe(false);
+    expect(q.selectFiles("pick1", [99])).toBe(false);
+    q.suspend();
+  });
+});
+
 describe("DownloadQueue Real-Debrid path", () => {
   const input = {
     id: "rd1",

@@ -16,6 +16,7 @@ export interface TorrentMeta {
   name: string;
   total: number;
   files: number;
+  fileList: { index: number; name: string; path: string; length: number }[];
   // The .torrent metadata (piece hashes), available once metadata arrives. We
   // persist it so a later re-seed can verify the on-disk file without having to
   // re-fetch metadata from the swarm (which a bare magnet would require).
@@ -63,6 +64,7 @@ export class TorrentEngine {
     dir: string,
     handlers: AddHandlers,
     announce?: string[],
+    selectedFileIndices?: number[],
   ): void {
     const client = this.ensureClient();
     const existing = this.torrents.get(id);
@@ -84,10 +86,25 @@ export class TorrentEngine {
     this.torrents.set(id, torrent);
 
     torrent.on("metadata", () => {
+      const fileList = (torrent.files ?? []).map((file, index) => ({
+        index,
+        name: file.name,
+        path: file.path,
+        length: file.length,
+      }));
+      if (fileList.length > 1) {
+        for (const file of torrent.files) file.deselect();
+        if (selectedFileIndices?.length) {
+          for (const index of selectedFileIndices) torrent.files[index]?.select();
+        } else {
+          torrent.pause();
+        }
+      }
       handlers.onMetadata?.({
         name: torrent.name,
         total: torrent.length,
         files: torrent.files?.length ?? 0,
+        fileList,
         torrentFile: torrent.torrentFile,
       });
     });
@@ -103,6 +120,14 @@ export class TorrentEngine {
         torrent.destroy();
       } catch {}
     });
+  }
+
+  selectFiles(id: string, indices: number[]): void {
+    const torrent = this.torrents.get(id);
+    if (!torrent || indices.length === 0) return;
+    for (const file of torrent.files ?? []) file.deselect();
+    for (const index of indices) torrent.files?.[index]?.select();
+    torrent.resume();
   }
 
   // The TCP port the client accepts incoming peers on (diagnostics / tests).

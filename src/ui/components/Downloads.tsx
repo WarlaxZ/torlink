@@ -24,16 +24,19 @@ const MARK = 2;
 function statusColor(status: QueueItem["status"]): string {
   if (status === "failed") return COLOR.bad;
   if (status === "paused") return PAUSED;
+  if (status === "selecting") return COLOR.warn;
   return COLOR.accent;
 }
 
 function statusIcon(status: QueueItem["status"]): string {
   if (status === "failed") return ICON.error;
   if (status === "paused") return ICON.pause;
+  if (status === "selecting") return ICON.pending;
   return ICON.down;
 }
 
 function rightStats(it: QueueItem): string {
+  if (it.status === "selecting") return `choose files  ${it.files ?? 0} available`;
   if (it.status === "downloading") {
     // Real-Debrid first caches the torrent on its cloud (resolving), then we
     // pull it over HTTP — no swarm, so no peer count.
