@@ -67,6 +67,7 @@ import { Watchlist } from "./components/Watchlist";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
+import { VpnPrompt } from "./components/VpnPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -81,6 +82,7 @@ import {
 } from "../sources/rutracker/session";
 import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
+import { vpnRouteIsSafe } from "../util/vpn";
 
 export interface DownloadInput {
   id: string;
@@ -146,6 +148,7 @@ export function App({
   const [rutrackerUser, setRutrackerUser] = useState<string | undefined>(undefined);
   const [editingTrackers, setEditingTrackers] = useState(false);
   const [editingLimits, setEditingLimits] = useState(false);
+  const [editingVpn, setEditingVpn] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
@@ -169,6 +172,7 @@ export function App({
   const [keepPrompt, setKeepPrompt] = useState<
     { session: TorrentStreamSession; input: DownloadInput } | null
   >(null);
+  const vpnUnsafe = useRef(false);
   const prepareAbort = useRef<AbortController | null>(null);
   const booting = useRef(false);
 
@@ -404,6 +408,24 @@ export function App({
     setNotice("Transfer and seeding limits saved.");
   }, [config, setConfig]);
 
+  const setVpnInterface = useCallback((raw: string) => {
+    setEditingVpn(false);
+    if (!config) return;
+    const vpnInterface = raw.trim() || undefined;
+    setConfig({ ...config, vpnInterface });
+    setNotice(vpnInterface ? `VPN guard set to ${vpnInterface}.` : "VPN guard disabled.");
+  }, [config, setConfig]);
+
+  const ensureVpnSafe = useCallback(async (): Promise<boolean> => {
+    const name = config?.vpnInterface?.trim();
+    if (!name) return true;
+    const safe = await vpnRouteIsSafe(name);
+    queue?.setP2PAllowed(safe);
+    if (!safe) setNotice(`P2P blocked: ${name} is not the active default route.`);
+    return safe;
+  }, [config, queue]);
+
+
   const setDownloadDir = useCallback(
     (raw: string) => {
       closeFolderPrompt();
@@ -486,11 +508,14 @@ export function App({
   const startDownload = useCallback(
     (input: DownloadInput) => {
       if (!config || !queue) return;
-      void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
-      queue.add(input, config.downloadDir);
-      setNotice(`Added: ${truncate(cleanText(input.name), 40)}`);
+      void (async () => {
+        if (!(await ensureVpnSafe())) return;
+        await fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
+        queue.add(input, config.downloadDir);
+        setNotice(`Added: ${truncate(cleanText(input.name), 40)}`);
+      })();
     },
-    [config, queue],
+    [config, queue, ensureVpnSafe],
   );
 
   const startDebridDownload = useCallback(
@@ -565,6 +590,10 @@ export function App({
       });
       void (async () => {
         try {
+          if (!(await ensureVpnSafe())) {
+            setPreparing(null);
+            return;
+          }
           const session = await streamTorrent(input.magnet, { signal: controller.signal });
           if (controller.signal.aborted) {
             void session.stop();
@@ -592,8 +621,34 @@ export function App({
         }
       })();
     },
-    [config, preparing, streamFiles, activeStream, playStream],
+    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe],
   );
+
+  useEffect(() => {
+    const name = config?.vpnInterface?.trim();
+    if (!queue) return;
+    if (!name) { vpnUnsafe.current = false; queue.setP2PAllowed(true); return; }
+    let alive = true;
+    const check = async (): Promise<void> => {
+      const safe = await vpnRouteIsSafe(name);
+      if (!alive) return;
+      queue.setP2PAllowed(safe);
+      if (!safe && !vpnUnsafe.current) {
+        vpnUnsafe.current = true;
+        const active = activeStreamRef.current;
+        if (active) {
+          activeStreamRef.current = null;
+          setActiveStream(null);
+          void active.session.stop();
+        }
+        setNotice(`VPN kill switch: ${name} lost the default route; P2P stopped.`);
+      } else if (safe) vpnUnsafe.current = false;
+    };
+    void check();
+    const timer = setInterval(() => void check(), 1000);
+    timer.unref();
+    return () => { alive = false; clearInterval(timer); };
+  }, [config?.vpnInterface, queue]);
 
   const stopStream = useCallback(() => {
     const active = activeStream;
@@ -987,7 +1042,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
           ? "help"
           : region,
       setRegion,
@@ -1038,6 +1093,7 @@ export function App({
     editingRutracker,
     editingTrackers,
     editingLimits,
+    editingVpn,
     toggleSource,
     pendingP2P,
     fileSelection,
@@ -1081,6 +1137,7 @@ export function App({
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
       if (editingLimits) return; // the limits prompt owns input
+      if (editingVpn) return; // the VPN prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
@@ -1125,6 +1182,11 @@ export function App({
       if (input === "L") {
         setShowHelp(false);
         setEditingLimits(true);
+        return;
+      }
+      if (input === "V") {
+        setShowHelp(false);
+        setEditingVpn(true);
         return;
       }
       if (input === "m") {
@@ -1446,11 +1508,22 @@ export function App({
           </Box>
         ) : null}
 
+        {editingVpn ? (
+          <Box marginTop={1}>
+            <VpnPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              value={store.config.vpnInterface ?? ""}
+              onSubmit={setVpnInterface}
+              onCancel={() => setEditingVpn(false)}
+            />
+          </Box>
+        ) : null}
+
         <Box
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1500,7 +1573,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }

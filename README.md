@@ -135,6 +135,8 @@ Before opening a PR, skim [CONTRIBUTING.md](CONTRIBUTING.md); it lays out the ba
 
 Your files stay on your disk, and nothing routes through a central server; torlink only talks to the torrent network directly. Once a download finishes it keeps seeding by default, sharing it back so the next person can find it just as easily. The network only works because people pass things along, and even a few minutes makes a real difference. If you'd rather not, opt out anytime: open the Seeding tab, press `p` to pause or stop any item, and press it again to pick it back up. Always your call.
 
+For a fail-closed VPN setup, press `Shift+V` and enter the VPN interface name (`tun0`, `utun4`, or the Windows interface alias). Before any P2P download or stream starts, torlink verifies that the interface exists and owns the default route. It continues monitoring once per second and tears down active P2P sessions if that route changes. Real-Debrid transfers are unaffected. This is a route kill switch, not a replacement for firewall-level VPN rules.
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=WarlaxZ%2Ftorlink&type=date&legend=top-left">

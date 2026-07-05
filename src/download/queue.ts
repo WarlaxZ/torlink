@@ -105,6 +105,12 @@ export class DownloadQueue extends EventEmitter {
   private trackers: string[] = [];
   private seedRatio = 0;
   private seedMinutes = 0;
+  private p2pAllowed = true;
+
+  setP2PAllowed(allowed: boolean): void {
+    this.p2pAllowed = allowed;
+    if (!allowed) this.killP2P();
+  }
 
   // Extra announce URLs appended to every torrent added from now on.
   // Existing running torrents aren't retro-updated — the change takes effect
@@ -172,6 +178,11 @@ export class DownloadQueue extends EventEmitter {
   }
 
   private startEngine(item: QueueItem): void {
+    if (!this.p2pAllowed) {
+      item.status = "paused";
+      item.error = "VPN kill switch blocked peer-to-peer traffic.";
+      return;
+    }
     this.engine.add(
       item.id,
       item.magnet,
@@ -647,6 +658,27 @@ export class DownloadQueue extends EventEmitter {
     if (!it) return;
     if (it.status === "downloading") this.pause(id);
     else if (it.status === "paused") this.resume(id);
+  }
+
+  killP2P(): void {
+    for (const item of this.items.values()) {
+      if (item.via === "realdebrid" || item.status !== "downloading") continue;
+      item.status = "paused";
+      item.speed = 0;
+      item.peers = 0;
+      this.engine.remove(item.id);
+    }
+    for (const seed of this.seeds.values()) {
+      if (seed.status !== "seeding") continue;
+      seed.status = "paused";
+      seed.uploadSpeed = 0;
+      seed.peers = 0;
+      this.engine.remove(seed.id);
+    }
+    this.changed();
+    void this.persist();
+    void this.persistSeeds();
+    this.maybeStopPoll();
   }
 
   // Delete a Real-Debrid item's partial files on disk (used when cancelling a

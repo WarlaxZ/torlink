@@ -40,6 +40,8 @@ export interface Config {
   uploadLimitKbps?: number;
   seedRatio?: number;
   seedMinutes?: number;
+  // Fail-closed P2P guard: this interface must exist and own the default route.
+  vpnInterface?: string;
 }
 
 export const defaultConfig: Config = {
