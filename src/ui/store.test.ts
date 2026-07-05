@@ -8,6 +8,7 @@ describe("parseCategory", () => {
     expect(parseCategory("movies")).toBe("movies");
     expect(parseCategory("tv")).toBe("tv");
     expect(parseCategory("anime")).toBe("anime");
+    expect(parseCategory("music")).toBe("music");
     expect(parseCategory("books")).toBe("books");
   });
 
@@ -34,6 +35,7 @@ describe("isCategory", () => {
     expect(isCategory("movies")).toBe(true);
     expect(isCategory("tv")).toBe(true);
     expect(isCategory("anime")).toBe(true);
+    expect(isCategory("music")).toBe(true);
     expect(isCategory("books")).toBe(true);
   });
 });
