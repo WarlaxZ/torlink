@@ -8,6 +8,7 @@ describe("parseCategory", () => {
     expect(parseCategory("movies")).toBe("movies");
     expect(parseCategory("tv")).toBe("tv");
     expect(parseCategory("anime")).toBe("anime");
+    expect(parseCategory("books")).toBe("books");
   });
 
   it("falls back to 'all' for missing, unknown, or non-category values", () => {
@@ -33,5 +34,6 @@ describe("isCategory", () => {
     expect(isCategory("movies")).toBe(true);
     expect(isCategory("tv")).toBe(true);
     expect(isCategory("anime")).toBe(true);
+    expect(isCategory("books")).toBe(true);
   });
 });

@@ -2,16 +2,22 @@ import { fetchResilient, HttpError, USER_AGENT } from "../util/net";
 import { buildMagnet } from "./magnet";
 import { unescapeEntities } from "./rss";
 import { parseSize } from "../util/format";
-import type { SearchOptions, Source, TorrentResult } from "./types";
+import type { SearchOptions, Source, SourceId, TorrentResult } from "./types";
 
 const BASE = "https://nyaa.si/";
+export const NYAA_LITERATURE_CATEGORY = "3_0";
 
 function tag(item: string, name: string): string {
   return item.match(new RegExp(`<${name}>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</${name}>`, "s"))?.[1]?.trim() ?? "";
 }
 
-async function search(query: string, opts: SearchOptions = {}): Promise<TorrentResult[]> {
-  const params = new URLSearchParams({ page: "rss", q: query.trim(), c: "0_0", f: "0" });
+async function search(
+  query: string,
+  category: string,
+  source: SourceId,
+  opts: SearchOptions = {},
+): Promise<TorrentResult[]> {
+  const params = new URLSearchParams({ page: "rss", q: query.trim(), c: category, f: "0" });
   const res = await fetchResilient(`${BASE}?${params.toString()}`, {
     headers: { "User-Agent": USER_AGENT },
     signal: opts.signal,
@@ -33,7 +39,7 @@ async function search(query: string, opts: SearchOptions = {}): Promise<TorrentR
       sizeBytes: parseSize(tag(item, "nyaa:size")),
       seeders: Number.isFinite(seeders) ? seeders : 0,
       leechers: Number.isFinite(leechers) ? leechers : 0,
-      source: "nyaa",
+      source,
       magnet: buildMagnet(infoHash, name),
       added: dateStr ? new Date(dateStr).getTime() / 1000 : undefined,
     });
@@ -46,5 +52,14 @@ export const nyaa: Source = {
   label: "Nyaa",
   group: "Anime",
   homepage: "https://nyaa.si",
-  search,
+  search: (query, opts = {}) => search(query, "0_0", "nyaa", opts),
+};
+
+export const nyaaLiterature: Source = {
+  id: "nyaa-literature",
+  label: "Nyaa",
+  group: "Books",
+  homepage: "https://nyaa.si/?c=3_0",
+  search: (query, opts = {}) =>
+    search(query, NYAA_LITERATURE_CATEGORY, "nyaa-literature", opts),
 };

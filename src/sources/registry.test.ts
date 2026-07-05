@@ -39,13 +39,24 @@ describe("toggleDisabledSource", () => {
 });
 
 describe("RuTracker sources", () => {
-  it("includes the four RuTracker sources", () => {
+  it("includes the five RuTracker sources", () => {
     const ids = SOURCES.map((s) => s.id);
     expect(ids).toEqual(
-      expect.arrayContaining(["rt-games", "rt-movies", "rt-tv", "rt-anime"]),
+      expect.arrayContaining(["rt-games", "rt-movies", "rt-tv", "rt-anime", "rt-books"]),
     );
     for (const s of SOURCES.filter((x) => x.id.startsWith("rt-"))) {
       expect(s.label).toBe("RuTracker");
     }
+  });
+});
+
+describe("Books sources", () => {
+  it("registers dedicated TPB, Nyaa, and RuTracker sources", () => {
+    const books = SOURCES.filter((source) => source.group === "Books");
+    expect(books.map((source) => source.id)).toEqual([
+      "tpb-books",
+      "nyaa-literature",
+      "rt-books",
+    ]);
   });
 });

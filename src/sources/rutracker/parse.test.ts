@@ -33,6 +33,8 @@ describe("parseRows", () => {
     expect(groupFor("PC игры")).toBe("Games");
     expect(groupFor("Зарубережные сериалы")).toBe("TV");
     expect(groupFor("Зарубережное кино")).toBe("Movies");
+    expect(groupFor("Электронные книги")).toBe("Books");
+    expect(groupFor("Аудиокниги (AAC)")).toBe("Books");
   });
 
   it("drops results that aren't one of the four tabs", () => {
@@ -58,6 +60,12 @@ const SELECT = `
   <optgroup label="&nbsp;Музыка">
     <option id="fs-408" value="408" class='fp-409' > |- Поп-музыка (lossless)&nbsp;</option>
   </optgroup>
+  <optgroup label="&nbsp;Книги и журналы">
+    <option id="fs-21" value="21" class='root_forum' >Книги и журналы (общий раздел)&nbsp;</option>
+  </optgroup>
+  <optgroup label="&nbsp;Аудиокниги">
+    <option id="fs-1909" value="1909" class='root_forum' >Аудиокниги (AAC, ALAC)&nbsp;</option>
+  </optgroup>
 </select>`;
 
 describe("buildGroupMap", () => {
@@ -66,6 +74,8 @@ describe("buildGroupMap", () => {
     expect(map.get(313)).toBe("Movies");
     expect(map.get(266)).toBe("TV");
     expect(map.get(973)).toBe("Games");
+    expect(map.get(21)).toBe("Books");
+    expect(map.get(1909)).toBe("Books");
   });
   it("overrides the section for anime nested under films", () => {
     expect(map.get(33)).toBe("Anime");
