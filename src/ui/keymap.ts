@@ -23,6 +23,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "t", label: "Extra trackers" },
       { keys: "L", label: "Transfer and seeding limits" },
+      { keys: "V", label: "VPN kill switch" },
       { keys: "q", label: "Quit" },
     ],
   },

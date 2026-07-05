@@ -112,3 +112,10 @@ describe("config torrentStreamAck", () => {
     expect(cfg.torrentStreamAck).toBe(true);
   });
 });
+
+describe("config vpnInterface", () => {
+  it("round-trips the VPN kill-switch interface", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [], vpnInterface: "tun0" });
+    expect((await loadConfig()).vpnInterface).toBe("tun0");
+  });
+});
