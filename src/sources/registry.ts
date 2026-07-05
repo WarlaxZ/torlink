@@ -11,6 +11,7 @@ import {
   rutrackerMovies,
   rutrackerTv,
   rutrackerAnime,
+  rutrackerMusic,
   rutrackerBooks,
 } from "./rutracker";
 import type { Source, SourceGroup, SourceId } from "./types";
@@ -34,6 +35,7 @@ export const SOURCES: readonly Source[] = [
   rutrackerMovies,
   rutrackerTv,
   rutrackerAnime,
+  rutrackerMusic,
   rutrackerBooks,
 ];
 

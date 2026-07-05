@@ -39,10 +39,10 @@ describe("toggleDisabledSource", () => {
 });
 
 describe("RuTracker sources", () => {
-  it("includes the five RuTracker sources", () => {
+  it("includes the six RuTracker sources", () => {
     const ids = SOURCES.map((s) => s.id);
     expect(ids).toEqual(
-      expect.arrayContaining(["rt-games", "rt-movies", "rt-tv", "rt-anime", "rt-books"]),
+      expect.arrayContaining(["rt-games", "rt-movies", "rt-tv", "rt-anime", "rt-music", "rt-books"]),
     );
     for (const s of SOURCES.filter((x) => x.id.startsWith("rt-"))) {
       expect(s.label).toBe("RuTracker");
@@ -64,6 +64,10 @@ describe("Books sources", () => {
 describe("Music sources", () => {
   it("registers dedicated TPB and 1337x sources", () => {
     const music = SOURCES.filter((source) => source.group === "Music");
-    expect(music.map((source) => source.id)).toEqual(["tpb-music", "x1337-music"]);
+    expect(music.map((source) => source.id)).toEqual([
+      "tpb-music",
+      "x1337-music",
+      "rt-music",
+    ]);
   });
 });

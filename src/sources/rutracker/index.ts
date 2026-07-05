@@ -30,7 +30,7 @@ interface Row {
   added?: number;
 }
 
-type RutrackerGroup = Exclude<SourceGroup, "Music">;
+type RutrackerGroup = SourceGroup;
 
 const SECTION_GROUP: Record<string, RutrackerGroup> = {
   "Сериалы": "TV",
@@ -40,6 +40,7 @@ const SECTION_GROUP: Record<string, RutrackerGroup> = {
   "Книги и журналы": "Books",
   "Обучение иностранным языкам": "Books",
   "Аудиокниги": "Books",
+  "Музыка": "Music",
 };
 
 const ANIME_RE = /аниме|anime|манга|manga|ранобэ/i;
@@ -50,6 +51,7 @@ const KEYWORD_RULES: { group: RutrackerGroup; re: RegExp }[] = [
   { group: "Games", re: /игр|game|консол|playstation|xbox|nintendo|ps[2345]|repack/i },
   { group: "Movies", re: /кино|фильм|видео|мультфильм|movie/i },
   { group: "Books", re: /книг|журнал|литератур|аудиокниг|учебник/i },
+  { group: "Music", re: /музык|рок|джаз|классик|саундтрек|lossless|flac/i },
 ];
 
 const GROUP_SOURCE: Record<RutrackerGroup, SourceId> = {
@@ -57,6 +59,7 @@ const GROUP_SOURCE: Record<RutrackerGroup, SourceId> = {
   Movies: "rt-movies",
   TV: "rt-tv",
   Anime: "rt-anime",
+  Music: "rt-music",
   Books: "rt-books",
 };
 
@@ -326,4 +329,5 @@ export const rutrackerGames = makeSource("rt-games", "Games");
 export const rutrackerMovies = makeSource("rt-movies", "Movies");
 export const rutrackerTv = makeSource("rt-tv", "TV");
 export const rutrackerAnime = makeSource("rt-anime", "Anime");
+export const rutrackerMusic = makeSource("rt-music", "Music");
 export const rutrackerBooks = makeSource("rt-books", "Books");

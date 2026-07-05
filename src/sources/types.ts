@@ -17,6 +17,7 @@ export type SourceId =
   | "rt-movies"
   | "rt-tv"
   | "rt-anime"
+  | "rt-music"
   | "rt-books";
 
 export type SourceGroup = "Games" | "Movies" | "TV" | "Anime" | "Music" | "Books";

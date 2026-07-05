@@ -35,10 +35,10 @@ describe("parseRows", () => {
     expect(groupFor("Зарубережное кино")).toBe("Movies");
     expect(groupFor("Электронные книги")).toBe("Books");
     expect(groupFor("Аудиокниги (AAC)")).toBe("Books");
+    expect(groupFor("Рок-музыка (lossless)")).toBe("Music");
   });
 
-  it("drops results that aren't one of the four tabs", () => {
-    expect(parseRows(TABLE(ROW("Рок-музыка (lossless)", "Some Album")))).toHaveLength(0);
+  it("drops results that aren't in a supported tab", () => {
     expect(parseRows(TABLE("<tr><td>nothing</td></tr>"))).toHaveLength(0);
   });
 });
@@ -81,8 +81,8 @@ describe("buildGroupMap", () => {
     expect(map.get(33)).toBe("Anime");
     expect(map.get(1390)).toBe("Anime");
   });
-  it("omits sections with no tab", () => {
-    expect(map.has(408)).toBe(false);
+  it("maps the music section", () => {
+    expect(map.get(408)).toBe("Music");
   });
 });
 

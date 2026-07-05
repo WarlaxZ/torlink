@@ -82,7 +82,7 @@ A short, hand-picked list of trusted sources:
 | Books | The Pirate Bay, Nyaa |
 | Music | The Pirate Bay, 1337x |
 
-**RuTracker** is available across Games, Movies, TV, Anime, and Books and requires a free account. Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.
+**RuTracker** is available across Games, Movies, TV, Anime, Music, and Books and requires a free account. Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.
 
 Games are the only category that intentionally distributes executable software, so they come from FitGirl alone, a repacker with a long, trusted track record; the other categories are media or document files. If a source is down, the search carries on without it, and torlink tells you which one is offline. A source that keeps failing is set aside automatically for a while so it stops slowing searches down; you can also switch sources on and off yourself with `Shift+S`.
 
