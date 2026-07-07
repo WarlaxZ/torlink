@@ -78,8 +78,8 @@ Your files stay on your disk, and nothing routes through a central server; torli
 
 <a href="https://www.star-history.com/?repos=baairon%2Ftorlink&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&theme=dark&legend=top-left&sealed_token=6RClUrW7A_foMjVMW-jdJ_bLj-wl8jtLiajry7T0uQ2F-UraDTQq4-n_hj9rdxkfW9Iqxekmz3p9eNLNUgZM18i04-fIvEYFHl-lz90OrCT5hhglY_qgSKoYh3IanPSjj8nUgVIMAGg6ZtPucVGVu-aCYcFzE3aertjFE4CPRDrO9dNaJKRxPFTH0clL" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left&sealed_token=6RClUrW7A_foMjVMW-jdJ_bLj-wl8jtLiajry7T0uQ2F-UraDTQq4-n_hj9rdxkfW9Iqxekmz3p9eNLNUgZM18i04-fIvEYFHl-lz90OrCT5hhglY_qgSKoYh3IanPSjj8nUgVIMAGg6ZtPucVGVu-aCYcFzE3aertjFE4CPRDrO9dNaJKRxPFTH0clL" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=baairon/torlink&type=date&legend=top-left&sealed_token=6RClUrW7A_foMjVMW-jdJ_bLj-wl8jtLiajry7T0uQ2F-UraDTQq4-n_hj9rdxkfW9Iqxekmz3p9eNLNUgZM18i04-fIvEYFHl-lz90OrCT5hhglY_qgSKoYh3IanPSjj8nUgVIMAGg6ZtPucVGVu-aCYcFzE3aertjFE4CPRDrO9dNaJKRxPFTH0clL" />
  </picture>
 </a>
