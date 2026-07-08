@@ -605,7 +605,9 @@ export function App({
           }
           prepareAbort.current = null;
           setPreparing(null);
-          const candidates = streamCandidates(session.files).sort((a, b) => b.bytes - a.bytes);
+          // StreamFilePrompt orders the list (title by default, size on toggle),
+          // so the pre-sort here only decided candidates[0] for the single-file case.
+          const candidates = streamCandidates(session.files);
           if (candidates.length === 0) {
             setNotice("This torrent has nothing to stream.");
             void session.stop();
@@ -737,7 +739,8 @@ export function App({
           });
           if (controller.signal.aborted) return;
           prepareAbort.current = null;
-          const candidates = streamCandidates(files).sort((a, b) => b.bytes - a.bytes);
+          // Ordering is handled by StreamFilePrompt; a single candidate needs none.
+          const candidates = streamCandidates(files);
           if (candidates.length === 0) {
             setPreparing(null);
             setNotice("Real-Debrid returned nothing to stream.");
@@ -1426,6 +1429,7 @@ export function App({
           <Box marginTop={1}>
             <StreamFilePrompt
               width={Math.max(24, Math.min(cols - 4, 72))}
+              maxRows={Math.max(3, bodyH - 4)}
               files={streamFiles}
               onSelect={(file) => finishStream(file)}
               onCancel={() => {
