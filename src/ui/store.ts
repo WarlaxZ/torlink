@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import type { Config } from "../config/config";
+import type { Config, FavouriteItem } from "../config/config";
 import type { DownloadQueue } from "../download/queue";
 import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
@@ -11,12 +11,18 @@ export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books";
 
-export type Section = Category | "watchlist" | "downloads" | "seeding" | "accounts";
+export type Section = Category | "watchlist" | "library" | "downloads" | "seeding" | "accounts";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
 // as opposed to the downloads/seeding/accounts views.
 export function isCategory(section: Section): boolean {
-  return section !== "watchlist" && section !== "downloads" && section !== "seeding" && section !== "accounts";
+  return (
+    section !== "watchlist" &&
+    section !== "library" &&
+    section !== "downloads" &&
+    section !== "seeding" &&
+    section !== "accounts"
+  );
 }
 
 export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[] = [
@@ -56,6 +62,12 @@ export interface Store {
   searchHistory: string[];
   savedSearches: string[];
   toggleSavedSearch: (query: string) => void;
+  // Pinned VIDEO torrents (the "Library"), most-recent first.
+  favourites: FavouriteItem[];
+  toggleFavourite: (item: FavouriteItem) => void;
+  removeFavourite: (id: string) => void;
+  openFavourite: (fav: FavouriteItem) => void;
+  isFavourited: (id: string) => boolean;
 
   section: Section;
   setSection: (s: Section) => void;

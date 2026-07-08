@@ -14,6 +14,7 @@ const FILTERS: NavItem[] = CATEGORIES.map((c) => ({
 }));
 const LIBRARY: NavItem[] = [
   { key: "watchlist", label: "Watchlist" },
+  { key: "library", label: "Library" },
   { key: "downloads", label: "Downloads" },
   { key: "seeding", label: "Seeding" },
   { key: "accounts", label: "Accounts" },

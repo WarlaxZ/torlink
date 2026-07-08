@@ -2,6 +2,20 @@ import { promises as fs } from "node:fs";
 import { configFile, defaultDownloadDir } from "./paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import { parseDnsServers } from "../util/dns";
+import type { SourceId } from "../sources/types";
+
+// A pinned VIDEO torrent/series to return to, remembering which episodes have
+// been streamed. Never stores stream URLs — only the magnet + metadata, so it
+// is always re-resolved fresh (URLs rotate/embed session ports).
+export interface FavouriteItem {
+  id: string; // infoHash — dedupe key
+  name: string;
+  magnet: string;
+  source?: SourceId;
+  sizeBytes?: number;
+  addedAt: number;
+  watched?: string[]; // episode filenames already streamed
+}
 
 export interface Config {
   downloadDir: string;
@@ -25,6 +39,9 @@ export interface Config {
   // search bar.
   searchHistory?: string[];
   savedSearches?: string[];
+  // Pinned VIDEO torrents (the "Library"), most-recent first, each remembering
+  // which episodes have been watched.
+  favourites?: FavouriteItem[];
   // Sources the user has switched off; they're skipped during search. Stored as
   // opaque strings — unknown ids are simply ignored by the registry.
   disabledSources?: string[];
@@ -48,6 +65,18 @@ export const defaultConfig: Config = {
   downloadDir: defaultDownloadDir,
   trackers: [],
 };
+
+// Defensive guard for a persisted favourite (mirrors isHistoryItem): drops
+// hand-edited junk before it reaches the UI. Coerces `watched` and `addedAt`.
+function isFavouriteItem(v: unknown): v is FavouriteItem {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.id === "string" && r.id.length > 0 &&
+    typeof r.name === "string" && r.name.length > 0 &&
+    typeof r.magnet === "string" && r.magnet.length > 0
+  );
+}
 
 const REALDEBRID_TOKEN_ENV = "REALDEBRID_API_TOKEN";
 
@@ -98,6 +127,21 @@ export async function loadConfig(): Promise<Config> {
       : [];
     cfg.savedSearches = Array.isArray(parsed.savedSearches)
       ? parsed.savedSearches.filter((query): query is string => typeof query === "string" && query.trim().length > 0).slice(0, 50)
+      : [];
+    cfg.favourites = Array.isArray(parsed.favourites)
+      ? parsed.favourites
+          .filter(isFavouriteItem)
+          .map((f) => {
+            const watched = Array.isArray(f.watched)
+              ? f.watched.filter((w): w is string => typeof w === "string")
+              : undefined;
+            return {
+              ...f,
+              addedAt: typeof f.addedAt === "number" ? f.addedAt : 0,
+              ...(watched ? { watched } : { watched: undefined }),
+            };
+          })
+          .slice(0, 100)
       : [];
     return cfg;
   } catch {

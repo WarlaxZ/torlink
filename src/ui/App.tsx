@@ -8,6 +8,7 @@ import {
   resolveMediaPlayer,
   resolveDnsServers,
   type Config,
+  type FavouriteItem,
 } from "../config/config";
 import { setDnsServers } from "../util/dns";
 import { normalizeDownloadDir } from "../config/folder";
@@ -41,6 +42,13 @@ import {
 import { formatSort, parseSort, type Sort } from "./sort";
 import { addToHistory } from "./searchHistory";
 import { toggleSavedSearches } from "./savedSearches";
+import {
+  toggleFavourite as toggleFavouriteList,
+  removeFavourite as removeFavouriteFromList,
+  isFavourited as isFavouritedIn,
+  watchedFor,
+  markWatched,
+} from "./favourites";
 import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";
@@ -64,6 +72,7 @@ import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
+import { Favourites } from "./components/Favourites";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
@@ -166,6 +175,12 @@ export function App({
   const [notice, setNotice] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
+  // Episodes streamed from the current picker session (marked ✓, cleared when
+  // the picker opens/closes). Union with the favourite's persisted watched list.
+  const [streamedFiles, setStreamedFiles] = useState<Set<string>>(new Set());
+  // The torrent behind the open picker, so we can favourite it / persist watched
+  // progress. Cleared only when the picker closes (survives keep-open replays).
+  const [streamSource, setStreamSource] = useState<DownloadInput | null>(null);
   const [preparing, setPreparing] = useState<{
     label: string;
     phase: "caching" | "fetching";
@@ -387,6 +402,47 @@ export function App({
     setNotice("Watchlist updated.");
   }, []);
 
+  const toggleFavourite = useCallback((item: FavouriteItem) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const favourites = toggleFavouriteList(prev.favourites ?? [], item);
+      const next = { ...prev, favourites };
+      void saveConfig(next);
+      return next;
+    });
+    setNotice("Favourites updated.");
+  }, []);
+
+  const removeFavourite = useCallback((id: string) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const favourites = removeFavouriteFromList(prev.favourites ?? [], id);
+      const next = { ...prev, favourites };
+      void saveConfig(next);
+      return next;
+    });
+    setNotice("Removed from favourites.");
+  }, []);
+
+  // Record a streamed episode against a favourite (deduped). Skips the disk
+  // write when the id isn't favourited or the episode was already recorded.
+  const markWatchedInFavourite = useCallback((id: string, filename: string) => {
+    setConfigState((prev) => {
+      if (!prev) return prev;
+      const current = prev.favourites ?? [];
+      const favourites = markWatched(current, id, filename);
+      if (favourites === current) return prev; // no change: don't churn disk
+      const next = { ...prev, favourites };
+      void saveConfig(next);
+      return next;
+    });
+  }, []);
+
+  const isFavourited = useCallback(
+    (id: string) => isFavouritedIn(config?.favourites ?? [], id),
+    [config],
+  );
+
   const closeFolderPrompt = useCallback(() => {
     setEditingFolder(false);
   }, []);
@@ -570,6 +626,20 @@ export function App({
     [playStream],
   );
 
+  // Play a picked episode but KEEP the picker open (unlike finishStream) so the
+  // user can go straight to the next episode. Marks it streamed this session and
+  // persists watched progress when the current torrent is favourited.
+  const playFromPicker = useCallback(
+    (file: ResolvedFile) => {
+      void playStream(file.url, file.filename);
+      setStreamedFiles((prev) => new Set(prev).add(file.filename));
+      if (streamSource && isFavouritedIn(config?.favourites ?? [], streamSource.id)) {
+        markWatchedInFavourite(streamSource.id, file.filename);
+      }
+    },
+    [playStream, streamSource, config, markWatchedInFavourite],
+  );
+
   const cancelPreparing = useCallback(() => {
     prepareAbort.current?.abort();
     prepareAbort.current = null;
@@ -615,6 +685,8 @@ export function App({
           }
           setActiveStream({ session, name: input.name, input });
           if (candidates.length > 1) {
+            setStreamedFiles(new Set());
+            setStreamSource(input);
             setStreamFiles(candidates);
           } else {
             void playStream(candidates[0]!.url, input.name);
@@ -748,6 +820,8 @@ export function App({
           }
           if (candidates.length > 1) {
             setPreparing(null);
+            setStreamedFiles(new Set());
+            setStreamSource(input);
             setStreamFiles(candidates);
             return;
           }
@@ -773,6 +847,21 @@ export function App({
       })();
     },
     [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream],
+  );
+
+  // Reopen a favourited series: re-resolve its magnet through the same stream
+  // flow (RD or torrent), which reopens the picker for multi-file torrents.
+  const openFavourite = useCallback(
+    (fav: FavouriteItem) => {
+      streamResult({
+        id: fav.id,
+        name: fav.name,
+        magnet: fav.magnet,
+        source: fav.source,
+        sizeBytes: fav.sizeBytes,
+      });
+    },
+    [streamResult],
   );
 
   const closePlayerPrompt = useCallback(() => {
@@ -1104,6 +1193,11 @@ export function App({
       searchHistory: config.searchHistory ?? [],
       savedSearches: config.savedSearches ?? [],
       toggleSavedSearch,
+      favourites: config.favourites ?? [],
+      toggleFavourite,
+      removeFavourite,
+      openFavourite,
+      isFavourited,
       section,
       setSection: changeSection,
       sort,
@@ -1149,6 +1243,10 @@ export function App({
     query,
     submitQuery,
     toggleSavedSearch,
+    toggleFavourite,
+    removeFavourite,
+    openFavourite,
+    isFavourited,
     section,
     changeSection,
     sort,
@@ -1431,9 +1529,30 @@ export function App({
               width={Math.max(24, Math.min(cols - 4, 72))}
               maxRows={Math.max(3, bodyH - 4)}
               files={streamFiles}
-              onSelect={(file) => finishStream(file)}
+              watched={
+                streamSource
+                  ? [...watchedFor(config?.favourites ?? [], streamSource.id), ...streamedFiles]
+                  : [...streamedFiles]
+              }
+              favourited={streamSource ? isFavourited(streamSource.id) : false}
+              onFavourite={
+                streamSource
+                  ? () =>
+                      toggleFavourite({
+                        id: streamSource.id,
+                        name: streamSource.name,
+                        magnet: streamSource.magnet,
+                        source: streamSource.source,
+                        sizeBytes: streamSource.sizeBytes,
+                        addedAt: Date.now(),
+                      })
+                  : undefined
+              }
+              onSelect={playFromPicker}
               onCancel={() => {
                 setStreamFiles(null);
+                setStreamedFiles(new Set());
+                setStreamSource(null);
                 // The Real-Debrid path has no activeStream (files are hosted
                 // by RD, not a local torrent session), so this only fires for
                 // the torrent-stream path — leave that path unaffected.
@@ -1659,6 +1778,9 @@ export function App({
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
               <Watchlist />
+            </Box>
+            <Box display={section === "library" ? "flex" : "none"} flexDirection="column">
+              <Favourites />
             </Box>
           </Box>
         </Box>

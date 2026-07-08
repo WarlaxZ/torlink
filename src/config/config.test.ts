@@ -119,3 +119,54 @@ describe("config vpnInterface", () => {
     expect((await loadConfig()).vpnInterface).toBe("tun0");
   });
 });
+
+describe("config favourites", () => {
+  it("round-trips favourites with watched episodes", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      trackers: [],
+      favourites: [
+        { id: "hash1", name: "Series", magnet: "magnet:?xt=1", addedAt: 5, watched: ["ep1"] },
+      ],
+    });
+    const cfg = await loadConfig();
+    expect(cfg.favourites).toEqual([
+      { id: "hash1", name: "Series", magnet: "magnet:?xt=1", addedAt: 5, watched: ["ep1"] },
+    ]);
+  });
+
+  it("drops junk favourites and non-string watched entries", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      trackers: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      favourites: [
+        { id: "", name: "no id", magnet: "m", addedAt: 1 },
+        { id: "ok", name: "", magnet: "m", addedAt: 1 },
+        { id: "keep", name: "Keep", magnet: "m", addedAt: 2, watched: ["ep1", 3, null] },
+      ] as any,
+    });
+    const cfg = await loadConfig();
+    expect(cfg.favourites).toEqual([
+      { id: "keep", name: "Keep", magnet: "m", addedAt: 2, watched: ["ep1"] },
+    ]);
+  });
+
+  it("defaults addedAt to 0 and caps at 100 entries", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      id: `h${i}`,
+      name: `n${i}`,
+      magnet: "m",
+    }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [], favourites: many as any });
+    const cfg = await loadConfig();
+    expect(cfg.favourites?.length).toBe(100);
+    expect(cfg.favourites?.[0]?.addedAt).toBe(0);
+  });
+
+  it("defaults to [] when favourites is missing", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [] });
+    expect((await loadConfig()).favourites).toEqual([]);
+  });
+});
