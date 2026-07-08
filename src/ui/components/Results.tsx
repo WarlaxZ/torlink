@@ -50,11 +50,15 @@ function Detail({
   width,
   debridConfigured,
   mark,
+  favourited,
+  onFavourite,
 }: {
   r: TorrentResult;
   width: number;
   debridConfigured: boolean;
   mark: { icon: string; color?: string; dim?: boolean } | null;
+  favourited?: boolean;
+  onFavourite?: () => void;
 }) {
   const ss = sourceStyle(r.source);
   const date = formatRelative(r.added);
@@ -161,6 +165,15 @@ function Detail({
           y
         </Text>
         <Text color={COLOR.text}> Copy</Text>
+        {onFavourite ? (
+          <>
+            <Text dimColor>{`     ${ICON.dot}     `}</Text>
+            <Text color={COLOR.accent} bold>
+              b
+            </Text>
+            <Text color={COLOR.text}>{` ${favourited ? "★" : "☆"} Favourite`}</Text>
+          </>
+        ) : null}
         <Text dimColor>{`  ${ICON.dot}  `}</Text>
         <Text color={COLOR.alt}>esc</Text>
         <Text dimColor> back</Text>
@@ -191,6 +204,8 @@ export function Results() {
     sort,
     setSort,
     toggleSavedSearch,
+    toggleFavourite,
+    isFavourited,
   } = useStore();
 
   const search = useConcurrentSearch(query, disabledSources);
@@ -285,6 +300,21 @@ export function Results() {
   const copyResultMagnet = (r: TorrentResult): void =>
     copyMagnet({ name: r.name, magnet: r.magnet });
 
+  // Favourites are for video content only (Movies / TV / Anime).
+  const canFavourite = (r: TorrentResult): boolean => {
+    const g = getSource(r.source).group;
+    return g === "Movies" || g === "TV" || g === "Anime";
+  };
+
+  const favInput = (r: TorrentResult) => ({
+    id: r.infoHash,
+    name: r.name,
+    magnet: r.magnet,
+    source: r.source,
+    sizeBytes: r.sizeBytes,
+    addedAt: Date.now(),
+  });
+
   const moveTo = (n: number): void => {
     setCursor(n);
     selRef.current = results[n]?.infoHash ?? null;
@@ -348,6 +378,7 @@ export function Results() {
       else if (input === "r" && detail) openDebrid(detail);
       else if (input === "v" && detail) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
+      else if (input === "b" && detail && canFavourite(detail)) toggleFavourite(favInput(detail));
     },
     { isActive: focused && mode === "detail" },
   );
@@ -498,6 +529,8 @@ export function Results() {
               width={Math.max(10, contentWidth - 4)}
               debridConfigured={debridConfigured}
               mark={stateMark(stateFor(detail.infoHash))}
+              favourited={canFavourite(detail) ? isFavourited(detail.infoHash) : false}
+              onFavourite={canFavourite(detail) ? () => toggleFavourite(favInput(detail)) : undefined}
             />
           ) : (
             <>

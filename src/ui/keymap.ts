@@ -48,6 +48,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "f", label: "Download to a chosen folder" },
       { keys: "r", label: "Download via Real-Debrid" },
       { keys: "v", label: "Stream" },
+      { keys: "b", label: "Favourite a video (detail view / stream picker)" },
       { keys: "y", label: "Copy magnet" },
       { keys: "m", label: "Paste magnet" },
       { keys: "x", label: "Stop active stream" },
@@ -120,6 +121,9 @@ export function footerHints(
   }
   if (section === "watchlist") {
     return [NAVIGATE, { keys: "↵", label: "Run" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+  }
+  if (section === "library") {
+    return [NAVIGATE, { keys: "↵", label: "Resume" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
   }
   if (section === "downloads") {
     if (downloadFocus === "paused") {
