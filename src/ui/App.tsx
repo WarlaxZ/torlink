@@ -26,7 +26,7 @@ import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { openFolder } from "../util/openFolder";
-import { cleanText, truncate } from "../util/format";
+import { cleanText, formatBytes, truncate } from "../util/format";
 import { isCategory, parseCategory } from "./store";
 import {
   StoreContext,
@@ -152,6 +152,17 @@ export function App({
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
+  // A result waiting on the "download to" prompt (f); null when the prompt is
+  // closed. lastDownloadToDir pre-fills the next prompt so queueing a batch
+  // into the same alternate folder only costs one typed path per session.
+  const [pendingDownload, setPendingDownload] = useState<{
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  } | null>(null);
+  const [lastDownloadToDir, setLastDownloadToDir] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
@@ -902,6 +913,54 @@ export function App({
     [config, startDownload],
   );
 
+  const requestDownloadTo = useCallback(
+    (input: {
+      id: string;
+      name: string;
+      magnet: string;
+      source?: SourceId;
+      sizeBytes?: number;
+    }) => {
+      setPendingDownload(input);
+    },
+    [],
+  );
+
+  const closeDownloadToPrompt = useCallback(() => {
+    setPendingDownload(null);
+  }, []);
+
+  const startDownloadTo = useCallback(
+    (raw: string) => {
+      const input = pendingDownload;
+      setPendingDownload(null);
+      const dir = normalizeDownloadDir(raw);
+      if (!queue || !input || !dir) return;
+      // add() ignores the dir for anything already active, so don't claim a
+      // folder that won't be used. Failed items fall through: a re-add with a
+      // fresh dir is exactly how a bad-disk download gets redirected.
+      const existing = queue.getItems().find((it) => it.id === input.id);
+      if (existing && existing.status !== "failed") {
+        setNotice(`Already in queue: ${truncate(cleanText(input.name), 40)}`);
+        return;
+      }
+      void (async () => {
+        try {
+          await fs.mkdir(dir, { recursive: true });
+        } catch {
+          setNotice(`Couldn't use folder: ${truncate(dir, 48)}`);
+          return;
+        }
+        setLastDownloadToDir(dir);
+        queue.add(input, dir);
+        setNotice(`Added: ${truncate(cleanText(input.name), 28)} → ${truncate(dir, 36)}`);
+        setSection("downloads");
+        setRegion("content");
+      })();
+    },
+    [queue, pendingDownload],
+  );
+
   const copyMagnet = useCallback((input: { name: string; magnet: string }) => {
     void (async () => {
       const ok = await writeClipboard(input.magnet);
@@ -934,6 +993,21 @@ export function App({
       setNotice(`Couldn't open folder: ${truncate(dir, 48)}`);
     })();
   }, []);
+
+  const exportTorrent = useCallback(
+    (input: { id: string; name: string }) => {
+      if (!queue) return;
+      void (async () => {
+        const file = await queue.exportTorrentFile(input.id);
+        if (file) {
+          setNotice(`Exported torrent file: ${truncate(file, 48)}`);
+          return;
+        }
+        setNotice(`No torrent file yet for ${truncate(cleanText(input.name), 32)}.`);
+      })();
+    },
+    [queue],
+  );
 
   const submitQuery = useCallback(
     (raw: string) => {
@@ -1034,7 +1108,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
           ? "help"
           : region,
       setRegion,
@@ -1046,6 +1120,7 @@ export function App({
       setSeedFocus,
       startDownload,
       requestP2PDownload,
+      requestDownloadTo,
       startDebridDownload,
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
@@ -1054,6 +1129,7 @@ export function App({
       copyLink,
       copyMagnet,
       openDownloadFolder,
+      exportTorrent,
       notice,
       setNotice,
       quitAll,
@@ -1087,6 +1163,7 @@ export function App({
     editingVpn,
     toggleSource,
     pendingP2P,
+    pendingDownload,
     fileSelection,
     streamFiles,
     preparing,
@@ -1098,12 +1175,14 @@ export function App({
     seedFocus,
     startDownload,
     requestP2PDownload,
+    requestDownloadTo,
     startDebridDownload,
     streamResult,
     rdStatus,
     copyLink,
     copyMagnet,
     openDownloadFolder,
+    exportTorrent,
     notice,
     listRows,
     compact,
@@ -1130,6 +1209,7 @@ export function App({
       if (editingLimits) return; // the limits prompt owns input
       if (editingVpn) return; // the VPN prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
+      if (pendingDownload) return; // the download-to prompt owns input
       if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
       if (keepPrompt) return; // the keep-download prompt owns input
@@ -1510,11 +1590,29 @@ export function App({
           </Box>
         ) : null}
 
+        {pendingDownload ? (
+          <Box marginTop={1}>
+            <FolderPrompt
+              title="download to"
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              subject={
+                pendingDownload.sizeBytes
+                  ? `${cleanText(pendingDownload.name)}  ${ICON.dot}  ${formatBytes(pendingDownload.sizeBytes)}`
+                  : cleanText(pendingDownload.name)
+              }
+              submitLabel="download"
+              value={lastDownloadToDir ?? store.config.downloadDir}
+              onSubmit={startDownloadTo}
+              onCancel={closeDownloadToPrompt}
+            />
+          </Box>
+        ) : null}
+
         <Box
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1564,7 +1662,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }

@@ -85,6 +85,7 @@ export const tpbMovies: Source = {
   label: "TPB",
   group: "Movies",
   homepage: "https://thepiratebay.org",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, MOVIE_CATS, TOP_MOVIES, "tpb-movies", opts),
 };
 
@@ -93,6 +94,7 @@ export const tpbTv: Source = {
   label: "TPB",
   group: "TV",
   homepage: "https://thepiratebay.org",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, TV_CATS, TOP_TV, "tpb-tv", opts),
 };
 
@@ -101,6 +103,7 @@ export const tpbBooks: Source = {
   label: "TPB",
   group: "Books",
   homepage: "https://thepiratebay.org",
+  reportsHealth: true,
   search: (query, opts = {}) =>
     search(query, TPB_BOOK_CATEGORIES, TOP_BOOKS, "tpb-books", opts),
 };
@@ -110,5 +113,6 @@ export const tpbMusic: Source = {
   label: "TPB",
   group: "Music",
   homepage: "https://thepiratebay.org",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, MUSIC_CATS, TOP_MUSIC, "tpb-music", opts),
 };

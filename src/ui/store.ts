@@ -91,6 +91,15 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
+  // Opens the "download to" prompt (D) so this one download can land in a
+  // folder other than the configured default.
+  requestDownloadTo: (input: {
+    id: string;
+    name: string;
+    magnet: string;
+    source?: SourceId;
+    sizeBytes?: number;
+  }) => void;
   // Download via Real-Debrid (resolve magnet -> direct links -> HTTP).
   startDebridDownload: (input: {
     id: string;
@@ -119,6 +128,9 @@ export interface Store {
   copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;
   openDownloadFolder: (dir: string) => void;
+  // Copies the cached .torrent metadata into the item's download folder and
+  // reports the outcome through the notice line.
+  exportTorrent: (input: { id: string; name: string }) => void;
 
   notice: string | null;
   setNotice: (s: string | null) => void;

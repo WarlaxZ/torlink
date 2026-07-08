@@ -52,6 +52,7 @@ export const nyaa: Source = {
   label: "Nyaa",
   group: "Anime",
   homepage: "https://nyaa.si",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, "0_0", "nyaa", opts),
 };
 
@@ -60,6 +61,7 @@ export const nyaaLiterature: Source = {
   label: "Nyaa",
   group: "Books",
   homepage: "https://nyaa.si/?c=3_0",
+  reportsHealth: true,
   search: (query, opts = {}) =>
     search(query, NYAA_LITERATURE_CATEGORY, "nyaa-literature", opts),
 };

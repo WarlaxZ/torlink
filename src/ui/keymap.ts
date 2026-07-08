@@ -14,11 +14,11 @@ export const HELP_GROUPS: HelpGroup[] = [
   {
     title: "Navigate",
     hints: [
-      { keys: "↑ ↓ ← →, h j k l", label: "Navigate content and panes" },
+      { keys: "↑↓←→ / hjkl", label: "Navigate panes and lists" },
       { keys: "↵", label: "Open" },
       { keys: "tab", label: "Switch pane" },
       { keys: "esc", label: "Back" },
-      { keys: "o", label: "Download folder" },
+      { keys: "o", label: "Default download folder" },
       { keys: "S", label: "Choose sources" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "t", label: "Extra trackers" },
@@ -45,6 +45,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "z", label: "Hide results with no seeders" },
       { keys: "w", label: "Save or remove current search" },
       { keys: "d", label: "Download (P2P)" },
+      { keys: "f", label: "Download to a chosen folder" },
       { keys: "r", label: "Download via Real-Debrid" },
       { keys: "v", label: "Stream" },
       { keys: "y", label: "Copy magnet" },
@@ -56,10 +57,11 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "Downloads",
     hints: [
       { keys: "p", label: "Pause/resume" },
-      { keys: "c", label: "Cancel or remove from list" },
+      { keys: "c", label: "Cancel or remove" },
       { keys: "f", label: "Retry failed" },
       { keys: "d", label: "Download again" },
       { keys: "e", label: "Open folder" },
+      { keys: "s", label: "Export torrent file" },
       { keys: "x", label: "Clear recent" },
     ],
   },
@@ -74,7 +76,8 @@ export const HELP_GROUPS: HelpGroup[] = [
 ];
 
 // Footer labels stay terse so the contextual hint row never wraps; the `?`
-// overlay (HELP_GROUPS) carries the full, descriptive list.
+// overlay (HELP_GROUPS) carries the full, descriptive list. Rare or
+// self-announcing actions (z) stay `?`-only to keep every row inside 80 cols.
 const NAVIGATE: Hint = { keys: "↑↓←→", label: "Move" };
 
 const ALWAYS: Hint = { keys: "?", label: "Keys" };
@@ -82,6 +85,8 @@ const ALWAYS: Hint = { keys: "?", label: "Keys" };
 const SWITCH: Hint = { keys: "tab", label: "Switch" };
 
 const FOLDER: Hint = { keys: "e", label: "Folder" };
+
+const TORRENT: Hint = { keys: "s", label: "Export" };
 
 export function footerHints(
   region: Region,
@@ -118,18 +123,18 @@ export function footerHints(
   }
   if (section === "downloads") {
     if (downloadFocus === "paused") {
-      return [{ keys: "p", label: "Resume" }, { keys: "c", label: "Cancel" }, FOLDER, SWITCH, ALWAYS];
+      return [{ keys: "p", label: "Resume" }, { keys: "c", label: "Cancel" }, FOLDER, TORRENT, SWITCH, ALWAYS];
     }
     if (downloadFocus === "failed") {
-      return [{ keys: "f", label: "Retry" }, { keys: "c", label: "Remove" }, FOLDER, SWITCH, ALWAYS];
+      return [{ keys: "f", label: "Retry" }, { keys: "c", label: "Remove" }, FOLDER, TORRENT, SWITCH, ALWAYS];
     }
     if (downloadFocus === "recent") {
       return [
-        NAVIGATE,
         { keys: "d", label: "Redownload" },
         { keys: "c", label: "Remove" },
         { keys: "x", label: "Clear" },
         FOLDER,
+        TORRENT,
         SWITCH,
         ALWAYS,
       ];
@@ -139,12 +144,15 @@ export function footerHints(
       { keys: "c", label: "Cancel" },
       { keys: "y", label: "Link" },
       FOLDER,
+      TORRENT,
       SWITCH,
       ALWAYS,
     ];
   }
   return [
     NAVIGATE,
+    // The footer advertises only the default download key; D (download to a
+    // chosen folder) stays bound but lives in the `?` sheet alone.
     { keys: "d", label: "Download" },
     ...(debridConfigured ? [{ keys: "r", label: "Real-Debrid" }] : []),
     { keys: "v", label: "Stream" },
