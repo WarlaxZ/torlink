@@ -67,6 +67,58 @@ describe("detectPlayer", () => {
     });
     expect(found).toBeNull();
   });
+
+  it("finds a Windows install path when nothing is on PATH", async () => {
+    const found = await detectPlayer({
+      which: async () => false,
+      winFind: async (paths) => (paths.some((p) => p.includes("VLC")) ? "C:\\VLC\\vlc.exe" : null),
+      platform: "win32",
+    });
+    expect(found).toBe("C:\\VLC\\vlc.exe");
+  });
+
+  it("falls back to Windows Media Player when VLC is absent", async () => {
+    const found = await detectPlayer({
+      which: async () => false,
+      winFind: async (paths) =>
+        paths.some((p) => p.includes("Windows Media Player"))
+          ? "C:\\Program Files\\Windows Media Player\\wmplayer.exe"
+          : null,
+      platform: "win32",
+    });
+    expect(found).toBe("C:\\Program Files\\Windows Media Player\\wmplayer.exe");
+  });
+
+  it("does not probe Windows paths off Windows", async () => {
+    const found = await detectPlayer({
+      which: async () => false,
+      winFind: async () => "C:\\VLC\\vlc.exe",
+      platform: "linux",
+    });
+    expect(found).toBeNull();
+  });
+
+  it("returns null on Windows when no player is installed", async () => {
+    const found = await detectPlayer({
+      which: async () => false,
+      winFind: async () => null,
+      platform: "win32",
+    });
+    expect(found).toBeNull();
+  });
+
+  it("prefers an earlier Windows candidate over a later one", async () => {
+    const found = await detectPlayer({
+      which: async () => false,
+      // Only Windows Media Player is present; VLC etc. are not.
+      winFind: async (paths) =>
+        paths.some((p) => p.includes("Windows Media Player"))
+          ? "C:\\Program Files\\Windows Media Player\\wmplayer.exe"
+          : null,
+      platform: "win32",
+    });
+    expect(found).toBe("C:\\Program Files\\Windows Media Player\\wmplayer.exe");
+  });
 });
 
 describe("streamCandidates", () => {

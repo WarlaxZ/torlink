@@ -26,17 +26,74 @@ const VIDEO_EXTS = new Set([
 ]);
 
 // Players we probe for, in preference order, when none is configured. Each has
-// a CLI name (looked up on PATH) and, on macOS, an .app bundle name we can
-// launch with `open -a` even when nothing is on PATH.
+// a CLI name (looked up on PATH); on macOS an .app bundle name we can launch
+// with `open -a`, and on Windows a list of known install paths — in both cases
+// so a GUI player still works when nothing is on PATH (the common case).
 interface PlayerCandidate {
   cli: string;
   macApp?: string;
+  // Absolute-path templates checked on Windows. May contain %ENV% tokens
+  // (e.g. %ProgramFiles%), expanded against process.env; a path whose tokens
+  // are undefined is skipped.
+  winPaths?: string[];
 }
 
 const PLAYER_CANDIDATES: PlayerCandidate[] = [
   { cli: "mpv" },
+  {
+    cli: "mpvnet",
+    winPaths: [
+      "%ProgramFiles%\\mpv.net\\mpvnet.exe",
+      "%LocalAppData%\\Programs\\mpv.net\\mpvnet.exe",
+    ],
+  },
   { cli: "iina", macApp: "IINA" },
-  { cli: "vlc", macApp: "VLC" },
+  {
+    cli: "vlc",
+    macApp: "VLC",
+    winPaths: [
+      "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe",
+      "%ProgramFiles(x86)%\\VideoLAN\\VLC\\vlc.exe",
+      "%ProgramW6432%\\VideoLAN\\VLC\\vlc.exe",
+    ],
+  },
+  {
+    cli: "mpc-hc64",
+    winPaths: [
+      "%ProgramFiles%\\MPC-HC\\mpc-hc64.exe",
+      "%ProgramFiles%\\MPC-HC64\\mpc-hc64.exe",
+      "%ProgramFiles(x86)%\\K-Lite Codec Pack\\MPC-HC64\\mpc-hc64.exe",
+    ],
+  },
+  {
+    cli: "mpc-hc",
+    winPaths: [
+      "%ProgramFiles(x86)%\\MPC-HC\\mpc-hc.exe",
+      "%ProgramFiles(x86)%\\K-Lite Codec Pack\\MPC-HC\\mpc-hc.exe",
+    ],
+  },
+  {
+    cli: "mpc-be64",
+    winPaths: [
+      "%ProgramFiles%\\MPC-BE\\mpc-be64.exe",
+      "%ProgramFiles(x86)%\\MPC-BE\\mpc-be.exe",
+    ],
+  },
+  {
+    cli: "potplayer",
+    winPaths: [
+      "%ProgramFiles%\\DAUM\\PotPlayer64\\PotPlayerMini64.exe",
+      "%ProgramFiles%\\DAUM\\PotPlayer\\PotPlayerMini64.exe",
+      "%ProgramFiles(x86)%\\DAUM\\PotPlayer\\PotPlayerMini.exe",
+    ],
+  },
+  {
+    cli: "wmplayer",
+    winPaths: [
+      "%ProgramFiles%\\Windows Media Player\\wmplayer.exe",
+      "%ProgramFiles(x86)%\\Windows Media Player\\wmplayer.exe",
+    ],
+  },
 ];
 
 function ext(name: string): string {
@@ -109,24 +166,64 @@ async function macAppExists(app: string): Promise<boolean> {
   return false;
 }
 
+// Expand %ENV% tokens in a Windows path template. Returns null if any token is
+// undefined (e.g. %ProgramFiles(x86)% on a 32-bit-only system), so callers skip
+// paths they can't resolve rather than probing a half-built string.
+function expandWinPath(template: string): string | null {
+  let missing = false;
+  const expanded = template.replace(/%([^%]+)%/g, (_, name: string) => {
+    const value = process.env[name];
+    if (value === undefined || value === "") {
+      missing = true;
+      return "";
+    }
+    return value;
+  });
+  return missing ? null : expanded;
+}
+
+// The first of these Windows install paths that exists on disk, or null. GUI
+// players (VLC, Windows Media Player) usually aren't on PATH, so we look where
+// their installers put them.
+async function winPlayerPath(paths: string[]): Promise<string | null> {
+  for (const template of paths) {
+    const full = expandWinPath(template);
+    if (!full) continue;
+    try {
+      await fs.access(full);
+      return full;
+    } catch {
+      /* not here */
+    }
+  }
+  return null;
+}
+
 export interface DetectDeps {
   which?: WhichImpl;
   appExists?: (app: string) => Promise<boolean>;
+  winFind?: (paths: string[]) => Promise<string | null>;
   platform?: NodeJS.Platform;
 }
 
 /**
- * Find the first available player, or null. On macOS this also matches an
- * installed .app bundle (VLC, IINA) even when nothing is on PATH — common,
- * since GUI players usually aren't. Deps are injectable for testing.
+ * Find the first available player, or null. When nothing is on PATH — the usual
+ * case for GUI players — this also matches an installed macOS .app bundle (VLC,
+ * IINA) or a known Windows install path (VLC, Windows Media Player). Deps are
+ * injectable for testing.
  */
 export async function detectPlayer(deps: DetectDeps = {}): Promise<string | null> {
   const which = deps.which ?? commandExists;
   const appExists = deps.appExists ?? macAppExists;
+  const winFind = deps.winFind ?? winPlayerPath;
   const platform = deps.platform ?? process.platform;
   for (const c of PLAYER_CANDIDATES) {
     if (await which(c.cli)) return c.cli;
     if (platform === "darwin" && c.macApp && (await appExists(c.macApp))) return c.macApp;
+    if (platform === "win32" && c.winPaths) {
+      const found = await winFind(c.winPaths);
+      if (found) return found;
+    }
   }
   return null;
 }
