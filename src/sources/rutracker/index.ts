@@ -318,6 +318,7 @@ function makeSource(id: SourceId, group: SourceGroup): Source {
     label: "RuTracker",
     group,
     homepage: "https://rutracker.org",
+    reportsHealth: true,
     search: async (query, opts = {}) => {
       const all = await sharedFetch(query, opts);
       return all.filter((r) => r.source === id);

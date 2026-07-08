@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { DownloadQueue, seedPolicyReached, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 import { RealDebridError } from "../integrations/realdebrid";
+import { deleteTorrentMeta, saveTorrentMeta } from "./persist";
 
 const tmpDirs: string[] = [];
 
@@ -67,6 +68,25 @@ describe("DownloadQueue seeding", () => {
     expect(q.getSeed("h4")?.status).toBe("paused");
     expect(q.seedingCount).toBe(0);
     q.suspend();
+  });
+
+  it("exports cached .torrent metadata for a history item", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-queue-export-"));
+    const item = h({ id: "h5", name: "Some/Torrent", dir: outDir });
+    try {
+      q.restoreHistory([item]);
+      await saveTorrentMeta(item.id, new Uint8Array([5, 6, 7]));
+
+      const file = await q.exportTorrentFile(item.id);
+
+      expect(file).toBe(path.join(outDir, "Some Torrent.torrent"));
+      await expect(fs.readFile(file!)).resolves.toEqual(Buffer.from([5, 6, 7]));
+    } finally {
+      deleteTorrentMeta(item.id);
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
   });
 });
 

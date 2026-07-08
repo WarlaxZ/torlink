@@ -8,6 +8,7 @@ import {
   saveTorrentMeta,
   torrentMetaPath,
   torrentMetaExists,
+  exportTorrentMeta,
   deleteTorrentMeta,
   type SeedRecord,
 } from "./persist";
@@ -155,7 +156,19 @@ export class DownloadQueue extends EventEmitter {
     const existing = this.items.get(input.id);
     if (existing && existing.status !== "failed") return;
     const item: QueueItem = existing
-      ? { ...existing, status: "downloading", error: undefined, speed: 0 }
+      ? {
+          ...existing,
+          // A re-add is a fresh request, so it targets the dir asked for now.
+          // Partial data doesn't follow to a new folder, so resume progress
+          // only survives when the dir is unchanged.
+          dir,
+          status: "downloading",
+          error: undefined,
+          speed: 0,
+          ...(existing.dir === dir
+            ? {}
+            : { progress: 0, downloadedBytes: 0, eta: undefined }),
+        }
       : {
           id: input.id,
           name: input.name,
@@ -693,6 +706,12 @@ export class DownloadQueue extends EventEmitter {
       const parent = path.dirname(paths[0]!);
       if (parent !== it.dir) await fs.rm(parent, { recursive: true, force: true }).catch(() => {});
     })();
+  }
+
+  exportTorrentFile(id: string): Promise<string | null> {
+    const it = this.items.get(id) ?? this.seeds.get(id) ?? this.history.find((h) => h.id === id);
+    if (!it) return Promise.resolve(null);
+    return exportTorrentMeta(it.id, it.name, it.dir);
   }
 
   cancel(id: string): void {

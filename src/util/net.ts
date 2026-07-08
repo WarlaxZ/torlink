@@ -13,7 +13,7 @@ const dohFetch: FetchImpl = (url, init) => {
   const opts = dispatcher ? { ...init, dispatcher } : init;
   return undiciFetch(url, opts as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 };
-export type SleepImpl = (ms: number) => Promise<void>;
+export type SleepImpl = (ms: number, signal?: AbortSignal) => Promise<void>;
 
 export interface FetchResilientOptions extends RequestInit {
   retries?: number;
@@ -61,8 +61,24 @@ const DEFAULT_BASE_MS = 500;
 const DEFAULT_CAP_MS = 20000;
 const BODY_SNIPPET_MAX = 200;
 
-function realSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Resolves early on abort so a cancelled search never sits out a backoff wait;
+// the retry loop re-checks the signal and bails right after.
+function realSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    if (signal) {
+      if (signal.aborted) {
+        done();
+        return;
+      }
+      signal.addEventListener("abort", done, { once: true });
+    }
+  });
 }
 
 function isAbortError(e: unknown): boolean {
@@ -139,7 +155,7 @@ export async function fetchResilient(
       if (isAbortError(e) || signal?.aborted) throw e;
       lastError = e;
       if (attempt < retries) {
-        await sleepImpl(backoffDelay(attempt, baseMs, capMs));
+        await sleepImpl(backoffDelay(attempt, baseMs, capMs), signal ?? undefined);
         continue;
       }
       throw e;
@@ -172,7 +188,7 @@ export async function fetchResilient(
         bodySnippet,
       );
     }
-    await sleepImpl(delayMs);
+    await sleepImpl(delayMs, signal ?? undefined);
   }
 
   throw lastError instanceof Error

@@ -62,5 +62,6 @@ export const torrentsCsv: Source = {
   label: "Torrents.csv",
   group: "Movies",
   homepage: "https://torrents-csv.com",
+  reportsHealth: true,
   search,
 };

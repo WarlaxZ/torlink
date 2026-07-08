@@ -144,6 +144,7 @@ export const x1337Movies: Source = {
   label: "1337x",
   group: "Movies",
   homepage: "https://1337x.to",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, "Movies", "x1337-movies", opts),
 };
 
@@ -152,6 +153,7 @@ export const x1337Tv: Source = {
   label: "1337x",
   group: "TV",
   homepage: "https://1337x.to",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, "TV", "x1337-tv", opts),
 };
 
@@ -160,5 +162,6 @@ export const x1337Music: Source = {
   label: "1337x",
   group: "Music",
   homepage: "https://1337x.to",
+  reportsHealth: true,
   search: (query, opts = {}) => search(query, "Music", "x1337-music", opts),
 };

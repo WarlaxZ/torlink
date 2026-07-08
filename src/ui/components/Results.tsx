@@ -137,6 +137,11 @@ function Detail({
           d
         </Text>
         <Text color={COLOR.text}> Download</Text>
+        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        <Text color={COLOR.accent} bold>
+          f
+        </Text>
+        <Text color={COLOR.text}> Download to</Text>
         {debridConfigured ? (
           <>
             <Text dimColor>{`     ${ICON.dot}     `}</Text>
@@ -155,8 +160,8 @@ function Detail({
         <Text color={COLOR.accent} bold>
           y
         </Text>
-        <Text color={COLOR.text}> Copy magnet</Text>
-        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        <Text color={COLOR.text}> Copy</Text>
+        <Text dimColor>{`  ${ICON.dot}  `}</Text>
         <Text color={COLOR.alt}>esc</Text>
         <Text dimColor> back</Text>
       </Box>
@@ -175,6 +180,7 @@ export function Results() {
     setRegion,
     setCaptureMode,
     requestP2PDownload,
+    requestDownloadTo,
     startDebridDownload,
     streamResult,
     debridConfigured,
@@ -208,6 +214,9 @@ export function Results() {
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
   const [cursor, setCursor] = useState(0);
+  // The row the user navigated to, by infohash; null until they move. Keeps
+  // the cursor on their row while streamed-in sources reshuffle the list.
+  const selRef = useRef<string | null>(null);
   const [detail, setDetail] = useState<TorrentResult | null>(null);
 
   // A new search jumps back to the top.
@@ -227,6 +236,11 @@ export function Results() {
       setCursor(0);
     }
   }, [section]);
+
+  useEffect(() => {
+    selRef.current = null;
+    setCursor(0);
+  }, [query, section]);
 
   useEffect(() => {
     if (!focused) return;
@@ -259,8 +273,22 @@ export function Results() {
 
   const openStream = (r: TorrentResult): void => streamResult(inputFor(r));
 
+  const openDownloadTo = (r: TorrentResult): void =>
+    requestDownloadTo({
+      id: r.infoHash,
+      name: r.name,
+      magnet: r.magnet,
+      source: r.source,
+      sizeBytes: r.sizeBytes,
+    });
+
   const copyResultMagnet = (r: TorrentResult): void =>
     copyMagnet({ name: r.name, magnet: r.magnet });
+
+  const moveTo = (n: number): void => {
+    setCursor(n);
+    selRef.current = results[n]?.infoHash ?? null;
+  };
 
   useInput(
     (input, key) => {
@@ -269,14 +297,14 @@ export function Results() {
         return;
       }
       if (key.upArrow || input === "k") {
-        if (results.length > 0 && clamped > 0) setCursor(clamped - 1);
+        if (results.length > 0 && clamped > 0) moveTo(clamped - 1);
         else setMode("search");
         return;
       }
       if (results.length === 0) return;
-      if (key.downArrow || input === "j") setCursor(wrapStep(clamped, 1, results.length));
-      else if (key.pageUp) setCursor(Math.max(0, clamped - pageJump));
-      else if (key.pageDown) setCursor(Math.min(results.length - 1, clamped + pageJump));
+      if (key.downArrow || input === "j") moveTo(wrapStep(clamped, 1, results.length));
+      else if (key.pageUp) moveTo(Math.max(0, clamped - pageJump));
+      else if (key.pageDown) moveTo(Math.min(results.length - 1, clamped + pageJump));
       else if (key.return) {
         const r = results[clamped];
         if (r) {
@@ -286,6 +314,9 @@ export function Results() {
       } else if (input === "d") {
         const r = results[clamped];
         if (r) openDownload(r);
+      } else if (input === "f") {
+        const r = results[clamped];
+        if (r) openDownloadTo(r);
       } else if (input === "r") {
         const r = results[clamped];
         if (r) openDebrid(r);
@@ -313,6 +344,7 @@ export function Results() {
         setMode("list");
         setDetail(null);
       } else if (input === "d" && detail) openDownload(detail);
+      else if (input === "f" && detail) openDownloadTo(detail);
       else if (input === "r" && detail) openDebrid(detail);
       else if (input === "v" && detail) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
@@ -341,6 +373,9 @@ export function Results() {
   const tabSources = activeCat?.group ? enabled.filter((s) => s.group === activeCat.group) : enabled;
   const tabErrored =
     tabSources.length > 0 && tabSources.every((s) => search.perSource[s.id]?.error);
+  // Only the active tab's sources hold its spinner; other groups' stragglers
+  // stream in silently.
+  const pending = tabSources.some((s) => search.perSource[s.id]?.loading);
   const showStats = useMemo(
     () => results.some((r) => r.sizeBytes > 0 || r.seeders > 0),
     [results],
@@ -368,7 +403,9 @@ export function Results() {
   const filterNote = aliveOnly ? `  ${ICON.dot} alive only` : "";
 
   const status = () => {
-    if (search.loading) {
+    if (pending) {
+      // Rows are already usable: the settled header simply carries a spinner
+      // until the tab's last source lands.
       if (results.length > 0)
         return <Text dimColor>{`searching… ${search.done}/${search.total} sources${sortNote}${filterNote}`}</Text>;
       return (
@@ -392,6 +429,19 @@ export function Results() {
             {`Couldn't reach ${activeCat.label}. ${who} may be down${outageCodes(down)}.${authHint(down)}`}
           </Text>
         );
+      }
+      if (aliveOnly) {
+        const cat = CATEGORIES.find((c) => c.key === section);
+        const base = cat?.group
+          ? search.results.filter((r) => getSource(r.source).group === cat.group)
+          : search.results;
+        if (base.length > 0 && base.every((r) => r.seeders <= 0)) {
+          return (
+            <Text dimColor>
+              All results have zero seeders. Press z to show them.
+            </Text>
+          );
+        }
       }
       if (search.results.length > 0 && activeCat?.group)
         return <Text dimColor>{`No ${activeCat.label.toLowerCase()} results yet. Try another tab or a search.`}</Text>;
