@@ -85,6 +85,7 @@ import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
 import { VpnPrompt } from "./components/VpnPrompt";
+import { RatePrompt } from "./components/RatePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -221,6 +222,8 @@ export function App({
   const [keepPrompt, setKeepPrompt] = useState<
     { session: TorrentStreamSession; input: DownloadInput } | null
   >(null);
+  // Ask for an explicit like/dislike signal once a stream ends.
+  const [ratePrompt, setRatePrompt] = useState<{ name: string } | null>(null);
   const vpnUnsafe = useRef(false);
   const prepareAbort = useRef<AbortController | null>(null);
   const [recovered, setRecovered] = useState(false);
@@ -831,6 +834,7 @@ export function App({
     const active = activeStream;
     if (!active) return;
     setActiveStream(null);
+    setRatePrompt({ name: active.name });
     if (active.session.isComplete()) {
       // Fully downloaded: offer to keep it as a real download + seed instead
       // of discarding the temp files.
@@ -1345,7 +1349,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt
           ? "help"
           : region,
       setRegion,
@@ -1410,6 +1414,7 @@ export function App({
     preparing,
     torrentPrompt,
     keepPrompt,
+    ratePrompt,
     activeStream,
     captureMode,
     downloadFocus,
@@ -1454,6 +1459,7 @@ export function App({
       if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
       if (keepPrompt) return; // the keep-download prompt owns input
+      if (ratePrompt) return; // the like/dislike prompt owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
         if (key.escape) cancelPreparing();
@@ -1835,6 +1841,34 @@ export function App({
                 void session.stop(); // discard temp
                 setNotice("Stream stopped.");
               }}
+            />
+          </Box>
+        ) : null}
+
+        {ratePrompt ? (
+          <Box marginTop={1}>
+            <RatePrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              name={ratePrompt.name}
+              onLike={() => {
+                if (config) {
+                  void postEvent(
+                    { reccUrl: config.reccUrl, reccToken: config.reccToken },
+                    { type: "liked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
+                  );
+                }
+                setRatePrompt(null);
+              }}
+              onDislike={() => {
+                if (config) {
+                  void postEvent(
+                    { reccUrl: config.reccUrl, reccToken: config.reccToken },
+                    { type: "disliked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
+                  );
+                }
+                setRatePrompt(null);
+              }}
+              onDismiss={() => setRatePrompt(null)}
             />
           </Box>
         ) : null}
