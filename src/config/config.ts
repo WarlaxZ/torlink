@@ -23,6 +23,10 @@ export interface Config {
   // encryption); a REALDEBRID_API_TOKEN env var overrides it at read time, so
   // those who prefer it can keep the token off disk entirely.
   realDebridToken?: string;
+  // Base URL of the reccd recommendation service, e.g. http://localhost:4100
+  reccUrl?: string;
+  // Bearer token for authenticating with reccd
+  reccToken?: string;
   // Preferred media-player command for streaming (e.g. "mpv", "iina", "vlc",
   // or an absolute path). Empty/unset falls back to auto-detection. A
   // TORLINK_PLAYER env var overrides it.

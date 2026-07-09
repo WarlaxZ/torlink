@@ -15,6 +15,20 @@ describe("config realDebridToken", () => {
   });
 });
 
+describe("config recc fields", () => {
+  it("round-trips reccUrl and reccToken through save and load", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      reccUrl: "http://localhost:4100",
+      reccToken: "recc-abc123",
+      trackers: [],
+    });
+    const cfg = await loadConfig();
+    expect(cfg.reccUrl).toBe("http://localhost:4100");
+    expect(cfg.reccToken).toBe("recc-abc123");
+  });
+});
+
 describe("config UI preferences", () => {
   it("round-trips the persisted sort and category", async () => {
     await saveConfig({
