@@ -82,4 +82,24 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["serve", "--port", "abc"]).kind).toBe("serve");
     expect((parseCliArgs(["serve", "--port", "abc"]) as { port?: number }).port).toBeUndefined();
   });
+  it("parses files with defaults", () => {
+    expect(parseCliArgs(["files"])).toEqual({
+      kind: "files",
+      port: undefined,
+      host: undefined,
+      token: undefined,
+      dir: undefined,
+    });
+  });
+  it("parses files flags", () => {
+    expect(
+      parseCliArgs(["files", "--port", "9160", "--host", "0.0.0.0", "--token", "s3cret", "--dir", "/mnt/media"]),
+    ).toEqual({
+      kind: "files",
+      port: 9160,
+      host: "0.0.0.0",
+      token: "s3cret",
+      dir: "/mnt/media",
+    });
+  });
 });

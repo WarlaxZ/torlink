@@ -43,6 +43,14 @@ if (cmd.kind === "watch") {
     downloadDir: cmd.downloadDir,
   };
   void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
+} else if (cmd.kind === "files") {
+  const options = {
+    port: cmd.port,
+    host: cmd.host,
+    token: cmd.token ?? process.env.TORLINK_FILES_TOKEN,
+    dir: cmd.dir,
+  };
+  void import("./daemon/files").then(({ runFiles }) => runFiles(options).catch(failHeadless));
 } else {
 
 // Enter the alt-screen and hide the hardware cursor: the TUI draws its own

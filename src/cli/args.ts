@@ -6,6 +6,7 @@ export type CliCommand =
   | { kind: "run"; initialMagnet?: string; initialTorrent?: string }
   | { kind: "watch"; dir: string; downloadDir?: string }
   | { kind: "serve"; port?: number; host?: string; token?: string; downloadDir?: string }
+  | { kind: "files"; port?: number; host?: string; token?: string; dir?: string }
   | { kind: "invalid"; arg: string };
 
 // Minimal `--flag value` reader for the headless subcommands. Unknown tokens are
@@ -47,6 +48,17 @@ export function parseCliArgs(argv: string[]): CliCommand {
       downloadDir: flags.to ?? flags.dir,
     };
   }
+  if (a === "files") {
+    const { flags } = readFlags(args.slice(1));
+    const portNum = flags.port ? Number.parseInt(flags.port, 10) : undefined;
+    return {
+      kind: "files",
+      port: portNum && Number.isFinite(portNum) && portNum > 0 ? portNum : undefined,
+      host: flags.host,
+      token: flags.token,
+      dir: flags.dir,
+    };
+  }
   if (/^magnet:\?/i.test(a)) return { kind: "run", initialMagnet: a };
   if (isInfoHash(a)) return { kind: "run", initialMagnet: a };
   if (/\.torrent$/i.test(a)) return { kind: "run", initialTorrent: a };
@@ -61,6 +73,7 @@ usage
   torlnk path/to/file.torrent open a .torrent file on launch
   torlnk watch <dir>          headless: download torrents dropped into <dir>
   torlnk serve                headless: HTTP add API (POST /add) on :9161
+  torlnk files                headless: serve downloads over HTTP on :9160
   torlnk --version            print the version
 
 once open: type to search every source at once, enter to run, arrows to move,
@@ -78,4 +91,12 @@ serve mode (no TUI): a small HTTP API for handing torlink a magnet.
 flags: --port <n> (default 9161), --host <addr> (default 127.0.0.1),
 --token <secret> (required to bind a public --host; or TORLINK_API_TOKEN),
 --to <dir> (where files land).
+
+files mode (no TUI): a read-only, range-aware HTTP server over the downloads
+folder, so finished files stream to a browser or media player.
+  GET /            list the folder (JSON)
+  GET /<path>      stream a file (supports Range for seeking/resuming)
+flags: --port <n> (default 9160), --host <addr> (default 127.0.0.1),
+--token <secret> (required to bind a public --host; or TORLINK_FILES_TOKEN),
+--dir <dir> (folder to serve; defaults to your downloads folder).
 `;
