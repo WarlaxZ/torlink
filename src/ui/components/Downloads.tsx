@@ -17,6 +17,7 @@ import { deliveryMethod } from "../downloadState";
 import type { QueueItem } from "../../download/types";
 import type { HistoryItem } from "../../download/history";
 import type { SourceId } from "../../sources/types";
+import { postEvent } from "../../recc/client";
 
 const ROWS_PER_ACTIVE = 2;
 const MARK = 2;
@@ -91,6 +92,7 @@ function SourceBadge({
 
 export function Downloads() {
   const {
+    config,
     queue,
     region,
     section,
@@ -144,8 +146,13 @@ export function Downloads() {
       } else if (inActive) {
         const it = active[clamped];
         if (!it) return;
-        if (input === "c") queue.cancel(it.id);
-        else if (input === "p") queue.togglePause(it.id);
+        if (input === "c") {
+          void postEvent(
+            { reccUrl: config.reccUrl, reccToken: config.reccToken },
+            { type: "abandoned", rawName: it.name, ts: Date.now(), source: "torlink" },
+          );
+          queue.cancel(it.id);
+        } else if (input === "p") queue.togglePause(it.id);
         else if (input === "y") {
           if (it.directUrl) copyLink(it.directUrl, it.name);
           else if (it.via === "realdebrid") {

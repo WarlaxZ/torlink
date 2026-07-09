@@ -17,6 +17,7 @@ import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
+import { postEvent } from "../recc/client";
 import { classifyStreamRoute } from "./streamRoute";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
@@ -461,9 +462,19 @@ export function App({
   const toggleFavourite = useCallback((item: FavouriteItem) => {
     setConfigState((prev) => {
       if (!prev) return prev;
+      const wasFavourited = isFavouritedIn(prev.favourites ?? [], item.id);
       const favourites = toggleFavouriteList(prev.favourites ?? [], item);
       const next = { ...prev, favourites };
       void saveConfig(next);
+      void postEvent(
+        { reccUrl: prev.reccUrl, reccToken: prev.reccToken },
+        {
+          type: wasFavourited ? "unfavourited" : "favourited",
+          rawName: item.name,
+          ts: Date.now(),
+          source: "torlink",
+        },
+      );
       return next;
     });
     setNotice("Favourites updated.");
@@ -675,6 +686,10 @@ export function App({
           `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${outcome.player}${copied ? " · link copied" : ""}`,
         );
         onPlayed?.();
+        void postEvent(
+          { reccUrl: config.reccUrl, reccToken: config.reccToken },
+          { type: "watched", rawName: name ?? url, ts: Date.now(), source: "torlink" },
+        );
         return;
       }
       // Couldn't play automatically: stash context, copy the link, and open the
@@ -761,6 +776,10 @@ export function App({
             return;
           }
           setActiveStream({ session, name: input.name, input });
+          void postEvent(
+            { reccUrl: config.reccUrl, reccToken: config.reccToken },
+            { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
+          );
           if (candidates.length > 1) {
             setStreamedFiles(new Set());
             setStreamSource(input);
