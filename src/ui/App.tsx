@@ -916,6 +916,10 @@ export function App({
             setNotice("Real-Debrid returned nothing to stream.");
             return;
           }
+          void postEvent(
+            { reccUrl: config.reccUrl, reccToken: config.reccToken },
+            { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
+          );
           if (candidates.length > 1) {
             setPreparing(null);
             setStreamedFiles(new Set());
