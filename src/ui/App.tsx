@@ -460,25 +460,26 @@ export function App({
   }, []);
 
   const toggleFavourite = useCallback((item: FavouriteItem) => {
+    if (!config) return;
+    const wasFavourited = isFavouritedIn(config.favourites ?? [], item.id);
     setConfigState((prev) => {
       if (!prev) return prev;
-      const wasFavourited = isFavouritedIn(prev.favourites ?? [], item.id);
       const favourites = toggleFavouriteList(prev.favourites ?? [], item);
       const next = { ...prev, favourites };
       void saveConfig(next);
-      void postEvent(
-        { reccUrl: prev.reccUrl, reccToken: prev.reccToken },
-        {
-          type: wasFavourited ? "unfavourited" : "favourited",
-          rawName: item.name,
-          ts: Date.now(),
-          source: "torlink",
-        },
-      );
       return next;
     });
+    void postEvent(
+      { reccUrl: config.reccUrl, reccToken: config.reccToken },
+      {
+        type: wasFavourited ? "unfavourited" : "favourited",
+        rawName: item.name,
+        ts: Date.now(),
+        source: "torlink",
+      },
+    );
     setNotice("Favourites updated.");
-  }, []);
+  }, [config]);
 
   const removeFavourite = useCallback((id: string) => {
     setConfigState((prev) => {

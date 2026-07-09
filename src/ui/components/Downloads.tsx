@@ -147,6 +147,7 @@ export function Downloads() {
         const it = active[clamped];
         if (!it) return;
         if (input === "c") {
+          // "abandoned" also covers dismissing an already-failed item — reccd doesn't distinguish
           void postEvent(
             { reccUrl: config.reccUrl, reccToken: config.reccToken },
             { type: "abandoned", rawName: it.name, ts: Date.now(), source: "torlink" },
