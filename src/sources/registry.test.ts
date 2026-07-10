@@ -52,7 +52,7 @@ describe("RuTracker sources", () => {
 
 describe("Books sources", () => {
   it("registers dedicated TPB, Nyaa, and RuTracker sources", () => {
-    const books = SOURCES.filter((source) => source.group === "Books");
+    const books = SOURCES.filter((source) => source.groups?.includes("Books"));
     expect(books.map((source) => source.id)).toEqual([
       "tpb-books",
       "nyaa-literature",
@@ -63,7 +63,7 @@ describe("Books sources", () => {
 
 describe("Music sources", () => {
   it("registers dedicated TPB and 1337x sources", () => {
-    const music = SOURCES.filter((source) => source.group === "Music");
+    const music = SOURCES.filter((source) => source.groups?.includes("Music"));
     expect(music.map((source) => source.id)).toEqual([
       "tpb-music",
       "x1337-music",

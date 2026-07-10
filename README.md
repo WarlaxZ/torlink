@@ -88,8 +88,8 @@ A short, hand-picked list of trusted sources:
 | Category | Sources |
 | --- | --- |
 | Games | FitGirl |
-| Movies | YTS, The Pirate Bay, 1337x, Torrents.csv |
-| TV | EZTV, The Pirate Bay, 1337x |
+| Movies | YTS, The Pirate Bay, 1337x, Torrents.csv, BitTorrented |
+| TV | EZTV, The Pirate Bay, 1337x, BitTorrented |
 | Anime | Nyaa, SubsPlease |
 | Books | The Pirate Bay, Nyaa |
 | Music | The Pirate Bay, 1337x |
@@ -109,6 +109,17 @@ Prefer an environment variable? Set `TORLINK_DNS` before launching (it takes pre
 ```sh
 TORLINK_DNS=cloudflare npm start
 ```
+
+## Headless
+
+torlink also runs without the TUI, for servers and seedboxes:
+
+    torlnk watch <dir>    download anything dropped into a folder
+    torlnk serve          take magnets over HTTP
+    torlnk files          stream finished downloads over HTTP
+    torlnk attach         keep the TUI alive across ssh sessions
+
+Add `--daemon` to keep watch, serve, or files running after you log out; `torlnk --help` has the full list of modes and flags.
 
 ## Contributing
 

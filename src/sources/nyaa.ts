@@ -50,7 +50,7 @@ async function search(
 export const nyaa: Source = {
   id: "nyaa",
   label: "Nyaa",
-  group: "Anime",
+  groups: ["Anime"],
   homepage: "https://nyaa.si",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, "0_0", "nyaa", opts),
@@ -59,7 +59,7 @@ export const nyaa: Source = {
 export const nyaaLiterature: Source = {
   id: "nyaa-literature",
   label: "Nyaa",
-  group: "Books",
+  groups: ["Books"],
   homepage: "https://nyaa.si/?c=3_0",
   reportsHealth: true,
   search: (query, opts = {}) =>

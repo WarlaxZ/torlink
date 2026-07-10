@@ -60,7 +60,7 @@ async function search(query: string, opts: SearchOptions = {}): Promise<TorrentR
 export const torrentsCsv: Source = {
   id: "torrents-csv",
   label: "Torrents.csv",
-  group: "Movies",
+  groups: ["Movies"],
   homepage: "https://torrents-csv.com",
   reportsHealth: true,
   search,

@@ -316,7 +316,7 @@ function makeSource(id: SourceId, group: SourceGroup): Source {
   return {
     id,
     label: "RuTracker",
-    group,
+    groups: [group],
     homepage: "https://rutracker.org",
     reportsHealth: true,
     search: async (query, opts = {}) => {
