@@ -33,16 +33,23 @@ export function SourcesPrompt({ width, disabled, onToggle, onCancel }: SourcesPr
     }
   });
 
-  const onCount = flat.length - disabled.length;
+  // A source can belong to several groups (e.g. a general index under both
+  // Movies and TV), so it renders once per group. Count each source once.
+  const total = new Set(flat.map((s) => s.id)).size;
+  const onCount = total - disabled.length;
+  // Global row index across all groups, matching `flat`'s order, so a source
+  // shown under two headers is two independently selectable rows.
+  let rowIndex = -1;
 
   return (
     <Box flexDirection="column" width={width}>
-      <Panel title="sources" width={width} focused count={`${onCount}/${flat.length}`}>
+      <Panel title="sources" width={width} focused count={`${onCount}/${total}`}>
         {groups.map((g) => (
           <Box key={g.group} flexDirection="column">
             <Text dimColor>{g.group}</Text>
             {g.sources.map((src) => {
-              const i = flat.indexOf(src);
+              rowIndex += 1;
+              const i = rowIndex;
               const on = !disabled.includes(src.id);
               const selected = i === clamped;
               const ss = SOURCE_STYLE[src.id];
@@ -50,7 +57,7 @@ export function SourcesPrompt({ width, disabled, onToggle, onCancel }: SourcesPr
               // source is otherwise enabled).
               const skipped = on && isSkipped(sourceHealth, src.id, Date.now());
               return (
-                <Box key={src.id}>
+                <Box key={`${g.group}-${src.id}`}>
                   <Text color={selected ? COLOR.accent : undefined}>
                     {selected ? `${ICON.pointer} ` : "  "}
                   </Text>

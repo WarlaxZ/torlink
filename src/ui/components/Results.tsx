@@ -220,7 +220,7 @@ export function Results() {
   const results = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.key === section);
     const base = cat?.group
-      ? search.results.filter((r) => getSource(r.source).group === cat.group)
+      ? search.results.filter((r) => getSource(r.source).groups?.includes(cat.group!))
       : search.results;
     const filtered = aliveOnly ? base.filter((result) => result.seeders > 0) : base;
     return sortResults(filtered, sort);
@@ -302,8 +302,8 @@ export function Results() {
 
   // Favourites are for video content only (Movies / TV / Anime).
   const canFavourite = (r: TorrentResult): boolean => {
-    const g = getSource(r.source).group;
-    return g === "Movies" || g === "TV" || g === "Anime";
+    const groups = getSource(r.source).groups ?? [];
+    return groups.some((g) => g === "Movies" || g === "TV" || g === "Anime");
   };
 
   const favInput = (r: TorrentResult) => ({
@@ -401,7 +401,9 @@ export function Results() {
     [search.perSource],
   );
   const activeCat = CATEGORIES.find((c) => c.key === section);
-  const tabSources = activeCat?.group ? enabled.filter((s) => s.group === activeCat.group) : enabled;
+  const tabSources = activeCat?.group
+    ? enabled.filter((s) => s.groups?.includes(activeCat.group!))
+    : enabled;
   const tabErrored =
     tabSources.length > 0 && tabSources.every((s) => search.perSource[s.id]?.error);
   // Only the active tab's sources hold its spinner; other groups' stragglers
@@ -464,7 +466,7 @@ export function Results() {
       if (aliveOnly) {
         const cat = CATEGORIES.find((c) => c.key === section);
         const base = cat?.group
-          ? search.results.filter((r) => getSource(r.source).group === cat.group)
+          ? search.results.filter((r) => getSource(r.source).groups?.includes(cat.group!))
           : search.results;
         if (base.length > 0 && base.every((r) => r.seeders <= 0)) {
           return (

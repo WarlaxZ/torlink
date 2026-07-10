@@ -5,18 +5,18 @@ describe("Pirate Bay sources", () => {
   it("should have tpbMovies", () => {
     expect(tpbMovies).toBeDefined();
     expect(tpbMovies.id).toBe("tpb-movies");
-    expect(tpbMovies.group).toBe("Movies");
+    expect(tpbMovies.groups).toContain("Movies");
   });
 
   it("should have tpbTv", () => {
     expect(tpbTv).toBeDefined();
     expect(tpbTv.id).toBe("tpb-tv");
-    expect(tpbTv.group).toBe("TV");
+    expect(tpbTv.groups).toContain("TV");
   });
 
   it("should have tpbMusic", () => {
     expect(tpbMusic).toBeDefined();
     expect(tpbMusic.id).toBe("tpb-music");
-    expect(tpbMusic.group).toBe("Music");
+    expect(tpbMusic.groups).toContain("Music");
   });
 });

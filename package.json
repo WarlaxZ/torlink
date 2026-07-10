@@ -8,7 +8,8 @@
   },
   "files": [
     "dist",
-    "preview"
+    "preview",
+    "scripts/ensure-webrtc.cjs"
   ],
   "engines": {
     "node": ">=22"
@@ -23,6 +24,7 @@
     "test": "vitest run",
     "verify:seeding": "tsx scripts/verify-seeding.ts",
     "previews": "tsx scripts/render-previews.tsx",
+    "postinstall": "node scripts/ensure-webrtc.cjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -49,7 +51,7 @@
     "type": "git",
     "url": "git+https://github.com/baairon/torlink.git"
   },
-  "homepage": "https://github.com/baairon/torlink#readme",
+  "homepage": "https://torlink.bairon.dev",
   "bugs": {
     "url": "https://github.com/baairon/torlink/issues"
   },

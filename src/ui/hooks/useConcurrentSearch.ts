@@ -76,6 +76,13 @@ function idleState(sources: readonly Source[]): ConcurrentSearchState {
   };
 }
 
+// Coalesce interval for streaming result updates. Sources finish in bursts (a
+// cache hit or a couple of fast hosts land almost together), and each update
+// re-sorts and re-renders the whole list. Flushing at most once per this window
+// keeps a burst from flooding Ink with re-renders and blocking stdin — the same
+// leading-throttle the queue hooks in store.ts use for `update` events.
+const RESULT_FLUSH_MS = 150;
+
 export function useConcurrentSearch(
   query: string,
   disabled: readonly SourceId[] = [],
@@ -96,6 +103,35 @@ export function useConcurrentSearch(
     const active = sources.filter((s) => !isSkipped(sourceHealth, s.id, Date.now()));
     const per = blankPerSource(active, true);
     let done = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = (): void => {
+      setState({
+        results: defaultOrder(mergeDuplicateResults(collected.slice())),
+        perSource: { ...per },
+        loading: done < active.length,
+        done,
+        total: active.length,
+      });
+    };
+
+    // Push the accumulated state to the UI, but no more than once per window.
+    // The final source flushes immediately so "done" / loading:false is prompt.
+    const scheduleFlush = (): void => {
+      if (done >= active.length) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        flush();
+        return;
+      }
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (alive) flush();
+      }, RESULT_FLUSH_MS);
+    };
 
     setState({
       results: [],
@@ -109,7 +145,7 @@ export function useConcurrentSearch(
       const sc = new AbortController();
       const onAbort = (): void => sc.abort();
       ctrl.signal.addEventListener("abort", onAbort);
-      const timer = setTimeout(() => sc.abort(), PER_SOURCE_TIMEOUT_MS);
+      const abortTimer = setTimeout(() => sc.abort(), PER_SOURCE_TIMEOUT_MS);
 
       cachedSearch(source, query, { signal: sc.signal })
         .then((res) => {
@@ -133,23 +169,18 @@ export function useConcurrentSearch(
           }
         })
         .finally(() => {
-          clearTimeout(timer);
+          clearTimeout(abortTimer);
           ctrl.signal.removeEventListener("abort", onAbort);
           if (!alive) return;
           done += 1;
-          setState({
-            results: defaultOrder(mergeDuplicateResults(collected.slice())),
-            perSource: { ...per },
-            loading: done < active.length,
-            done,
-            total: active.length,
-          });
+          scheduleFlush();
         });
     }
 
     return () => {
       alive = false;
       ctrl.abort();
+      if (timer) clearTimeout(timer);
     };
   }, [query, sources]);
 

@@ -4,8 +4,9 @@ import { parseSize } from "../util/format";
 import type { SearchOptions, Source, SourceId, TorrentResult } from "./types";
 
 const HOSTS = ["1337x.to", "1337x.st", "x1337x.ws", "1337xx.to"];
+let workingHostIndex = 0;
 
-const MAX_DETAILS = 8;
+const MAX_DETAILS = 4;
 
 const STOP = new Set(["the", "a", "an", "of", "and", "or", "to"]);
 
@@ -94,11 +95,14 @@ async function search(
   let base = "";
   let html = "";
   let lastError: unknown;
-  for (const host of HOSTS) {
+  for (let i = 0; i < HOSTS.length; i++) {
+    const hostIdx = (workingHostIndex + i) % HOSTS.length;
+    const host = HOSTS[hostIdx];
     try {
       const candidate = `https://${host}`;
-      html = await fetchText(`${candidate}${path}`, opts, 2);
+      html = await fetchText(`${candidate}${path}`, opts, i === 0 ? 2 : 0);
       base = candidate;
+      workingHostIndex = hostIdx;
       break;
     } catch (e) {
       if (opts.signal?.aborted) throw e;
@@ -142,7 +146,7 @@ async function search(
 export const x1337Movies: Source = {
   id: "x1337-movies",
   label: "1337x",
-  group: "Movies",
+  groups: ["Movies"],
   homepage: "https://1337x.to",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, "Movies", "x1337-movies", opts),
@@ -151,7 +155,7 @@ export const x1337Movies: Source = {
 export const x1337Tv: Source = {
   id: "x1337-tv",
   label: "1337x",
-  group: "TV",
+  groups: ["TV"],
   homepage: "https://1337x.to",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, "TV", "x1337-tv", opts),
@@ -160,7 +164,7 @@ export const x1337Tv: Source = {
 export const x1337Music: Source = {
   id: "x1337-music",
   label: "1337x",
-  group: "Music",
+  groups: ["Music"],
   homepage: "https://1337x.to",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, "Music", "x1337-music", opts),
