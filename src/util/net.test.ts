@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parseRetryAfter, backoffDelay, fetchResilient, HttpError } from "./net";
 
 function fakeRes(status: number, headers: Record<string, string> = {}): Response {
@@ -275,20 +275,27 @@ describe("fetchResilient", () => {
   });
 
   it("cuts a backoff sleep short when the signal aborts", async () => {
-    // No sleepImpl: exercises the real sleep. Retry-After floors the backoff
-    // at 60s, so only an abort-aware sleep lets this settle quickly.
-    const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 20);
-    const started = Date.now();
-    await expect(
-      fetchResilient("http://x", {
-        retries: 2,
-        baseMs: 60_000,
-        capMs: 60_000,
-        signal: ctrl.signal,
-        fetchImpl: async () => fakeRes(503, { "retry-after": "60" }),
-      }),
-    ).rejects.toBeInstanceOf(HttpError);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    // No sleepImpl: exercises the real sleep. Retry-After floors the backoff at
+    // 60s, so only an abort-aware sleep lets this settle. With fake timers we
+    // advance just past the 20ms abort — never the 60s backoff — so a sleep that
+    // ignored the signal would sit unresolved and this test would hang.
+    vi.useFakeTimers();
+    try {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 20);
+      const rejects = expect(
+        fetchResilient("http://x", {
+          retries: 2,
+          baseMs: 60_000,
+          capMs: 60_000,
+          signal: ctrl.signal,
+          fetchImpl: async () => fakeRes(503, { "retry-after": "60" }),
+        }),
+      ).rejects.toBeInstanceOf(HttpError);
+      await vi.advanceTimersByTimeAsync(20);
+      await rejects;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
