@@ -139,7 +139,6 @@ describe("config favourites", () => {
     await saveConfig({
       downloadDir: "/tmp/dl",
       trackers: [],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       favourites: [
         { id: "", name: "no id", magnet: "m", addedAt: 1 },
         { id: "ok", name: "", magnet: "m", addedAt: 1 },
@@ -158,7 +157,6 @@ describe("config favourites", () => {
       name: `n${i}`,
       magnet: "m",
     }));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await saveConfig({ downloadDir: "/tmp/dl", trackers: [], favourites: many as any });
     const cfg = await loadConfig();
     expect(cfg.favourites?.length).toBe(100);
