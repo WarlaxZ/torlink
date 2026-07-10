@@ -73,7 +73,9 @@ describe("DownloadQueue seeding", () => {
   it("exports cached .torrent metadata for a history item", async () => {
     const q = new DownloadQueue();
     const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-queue-export-"));
-    const item = h({ id: "h5", name: "Some/Torrent", dir: outDir });
+    // Unique id: saveTorrentMeta writes into the shared torrents dir keyed by id,
+    // so a fixed id would collide with any concurrent run using the same one.
+    const item = h({ id: `export-${path.basename(outDir)}`, name: "Some/Torrent", dir: outDir });
     try {
       q.restoreHistory([item]);
       await saveTorrentMeta(item.id, new Uint8Array([5, 6, 7]));
@@ -166,6 +168,21 @@ describe("DownloadQueue Real-Debrid path", () => {
 
 describe("DownloadQueue Real-Debrid scheduling", () => {
   const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  // Poll the event loop until `cond` holds, yielding a real macrotask each time
+  // so injected async deps and real fs I/O can settle. Waiting on observable
+  // state instead of a fixed number of ticks keeps these tests deterministic
+  // under load; the generous cap still fails fast on a genuine hang.
+  const waitFor = async (
+    cond: () => boolean | Promise<boolean>,
+    label = "condition",
+  ): Promise<void> => {
+    for (let i = 0; i < 500; i++) {
+      if (await cond()) return;
+      await tick();
+    }
+    throw new Error(`waitFor timed out waiting for ${label}`);
+  };
+  const fileExists = (p: string): Promise<boolean> => fs.access(p).then(() => true, () => false);
 
   it("runs at most two Real-Debrid downloads at once; the rest wait as queued", async () => {
     const q = new DownloadQueue();
@@ -184,8 +201,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     const inputs = [1, 2, 3, 4].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
     const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
 
-    await tick();
-    await tick();
+    await waitFor(() => started === 2, "2 downloads started");
     expect(started).toBe(2);
     expect(q.getItems().filter((it) => it.phase === "queued")).toHaveLength(2);
 
@@ -259,13 +275,11 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     const inputs = [1, 2, 3].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
     const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
 
-    await tick();
-    await tick();
-    expect(started).toHaveLength(2); // cap = 2; rd3 waiting
+    await waitFor(() => started.length === 2, "cap of 2 started"); // cap = 2; rd3 waiting
+    expect(started).toHaveLength(2);
 
     q.cancel("rd1"); // cancel a running item → its slot should free
-    await tick();
-    await tick();
+    await waitFor(() => started.length === 3, "rd3 starts after slot frees");
     expect(started).toHaveLength(3); // rd3 acquired the freed slot
     expect(q.has("rd1")).toBe(false); // cancelled item is gone
 
@@ -287,10 +301,11 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
         downloadCalls++;
         if (downloadCalls === 1) {
           // First run: block until the pause aborts us, then throw like a real abort.
+          const abortErr = (): Error =>
+            Object.assign(new Error("Download aborted."), { name: "AbortError" });
           await new Promise<void>((_res, rej) => {
-            opts?.signal?.addEventListener("abort", () =>
-              rej(Object.assign(new Error("Download aborted."), { name: "AbortError" })),
-            );
+            if (opts?.signal?.aborted) return rej(abortErr());
+            opts?.signal?.addEventListener("abort", () => rej(abortErr()));
           });
         }
         opts?.onProgress?.({ downloaded: 10, total: 10, speed: 0 });
@@ -300,15 +315,17 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     };
 
     const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
-    await tick();
-    await tick();
+    await waitFor(
+      () => q.getItems().find((i) => i.id === "rd1")?.phase === "downloading",
+      "download in progress",
+    );
 
     q.pause("rd1");
     await p; // driveDebrid returns once the pause abort unwinds
     expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("paused");
 
     q.resume("rd1");
-    for (let n = 0; n < 5 && q.has("rd1"); n++) await tick();
+    await waitFor(() => !q.has("rd1"), "resumed download completes"); // second run → history
     expect(q.has("rd1")).toBe(false); // second download run completed → history
     expect(downloadCalls).toBe(2);
     q.suspend();
@@ -322,25 +339,28 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       downloadFiles: async (_files, destDir, opts) => {
         await fs.mkdir(destDir, { recursive: true });
         await fs.writeFile(path.join(destDir, "f.mkv"), "partial");
-        await new Promise<void>((_res, rej) =>
-          opts?.signal?.addEventListener("abort", () =>
-            rej(Object.assign(new Error("Download aborted."), { name: "AbortError" })),
-          ),
-        );
+        const abortErr = (): Error =>
+          Object.assign(new Error("Download aborted."), { name: "AbortError" });
+        await new Promise<void>((_res, rej) => {
+          // The abort may already have fired while the writes above were in
+          // flight; adding a listener after the fact would never see it and the
+          // pipeline would hang. Reject immediately in that case.
+          if (opts?.signal?.aborted) return rej(abortErr());
+          opts?.signal?.addEventListener("abort", () => rej(abortErr()));
+        });
         return [];
       },
       sleep: async () => {},
     };
+    const file = path.join(dir, "f.mkv");
     const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, dir, "tok", deps);
-    await tick();
-    await tick();
+    await waitFor(() => fileExists(file), "partial file written"); // download reached the abort wait
     q.pause("rd1");
     await p;
-    expect(await fs.readFile(path.join(dir, "f.mkv"), "utf8")).toBe("partial"); // kept on pause
+    expect(await fs.readFile(file, "utf8")).toBe("partial"); // kept on pause
 
     q.cancel("rd1");
-    for (let n = 0; n < 5; n++) await tick(); // cleanup is async best-effort
-    await expect(fs.access(path.join(dir, "f.mkv"))).rejects.toBeTruthy(); // gone after cancel
+    await waitFor(async () => !(await fileExists(file)), "partial file deleted"); // async best-effort cleanup
     q.suspend();
   });
 });

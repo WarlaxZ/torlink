@@ -1,9 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Semaphore } from "./semaphore";
 
-const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+// Semaphore itself uses no timers; the one yield below just proves queued
+// waiters stay parked. Drive it with fake timers so it never leans on real
+// wall-clock scheduling.
+const tick = async (): Promise<void> => {
+  await vi.advanceTimersByTimeAsync(0);
+};
 
 describe("Semaphore", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("admits up to the limit immediately", async () => {
     const s = new Semaphore(2);
     await s.acquire();
