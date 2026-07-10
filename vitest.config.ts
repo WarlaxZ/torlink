@@ -1,15 +1,13 @@
-import os from "node:os";
-import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Keep tests off the real user data dir: redirect all persisted state (queue /
-// history / seeds / config) into a temp folder via the TORLINK_STATE_DIR
-// override that src/config/paths.ts honors. Applied before test modules import
-// paths.ts, so every write during a run lands here instead.
+// Keep tests off the real user data dir and isolated from each other: each
+// worker gets its own TORLINK_STATE_DIR (which src/config/paths.ts honors) so
+// concurrent workers never share persisted state — queue / history / seeds /
+// config / torrents — and race on it. See src/test-setup.ts for the per-worker
+// path; it must run before any test module imports paths.ts, which setupFiles
+// guarantee.
 export default defineConfig({
   test: {
-    env: {
-      TORLINK_STATE_DIR: path.join(os.tmpdir(), "torlink-test-state"),
-    },
+    setupFiles: ["./src/test-setup.ts"],
   },
 });
