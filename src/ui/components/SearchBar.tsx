@@ -36,6 +36,7 @@ export function SearchBar({
               defaultValue={value}
               placeholder={placeholder}
               history={history}
+              width={Math.max(1, width - 6)}
               onSubmit={onSubmit}
               onChange={onChange}
               onExitDown={onExitDown}

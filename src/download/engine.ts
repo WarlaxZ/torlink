@@ -149,16 +149,29 @@ export class TorrentEngine {
   stats(id: string): TorrentProgress | null {
     const t = this.torrents.get(id);
     if (!t) return null;
+
+    let progress = 0;
+    let downloaded = 0;
+    let timeRemaining = Infinity;
+
+    try {
+      progress = t.progress;
+      downloaded = t.downloaded;
+      timeRemaining = t.timeRemaining;
+    } catch {
+      // Ignore webtorrent getter errors that occur before metadata is fully parsed
+    }
+
     return {
-      progress: t.progress,
-      downloaded: t.downloaded,
-      total: t.length,
-      speed: t.downloadSpeed,
-      uploadSpeed: t.uploadSpeed,
-      uploaded: t.uploaded,
-      peers: t.numPeers,
-      timeRemaining: t.timeRemaining,
-      name: t.name,
+      progress,
+      downloaded,
+      total: t.length || 0,
+      speed: t.downloadSpeed || 0,
+      uploadSpeed: t.uploadSpeed || 0,
+      uploaded: t.uploaded || 0,
+      peers: t.numPeers || 0,
+      timeRemaining,
+      name: t.name || '',
     };
   }
 
