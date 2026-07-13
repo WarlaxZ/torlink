@@ -158,7 +158,7 @@ export class TorrentEngine {
       progress = t.progress;
       downloaded = t.downloaded;
       timeRemaining = t.timeRemaining;
-    } catch (err) {
+    } catch {
       // Ignore webtorrent getter errors that occur before metadata is fully parsed
     }
 
