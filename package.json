@@ -1,10 +1,10 @@
 {
-  "name": "torlnk",
-  "version": "1.5.1",
+  "name": "torlnk-rd",
+  "version": "1.6.0",
   "description": "A sleek, zero-setup torrent finder and downloader that lives right in your terminal.",
   "type": "module",
   "bin": {
-    "torlnk": "./dist/cli.cjs"
+    "torlnk": "dist/cli.cjs"
   },
   "files": [
     "dist",
@@ -47,7 +47,10 @@
     "zero-setup",
     "fitgirl"
   ],
-  "author": "bairon",
+  "author": "WarlaxZ",
+  "contributors": [
+    "bairon <hi@bairon.dev> (original author of torlnk)"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

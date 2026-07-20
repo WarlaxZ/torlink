@@ -16,6 +16,21 @@ Download a standalone executable from [Releases](https://github.com/WarlaxZ/torl
 curl -fsSL https://raw.githubusercontent.com/WarlaxZ/torlink/main/scripts/install.sh | sh
 ```
 
+Or, with [Node 22+](https://nodejs.org), install it from npm — the command is `torlnk`:
+
+```sh
+npm install -g torlnk-rd
+torlnk
+```
+
+Or run it once, without installing anything:
+
+```sh
+npx torlnk-rd
+```
+
+Globally-installed copies keep themselves current: `torlnk update` pulls the latest release (and `torlnk` quietly points it out when one is available).
+
 You can still build from source with [Node 22+](https://nodejs.org):
 
 1. **Clone this repo** and open the folder.
