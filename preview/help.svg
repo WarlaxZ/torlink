@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="832" height="1442" viewBox="0 0 832 1442" style="max-width: 832px; width: 100%; height: auto;" role="img">
+  <rect width="100%" height="100%" rx="14" fill="#0a0810"/>
+  <rect x="0.5" y="0.5" width="831" height="1441" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
+  <text x="416" y="23" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="13" fill="#8a8a8a">torlink</text>
+  <g font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="16" fill="#ddd8ea">
+    <text x="99.2" y="84" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#87ff87" font-weight="600">𐓏</text>
+    <rect x="51.2" y="90" width="9.6" height="11" fill="#ffffff"/>
+    <rect x="60.8" y="90" width="9.6" height="22" fill="#ffffff"/>
+    <rect x="70.4" y="90" width="9.6" height="11" fill="#ffffff"/>
+    <rect x="89.6" y="90" width="9.6" height="22" fill="#ffd7ff"/>
+    <rect x="99.2" y="90" width="9.6" height="11" fill="#ffd7ff"/>
+    <rect x="108.8" y="90" width="9.6" height="22" fill="#ffd7ff"/>
+    <rect x="128" y="90" width="9.6" height="22" fill="#d7d7ff"/>
+    <rect x="137.6" y="90" width="9.6" height="11" fill="#d7d7ff"/>
+    <rect x="147.2" y="90" width="9.6" height="22" fill="#d7d7ff"/>
+    <rect x="166.4" y="90" width="9.6" height="22" fill="#d7afff"/>
+    <rect x="204.8" y="90" width="9.6" height="22" fill="#d7afff"/>
+    <rect x="224" y="90" width="9.6" height="22" fill="#d7afff"/>
+    <rect x="233.6" y="101" width="9.6" height="11" fill="#d7afff"/>
+    <rect x="252.8" y="90" width="9.6" height="22" fill="#d7afff"/>
+    <rect x="272" y="90" width="9.6" height="22" fill="#d7afff"/>
+    <rect x="281.6" y="101" width="9.6" height="11" fill="#d7afff"/>
+    <rect x="291.2" y="90" width="9.6" height="11" fill="#afafff"/>
+    <rect x="310.4" y="101" width="9.6" height="11" fill="#afafff"/>
+    <rect x="320" y="101" width="9.6" height="11" fill="#afafff"/>
+    <rect x="339.2" y="90" width="9.6" height="22" fill="#afafff"/>
+    <rect x="348.8" y="90" width="9.6" height="11" fill="#afafff"/>
+    <rect x="358.4" y="90" width="9.6" height="22" fill="#afafff"/>
+    <rect x="377.6" y="90" width="9.6" height="22" fill="#afafff"/>
+    <rect x="387.2" y="90" width="9.6" height="11" fill="#af87ff"/>
+    <rect x="396.8" y="101" width="9.6" height="11" fill="#af87ff"/>
+    <rect x="60.8" y="112" width="9.6" height="22" fill="#af87ff"/>
+    <rect x="89.6" y="112" width="9.6" height="22" fill="#af87ff"/>
+    <rect x="99.2" y="123" width="9.6" height="11" fill="#af87d7"/>
+    <rect x="108.8" y="112" width="9.6" height="22" fill="#af87d7"/>
+    <rect x="128" y="112" width="9.6" height="22" fill="#af87d7"/>
+    <rect x="137.6" y="112" width="9.6" height="11" fill="#af87d7"/>
+    <rect x="147.2" y="123" width="9.6" height="11" fill="#af87d7"/>
+    <rect x="166.4" y="112" width="9.6" height="22" fill="#8787d7"/>
+    <rect x="176" y="123" width="9.6" height="11" fill="#8787d7"/>
+    <rect x="185.6" y="123" width="9.6" height="11" fill="#8787d7"/>
+    <rect x="204.8" y="112" width="9.6" height="22" fill="#8787d7"/>
+    <rect x="224" y="112" width="9.6" height="22" fill="#8787d7"/>
+    <rect x="243.2" y="112" width="9.6" height="11" fill="#8787d7"/>
+    <rect x="252.8" y="112" width="9.6" height="22" fill="#8787d7"/>
+    <rect x="272" y="112" width="9.6" height="22" fill="#8787d7"/>
+    <rect x="291.2" y="112" width="9.6" height="22" fill="#875faf"/>
+    <rect x="339.2" y="112" width="9.6" height="22" fill="#875faf"/>
+    <rect x="348.8" y="112" width="9.6" height="11" fill="#875faf"/>
+    <rect x="358.4" y="123" width="9.6" height="11" fill="#875faf"/>
+    <rect x="377.6" y="112" width="9.6" height="22" fill="#875faf"/>
+    <rect x="387.2" y="123" width="9.6" height="11" fill="#875faf"/>
+    <rect x="396.8" y="112" width="9.6" height="11" fill="#5f5faf"/>
+    <text x="41.6" y="150" textLength="748.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">──────────────────────────────────────────────────────────────────────────────</text>
+    <text x="41.6" y="194" textLength="633.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#af87af">╭────────────────────────────────────────────────────────────────╮</text>
+    <rect x="45.7" y="200" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="200" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="222" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="238" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Keyboard</text>
+    <rect x="669.7" y="222" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="244" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="244" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="266" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="282" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Navigate</text>
+    <rect x="669.7" y="266" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="288" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="304" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑↓←→ / hjkl</text>
+    <text x="195.2" y="304" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Navigate panes and lists</text>
+    <rect x="669.7" y="288" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="310" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="326" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
+    <text x="195.2" y="326" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open</text>
+    <rect x="669.7" y="310" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="332" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="348" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">tab</text>
+    <text x="195.2" y="348" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Switch pane</text>
+    <rect x="669.7" y="332" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="354" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="370" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">esc</text>
+    <text x="195.2" y="370" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Back</text>
+    <rect x="669.7" y="354" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="376" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="392" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">o</text>
+    <text x="195.2" y="392" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Default download folder</text>
+    <rect x="669.7" y="376" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="398" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">S</text>
+    <text x="195.2" y="414" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Choose sources</text>
+    <rect x="669.7" y="398" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="420" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="436" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">D</text>
+    <text x="195.2" y="436" textLength="345.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Custom DNS (bypass blocked networks)</text>
+    <rect x="669.7" y="420" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="442" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="458" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">t</text>
+    <text x="195.2" y="458" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Extra trackers</text>
+    <rect x="669.7" y="442" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="464" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="480" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">L</text>
+    <text x="195.2" y="480" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Transfer and seeding limits</text>
+    <rect x="669.7" y="464" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="486" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">V</text>
+    <text x="195.2" y="502" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">VPN kill switch</text>
+    <rect x="669.7" y="486" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="508" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="524" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">q</text>
+    <text x="195.2" y="524" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Quit</text>
+    <rect x="669.7" y="508" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="530" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="530" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="552" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="568" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Accounts</text>
+    <rect x="669.7" y="552" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="574" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="590" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑ ↓</text>
+    <text x="195.2" y="590" textLength="201.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between services</text>
+    <rect x="669.7" y="574" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="596" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="612" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
+    <text x="195.2" y="612" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in / switch account</text>
+    <rect x="669.7" y="596" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="618" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="634" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
+    <text x="195.2" y="634" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign out</text>
+    <rect x="669.7" y="618" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="640" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="640" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="662" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="678" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Search</text>
+    <rect x="669.7" y="662" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="684" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="700" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">/</text>
+    <text x="195.2" y="700" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Edit search</text>
+    <rect x="669.7" y="684" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="706" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="722" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
+    <text x="195.2" y="722" textLength="96" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Run search</text>
+    <rect x="669.7" y="706" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="728" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑</text>
+    <text x="195.2" y="744" textLength="364.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Recall recent searches (while editing)</text>
+    <rect x="669.7" y="728" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="750" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="766" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">f</text>
+    <text x="195.2" y="766" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter list</text>
+    <rect x="669.7" y="750" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="772" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="788" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">s</text>
+    <text x="195.2" y="788" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sort results</text>
+    <rect x="669.7" y="772" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="794" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="810" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">z</text>
+    <text x="195.2" y="810" textLength="268.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Hide results with no seeders</text>
+    <rect x="669.7" y="794" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="816" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="832" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">w</text>
+    <text x="195.2" y="832" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Save or remove current search</text>
+    <rect x="669.7" y="816" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="838" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="854" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">d</text>
+    <text x="195.2" y="854" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download (P2P)</text>
+    <rect x="669.7" y="838" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="860" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="876" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">shift+d</text>
+    <text x="195.2" y="876" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download to a chosen folder</text>
+    <rect x="669.7" y="860" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="882" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="898" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">r</text>
+    <text x="195.2" y="898" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download via Real-Debrid</text>
+    <rect x="669.7" y="882" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="904" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="920" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">v</text>
+    <text x="195.2" y="920" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stream</text>
+    <rect x="669.7" y="904" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="926" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="942" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">b</text>
+    <text x="195.2" y="942" textLength="451.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Favourite a video (detail view / stream picker)</text>
+    <rect x="669.7" y="926" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="948" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="964" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">y</text>
+    <text x="195.2" y="964" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Copy magnet</text>
+    <rect x="669.7" y="948" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="970" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="986" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">m</text>
+    <text x="195.2" y="986" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Paste magnet</text>
+    <rect x="669.7" y="970" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="992" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1008" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
+    <text x="195.2" y="1008" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stop active stream</text>
+    <rect x="669.7" y="992" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1014" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="1014" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1036" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1052" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Downloads</text>
+    <rect x="669.7" y="1036" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1058" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1074" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">p</text>
+    <text x="195.2" y="1074" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
+    <rect x="669.7" y="1058" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1080" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1096" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">c</text>
+    <text x="195.2" y="1096" textLength="297.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Cancel or remove (shift+c: all)</text>
+    <rect x="669.7" y="1080" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1102" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1118" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">f</text>
+    <text x="195.2" y="1118" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Retry failed</text>
+    <rect x="669.7" y="1102" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1124" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1140" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">d</text>
+    <text x="195.2" y="1140" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download again</text>
+    <rect x="669.7" y="1124" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1146" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1162" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">e</text>
+    <text x="195.2" y="1162" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open folder</text>
+    <rect x="669.7" y="1146" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1168" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1184" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">s</text>
+    <text x="195.2" y="1184" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Export torrent file</text>
+    <rect x="669.7" y="1168" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1190" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="1190" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1212" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1228" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Seeding</text>
+    <rect x="669.7" y="1212" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1234" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1250" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">p</text>
+    <text x="195.2" y="1250" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
+    <rect x="669.7" y="1234" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1256" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1272" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">c</text>
+    <text x="195.2" y="1272" textLength="153.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Remove from list</text>
+    <rect x="669.7" y="1256" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1278" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1294" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">e</text>
+    <text x="195.2" y="1294" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open folder</text>
+    <rect x="669.7" y="1278" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1300" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="1300" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1322" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1338" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Your downloaded files always stay on disk.</text>
+    <rect x="669.7" y="1322" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1344" width="1.4" height="22" fill="#af87af"/>
+    <text x="70.4" y="1360" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Press ? or esc to close</text>
+    <rect x="669.7" y="1344" width="1.4" height="22" fill="#af87af"/>
+    <rect x="45.7" y="1366" width="1.4" height="22" fill="#af87af"/>
+    <rect x="669.7" y="1366" width="1.4" height="22" fill="#af87af"/>
+    <text x="41.6" y="1404" textLength="633.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#af87af">╰────────────────────────────────────────────────────────────────╯</text>
+  </g>
+</svg>

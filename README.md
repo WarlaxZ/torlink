@@ -49,6 +49,10 @@ You can still build from source with [Node 22+](https://nodejs.org):
 
 That's the only thing you'll type. torlink opens straight to a search bar: search for what you want, paste in a magnet link or a bare infohash, or just press Enter on an empty box to browse the curated library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
 
+<p align="center">
+  <img src="preview/help.svg" alt="torlink's keyboard help overlay: every shortcut grouped by what it does" style="max-width: 832px; width: 100%; height: auto;">
+</p>
+
 ## Finding something
 
 Type what you're looking for and press Enter. Results stream in from every source as they answer, tagged with size and how many people are sharing each one, so you can see what'll come down fast. Arrow to what you want and press `d` to save it, or `shift+d` to pick a different folder for just that download.
@@ -75,6 +79,12 @@ Press `Shift+L` to set download/upload limits and automatic seeding targets. Val
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
+The Seeding tab shows everything you're sharing back — live upload speed and peers for each, with `p` to pause or resume any of them.
+
+<p align="center">
+  <img src="preview/seeding.svg" alt="torlink's Seeding tab: items being shared, with upload speed, peers, and pause controls" style="max-width: 832px; width: 100%; height: auto;">
+</p>
+
 ## Streaming
 
 Don't want to wait for a download? Press **`v`** on a movie or an episode and torlink opens the largest video file straight in your media player while it downloads. The first time it'll ask which player to use (`mpv`, `iina`, `vlc`, or a path); after that it just plays. You can set one ahead of time with `TORLINK_PLAYER`.
@@ -88,6 +98,10 @@ With a Real-Debrid account connected (below), `v` streams from Real-Debrid's ser
 torlink works great on its own, but if you have a [Real-Debrid](https://real-debrid.com) account you can plug it in for a noticeably better ride. Real-Debrid pulls the torrent onto its own servers and hands you back a plain, direct download. That means full speed even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because Real-Debrid does the torrenting, not you — your IP never touches the network.
 
 To connect it, open the **Accounts** tab in the sidebar (alongside Downloads and Seeding), select Real-Debrid, paste your API token from [real-debrid.com/apitoken](https://real-debrid.com/apitoken), and torlink checks it and remembers it. (Prefer to keep the token off disk? Set `REALDEBRID_API_TOKEN` in your environment instead and torlink picks it up.)
+
+<p align="center">
+  <img src="preview/accounts.svg" alt="torlink's Accounts tab: Real-Debrid and RuTracker sign-in with connection status" style="max-width: 832px; width: 100%; height: auto;">
+</p>
 
 Once it's connected, downloading and streaming get an upgrade:
 
@@ -112,6 +126,10 @@ A short, hand-picked list of trusted sources:
 **RuTracker** is available across Games, Movies, TV, Anime, Music, and Books and requires a free account. Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.
 
 Games are the only category that intentionally distributes executable software, so they come from FitGirl alone, a repacker with a long, trusted track record; the other categories are media or document files. If a source is down, the search carries on without it, and torlink tells you which one is offline. A source that keeps failing is set aside automatically for a while so it stops slowing searches down; you can also switch sources on and off yourself with `Shift+S`.
+
+<p align="center">
+  <img src="preview/sources.svg" alt="torlink's source picker: toggle any source on or off, grouped by category" style="max-width: 832px; width: 100%; height: auto;">
+</p>
 
 ### Blocked by your network?
 
