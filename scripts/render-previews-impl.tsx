@@ -13,6 +13,10 @@ import { Sidebar, RAIL_WIDTH } from "../src/ui/components/Sidebar";
 import { SearchBar } from "../src/ui/components/SearchBar";
 import { Panel } from "../src/ui/components/Panel";
 import { Downloads } from "../src/ui/components/Downloads";
+import { HelpOverlay } from "../src/ui/components/HelpOverlay";
+import { SourcesPrompt } from "../src/ui/components/SourcesPrompt";
+import { Accounts } from "../src/ui/components/Accounts";
+import { Seeding } from "../src/ui/components/Seeding";
 import { footerHints } from "../src/ui/keymap";
 import { sourcesByGroup } from "../src/sources/registry";
 import { cleanText, formatBytes, formatRelative } from "../src/util/format";
@@ -21,7 +25,8 @@ import type { Config } from "../src/config/config";
 import type { DownloadQueue } from "../src/download/queue";
 import type { QueueItem, SeedItem } from "../src/download/types";
 import type { HistoryItem } from "../src/download/history";
-import type { TorrentResult } from "../src/sources/types";
+import type { SourceId, TorrentResult } from "../src/sources/types";
+import type { RdStatus } from "../src/integrations/rdStatus";
 
 const COLS = 80;
 const CONTENT_WIDTH = Math.max(24, COLS - RAIL_WIDTH - 3);
@@ -49,6 +54,17 @@ const HISTORY: HistoryItem[] = [
   { id: "h1", name: "Elden Ring: Shadow of the Erdtree Edition", source: "fitgirl", sizeBytes: 54e9, magnet: "", dir: "", completedAt: NOW_MS - 3_600_000 },
   { id: "h2", name: "Breaking Bad S05E14 1080p WEB-DL", source: "eztv", sizeBytes: 1.6e9, magnet: "", dir: "", completedAt: NOW_MS - 90_000_000 },
 ];
+
+const SEEDS: SeedItem[] = [
+  { id: "h1", name: "Elden Ring: Shadow of the Erdtree Edition", source: "fitgirl", magnet: "", dir: "", sizeBytes: 54e9, status: "seeding", uploadSpeed: 1.4e6, uploaded: 8.2e9, peers: 12 },
+  { id: "h2", name: "Breaking Bad S05E14 1080p WEB-DL", source: "eztv", magnet: "", dir: "", sizeBytes: 1.6e9, status: "paused", uploadSpeed: 0, uploaded: 4.1e8, peers: 0 },
+];
+
+const RD_STATUS: RdStatus = {
+  username: "you",
+  premium: true,
+  premiumUntil: new Date(NOW_MS + 60 * 86_400_000),
+};
 
 function fakeQueue(
   items: QueueItem[],
@@ -281,4 +297,88 @@ save(
     <Footer hints={footerHints("content", "downloads")} />
   </Box>,
   { shimmer: true },
+);
+
+save(
+  "seeding",
+  makeStore(
+    { section: "seeding", region: "content", contentWidth: CONTENT_WIDTH, listRows: 10, cols: COLS, rows: 24 },
+    [],
+    HISTORY,
+    SEEDS,
+  ),
+  <Box flexDirection="column" width={COLS} paddingX={1}>
+    <Box justifyContent="space-between">
+      <Logo />
+    </Box>
+    <Rule width={RULE_WIDTH} />
+    <Box height={10} marginTop={1}>
+      <Sidebar />
+      <Box flexGrow={1} flexDirection="column">
+        <Seeding />
+      </Box>
+    </Box>
+    <Footer hints={footerHints("content", "seeding")} />
+  </Box>,
+);
+
+save(
+  "accounts",
+  makeStore({ section: "accounts", region: "content", contentWidth: CONTENT_WIDTH, listRows: 10, cols: COLS, rows: 24 }),
+  <Box flexDirection="column" width={COLS} paddingX={1}>
+    <Box justifyContent="space-between">
+      <Logo />
+    </Box>
+    <Rule width={RULE_WIDTH} />
+    <Box height={10} marginTop={1}>
+      <Sidebar />
+      <Box flexGrow={1} flexDirection="column">
+        <Accounts
+          rdToken="rd_live_xxx"
+          rdStatus={RD_STATUS}
+          rutrackerUser="you"
+          onManageRd={() => {}}
+          onSignOutRd={() => {}}
+          onManageRutracker={() => {}}
+          onSignOutRutracker={() => {}}
+        />
+      </Box>
+    </Box>
+    <Footer hints={footerHints("content", "accounts")} />
+  </Box>,
+);
+
+const PROMPT_WIDTH = Math.max(24, Math.min(COLS - 4, 62));
+
+save(
+  "sources",
+  makeStore({ region: "content", cols: COLS }),
+  <Box flexDirection="column" width={COLS} paddingX={1}>
+    <Box justifyContent="space-between">
+      <Logo />
+    </Box>
+    <Rule width={RULE_WIDTH} />
+    <Box marginTop={1}>
+      <SourcesPrompt
+        width={PROMPT_WIDTH}
+        disabled={["torrents-csv", "x1337-music"] as SourceId[]}
+        onToggle={() => {}}
+        onCancel={() => {}}
+      />
+    </Box>
+  </Box>,
+);
+
+save(
+  "help",
+  makeStore({ region: "content", cols: COLS }),
+  <Box flexDirection="column" width={COLS} paddingX={1}>
+    <Box justifyContent="space-between">
+      <Logo />
+    </Box>
+    <Rule width={RULE_WIDTH} />
+    <Box marginTop={1}>
+      <HelpOverlay />
+    </Box>
+  </Box>,
 );
