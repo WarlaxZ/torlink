@@ -71,4 +71,9 @@ torlink is pastel-violet and quiet. There is exactly one gradient, the wordmark 
 - Say why, not just what. The diff already shows the what.
 - One concern per pull request. Two unrelated ideas are two PRs.
 
+## Releasing
+
+Maintainers: cutting a release (version bump → tag → automated bundles, GitHub
+Release, and npm publish) is documented in [RELEASING.md](RELEASING.md).
+
 Thanks for helping keep torlink sharp.
