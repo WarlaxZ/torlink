@@ -1,8 +1,10 @@
-// `torlnk update`: fetch the latest release, apply it, and bring any --daemon
-// process back on the new code. Two install shapes are handled: a git checkout
-// (pull, install, build) and a global npm install (npm i -g), chosen by whether
-// the package root is a git working tree. The package name and root come from
-// the manifest at runtime, never a hardcoded slug.
+// `torlnk update`: fetch the latest GitHub release, apply it, and bring any
+// --daemon process back on the new code. Three install shapes are handled: a
+// self-contained release bundle (download the matching asset, verify it, swap
+// it in place), a git checkout (pull, install, build), and a global npm install
+// (npm i -g). The shape is chosen by where the running node lives and whether
+// the package root is a git working tree. The repo slug, package name, and root
+// come from the manifest at runtime, never a hardcoded slug.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -142,7 +144,7 @@ export async function runUpdate(opts: { force?: boolean } = {}): Promise<void> {
       ? "Forcing a reinstall and restart…"
       : latest
         ? `Updating to v${latest}…`
-        : "Couldn't reach the registry; updating from source anyway…",
+        : "Couldn't reach GitHub; updating from source anyway…",
   );
 
   const ok = isGitCheckout ? await gitUpdate(root, opts.force ?? false) : await npmGlobalUpdate(manifest.name);
