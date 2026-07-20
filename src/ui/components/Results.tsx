@@ -3,18 +3,20 @@ import { Box, Text, useInput } from "ink";
 import { useStore, useQueueItems, useQueueHistory, CATEGORIES, isCategory } from "../store";
 import { Spinner } from "./Spinner";
 import { SearchBar } from "./SearchBar";
+import { TextField } from "./TextField";
 import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { getSource, enabledSources } from "../../sources/registry";
 import { wrapStep, windowStart, resultsPanelOuter } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
+import { filterResults } from "../filter";
 import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatCount, formatRelative, stripControl, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
 
-type Mode = "list" | "search" | "detail";
+type Mode = "list" | "search" | "detail" | "filter";
 
 // Glyph + colour for a result row's download state. Returns null for untouched.
 function stateMark(state: DownloadState | null): { icon: string; color?: string; dim?: boolean } | null {
@@ -215,16 +217,18 @@ export function Results() {
   const queueHistory = useQueueHistory(queue);
   const stateFor = (hash: string): DownloadState | null =>
     downloadStateFor(hash, queueItems, queueHistory);
+  // `aliveOnly` is the fork's name for upstream's hideDead; `textFilter` is the
+  // upstream in-memory token filter. `sort` is persisted via the store.
   const [aliveOnly, setAliveOnly] = useState(false);
+  const [textFilter, setTextFilter] = useState("");
 
   const results = useMemo(() => {
     const cat = CATEGORIES.find((c) => c.key === section);
     const base = cat?.group
       ? search.results.filter((r) => getSource(r.source).groups?.includes(cat.group!))
       : search.results;
-    const filtered = aliveOnly ? base.filter((result) => result.seeders > 0) : base;
-    return sortResults(filtered, sort);
-  }, [search.results, section, sort, aliveOnly]);
+    return sortResults(filterResults(base, aliveOnly, textFilter), sort);
+  }, [search.results, section, sort, aliveOnly, textFilter]);
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
@@ -255,11 +259,12 @@ export function Results() {
   useEffect(() => {
     selRef.current = null;
     setCursor(0);
+    setTextFilter("");
   }, [query, section]);
 
   useEffect(() => {
     if (!focused) return;
-    setCaptureMode(mode === "search" ? "text" : mode === "detail" ? "esc" : "none");
+    setCaptureMode(mode === "search" || mode === "filter" ? "text" : mode === "detail" ? "esc" : "none");
     return () => setCaptureMode("none");
   }, [mode, focused, setCaptureMode]);
 
@@ -270,7 +275,8 @@ export function Results() {
   const clamped = Math.min(cursor, Math.max(0, results.length - 1));
 
   const searchH = 3;
-  const panelOuter = resultsPanelOuter(listRows, searchH);
+  const filterH = mode === "filter" || textFilter.trim() ? 1 : 0;
+  const panelOuter = resultsPanelOuter(listRows, searchH + filterH);
   const listHeight = Math.max(3, panelOuter - 4);
   const pageJump = Math.max(1, listHeight - 1);
 
@@ -331,11 +337,24 @@ export function Results() {
         else setMode("search");
         return;
       }
-      if (results.length === 0) return;
-      if (key.downArrow || input === "j") moveTo(wrapStep(clamped, 1, results.length));
-      else if (key.pageUp) moveTo(Math.max(0, clamped - pageJump));
-      else if (key.pageDown) moveTo(Math.min(results.length - 1, clamped + pageJump));
-      else if (key.return) {
+      if (input === "s") {
+        setSort(nextSort(sort));
+      } else if (input === "z") {
+        setAliveOnly((current) => !current);
+        setCursor(0);
+      } else if (input === "f") {
+        setMode("filter");
+      } else if (input === "w" && query.trim()) {
+        toggleSavedSearch(query.trim());
+      } else if (results.length === 0) {
+        return;
+      } else if (key.downArrow || input === "j") {
+        moveTo(wrapStep(clamped, 1, results.length));
+      } else if (key.pageUp) {
+        moveTo(Math.max(0, clamped - pageJump));
+      } else if (key.pageDown) {
+        moveTo(Math.min(results.length - 1, clamped + pageJump));
+      } else if (key.return) {
         const r = results[clamped];
         if (r) {
           setDetail(r);
@@ -344,7 +363,7 @@ export function Results() {
       } else if (input === "d") {
         const r = results[clamped];
         if (r) openDownload(r);
-      } else if (input === "f") {
+      } else if (input === "D") {
         const r = results[clamped];
         if (r) openDownloadTo(r);
       } else if (input === "r") {
@@ -356,13 +375,6 @@ export function Results() {
       } else if (input === "y") {
         const r = results[clamped];
         if (r) copyResultMagnet(r);
-      } else if (input === "s") {
-        setSort(nextSort(sort));
-      } else if (input === "z") {
-        setAliveOnly((current) => !current);
-        setCursor(0);
-      } else if (input === "w" && query.trim()) {
-        toggleSavedSearch(query.trim());
       }
     },
     { isActive: focused && mode === "list" },
@@ -374,7 +386,7 @@ export function Results() {
         setMode("list");
         setDetail(null);
       } else if (input === "d" && detail) openDownload(detail);
-      else if (input === "f" && detail) openDownloadTo(detail);
+      else if (input === "D" && detail) openDownloadTo(detail);
       else if (input === "r" && detail) openDebrid(detail);
       else if (input === "v" && detail) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
@@ -387,7 +399,7 @@ export function Results() {
     (_input, key) => {
       if (key.escape) setMode("list");
     },
-    { isActive: focused && mode === "search" },
+    { isActive: focused && (mode === "search" || mode === "filter") },
   );
 
   const onSubmit = (value: string): void => {
@@ -626,6 +638,30 @@ export function Results() {
           )}
         </Panel>
       </Box>
+      {(mode === "filter" || textFilter.trim()) && (
+        <Box width={contentWidth} paddingLeft={1}>
+          <Box flexShrink={0}>
+            <Text color={COLOR.accent}>{`Filter ${ICON.pointer} `}</Text>
+          </Box>
+          <Box flexGrow={1} minWidth={0}>
+            {mode === "filter" ? (
+              <TextField
+                defaultValue={textFilter}
+                width={Math.max(1, contentWidth - 10)}
+                onChange={setTextFilter}
+                // Commit from the submit value / functional form, not the
+                // render closure: a same-tick burst (ctrl+u then enter) would
+                // otherwise resurrect the pre-clear text.
+                onSubmit={(value) => { setTextFilter(value.trim()); setMode("list"); }}
+                onExitDown={() => { setTextFilter((cur) => cur.trim()); setMode("list"); }}
+                onExitLeft={() => { setTextFilter((cur) => cur.trim()); setMode("list"); }}
+              />
+            ) : (
+              <Text wrap="truncate-end">{textFilter}</Text>
+            )}
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }

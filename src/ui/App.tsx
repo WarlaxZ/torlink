@@ -80,6 +80,8 @@ import { VpnPrompt } from "./components/VpnPrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
+import { VERSION } from "../version";
+import { fetchLatestVersion, isNewer } from "../update/version";
 import type { SourceId } from "../sources/types";
 import type { QueueItem } from "../download/types";
 import {
@@ -173,6 +175,7 @@ export function App({
   } | null>(null);
   const [lastDownloadToDir, setLastDownloadToDir] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   // Episodes streamed from the current picker session (marked ✓, cleared when
@@ -257,6 +260,20 @@ export function App({
       alive = false;
     };
   }, [initialMagnet, initialTorrent]);
+
+  // Best-effort, once per launch, off the hot path: if a newer release exists,
+  // surface a quiet banner. Any failure (offline, opt-out) just leaves it hidden.
+  useEffect(() => {
+    if (process.env.TORLINK_NO_UPDATE_CHECK) return;
+    let alive = true;
+    void (async () => {
+      const latest = await fetchLatestVersion();
+      if (alive && latest && isNewer(VERSION, latest)) setUpdateVersion(latest);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     void loadRutrackerSession().then((s) => setRutrackerUser(s?.username));
@@ -1406,7 +1423,7 @@ export function App({
     return (
       <StoreContext.Provider value={store}>
         <TabTitle />
-        <Splash />
+        <Splash updateVersion={updateVersion} />
       </StoreContext.Provider>
     );
   }
@@ -1416,10 +1433,16 @@ export function App({
       <TabTitle />
       <Box flexDirection="column" paddingX={1}>
         <Box justifyContent="space-between">
-          <Logo />
-          <Box>
+          {/* The wordmark never shrinks: without these constraints a long notice
+              squeezes the logo box and wraps its own text through the art. */}
+          <Box flexShrink={0}>
+            <Logo />
+          </Box>
+          <Box flexShrink={1} minWidth={0} marginLeft={2}>
             <RdBadge status={rdStatus} />
-            {notice ? <Text color={COLOR.good}>{`  ${notice}`}</Text> : null}
+            {notice ? (
+              <Text color={COLOR.good} wrap="truncate-end">{`  ${notice}`}</Text>
+            ) : null}
           </Box>
         </Box>
         {preparing ? (

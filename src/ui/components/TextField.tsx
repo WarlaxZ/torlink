@@ -127,6 +127,8 @@ export function TextField({
         return;
       }
       if (key.downArrow) {
+        // With no active history navigation, "next" reports "exit" and we drop
+        // out of the field (e.g. Tab/Down enters browse from the search box).
         const next = historyStep("next", histIndex, hist.length);
         if (next === "exit") {
           onExitDown?.();
@@ -136,7 +138,11 @@ export function TextField({
         recall(next === -1 ? draft : (hist[next] ?? ""));
         return;
       }
-      if (key.tab || (key.ctrl && input === "c")) return;
+      if (key.tab) {
+        onExitDown?.();
+        return;
+      }
+      if (key.ctrl && input === "c") return;
 
       if (key.return) {
         onSubmit?.(value);
