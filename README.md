@@ -2,7 +2,7 @@
   <img src="preview/splash.svg" alt="torlink, curated torrents straight from your terminal" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
-> A fork of [baairon/torlink](https://github.com/baairon/torlink) with some extra quality-of-life touches — remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
+> A fork of [baairon/torlink](https://github.com/baairon/torlink), headlined by optional [Real-Debrid](#real-debrid-optional) support — download and stream through Real-Debrid's servers for full speed without seeders, and keep your IP off the swarm. Plus a handful of quality-of-life touches: remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
 
 Finding a torrent these days sucks. One site is a minefield of fake download buttons. Another hides the real link under a popup that spawns two more tabs. And after all that, half the results are dead, zero seeders.
 
@@ -185,8 +185,8 @@ For a fail-closed VPN setup, press `Shift+V` and enter the VPN interface name (`
 
 <a href="https://www.star-history.com/?repos=WarlaxZ%2Ftorlink&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
  </picture>
 </a>
