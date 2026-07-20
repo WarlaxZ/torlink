@@ -93,7 +93,7 @@ export async function runUpdate(opts: { force?: boolean } = {}): Promise<void> {
     return;
   }
 
-  const latest = await fetchLatestVersion({ packageName: manifest.name });
+  const latest = await fetchLatestVersion();
   if (!opts.force && latest && !isNewer(VERSION, latest)) {
     console.log(`Already on the latest release (v${latest}). Use --force to rebuild and restart anyway.`);
     return;

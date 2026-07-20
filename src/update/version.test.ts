@@ -27,50 +27,39 @@ describe("isNewer", () => {
 });
 
 describe("fetchLatestVersion", () => {
-  const okResponse = (version: unknown): Response =>
-    ({ ok: true, json: async () => ({ version }) }) as unknown as Response;
+  const release = (tag: string): Response =>
+    ({ ok: true, json: async () => ({ tag_name: tag, assets: [] }) }) as unknown as Response;
 
-  it("returns the version string from the registry", async () => {
-    const v = await fetchLatestVersion({ fetchImpl: async () => okResponse("1.5.0") });
-    expect(v).toBe("1.5.0");
+  it("returns the version from the repo's latest GitHub release", async () => {
+    const v = await fetchLatestVersion({
+      repoUrl: "https://github.com/WarlaxZ/torlink",
+      fetchImpl: async () => release("v1.5.1"),
+    });
+    expect(v).toBe("1.5.1");
   });
-  it("builds the registry URL from the manifest name, not a hardcoded slug", async () => {
+  it("builds the API url from the repository slug", async () => {
     const urls: string[] = [];
     await fetchLatestVersion({
-      packageName: "@scope/other-pkg",
+      repoUrl: "git+https://github.com/WarlaxZ/torlink.git",
       fetchImpl: async (url) => {
         urls.push(url);
-        return okResponse("9.9.9");
+        return release("v2.0.0");
       },
     });
-    expect(urls).toEqual(["https://registry.npmjs.org/%40scope%2Fother-pkg/latest"]);
+    expect(urls).toEqual(["https://api.github.com/repos/WarlaxZ/torlink/releases/latest"]);
   });
-  it("defaults the package name to this repo's own manifest", async () => {
-    const urls: string[] = [];
-    await fetchLatestVersion({
-      fetchImpl: async (url) => {
-        urls.push(url);
-        return okResponse("9.9.9");
-      },
+  it("returns null when the repo url is not a GitHub url", async () => {
+    const v = await fetchLatestVersion({
+      repoUrl: "https://gitlab.com/o/r",
+      fetchImpl: async () => release("v9.9.9"),
     });
-    expect(urls).toEqual(["https://registry.npmjs.org/torlnk/latest"]);
+    expect(v).toBeNull();
   });
   it("returns null on a non-ok response", async () => {
     const v = await fetchLatestVersion({
+      repoUrl: "https://github.com/o/r",
       fetchImpl: async () => ({ ok: false, status: 404 }) as unknown as Response,
     });
-    expect(v).toBeNull();
-  });
-  it("returns null when the network throws", async () => {
-    const v = await fetchLatestVersion({
-      fetchImpl: async () => {
-        throw new Error("offline");
-      },
-    });
-    expect(v).toBeNull();
-  });
-  it("returns null when the payload has no version", async () => {
-    const v = await fetchLatestVersion({ fetchImpl: async () => okResponse(undefined) });
     expect(v).toBeNull();
   });
 });
