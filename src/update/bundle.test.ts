@@ -1,7 +1,16 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { assetNameFor, isBundleInstall, verifySha256, swapInPlace, type SwapDeps } from "./bundle";
+import {
+  assetNameFor,
+  isBundleInstall,
+  verifySha256,
+  swapInPlace,
+  type SwapDeps,
+  applyBundleUpdate,
+  type ApplyDeps,
+} from "./bundle";
+import type { GithubRelease } from "./github";
 
 describe("assetNameFor", () => {
   it("maps supported platform/arch pairs to release asset names", () => {
@@ -82,5 +91,74 @@ describe("swapInPlace", () => {
       "rename /tmp/stage/torlnk-runtime -> /opt/torlnk-runtime", // failed
       "rename /opt/torlnk-runtime.old-123 -> /opt/torlnk-runtime", // rollback
     ]);
+  });
+});
+
+const release: GithubRelease = {
+  version: "1.5.1",
+  assets: [
+    { name: "torlnk-linux-x64.tar.gz", url: "https://d/asset.tar.gz" },
+    { name: "SHA256SUMS", url: "https://d/SHA256SUMS" },
+  ],
+  sha256Url: "https://d/SHA256SUMS",
+};
+
+function applyDeps(over: Partial<ApplyDeps> = {}): { deps: ApplyDeps; log: string[] } {
+  const log: string[] = [];
+  const deps: ApplyDeps = {
+    platform: "linux",
+    arch: "x64",
+    download: async (url) => {
+      log.push(`download ${url}`);
+      return Buffer.from("archive-bytes");
+    },
+    readText: async (url) => {
+      log.push(`readText ${url}`);
+      return "sha  torlnk-linux-x64.tar.gz";
+    },
+    verify: () => {
+      log.push("verify");
+      return true;
+    },
+    extract: async (archive, dest) => {
+      log.push(`extract ${archive} -> ${dest}`);
+    },
+    swap: () => log.push("swap"),
+    tmpDir: () => "/tmp/torlnk-upd",
+    write: async (p) => {
+      log.push(`write ${p}`);
+    },
+    ...over,
+  };
+  return { deps, log };
+}
+
+describe("applyBundleUpdate", () => {
+  it("downloads, verifies, extracts, and swaps in order", async () => {
+    const { deps, log } = applyDeps();
+    const ok = await applyBundleUpdate(release, "/opt/torlnk-runtime", deps);
+    expect(ok).toBe(true);
+    expect(log).toEqual([
+      "download https://d/asset.tar.gz",
+      "write /tmp/torlnk-upd/torlnk-linux-x64.tar.gz",
+      "readText https://d/SHA256SUMS",
+      "verify",
+      "extract /tmp/torlnk-upd/torlnk-linux-x64.tar.gz -> /tmp/torlnk-upd/stage",
+      "swap",
+    ]);
+  });
+
+  it("aborts before swap when verification fails", async () => {
+    const { deps, log } = applyDeps({ verify: () => false });
+    const ok = await applyBundleUpdate(release, "/opt/torlnk-runtime", deps);
+    expect(ok).toBe(false);
+    expect(log).not.toContain("swap");
+  });
+
+  it("stops when the platform has no published asset", async () => {
+    const { deps, log } = applyDeps({ platform: "linux", arch: "arm64" });
+    const ok = await applyBundleUpdate(release, "/opt/torlnk-runtime", deps);
+    expect(ok).toBe(false);
+    expect(log).toEqual([]); // never tried to download
   });
 });

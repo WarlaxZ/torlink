@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
+import type { GithubRelease } from "./github";
 
 // Map the running platform/arch to the asset name that release.yml publishes.
 // Anything not built by the release workflow returns null so the caller can
@@ -62,4 +63,54 @@ export function swapInPlace(
     throw e;
   }
   deps.rm(backup);
+}
+
+export interface ApplyDeps {
+  platform: NodeJS.Platform | string;
+  arch: string;
+  download: (url: string) => Promise<Buffer>;
+  readText: (url: string) => Promise<string>;
+  verify: (data: Buffer, assetName: string, sums: string) => boolean;
+  extract: (archivePath: string, destDir: string) => Promise<void>;
+  swap: (root: string, stagedRuntime: string) => void;
+  tmpDir: () => string;
+  write: (filePath: string, data: Buffer) => Promise<void>;
+}
+
+// Orchestrate a bundle update: pick the asset for this platform, download +
+// verify it against SHA256SUMS, extract into a staging dir, then swap the
+// extracted torlnk-runtime/ into place. Returns false (install untouched)
+// whenever a precondition fails; the swap is the last step so a failed
+// download/verify/extract can never leave a half-written install.
+export async function applyBundleUpdate(
+  release: GithubRelease,
+  root: string,
+  deps: ApplyDeps,
+): Promise<boolean> {
+  const assetName = assetNameFor(deps.platform, deps.arch);
+  if (!assetName) {
+    console.error(`No published bundle for ${deps.platform}/${deps.arch}.`);
+    return false;
+  }
+  const asset = release.assets.find((a) => a.name === assetName);
+  if (!asset || !release.sha256Url) {
+    console.error("Release is missing this platform's asset or its checksums.");
+    return false;
+  }
+
+  const tmp = deps.tmpDir();
+  const archivePath = path.join(tmp, assetName);
+  const bytes = await deps.download(asset.url);
+  await deps.write(archivePath, bytes);
+
+  const sums = await deps.readText(release.sha256Url);
+  if (!deps.verify(bytes, assetName, sums)) {
+    console.error("Checksum mismatch; the download was not applied.");
+    return false;
+  }
+
+  const stage = path.join(tmp, "stage");
+  await deps.extract(archivePath, stage);
+  deps.swap(root, path.join(stage, "torlnk-runtime"));
+  return true;
 }
