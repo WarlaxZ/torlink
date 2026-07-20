@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/WarlaxZ/torlink/main/scripts/instal
 Or, with [Node 22+](https://nodejs.org), install it from npm and run the `torlnk` command anywhere:
 
 ```sh
-npm install -g torlink
+npm install -g torlnk-rd
 torlnk
 ```
 

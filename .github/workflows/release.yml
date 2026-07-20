@@ -84,14 +84,14 @@ jobs:
             artifacts/torlnk-*
             artifacts/SHA256SUMS
 
-  # Publish the package to npm on the same tag, so `npm i -g torlink@latest`
+  # Publish the package to npm on the same tag, so `npm i -g torlnk-rd@latest`
   # (and the in-app update check for npm-global installs) tracks releases too.
   # Uses npm Trusted Publishing (OIDC) — no stored token — and gets signed
   # build provenance automatically. Runs after the cross-platform bundles build
   # so a broken release never reaches npm.
   #
   # One-time setup on npmjs.com (package must already exist — see the PR notes
-  # for the first-publish bootstrap): torlink → Settings → Trusted Publisher →
+  # for the first-publish bootstrap): torlnk-rd → Settings → Trusted Publisher →
   # GitHub Actions, org "WarlaxZ", repo "torlink", workflow "release.yml".
   publish-npm:
     needs: build
