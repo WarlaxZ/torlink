@@ -86,11 +86,19 @@ jobs:
 
   # Publish the package to npm on the same tag, so `npm i -g torlink@latest`
   # (and the in-app update check for npm-global installs) tracks releases too.
-  # Requires an NPM_TOKEN repo secret (an npm automation token). Runs after the
-  # cross-platform bundles build so a broken release never reaches npm.
+  # Uses npm Trusted Publishing (OIDC) — no stored token — and gets signed
+  # build provenance automatically. Runs after the cross-platform bundles build
+  # so a broken release never reaches npm.
+  #
+  # One-time setup on npmjs.com (package must already exist — see the PR notes
+  # for the first-publish bootstrap): torlink → Settings → Trusted Publisher →
+  # GitHub Actions, org "WarlaxZ", repo "torlink", workflow "release.yml".
   publish-npm:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token npm exchanges for publish rights
     steps:
       - uses: actions/checkout@v7
         with:
@@ -100,8 +108,9 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
+      # Trusted publishing needs npm >= 11.5.1; Node 22's bundled npm is older.
+      - run: npm install -g npm@latest
       - run: npm ci
-      # `prepublishOnly` builds dist/; publishConfig sets public access.
+      # `prepublishOnly` builds dist/; publishConfig sets public access; OIDC
+      # supplies auth and provenance — no NODE_AUTH_TOKEN needed.
       - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
