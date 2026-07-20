@@ -47,17 +47,17 @@ const RESULTS: TorrentResult[] = [
 ];
 
 const DOWNLOADS: QueueItem[] = [
-  { id: "x1", name: "Dune: Part Two (2024) [2160p BluRay]", source: "yts", magnet: "", dir: "", status: "downloading", progress: 64, totalBytes: 8.4e9, downloadedBytes: 5.4e9, speed: 8.1e6, peers: 41, eta: 360, addedAt: NOW_MS },
+  { id: "x1", name: "Ubuntu 24.04.1 LTS Desktop (amd64)", magnet: "", dir: "", status: "downloading", progress: 64, totalBytes: 5.9e9, downloadedBytes: 3.78e9, speed: 8.1e6, peers: 41, eta: 360, addedAt: NOW_MS },
 ];
 
 const HISTORY: HistoryItem[] = [
-  { id: "h1", name: "Elden Ring: Shadow of the Erdtree Edition", source: "fitgirl", sizeBytes: 54e9, magnet: "", dir: "", completedAt: NOW_MS - 3_600_000 },
-  { id: "h2", name: "Breaking Bad S05E14 1080p WEB-DL", source: "eztv", sizeBytes: 1.6e9, magnet: "", dir: "", completedAt: NOW_MS - 90_000_000 },
+  { id: "h1", name: "Debian 12.7.0 amd64 DVD-1", sizeBytes: 3.9e9, magnet: "", dir: "", completedAt: NOW_MS - 3_600_000 },
+  { id: "h2", name: "Fedora Workstation 40 x86_64 Live", sizeBytes: 2.1e9, magnet: "", dir: "", completedAt: NOW_MS - 90_000_000 },
 ];
 
 const SEEDS: SeedItem[] = [
-  { id: "h1", name: "Elden Ring: Shadow of the Erdtree Edition", source: "fitgirl", magnet: "", dir: "", sizeBytes: 54e9, status: "seeding", uploadSpeed: 1.4e6, uploaded: 8.2e9, peers: 12 },
-  { id: "h2", name: "Breaking Bad S05E14 1080p WEB-DL", source: "eztv", magnet: "", dir: "", sizeBytes: 1.6e9, status: "paused", uploadSpeed: 0, uploaded: 4.1e8, peers: 0 },
+  { id: "h1", name: "Debian 12.7.0 amd64 DVD-1", magnet: "", dir: "", sizeBytes: 3.9e9, status: "seeding", uploadSpeed: 1.4e6, uploaded: 8.2e9, peers: 12 },
+  { id: "h2", name: "Fedora Workstation 40 x86_64 Live", magnet: "", dir: "", sizeBytes: 2.1e9, status: "paused", uploadSpeed: 0, uploaded: 4.1e8, peers: 0 },
 ];
 
 const RD_STATUS: RdStatus = {
