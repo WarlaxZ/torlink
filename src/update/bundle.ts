@@ -1,5 +1,9 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import { fetchResilient, USER_AGENT } from "../util/net";
 import type { GithubRelease } from "./github";
 
 // Map the running platform/arch to the asset name that release.yml publishes.
@@ -113,4 +117,87 @@ export async function applyBundleUpdate(
   await deps.extract(archivePath, stage);
   deps.swap(root, path.join(stage, "torlnk-runtime"));
   return true;
+}
+
+async function downloadBuffer(url: string): Promise<Buffer> {
+  const res = await fetchResilient(url, {
+    retries: 2,
+    headers: { "User-Agent": USER_AGENT },
+    // GitHub asset URLs redirect to a CDN; fetch follows redirects by default.
+  });
+  if (!res.ok) throw new Error(`download failed: ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// Extract a .tar.gz with system tar, or a .zip on Windows via PowerShell —
+// the same tools release.yml packs with, so no runtime dependency is added.
+function extractArchive(archivePath: string, destDir: string): void {
+  fs.mkdirSync(destDir, { recursive: true });
+  if (archivePath.endsWith(".zip")) {
+    const r = spawnSync(
+      "powershell",
+      ["-NoProfile", "-Command", `Expand-Archive -Force -Path "${archivePath}" -DestinationPath "${destDir}"`],
+      { stdio: "inherit" },
+    );
+    if (r.status !== 0) throw new Error("unzip failed");
+  } else {
+    const r = spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "inherit" });
+    if (r.status !== 0) throw new Error("tar failed");
+  }
+}
+
+// Unix: move the running runtime aside and move the new one in (open files keep
+// their inode, so the updater's own node keeps running). Windows: node.exe is
+// locked, so stage the new runtime next to root and finish the swap on exit via
+// a .cmd helper, printing a manual fallback.
+function swapRuntime(root: string, stagedRuntime: string): void {
+  if (process.platform === "win32") {
+    const staged = `${root}.new`;
+    fs.rmSync(staged, { recursive: true, force: true });
+    fs.renameSync(stagedRuntime, staged);
+    const helper = `${root}.swap.cmd`;
+    fs.writeFileSync(
+      helper,
+      [
+        "@echo off",
+        "timeout /t 2 /nobreak >nul",
+        `rmdir /s /q "${root}"`,
+        `move "${staged}" "${root}"`,
+        `del "%~f0"`,
+        "",
+      ].join("\r\n"),
+    );
+    console.log(
+      `Staged the update at ${staged}. It will be applied on exit; if not, run:\n  ${helper}`,
+    );
+    spawnSync("cmd", ["/c", "start", "/min", "", helper], { stdio: "ignore" });
+    return;
+  }
+  swapInPlace(root, stagedRuntime, process.pid, {
+    rename: (from, to) => fs.renameSync(from, to),
+    rm: (target) => fs.rmSync(target, { recursive: true, force: true }),
+  });
+}
+
+// The production entrypoint used by run.ts. Builds a temp dir and real deps,
+// then delegates to the unit-tested applyBundleUpdate.
+export async function applyBundleFromEnv(
+  release: GithubRelease,
+  root: string,
+): Promise<boolean> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "torlnk-upd-"));
+  return applyBundleUpdate(release, root, {
+    platform: process.platform,
+    arch: process.arch,
+    download: downloadBuffer,
+    readText: async (url) => (await downloadBuffer(url)).toString("utf8"),
+    verify: verifySha256,
+    extract: async (archivePath, destDir) => extractArchive(archivePath, destDir),
+    swap: swapRuntime,
+    tmpDir: () => tmp,
+    write: async (filePath, data) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, data);
+    },
+  });
 }
