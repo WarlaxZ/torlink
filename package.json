@@ -1,5 +1,5 @@
 {
-  "name": "torlnk",
+  "name": "torlink",
   "version": "1.5.1",
   "description": "A sleek, zero-setup torrent finder and downloader that lives right in your terminal.",
   "type": "module",
@@ -47,7 +47,10 @@
     "zero-setup",
     "fitgirl"
   ],
-  "author": "bairon",
+  "author": "WarlaxZ",
+  "contributors": [
+    "bairon <hi@bairon.dev> (original author of torlnk)"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

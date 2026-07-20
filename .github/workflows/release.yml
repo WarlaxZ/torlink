@@ -83,3 +83,25 @@ jobs:
           files: |
             artifacts/torlnk-*
             artifacts/SHA256SUMS
+
+  # Publish the package to npm on the same tag, so `npm i -g torlink@latest`
+  # (and the in-app update check for npm-global installs) tracks releases too.
+  # Requires an NPM_TOKEN repo secret (an npm automation token). Runs after the
+  # cross-platform bundles build so a broken release never reaches npm.
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      # `prepublishOnly` builds dist/; publishConfig sets public access.
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
