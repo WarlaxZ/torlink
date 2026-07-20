@@ -185,8 +185,8 @@ For a fail-closed VPN setup, press `Shift+V` and enter the VPN interface name (`
 
 <a href="https://www.star-history.com/?repos=WarlaxZ%2Ftorlink&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=eeR6uXvAUVOQYIvOIG6YIWA6EOozC9c_Xw3IYCsipQuw1TIb8SWXHZhvbVDdQZE-9MXgGh3XDeV-0IfPHtyEcrMft_XblWS8_GRIVU9TZuX-H_wxuz8tGiYq45TecZ_KGSkaRUE4bGWDQNmGui_BeUVuTXBebWQ2zPMkbC0X7aR53ZW157eX8fAF6VPT" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
  </picture>
 </a>
