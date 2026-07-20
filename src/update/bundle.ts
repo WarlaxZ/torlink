@@ -36,3 +36,30 @@ export function verifySha256(data: Buffer, assetName: string, sums: string): boo
   const got = createHash("sha256").update(data).digest("hex");
   return got.toLowerCase() === want.toLowerCase();
 }
+
+export interface SwapDeps {
+  rename: (from: string, to: string) => void;
+  rm: (target: string) => void;
+}
+
+// Replace the runtime dir at `root` with `stagedRuntime`. Order matters: the
+// old dir is moved aside first so the move-in has a clear target, then deleted
+// only after the new dir is in place. If the move-in fails, the old dir is
+// rolled back so the install is never left missing. `pid` disambiguates the
+// backup dir for concurrent/retried runs.
+export function swapInPlace(
+  root: string,
+  stagedRuntime: string,
+  pid: number,
+  deps: SwapDeps,
+): void {
+  const backup = `${root}.old-${pid}`;
+  deps.rename(root, backup);
+  try {
+    deps.rename(stagedRuntime, root);
+  } catch (e) {
+    deps.rename(backup, root); // roll back
+    throw e;
+  }
+  deps.rm(backup);
+}
