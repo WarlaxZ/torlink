@@ -1,16 +1,20 @@
-// `torlnk update`: fetch the latest release, apply it, and bring any --daemon
-// process back on the new code. Two install shapes are handled: a git checkout
-// (pull, install, build) and a global npm install (npm i -g), chosen by whether
-// the package root is a git working tree. The package name and root come from
-// the manifest at runtime, never a hardcoded slug.
+// `torlnk update`: fetch the latest GitHub release, apply it, and bring any
+// --daemon process back on the new code. Three install shapes are handled: a
+// self-contained release bundle (download the matching asset, verify it, swap
+// it in place), a git checkout (pull, install, build), and a global npm install
+// (npm i -g). The shape is chosen by where the running node lives and whether
+// the package root is a git working tree. The repo slug, package name, and root
+// come from the manifest at runtime, never a hardcoded slug.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { VERSION } from "../version";
-import { fetchLatestVersion, isNewer } from "./version";
+import { isNewer } from "./version";
 import { readManifest } from "./manifest";
 import { isAlive, listRunDescriptors, restartDaemon } from "../daemon/restart";
+import { isBundleInstall, applyBundleFromEnv } from "./bundle";
+import { parseRepoSlug, fetchLatestRelease } from "./github";
 
 // git is a real binary everywhere and spawns without a shell, so paths with
 // spaces survive as plain argv entries. npm is npm.cmd on Windows and a .cmd
@@ -93,13 +97,39 @@ export async function runUpdate(opts: { force?: boolean } = {}): Promise<void> {
     return;
   }
 
-  const latest = await fetchLatestVersion({ packageName: manifest.name });
+  const slug = parseRepoSlug(manifest.repoUrl);
+  const release = slug
+    ? await fetchLatestRelease({ owner: slug.owner, repo: slug.repo })
+    : null;
+  const latest = release?.version ?? null;
   if (!opts.force && latest && !isNewer(VERSION, latest)) {
-    console.log(`Already on the latest release (v${latest}). Use --force to rebuild and restart anyway.`);
+    console.log(`Already on the latest release (v${latest}). Use --force to reinstall and restart anyway.`);
     return;
   }
 
   const root = manifest.root;
+
+  // Bundle install (self-contained tarball): download + verify + swap in place.
+  // Handled before the git/npm branches because a bundle root has no .git and is
+  // user-writable, so it would otherwise fall through to the npm path.
+  if (isBundleInstall(root, process.execPath)) {
+    if (!release) {
+      console.error("Couldn't reach GitHub to find a release to install.");
+      process.exitCode = 1;
+      return;
+    }
+    console.log(opts.force ? "Reinstalling the current release…" : `Updating to v${latest}…`);
+    const ok = await applyBundleFromEnv(release, root);
+    if (!ok) {
+      console.error("Update failed; nothing was restarted.");
+      process.exitCode = 1;
+      return;
+    }
+    await restartDaemons();
+    console.log("Update complete.");
+    return;
+  }
+
   const isGitCheckout = fs.existsSync(path.join(root, ".git"));
   if (!isGitCheckout) {
     const owner = managedInstallOwner(root);
@@ -114,7 +144,7 @@ export async function runUpdate(opts: { force?: boolean } = {}): Promise<void> {
       ? "Forcing a reinstall and restart…"
       : latest
         ? `Updating to v${latest}…`
-        : "Couldn't reach the registry; updating from source anyway…",
+        : "Couldn't reach GitHub; updating from source anyway…",
   );
 
   const ok = isGitCheckout ? await gitUpdate(root, opts.force ?? false) : await npmGlobalUpdate(manifest.name);
