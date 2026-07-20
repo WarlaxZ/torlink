@@ -4,3 +4,4 @@ build/
 sea-prep.blob
 .DS_Store
 package-lock.json
+!nix/package-lock.json

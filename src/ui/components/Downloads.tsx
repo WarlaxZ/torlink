@@ -23,7 +23,7 @@ const MARK = 2;
 
 function statusColor(status: QueueItem["status"]): string {
   if (status === "failed") return COLOR.bad;
-  if (status === "paused") return PAUSED;
+  if (status === "paused" || status === "queued") return PAUSED;
   if (status === "selecting") return COLOR.warn;
   return COLOR.accent;
 }
@@ -31,7 +31,7 @@ function statusColor(status: QueueItem["status"]): string {
 function statusIcon(status: QueueItem["status"]): string {
   if (status === "failed") return ICON.error;
   if (status === "paused") return ICON.pause;
-  if (status === "selecting") return ICON.pending;
+  if (status === "selecting" || status === "queued") return ICON.pending;
   return ICON.down;
 }
 
@@ -52,7 +52,8 @@ function rightStats(it: QueueItem): string {
     return `${it.progress}%  ${speed}  ${ICON.peer}${it.peers}${eta}`;
   }
   if (it.status === "paused") return `paused  ${it.progress}%`;
-  return it.error || "failed";
+  if (it.status === "queued") return `queued  ${it.progress}%`;
+  return truncate(it.error || "failed", 28);
 }
 
 // The source cell: a colored delivery-method marker (RD green / P2P amber) plus
@@ -100,7 +101,6 @@ export function Downloads() {
     setDownloadFocus,
     copyLink,
     setNotice,
-    streamActive,
     exportTorrent,
   } = useStore();
   const active = useQueueItems(queue);
@@ -135,7 +135,6 @@ export function Downloads() {
       if (key.upArrow || input === "k") setCursor(wrapStep(clamped, -1, total));
       else if (key.downArrow || input === "j") setCursor(wrapStep(clamped, 1, total));
       else if (input === "f") queue.retryFailed();
-      else if (input === "x" && !streamActive) queue.clearHistory();
       else if (input === "e") {
         const dir = inActive ? active[clamped]?.dir : recent[recentCursor]?.dir;
         if (dir) openDownloadFolder(dir);
@@ -166,6 +165,9 @@ export function Downloads() {
             sizeBytes: h.sizeBytes,
           });
         else if (input === "c") queue.removeHistory(h.id);
+        // Clear-all lives here, not at the top of the chain, so it can only
+        // fire while the cursor is actually on the recent list.
+        else if (input === "C") queue.clearHistory();
       }
     },
     { isActive: focused && total > 0 },

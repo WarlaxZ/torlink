@@ -1,6 +1,17 @@
 import type { SourceId } from "../sources/types";
 
-export type DownloadStatus = "selecting" | "downloading" | "paused" | "completed" | "failed";
+// "selecting" = the fork's pre-download file picker state (choose which files
+// to fetch before the transfer starts).
+// "queued" = waiting for a free download slot (see TORLINK_MAX_DOWNLOADS). Unlike
+// "paused" (an explicit user action) a queued item is started automatically as
+// soon as a slot frees.
+export type DownloadStatus =
+  | "selecting"
+  | "downloading"
+  | "queued"
+  | "paused"
+  | "completed"
+  | "failed";
 
 export interface TorrentFileChoice {
   index: number;

@@ -41,11 +41,12 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "/", label: "Edit search" },
       { keys: "↵", label: "Run search" },
       { keys: "↑", label: "Recall recent searches (while editing)" },
+      { keys: "f", label: "Filter list" },
       { keys: "s", label: "Sort results" },
       { keys: "z", label: "Hide results with no seeders" },
       { keys: "w", label: "Save or remove current search" },
       { keys: "d", label: "Download (P2P)" },
-      { keys: "f", label: "Download to a chosen folder" },
+      { keys: "shift+d", label: "Download to a chosen folder" },
       { keys: "r", label: "Download via Real-Debrid" },
       { keys: "v", label: "Stream" },
       { keys: "b", label: "Favourite a video (detail view / stream picker)" },
@@ -58,12 +59,11 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "Downloads",
     hints: [
       { keys: "p", label: "Pause/resume" },
-      { keys: "c", label: "Cancel or remove" },
+      { keys: "c", label: "Cancel or remove (shift+c: all)" },
       { keys: "f", label: "Retry failed" },
       { keys: "d", label: "Download again" },
       { keys: "e", label: "Open folder" },
       { keys: "s", label: "Export torrent file" },
-      { keys: "x", label: "Clear recent" },
     ],
   },
   {
@@ -108,7 +108,7 @@ export function footerHints(
   if (section === "seeding") {
     const label =
       seedFocus === "seeding" ? "Pause" : seedFocus === "missing" ? "Retry" : "Resume";
-    return [{ keys: "p", label }, { keys: "c", label: "Remove" }, FOLDER, SWITCH, ALWAYS];
+    return [{ keys: "p", label }, { keys: "c", label: "Remove from list" }, FOLDER, SWITCH, ALWAYS];
   }
   if (section === "accounts") {
     return [
@@ -133,10 +133,11 @@ export function footerHints(
       return [{ keys: "f", label: "Retry" }, { keys: "c", label: "Remove" }, FOLDER, TORRENT, SWITCH, ALWAYS];
     }
     if (downloadFocus === "recent") {
+      // Removal is list bookkeeping, never file deletion, and the label says
+      // so. Clear-all (shift+c) stays `?`-only, like D.
       return [
         { keys: "d", label: "Redownload" },
-        { keys: "c", label: "Remove" },
-        { keys: "x", label: "Clear" },
+        { keys: "c", label: "Remove from list" },
         FOLDER,
         TORRENT,
         SWITCH,
@@ -165,6 +166,7 @@ export function footerHints(
     { keys: "z", label: "Alive" },
     { keys: "w", label: "Watch" },
     { keys: "/", label: "Search" },
+    { keys: "f", label: "Filter" },
     SWITCH,
     ALWAYS,
   ];

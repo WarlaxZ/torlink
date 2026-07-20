@@ -21,6 +21,7 @@ import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
 import { log } from "../util/logger";
 import { pickStreamFile } from "../util/player";
+import { deleteSeedData } from "./delete-data";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
 
@@ -68,6 +69,13 @@ const DEBRID_BACKOFF_BASE_MS = 5_000;
 const DEBRID_BACKOFF_CAP_MS = 60_000;
 const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// Max torrents allowed to actively download at once. Overflow waits as "queued"
+// and starts automatically when a slot frees. 0 / unset = unlimited (default).
+function readMaxDownloads(): number {
+  const v = Number(process.env.TORLINK_MAX_DOWNLOADS);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
 export interface AddInput {
   id: string;
   name: string;
@@ -111,6 +119,14 @@ export class DownloadQueue extends EventEmitter {
   setP2PAllowed(allowed: boolean): void {
     this.p2pAllowed = allowed;
     if (!allowed) this.killP2P();
+  }
+
+  // Max torrents allowed to download at once; overflow waits as "queued".
+  private readonly maxDownloads: number;
+
+  constructor(opts?: { maxDownloads?: number }) {
+    super();
+    this.maxDownloads = opts?.maxDownloads ?? readMaxDownloads();
   }
 
   // Extra announce URLs appended to every torrent added from now on.
@@ -183,9 +199,15 @@ export class DownloadQueue extends EventEmitter {
           peers: 0,
           addedAt: Date.now(),
         };
+    // Respect the concurrent-download cap: start now if a slot is free, else
+    // hold the torrent as "queued" until one frees (see promote()).
+    const start = this.maxDownloads === 0 || this.activeCount < this.maxDownloads;
+    item.status = start ? "downloading" : "queued";
     this.items.set(item.id, item);
-    this.startEngine(item);
-    this.ensurePoll();
+    if (start) {
+      this.startEngine(item);
+      this.ensurePoll();
+    }
     this.changed();
     void this.persist();
   }
@@ -429,6 +451,33 @@ export class DownloadQueue extends EventEmitter {
     this.maybeStopPoll();
   }
 
+  /**
+   * Start queued torrents (oldest first) while download slots are free. Called
+   * whenever a slot opens up — a download finishes, fails, is paused, or is
+   * cancelled. With no cap (maxDownloads 0) nothing queues in-session, but
+   * persisted "queued" items from an earlier capped run must still start, so
+   * 0 means no ceiling here rather than an early return.
+   */
+  private promote(): void {
+    const cap = this.maxDownloads === 0 ? Infinity : this.maxDownloads;
+    let started = false;
+    while (this.activeCount < cap) {
+      const next = [...this.items.values()]
+        .filter((it) => it.status === "queued")
+        .sort((a, b) => a.addedAt - b.addedAt)[0];
+      if (!next) break;
+      next.status = "downloading";
+      next.speed = 0;
+      this.startEngine(next);
+      started = true;
+    }
+    if (started) {
+      this.ensurePoll();
+      this.changed();
+      void this.persist();
+    }
+  }
+
   // One torrent serves an item across its whole life (download -> seed ->
   // missing), so the engine handlers are phase-aware: they look up the id in
   // `items` (still downloading) or `seeds` (finished, now seeding) and act on
@@ -477,6 +526,7 @@ export class DownloadQueue extends EventEmitter {
           it.peers = 0;
           this.changed();
           void this.persist();
+          this.promote(); // a slot just freed
           this.maybeStopPoll();
           return;
         }
@@ -503,6 +553,7 @@ export class DownloadQueue extends EventEmitter {
     this.emit("completed", it.name);
     this.changed();
     void this.persist();
+    this.promote(); // a slot just freed
     this.maybeStopPoll();
   }
 
@@ -613,8 +664,8 @@ export class DownloadQueue extends EventEmitter {
 
   pause(id: string): void {
     const it = this.items.get(id);
-    if (!it || it.status !== "downloading") return;
-    if (it.via === "realdebrid") {
+    if (it?.via === "realdebrid") {
+      if (it.status !== "downloading") return;
       // Abort the in-flight pipeline with a "pause" reason so downloadFiles keeps
       // the partial file(s); driveDebrid sees the paused status and won't fail it.
       it.status = "paused";
@@ -626,17 +677,25 @@ export class DownloadQueue extends EventEmitter {
       this.debridAborts.get(id)?.abort("pause");
       this.changed();
       void this.persist();
+      this.promote(); // a slot just freed
       this.maybeStopPoll();
       return;
     }
+    // A queued (not-yet-started) item can be paused too; only a downloading one
+    // holds a live engine + frees a slot on pause.
+    if (!it || (it.status !== "downloading" && it.status !== "queued")) return;
+    const wasDownloading = it.status === "downloading";
     it.status = "paused";
     it.speed = 0;
     it.peers = 0;
     it.eta = undefined;
-    this.engine.remove(id);
+    if (wasDownloading) this.engine.remove(id);
     this.changed();
     void this.persist();
-    this.maybeStopPoll();
+    if (wasDownloading) {
+      this.promote(); // a slot just freed
+      this.maybeStopPoll();
+    }
   }
 
   resume(id: string): void {
@@ -651,6 +710,8 @@ export class DownloadQueue extends EventEmitter {
       }
       // Re-run the pipeline: re-resolve for a fresh link, then downloadFiles
       // continues each partial file via HTTP Range from its on-disk size.
+      // Real-Debrid transfers are bounded by their own semaphore, so they
+      // resume immediately rather than waiting on the P2P download slot cap.
       it.status = "downloading";
       it.error = undefined;
       this.debridAttempts.set(id, 0);
@@ -659,9 +720,13 @@ export class DownloadQueue extends EventEmitter {
       void this.driveDebrid(id, this.debridToken, this.debridDeps);
       return;
     }
-    it.status = "downloading";
-    this.startEngine(it);
-    this.ensurePoll();
+    // Respect the cap on manual resume: start if a slot is free, else re-queue.
+    const start = this.maxDownloads === 0 || this.activeCount < this.maxDownloads;
+    it.status = start ? "downloading" : "queued";
+    if (start) {
+      this.startEngine(it);
+      this.ensurePoll();
+    }
     this.changed();
     void this.persist();
   }
@@ -669,7 +734,7 @@ export class DownloadQueue extends EventEmitter {
   togglePause(id: string): void {
     const it = this.items.get(id);
     if (!it) return;
-    if (it.status === "downloading") this.pause(id);
+    if (it.status === "downloading" || it.status === "queued") this.pause(id);
     else if (it.status === "paused") this.resume(id);
   }
 
@@ -727,13 +792,50 @@ export class DownloadQueue extends EventEmitter {
     deleteTorrentMeta(id);
     this.changed();
     void this.persist();
+    this.promote(); // a slot may have freed
     this.maybeStopPoll();
+  }
+
+  // Remove a torrent from the daemon entirely, wherever it lives (active
+  // download, seed, or just history), and optionally delete its on-disk data.
+  // Unlike cancel() (downloads only) or stopSeeding() (which leaves a paused
+  // seed record behind), this forgets the torrent completely. Returns false if
+  // the id is unknown.
+  async remove(id: string, opts: { deleteFiles?: boolean } = {}): Promise<boolean> {
+    const it = this.items.get(id);
+    const seed = this.seeds.get(id);
+    const hist = this.history.find((h) => h.id === id);
+    if (!it && !seed && !hist) return false;
+
+    const dir = it?.dir ?? seed?.dir ?? hist?.dir;
+    const name = it?.name ?? seed?.name ?? hist?.name;
+
+    // Tear down any live engine handle + in-memory record.
+    if (it || seed) this.engine.remove(id);
+    if (it) this.items.delete(id);
+    if (seed) {
+      this.seeds.delete(id);
+      this.strayHits.delete(id);
+      this.seedStartedAt.delete(id);
+    }
+    deleteTorrentMeta(id);
+    this.removeHistory(id); // persists history
+
+    if (opts.deleteFiles && dir && name) {
+      await deleteSeedData(dir, name);
+    }
+
+    this.changed();
+    void this.persist();
+    void this.persistSeeds();
+    if (it) this.promote(); // a download slot may have freed
+    this.maybeStopPoll();
+    return true;
   }
 
   retry(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "failed") return;
-    it.status = "downloading";
     it.error = undefined;
     if (it.via === "realdebrid") {
       // No token (e.g. retried after a restart): can't re-run, tell the user.
@@ -752,8 +854,13 @@ export class DownloadQueue extends EventEmitter {
       void this.driveDebrid(id, this.debridToken, this.debridDeps);
       return;
     }
-    this.startEngine(it);
-    this.ensurePoll();
+    // Respect the cap on retry: start if a slot is free, else queue.
+    const start = this.maxDownloads === 0 || this.activeCount < this.maxDownloads;
+    it.status = start ? "downloading" : "queued";
+    if (start) {
+      this.startEngine(it);
+      this.ensurePoll();
+    }
     this.changed();
     void this.persist();
   }
@@ -884,6 +991,7 @@ export class DownloadQueue extends EventEmitter {
   }
 
   restore(items: QueueItem[]): void {
+    let active = 0;
     for (const raw of items) {
       // A Real-Debrid transfer can't be resumed across a restart (no resolved
       // links, possibly no token), so surface it as a retryable failure rather
@@ -897,10 +1005,25 @@ export class DownloadQueue extends EventEmitter {
         raw.peers = 0;
       }
       this.items.set(raw.id, raw);
-      if (raw.status === "downloading" || raw.status === "selecting") this.startEngine(raw);
+      // "selecting" is the pre-download file picker; its engine enumerates files
+      // and holds no download slot, so start it regardless of the cap.
+      if (raw.status === "selecting") {
+        this.startEngine(raw);
+        continue;
+      }
+      if (raw.status !== "downloading") continue;
+      if (this.maxDownloads === 0 || active < this.maxDownloads) {
+        this.startEngine(raw);
+        active++;
+      } else {
+        // Over the cap on boot → hold as queued (promoted as slots free).
+        raw.status = "queued";
+      }
     }
-    if (this.activeCount > 0) this.ensurePoll();
+    if (active > 0) this.ensurePoll();
     this.changed();
+    // Fill any remaining slots from persisted "queued" items.
+    this.promote();
   }
 
   restoreHistory(items: HistoryItem[]): void {

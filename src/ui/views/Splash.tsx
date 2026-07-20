@@ -1,5 +1,6 @@
 import { Box, Text, useInput, useStdin } from "ink";
 import { Logo } from "../components/Logo";
+import { UpdateBanner } from "../components/UpdateBanner";
 import { SearchBar } from "../components/SearchBar";
 import { LOGO_WIDTH } from "../logo";
 import { useStore } from "../store";
@@ -10,7 +11,7 @@ const CATEGORIES = sourcesByGroup()
   .map((g) => g.group.toLowerCase())
   .join(`  ${ICON.dot}  `);
 
-export function Splash() {
+export function Splash({ updateVersion }: { updateVersion?: string | null } = {}) {
   const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion } = useStore();
   const { isRawModeSupported } = useStdin();
 
@@ -40,6 +41,7 @@ export function Splash() {
       justifyContent="center"
       alignItems="center"
     >
+      <UpdateBanner latest={updateVersion ?? null} />
       {showLogo ? (
         <Logo />
       ) : (
@@ -71,6 +73,7 @@ export function Splash() {
           placeholder="Search or paste a magnet link…"
           history={searchHistory}
           onSubmit={submitQuery}
+          onExitDown={() => submitQuery("")}
         />
       </Box>
       <Box marginTop={1}>
@@ -78,8 +81,7 @@ export function Splash() {
           <Text color={COLOR.alt}>↵</Text>
           <Text dimColor> search</Text>
           <Text dimColor>{`  ${ICON.dot}  `}</Text>
-          <Text dimColor>empty </Text>
-          <Text color={COLOR.alt}>↵</Text>
+          <Text color={COLOR.alt}>⇥</Text>
           <Text dimColor> browse</Text>
           <Text dimColor>{`  ${ICON.dot}  `}</Text>
           <Text color={COLOR.alt}>^c</Text>
