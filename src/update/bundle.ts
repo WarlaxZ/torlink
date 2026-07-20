@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 // Map the running platform/arch to the asset name that release.yml publishes.
 // Anything not built by the release workflow returns null so the caller can
@@ -21,4 +22,17 @@ export function assetNameFor(
 export function isBundleInstall(root: string, execPath: string): boolean {
   const rel = path.relative(root, execPath);
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+// A SHA256SUMS file is lines of "<hex>␠␠<filename>". Confirm the downloaded
+// bytes hash to the digest recorded for their filename. A missing entry fails
+// closed: an unverifiable download is treated as bad.
+export function verifySha256(data: Buffer, assetName: string, sums: string): boolean {
+  const want = sums
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(/\s+/))
+    .find(([, name]) => name === assetName)?.[0];
+  if (!want) return false;
+  const got = createHash("sha256").update(data).digest("hex");
+  return got.toLowerCase() === want.toLowerCase();
 }
