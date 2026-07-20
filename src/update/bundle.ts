@@ -2,7 +2,6 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import { fetchResilient, USER_AGENT } from "../util/net";
 import type { GithubRelease } from "./github";
 
@@ -185,19 +184,30 @@ export async function applyBundleFromEnv(
   release: GithubRelease,
   root: string,
 ): Promise<boolean> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "torlnk-upd-"));
-  return applyBundleUpdate(release, root, {
-    platform: process.platform,
-    arch: process.arch,
-    download: downloadBuffer,
-    readText: async (url) => (await downloadBuffer(url)).toString("utf8"),
-    verify: verifySha256,
-    extract: async (archivePath, destDir) => extractArchive(archivePath, destDir),
-    swap: swapRuntime,
-    tmpDir: () => tmp,
-    write: async (filePath, data) => {
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, data);
-    },
-  });
+  // Stage the download/extraction as a sibling of the install root, not in
+  // os.tmpdir(): the final swap renames the extracted runtime into place, and a
+  // rename across filesystems throws EXDEV. On Linux /tmp is often a separate
+  // tmpfs mount, so staging there would make every update fail. A sibling dir is
+  // on the same filesystem as root, keeping the rename atomic and local.
+  const tmp = fs.mkdtempSync(path.join(path.dirname(root), ".torlnk-upd-"));
+  try {
+    return await applyBundleUpdate(release, root, {
+      platform: process.platform,
+      arch: process.arch,
+      download: downloadBuffer,
+      readText: async (url) => (await downloadBuffer(url)).toString("utf8"),
+      verify: verifySha256,
+      extract: async (archivePath, destDir) => extractArchive(archivePath, destDir),
+      swap: swapRuntime,
+      tmpDir: () => tmp,
+      write: async (filePath, data) => {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, data);
+      },
+    });
+  } finally {
+    // Best-effort cleanup of the archive + leftover staging dir. The swapped-in
+    // runtime has already been moved out of tmp, so this only removes leftovers.
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
