@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="832" height="452" viewBox="0 0 832 452" style="max-width: 832px; width: 100%; height: auto;" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="832" height="540" viewBox="0 0 832 540" style="max-width: 832px; width: 100%; height: auto;" role="img">
   <rect width="100%" height="100%" rx="14" fill="#0a0810"/>
-  <rect x="0.5" y="0.5" width="831" height="451" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
+  <rect x="0.5" y="0.5" width="831" height="539" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
   <text x="416" y="23" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="13" fill="#8a8a8a">torlink</text>
   <g font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="16" fill="#ddd8ea">
     <text x="99.2" y="84" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#87ff87" font-weight="600">𐓏</text>
@@ -61,14 +61,14 @@
     <rect x="208.9" y="200" width="1.4" height="22" fill="#afafff"/>
     <text x="224" y="216" textLength="508.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in to services that need an account to search or</text>
     <rect x="784.9" y="200" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="238" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">TVvies</text>
+    <text x="60.8" y="238" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Movies</text>
     <rect x="208.9" y="222" width="1.4" height="22" fill="#afafff"/>
     <text x="224" y="238" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">stream.</text>
     <rect x="784.9" y="222" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="260" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Anime</text>
+    <text x="60.8" y="260" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">TV</text>
     <rect x="208.9" y="244" width="1.4" height="22" fill="#afafff"/>
     <rect x="784.9" y="244" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="282" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Music</text>
+    <text x="60.8" y="282" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Anime</text>
     <rect x="208.9" y="266" width="1.4" height="22" fill="#afafff"/>
     <text x="224" y="282" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">❯</text>
     <text x="243.2" y="282" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af" font-weight="600">RD</text>
@@ -79,40 +79,52 @@
     <text x="675.2" y="282" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
     <text x="694.4" y="282" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">sign out</text>
     <rect x="784.9" y="266" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="304" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Books</text>
+    <text x="60.8" y="304" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Music</text>
     <rect x="208.9" y="288" width="1.4" height="22" fill="#afafff"/>
-    <text x="300.8" y="304" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">✓</text>
-    <text x="320" y="304" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">premium · 60d left</text>
+    <text x="300.8" y="304" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" fill-opacity="0.55" font-weight="600">real-debrid.com</text>
     <rect x="784.9" y="288" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="326" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watchlist</text>
+    <text x="60.8" y="326" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Books</text>
     <rect x="208.9" y="310" width="1.4" height="22" fill="#afafff"/>
+    <text x="300.8" y="326" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">✓</text>
+    <text x="320" y="326" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">premium · 60d left</text>
     <rect x="784.9" y="310" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="348" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Library</text>
     <rect x="208.9" y="332" width="1.4" height="22" fill="#afafff"/>
-    <text x="243.2" y="348" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd787">RUT</text>
-    <text x="300.8" y="348" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">RuTracker  ·</text>
-    <text x="550.4" y="348" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
-    <text x="569.6" y="348" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">switch  ·</text>
-    <text x="675.2" y="348" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
-    <text x="694.4" y="348" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">sign out</text>
     <rect x="784.9" y="332" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="370" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Seedingds</text>
+    <text x="60.8" y="370" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watchlist</text>
     <rect x="208.9" y="354" width="1.4" height="22" fill="#afafff"/>
-    <text x="300.8" y="370" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">✓</text>
-    <text x="320" y="370" textLength="153.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Signed in as you</text>
+    <text x="243.2" y="370" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd787">RUT</text>
+    <text x="300.8" y="370" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">RuTracker  ·</text>
+    <text x="550.4" y="370" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
+    <text x="569.6" y="370" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">switch  ·</text>
+    <text x="675.2" y="370" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
+    <text x="694.4" y="370" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">sign out</text>
     <rect x="784.9" y="354" width="1.4" height="22" fill="#afafff"/>
-    <rect x="41.6" y="376" width="4.8" height="22" fill="#878787"/>
-    <text x="60.8" y="392" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">Accounts</text>
-    <text x="204.8" y="392" textLength="585.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╰───────────────────────────────────────────────────────────╯</text>
-    <text x="41.6" y="414" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑↓←→</text>
-    <text x="89.6" y="414" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move</text>
-    <text x="156.8" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
-    <text x="176" y="414" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in</text>
-    <text x="272" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
-    <text x="291.2" y="414" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign out</text>
-    <text x="396.8" y="414" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">tab</text>
-    <text x="435.2" y="414" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Switch</text>
-    <text x="521.6" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">?</text>
-    <text x="540.8" y="414" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Keys</text>
+    <text x="60.8" y="392" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Library</text>
+    <rect x="208.9" y="376" width="1.4" height="22" fill="#afafff"/>
+    <text x="300.8" y="392" textLength="124.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">rutracker.org</text>
+    <rect x="784.9" y="376" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="414" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Downloads</text>
+    <rect x="208.9" y="398" width="1.4" height="22" fill="#afafff"/>
+    <text x="300.8" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">✓</text>
+    <text x="320" y="414" textLength="153.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Signed in as you</text>
+    <rect x="784.9" y="398" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="436" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Seeding</text>
+    <rect x="208.9" y="420" width="1.4" height="22" fill="#afafff"/>
+    <rect x="784.9" y="420" width="1.4" height="22" fill="#afafff"/>
+    <rect x="41.6" y="442" width="4.8" height="22" fill="#878787"/>
+    <text x="60.8" y="458" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">Accounts</text>
+    <rect x="208.9" y="442" width="1.4" height="22" fill="#afafff"/>
+    <rect x="784.9" y="442" width="1.4" height="22" fill="#afafff"/>
+    <text x="204.8" y="480" textLength="585.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╰───────────────────────────────────────────────────────────╯</text>
+    <text x="41.6" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑↓←→</text>
+    <text x="89.6" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move</text>
+    <text x="156.8" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↵</text>
+    <text x="176" y="502" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in</text>
+    <text x="272" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">x</text>
+    <text x="291.2" y="502" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign out</text>
+    <text x="396.8" y="502" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">tab</text>
+    <text x="435.2" y="502" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Switch</text>
+    <text x="521.6" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">?</text>
+    <text x="540.8" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Keys</text>
   </g>
 </svg>

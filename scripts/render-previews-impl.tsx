@@ -282,13 +282,13 @@ save(
 
 save(
   "downloads",
-  makeStore({ section: "downloads", contentWidth: CONTENT_WIDTH, listRows: 10, cols: COLS, rows: 24 }, DOWNLOADS, HISTORY),
+  makeStore({ section: "downloads", contentWidth: CONTENT_WIDTH, listRows: 14, cols: COLS, rows: 24 }, DOWNLOADS, HISTORY),
   <Box flexDirection="column" width={COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
     <Rule width={RULE_WIDTH} />
-    <Box height={10} marginTop={1}>
+    <Box height={14} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Downloads />
@@ -302,7 +302,7 @@ save(
 save(
   "seeding",
   makeStore(
-    { section: "seeding", region: "content", contentWidth: CONTENT_WIDTH, listRows: 10, cols: COLS, rows: 24 },
+    { section: "seeding", region: "content", contentWidth: CONTENT_WIDTH, listRows: 14, cols: COLS, rows: 24 },
     [],
     HISTORY,
     SEEDS,
@@ -312,7 +312,7 @@ save(
       <Logo />
     </Box>
     <Rule width={RULE_WIDTH} />
-    <Box height={10} marginTop={1}>
+    <Box height={14} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Seeding />
@@ -324,13 +324,13 @@ save(
 
 save(
   "accounts",
-  makeStore({ section: "accounts", region: "content", contentWidth: CONTENT_WIDTH, listRows: 10, cols: COLS, rows: 24 }),
+  makeStore({ section: "accounts", region: "content", contentWidth: CONTENT_WIDTH, listRows: 14, cols: COLS, rows: 24 }),
   <Box flexDirection="column" width={COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
     <Rule width={RULE_WIDTH} />
-    <Box height={10} marginTop={1}>
+    <Box height={14} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Accounts
