@@ -7,6 +7,7 @@ import {
   resolveRealDebridToken,
   resolveMediaPlayer,
   resolveDnsServers,
+  resolveReccConfig,
   type Config,
   type FavouriteItem,
 } from "../config/config";
@@ -17,6 +18,7 @@ import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
+import { postEvent } from "../recc/client";
 import { classifyStreamRoute } from "./streamRoute";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
@@ -77,13 +79,17 @@ import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
+import { ReccdPrompt } from "./components/ReccdPrompt";
+import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
 import { Favourites } from "./components/Favourites";
+import { ForYou } from "./components/ForYou";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
 import { VpnPrompt } from "./components/VpnPrompt";
+import { RatePrompt } from "./components/RatePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
 import { useMouseWheel } from "./hooks/useMouseWheel";
@@ -157,6 +163,8 @@ export function App({
   const [showHelp, setShowHelp] = useState(false);
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
+  const [editingRecc, setEditingRecc] = useState(false);
+  const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
@@ -220,6 +228,8 @@ export function App({
   const [keepPrompt, setKeepPrompt] = useState<
     { session: TorrentStreamSession; input: DownloadInput } | null
   >(null);
+  // Ask for an explicit like/dislike signal once a stream ends.
+  const [ratePrompt, setRatePrompt] = useState<{ name: string } | null>(null);
   const vpnUnsafe = useRef(false);
   const prepareAbort = useRef<AbortController | null>(null);
   const [recovered, setRecovered] = useState(false);
@@ -459,6 +469,8 @@ export function App({
   }, []);
 
   const toggleFavourite = useCallback((item: FavouriteItem) => {
+    if (!config) return;
+    const wasFavourited = isFavouritedIn(config.favourites ?? [], item.id);
     setConfigState((prev) => {
       if (!prev) return prev;
       const favourites = toggleFavouriteList(prev.favourites ?? [], item);
@@ -466,8 +478,17 @@ export function App({
       void saveConfig(next);
       return next;
     });
+    void postEvent(
+      resolveReccConfig(config),
+      {
+        type: wasFavourited ? "unfavourited" : "favourited",
+        rawName: item.name,
+        ts: Date.now(),
+        source: "torlink",
+      },
+    );
     setNotice("Favourites updated.");
-  }, []);
+  }, [config]);
 
   const removeFavourite = useCallback((id: string) => {
     setConfigState((prev) => {
@@ -634,6 +655,49 @@ export function App({
     setNotice("Real-Debrid token cleared.");
   }, [config, setConfig, closeTokenPrompt]);
 
+  const refreshReccStatus = useCallback((cfg: Config | null) => {
+    const rc = cfg ? resolveReccConfig(cfg) : {};
+    if (!rc.reccUrl) {
+      setReccStatus(null);
+      return;
+    }
+    void checkReccConnection(rc).then(setReccStatus);
+  }, []);
+
+  useEffect(() => {
+    refreshReccStatus(config);
+  }, [config?.reccUrl, config?.reccToken, refreshReccStatus]);
+
+  const closeReccPrompt = useCallback(() => setEditingRecc(false), []);
+
+  const openReccPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setEditingRecc(true);
+    refreshReccStatus(config);
+  }, [config, refreshReccStatus]);
+
+  const saveReccConfig = useCallback(
+    (rawUrl: string, rawToken: string) => {
+      closeReccPrompt();
+      const url = rawUrl.trim().replace(/\/+$/, "");
+      const token = rawToken.trim();
+      persistConfig({ reccUrl: url || undefined, reccToken: token || undefined });
+      setNotice(url ? `${ICON.done} reccd set to ${url}` : "reccd connection cleared.");
+    },
+    [closeReccPrompt, persistConfig],
+  );
+
+  const clearReccConfig = useCallback(() => {
+    closeReccPrompt();
+    if (process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim()) {
+      setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
+      return;
+    }
+    persistConfig({ reccUrl: undefined, reccToken: undefined });
+    setNotice("reccd connection cleared.");
+  }, [closeReccPrompt, persistConfig]);
+
   const startDownload = useCallback(
     (input: DownloadInput) => {
       if (!config || !queue) return;
@@ -675,6 +739,10 @@ export function App({
           `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${outcome.player}${copied ? " · link copied" : ""}`,
         );
         onPlayed?.();
+        void postEvent(
+          resolveReccConfig(config),
+          { type: "watched", rawName: name ?? url, ts: Date.now(), source: "torlink" },
+        );
         return;
       }
       // Couldn't play automatically: stash context, copy the link, and open the
@@ -761,6 +829,10 @@ export function App({
             return;
           }
           setActiveStream({ session, name: input.name, input });
+          void postEvent(
+            resolveReccConfig(config),
+            { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
+          );
           if (candidates.length > 1) {
             setStreamedFiles(new Set());
             setStreamSource(input);
@@ -811,6 +883,7 @@ export function App({
     const active = activeStream;
     if (!active) return;
     setActiveStream(null);
+    setRatePrompt({ name: active.name });
     if (active.session.isComplete()) {
       // Fully downloaded: offer to keep it as a real download + seed instead
       // of discarding the temp files.
@@ -897,6 +970,10 @@ export function App({
             setNotice("Real-Debrid returned nothing to stream.");
             return;
           }
+          void postEvent(
+            resolveReccConfig(config),
+            { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
+          );
           if (candidates.length > 1) {
             setPreparing(null);
             setStreamedFiles(new Set());
@@ -1321,7 +1398,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt
           ? "help"
           : region,
       setRegion,
@@ -1337,6 +1414,7 @@ export function App({
       startDebridDownload,
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
+      reccConfigured: Boolean(resolveReccConfig(config).reccUrl),
       streamActive: activeStream !== null,
       rdStatus,
       copyLink,
@@ -1371,6 +1449,7 @@ export function App({
     showHelp,
     editingFolder,
     editingToken,
+    editingRecc,
     editingPlayer,
     editingSources,
     editingDns,
@@ -1386,6 +1465,7 @@ export function App({
     preparing,
     torrentPrompt,
     keepPrompt,
+    ratePrompt,
     activeStream,
     captureMode,
     downloadFocus,
@@ -1418,6 +1498,7 @@ export function App({
       }
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
+      if (editingRecc) return; // the reccd prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
@@ -1430,6 +1511,7 @@ export function App({
       if (fileSelection) return; // the download file picker owns input
       if (torrentPrompt) return; // the torrent privacy warning owns input
       if (keepPrompt) return; // the keep-download prompt owns input
+      if (ratePrompt) return; // the like/dislike prompt owns input
       if (streamFiles) return; // the file picker owns input
       if (preparing) {
         if (key.escape) cancelPreparing();
@@ -1462,7 +1544,7 @@ export function App({
         openDnsPrompt();
         return;
       }
-      if (input === "t") {
+      if (input === "t" && !(region === "content" && section === "forYou")) {
         setShowHelp(false);
         setEditingTrackers(true);
         return;
@@ -1592,6 +1674,19 @@ export function App({
               onSubmit={setRealDebridToken}
               onClear={clearRealDebridToken}
               onCancel={closeTokenPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {editingRecc ? (
+          <Box marginTop={1}>
+            <ReccdPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              url={store.config.reccUrl ?? ""}
+              token={store.config.reccToken ?? ""}
+              status={reccStatus}
+              onSubmit={saveReccConfig}
+              onCancel={closeReccPrompt}
             />
           </Box>
         ) : null}
@@ -1815,6 +1910,34 @@ export function App({
           </Box>
         ) : null}
 
+        {ratePrompt ? (
+          <Box marginTop={1}>
+            <RatePrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              name={ratePrompt.name}
+              onLike={() => {
+                if (config) {
+                  void postEvent(
+                    resolveReccConfig(config),
+                    { type: "liked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
+                  );
+                }
+                setRatePrompt(null);
+              }}
+              onDislike={() => {
+                if (config) {
+                  void postEvent(
+                    resolveReccConfig(config),
+                    { type: "disliked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
+                  );
+                }
+                setRatePrompt(null);
+              }}
+              onDismiss={() => setRatePrompt(null)}
+            />
+          </Box>
+        ) : null}
+
         {editingTrackers ? (
           <Box marginTop={1}>
             <TrackersPrompt
@@ -1870,7 +1993,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1909,6 +2032,13 @@ export function App({
                 onSignOutRd={clearRealDebridToken}
                 onManageRutracker={openRutrackerPrompt}
                 onSignOutRutracker={signOutRutracker}
+                reccConfigured={store.reccConfigured}
+                reccStatus={reccStatus}
+                reccEnvOverride={Boolean(
+                  process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim(),
+                )}
+                onManageRecc={openReccPrompt}
+                onSignOutRecc={clearReccConfig}
               />
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
@@ -1917,13 +2047,23 @@ export function App({
             <Box display={section === "library" ? "flex" : "none"} flexDirection="column">
               <Favourites />
             </Box>
+            <Box display={section === "forYou" ? "flex" : "none"} flexDirection="column">
+              <ForYou
+                reccConfig={resolveReccConfig(store.config)}
+                visible={section === "forYou"}
+                active={store.region === "content" && section === "forYou"}
+                setSection={store.setSection}
+                submitQuery={store.submitQuery}
+                setCaptureMode={store.setCaptureMode}
+              />
+            </Box>
           </Box>
         </Box>
 
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }

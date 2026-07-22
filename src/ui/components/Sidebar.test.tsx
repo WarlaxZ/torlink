@@ -30,4 +30,22 @@ describe("Sidebar", () => {
     );
     expect(lastFrame() ?? "").toContain("Accounts");
   });
+
+  it("hides the For You entry when reccd is not configured", () => {
+    const { lastFrame } = render(
+      <StoreContext.Provider value={baseStore()}>
+        <Sidebar />
+      </StoreContext.Provider>,
+    );
+    expect(lastFrame() ?? "").not.toContain("For You");
+  });
+
+  it("shows the For You entry when reccd is configured", () => {
+    const { lastFrame } = render(
+      <StoreContext.Provider value={{ ...baseStore(), reccConfigured: true } as unknown as Store}>
+        <Sidebar />
+      </StoreContext.Provider>,
+    );
+    expect(lastFrame() ?? "").toContain("For You");
+  });
 });
