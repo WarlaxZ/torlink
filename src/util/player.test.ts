@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickStreamFile, detectPlayer, streamCandidates } from "./player";
+import { pickStreamFile, detectPlayer, streamCandidates, attemptAutoPlay, detectAndPlay } from "./player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 
 function f(filename: string, bytes: number): ResolvedFile {
@@ -135,5 +135,77 @@ describe("streamCandidates", () => {
 
   it("returns an empty array for no files", () => {
     expect(streamCandidates([])).toEqual([]);
+  });
+});
+
+describe("detectAndPlay", () => {
+  it("returns the detected player when it launches", async () => {
+    const player = await detectAndPlay("http://x", {
+      detect: async () => "mpv",
+      launch: async () => true,
+    });
+    expect(player).toBe("mpv");
+  });
+
+  it("returns null when detection finds nothing", async () => {
+    const player = await detectAndPlay("http://x", {
+      detect: async () => null,
+      launch: async () => true,
+    });
+    expect(player).toBeNull();
+  });
+
+  it("returns null when the detected player fails to launch", async () => {
+    const player = await detectAndPlay("http://x", {
+      detect: async () => "mpv",
+      launch: async () => false,
+    });
+    expect(player).toBeNull();
+  });
+});
+
+describe("attemptAutoPlay", () => {
+  it("launches the configured player and reports played", async () => {
+    const out = await attemptAutoPlay("vlc.exe", "http://x", {
+      launch: async (cmd) => cmd === "vlc.exe",
+    });
+    expect(out).toEqual({ played: true, player: "vlc.exe", configuredFailed: false });
+  });
+
+  it("flags a configured player that fails to launch and does NOT auto-detect", async () => {
+    let detected = false;
+    const out = await attemptAutoPlay("vlc.exe", "http://x", {
+      launch: async () => false,
+      detect: async () => {
+        detected = true;
+        return "mpv";
+      },
+    });
+    expect(out).toEqual({ played: false, configuredFailed: true });
+    expect(detected).toBe(false);
+  });
+
+  it("auto-detects and launches when nothing is configured", async () => {
+    const out = await attemptAutoPlay("", "http://x", {
+      detect: async () => "mpv",
+      launch: async () => true,
+    });
+    expect(out).toEqual({ played: true, player: "mpv", configuredFailed: false });
+  });
+
+  it("reports not-played (configuredFailed false) when detection finds nothing", async () => {
+    const out = await attemptAutoPlay("", "http://x", {
+      detect: async () => null,
+      launch: async () => true,
+    });
+    expect(out).toEqual({ played: false, configuredFailed: false });
+  });
+
+  it("reports not-played when the detected player fails to launch", async () => {
+    const out = await attemptAutoPlay("", "http://x", {
+      detect: async () => "mpv",
+      launch: async () => false,
+    });
+    expect(out).toEqual({ played: false, configuredFailed: false });
   });
 });
