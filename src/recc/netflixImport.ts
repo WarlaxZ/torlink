@@ -37,3 +37,15 @@ export function chunkNetflixCsv(csvText: string, budgetBytes = CHUNK_BUDGET_BYTE
   }
   return chunks;
 }
+
+export interface NetflixImportResult {
+  imported: number;
+  resolved: number;
+  unresolved: number;
+  unresolvedTitles: string[];
+  chunks: number;
+}
+
+export function formatImportSummary(r: NetflixImportResult): string {
+  return `Imported ${r.imported} · ${r.resolved} matched · ${r.unresolved} unmatched`;
+}

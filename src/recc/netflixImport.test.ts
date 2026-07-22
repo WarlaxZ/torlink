@@ -42,3 +42,13 @@ describe("chunkNetflixCsv", () => {
     expect(chunkNetflixCsv(csv)).toEqual([`${HEADER}\nThe Matrix,1/2/20\nHeat,3/4/21`]);
   });
 });
+
+import { formatImportSummary } from "./netflixImport.js";
+
+describe("formatImportSummary", () => {
+  it("renders imported, matched and unmatched counts", () => {
+    expect(
+      formatImportSummary({ imported: 342, resolved: 128, unresolved: 214, unresolvedTitles: [], chunks: 1 }),
+    ).toBe("Imported 342 · 128 matched · 214 unmatched");
+  });
+});
