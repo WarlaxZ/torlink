@@ -1585,6 +1585,8 @@ export function App({
     keepPrompt,
     ratePrompt,
     importingNetflix,
+    importChooser,
+    importingTrakt,
     activeStream,
     captureMode,
     downloadFocus,
