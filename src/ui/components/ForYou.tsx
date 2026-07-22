@@ -11,6 +11,7 @@ import { cleanText, truncate } from "../../util/format";
 
 interface ForYouProps {
   reccConfig: ReccClientConfig;
+  visible: boolean;
   active: boolean;
   setSection: (s: Section) => void;
   submitQuery: (q: string) => void;
@@ -21,8 +22,8 @@ interface ForYouProps {
 const NEXT_TYPE: Record<ReccType, ReccType> = { all: "movie", movie: "tv", tv: "all" };
 const TYPE_SECTION: Record<ReccType, Section> = { all: "all", movie: "movies", tv: "tv" };
 
-export function ForYou({ reccConfig, active, setSection, submitQuery, fetchImpl, width = 60 }: ForYouProps) {
-  const recs = useRecommendations(reccConfig, active, fetchImpl);
+export function ForYou({ reccConfig, visible, active, setSection, submitQuery, fetchImpl, width = 60 }: ForYouProps) {
+  const recs = useRecommendations(reccConfig, visible, fetchImpl);
   const [selected, setSelected] = useState(0);
   const [editingGenre, setEditingGenre] = useState(false);
 

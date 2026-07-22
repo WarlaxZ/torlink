@@ -21,7 +21,7 @@ describe("ForYou", () => {
   it("fetches and renders picks once active", async () => {
     const { impl } = fetchStub();
     const { lastFrame } = render(
-      <ForYou reccConfig={CONFIG} active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
     expect(lastFrame()).toContain("Chernobyl");
@@ -31,7 +31,7 @@ describe("ForYou", () => {
   it("shows a setup hint when reccUrl is unset", async () => {
     const { impl } = fetchStub();
     const { lastFrame } = render(
-      <ForYou reccConfig={{}} active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+      <ForYou reccConfig={{}} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
     expect(lastFrame()).toContain("set up");
@@ -40,7 +40,7 @@ describe("ForYou", () => {
   it("cycles the type filter with 't' and refetches", async () => {
     const { impl, urls } = fetchStub();
     const { stdin } = render(
-      <ForYou reccConfig={CONFIG} active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
     stdin.write("t");
@@ -53,7 +53,7 @@ describe("ForYou", () => {
     const setSection = vi.fn();
     const submitQuery = vi.fn();
     const { stdin } = render(
-      <ForYou reccConfig={CONFIG} active setSection={setSection} submitQuery={submitQuery} fetchImpl={impl} />,
+      <ForYou reccConfig={CONFIG} visible active setSection={setSection} submitQuery={submitQuery} fetchImpl={impl} />,
     );
     await flush();
     stdin.write("\r");
@@ -68,7 +68,7 @@ describe("ForYou", () => {
       calls++;
       return { ok: true, status: 200, json: async () => [REC] } as unknown as Response;
     }) as unknown as FetchImpl;
-    render(<ForYou reccConfig={CONFIG} active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
+    render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
     await flush();
     expect(calls).toBe(1);
   });
@@ -76,7 +76,7 @@ describe("ForYou", () => {
   it("shows an error when the fetch fails", async () => {
     const impl = (async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response) as unknown as FetchImpl;
     const { lastFrame } = render(
-      <ForYou reccConfig={CONFIG} active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
     expect(lastFrame()).toContain("unavailable");

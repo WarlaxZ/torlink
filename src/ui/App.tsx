@@ -1980,6 +1980,7 @@ export function App({
             <Box display={section === "forYou" ? "flex" : "none"} flexDirection="column">
               <ForYou
                 reccConfig={resolveReccConfig(store.config)}
+                visible={section === "forYou"}
                 active={store.region === "content" && section === "forYou"}
                 setSection={store.setSection}
                 submitQuery={store.submitQuery}
