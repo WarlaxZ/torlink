@@ -44,4 +44,32 @@ describe("RatePrompt", () => {
     await flush();
     expect(onDismiss).toHaveBeenCalled();
   });
+
+  it("shows the watched affordance and calls onWatched when 'w' is pressed (when onWatched given)", async () => {
+    const onWatched = vi.fn();
+    const { stdin, lastFrame } = render(
+      <RatePrompt name="The Matrix" onLike={vi.fn()} onDislike={vi.fn()} onWatched={onWatched} onDismiss={vi.fn()} />,
+    );
+    await flush();
+    expect(lastFrame()).toContain("watched");
+    stdin.write("w");
+    await flush();
+    expect(onWatched).toHaveBeenCalled();
+  });
+
+  it("does not render the watched affordance when onWatched is omitted", async () => {
+    const { lastFrame } = render(
+      <RatePrompt name="The Matrix" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
+    );
+    await flush();
+    expect(lastFrame()).not.toContain("watched");
+  });
+
+  it("uses a custom title when provided", async () => {
+    const { lastFrame } = render(
+      <RatePrompt name="The Matrix" title="Rate this pick" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
+    );
+    await flush();
+    expect(lastFrame()).toContain("Rate this pick");
+  });
 });
