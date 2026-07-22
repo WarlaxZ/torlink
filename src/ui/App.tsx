@@ -168,6 +168,11 @@ export function App({
   const [editingRecc, setEditingRecc] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
   const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
+  // Bumped whenever the import overlay opens or closes. An in-flight upload can't
+  // be aborted (reccd is idempotent, so a stray extra chunk is harmless), but a
+  // late completion must not flash stale state onto a reopened overlay — so each
+  // run captures the current generation and ignores its own setState once superseded.
+  const netflixImportGen = useRef(0);
   const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
@@ -702,9 +707,13 @@ export function App({
     setNotice("reccd connection cleared.");
   }, [closeReccPrompt, persistConfig]);
 
-  const closeNetflixImport = useCallback(() => setImportingNetflix(false), []);
+  const closeNetflixImport = useCallback(() => {
+    netflixImportGen.current++; // supersede any in-flight run so it can't update state after close
+    setImportingNetflix(false);
+  }, []);
 
   const openNetflixImport = useCallback(() => {
+    netflixImportGen.current++; // fresh generation; a stale upload's late setState is ignored
     setView("browser");
     setShowHelp(false);
     setNetflixImport({ phase: "form" });
@@ -714,18 +723,23 @@ export function App({
   const runNetflixImport = useCallback(
     (path: string) => {
       if (!config) return;
+      const gen = netflixImportGen.current;
+      const isCurrent = (): boolean => netflixImportGen.current === gen;
       setNetflixImport({ phase: "running", progress: { done: 0, total: 0 } });
       void (async () => {
         let csvText: string;
         try {
           csvText = await fs.readFile(path, "utf8");
         } catch {
-          setNetflixImport({ phase: "done", error: `Couldn't read ${path}` });
+          if (isCurrent()) setNetflixImport({ phase: "done", error: `Couldn't read ${path}` });
           return;
         }
         const outcome = await uploadNetflixCsv(resolveReccConfig(config), csvText, {
-          onProgress: (done, total) => setNetflixImport({ phase: "running", progress: { done, total } }),
+          onProgress: (done, total) => {
+            if (isCurrent()) setNetflixImport({ phase: "running", progress: { done, total } });
+          },
         });
+        if (!isCurrent()) return;
         if (outcome.ok) {
           setNetflixImport({ phase: "done", result: outcome.result });
         } else {
