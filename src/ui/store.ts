@@ -11,7 +11,14 @@ export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books";
 
-export type Section = Category | "watchlist" | "library" | "downloads" | "seeding" | "accounts";
+export type Section =
+  | Category
+  | "watchlist"
+  | "library"
+  | "downloads"
+  | "seeding"
+  | "accounts"
+  | "forYou";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
 // as opposed to the downloads/seeding/accounts views.
@@ -21,7 +28,8 @@ export function isCategory(section: Section): boolean {
     section !== "library" &&
     section !== "downloads" &&
     section !== "seeding" &&
-    section !== "accounts"
+    section !== "accounts" &&
+    section !== "forYou"
   );
 }
 

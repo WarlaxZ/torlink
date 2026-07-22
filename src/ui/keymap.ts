@@ -56,6 +56,17 @@ export const HELP_GROUPS: HelpGroup[] = [
     ],
   },
   {
+    title: "For You",
+    hints: [
+      { keys: "↑ ↓", label: "Move between picks" },
+      { keys: "↵", label: "Search this title" },
+      { keys: "t", label: "Cycle movie / TV / all" },
+      { keys: "g", label: "Filter by genre" },
+      { keys: "e", label: "Toggle explore mode" },
+      { keys: "r", label: "Refresh recommendations" },
+    ],
+  },
+  {
     title: "Downloads",
     hints: [
       { keys: "p", label: "Pause/resume" },
@@ -124,6 +135,18 @@ export function footerHints(
   }
   if (section === "library") {
     return [NAVIGATE, { keys: "↵", label: "Resume" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+  }
+  if (section === "forYou") {
+    return [
+      NAVIGATE,
+      { keys: "↵", label: "Search title" },
+      { keys: "t", label: "Type" },
+      { keys: "g", label: "Genre" },
+      { keys: "e", label: "Explore" },
+      { keys: "r", label: "Refresh" },
+      SWITCH,
+      ALWAYS,
+    ];
   }
   if (section === "downloads") {
     if (downloadFocus === "paused") {

@@ -7,6 +7,7 @@ import {
   resolveRealDebridToken,
   resolveMediaPlayer,
   resolveDnsServers,
+  resolveReccConfig,
   type Config,
   type FavouriteItem,
 } from "../config/config";
@@ -81,6 +82,7 @@ import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt"
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
 import { Favourites } from "./components/Favourites";
+import { ForYou } from "./components/ForYou";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
@@ -473,7 +475,7 @@ export function App({
       return next;
     });
     void postEvent(
-      { reccUrl: config.reccUrl, reccToken: config.reccToken },
+      resolveReccConfig(config),
       {
         type: wasFavourited ? "unfavourited" : "favourited",
         rawName: item.name,
@@ -691,7 +693,7 @@ export function App({
         );
         onPlayed?.();
         void postEvent(
-          { reccUrl: config.reccUrl, reccToken: config.reccToken },
+          resolveReccConfig(config),
           { type: "watched", rawName: name ?? url, ts: Date.now(), source: "torlink" },
         );
         return;
@@ -781,7 +783,7 @@ export function App({
           }
           setActiveStream({ session, name: input.name, input });
           void postEvent(
-            { reccUrl: config.reccUrl, reccToken: config.reccToken },
+            resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
           if (candidates.length > 1) {
@@ -922,7 +924,7 @@ export function App({
             return;
           }
           void postEvent(
-            { reccUrl: config.reccUrl, reccToken: config.reccToken },
+            resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
           if (candidates.length > 1) {
@@ -1853,7 +1855,7 @@ export function App({
               onLike={() => {
                 if (config) {
                   void postEvent(
-                    { reccUrl: config.reccUrl, reccToken: config.reccToken },
+                    resolveReccConfig(config),
                     { type: "liked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
                   );
                 }
@@ -1862,7 +1864,7 @@ export function App({
               onDislike={() => {
                 if (config) {
                   void postEvent(
-                    { reccUrl: config.reccUrl, reccToken: config.reccToken },
+                    resolveReccConfig(config),
                     { type: "disliked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
                   );
                 }
@@ -1974,6 +1976,14 @@ export function App({
             </Box>
             <Box display={section === "library" ? "flex" : "none"} flexDirection="column">
               <Favourites />
+            </Box>
+            <Box display={section === "forYou" ? "flex" : "none"} flexDirection="column">
+              <ForYou
+                reccConfig={resolveReccConfig(store.config)}
+                active={store.region === "content" && section === "forYou"}
+                setSection={store.setSection}
+                submitQuery={store.submitQuery}
+              />
             </Box>
           </Box>
         </Box>
