@@ -17,6 +17,7 @@ export interface RecommendationsState {
   genre: string;
   explore: boolean;
   refresh: () => void;
+  dismiss: (imdbId: string) => void;
   setType: (t: ReccType) => void;
   setGenre: (g: string) => void;
   toggleExplore: () => void;
@@ -92,9 +93,15 @@ export function useRecommendations(
   }, [type, genre, explore]);
 
   const refresh = useCallback(() => void load(), [load]);
+
+  // Optimistically remove a pick from the list (e.g. once it's been rated).
+  // Events are fire-and-forget, so we don't wait on reccd before dropping it.
+  const dismiss = useCallback((imdbId: string) => {
+    setItems((prev) => prev.filter((it) => it.imdbId !== imdbId));
+  }, []);
   const setType = useCallback((t: ReccType) => setTypeState(t), []);
   const setGenre = useCallback((g: string) => setGenreState(g), []);
   const toggleExplore = useCallback(() => setExplore((v) => !v), []);
 
-  return { items, loading, error, type, genre, explore, refresh, setType, setGenre, toggleExplore };
+  return { items, loading, error, type, genre, explore, refresh, dismiss, setType, setGenre, toggleExplore };
 }
