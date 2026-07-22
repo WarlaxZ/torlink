@@ -16,13 +16,15 @@ export async function runImportNetflix(filePath: string): Promise<void> {
   let csvText: string;
   try {
     csvText = await readFile(filePath, "utf8");
-  } catch {
-    throw new Error(`could not read file: ${filePath}`);
+  } catch (err) {
+    throw new Error(`could not read file: ${filePath} (${err instanceof Error ? err.message : String(err)})`);
   }
 
   const outcome = await uploadNetflixCsv(reccConfig, csvText, {
     onProgress: (done, total) => {
-      if (total > 1) console.log(`uploading chunk ${done}/${total}…`);
+      // Progress goes to stderr so stdout carries only the result (summary +
+      // titles), keeping `… | less` / `> out.txt` clean.
+      if (total > 1) console.error(`uploading chunk ${done}/${total}…`);
     },
   });
 

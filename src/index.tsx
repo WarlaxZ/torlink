@@ -76,10 +76,12 @@ if (cmd.kind === "update") {
   };
   void import("./daemon/files").then(({ runFiles }) => runFiles(options).catch(failHeadless));
 } else if (cmd.kind === "import-netflix") {
+  // No forced process.exit(0) on success (unlike a hard exit, letting the event
+  // loop drain avoids truncating the summary/unmatched-titles list when stdout
+  // is a pipe or file); the process ends once the upload settles. Errors still
+  // exit non-zero via failHeadless.
   void import("./cli/runImportNetflix").then(({ runImportNetflix }) =>
-    runImportNetflix(cmd.file)
-      .then(() => process.exit(0))
-      .catch(failHeadless),
+    runImportNetflix(cmd.file).catch(failHeadless),
   );
 } else {
 
