@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { FetchImpl } from "../../util/net";
 import type { ReccClientConfig } from "../../recc/client";
-import type { Section } from "../store";
+import type { CaptureMode, Section } from "../store";
 import { useRecommendations, type ReccType } from "../hooks/useRecommendations";
 import { GenrePrompt } from "./GenrePrompt";
 import { Panel } from "./Panel";
@@ -15,6 +15,7 @@ interface ForYouProps {
   active: boolean;
   setSection: (s: Section) => void;
   submitQuery: (q: string) => void;
+  setCaptureMode?: (m: CaptureMode) => void;
   fetchImpl?: FetchImpl;
   width?: number;
 }
@@ -22,7 +23,16 @@ interface ForYouProps {
 const NEXT_TYPE: Record<ReccType, ReccType> = { all: "movie", movie: "tv", tv: "all" };
 const TYPE_SECTION: Record<ReccType, Section> = { all: "all", movie: "movies", tv: "tv" };
 
-export function ForYou({ reccConfig, visible, active, setSection, submitQuery, fetchImpl, width = 60 }: ForYouProps) {
+export function ForYou({
+  reccConfig,
+  visible,
+  active,
+  setSection,
+  submitQuery,
+  setCaptureMode,
+  fetchImpl,
+  width = 60,
+}: ForYouProps) {
   const recs = useRecommendations(reccConfig, visible, fetchImpl);
   const [selected, setSelected] = useState(0);
   const [editingGenre, setEditingGenre] = useState(false);
@@ -36,7 +46,10 @@ export function ForYou({ reccConfig, visible, active, setSection, submitQuery, f
       else if (key.downArrow || input === "j") setSelected((i) => (count ? (i + 1) % count : 0));
       else if (input === "t") { setSelected(0); recs.setType(NEXT_TYPE[recs.type]); }
       else if (input === "e") { setSelected(0); recs.toggleExplore(); }
-      else if (input === "g") setEditingGenre(true);
+      else if (input === "g") {
+        setEditingGenre(true);
+        setCaptureMode?.("text");
+      }
       else if (input === "r") recs.refresh();
       else if (key.return) {
         const item = recs.items[selected];
@@ -56,10 +69,14 @@ export function ForYou({ reccConfig, visible, active, setSection, submitQuery, f
         value={recs.genre}
         onSubmit={(g) => {
           setEditingGenre(false);
+          setCaptureMode?.("none");
           setSelected(0);
           recs.setGenre(g.trim());
         }}
-        onCancel={() => setEditingGenre(false)}
+        onCancel={() => {
+          setEditingGenre(false);
+          setCaptureMode?.("none");
+        }}
       />
     );
   }

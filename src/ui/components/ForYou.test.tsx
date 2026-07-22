@@ -4,6 +4,7 @@ import { ForYou } from "./ForYou";
 import type { FetchImpl } from "../../util/net";
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
+const ESC = String.fromCharCode(27);
 
 const REC = { imdbId: "tt1", title: "Chernobyl", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
 const CONFIG = { reccUrl: "http://host:4100", reccToken: "tok" };
@@ -80,5 +81,47 @@ describe("ForYou", () => {
     );
     await flush();
     expect(lastFrame()).toContain("unavailable");
+  });
+
+  it("suppresses global shortcuts by setting captureMode to 'text' when the genre prompt opens", async () => {
+    const { impl } = fetchStub();
+    const setCaptureMode = vi.fn();
+    const { stdin } = render(
+      <ForYou
+        reccConfig={CONFIG}
+        visible
+        active
+        setSection={vi.fn()}
+        submitQuery={vi.fn()}
+        setCaptureMode={setCaptureMode}
+        fetchImpl={impl}
+      />,
+    );
+    await flush();
+    stdin.write("g");
+    await flush();
+    expect(setCaptureMode).toHaveBeenCalledWith("text");
+  });
+
+  it("restores captureMode to 'none' when the genre prompt is cancelled", async () => {
+    const { impl } = fetchStub();
+    const setCaptureMode = vi.fn();
+    const { stdin } = render(
+      <ForYou
+        reccConfig={CONFIG}
+        visible
+        active
+        setSection={vi.fn()}
+        submitQuery={vi.fn()}
+        setCaptureMode={setCaptureMode}
+        fetchImpl={impl}
+      />,
+    );
+    await flush();
+    stdin.write("g");
+    await flush();
+    stdin.write(ESC);
+    await flush();
+    expect(setCaptureMode).toHaveBeenCalledWith("none");
   });
 });

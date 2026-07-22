@@ -1984,6 +1984,7 @@ export function App({
                 active={store.region === "content" && section === "forYou"}
                 setSection={store.setSection}
                 submitQuery={store.submitQuery}
+                setCaptureMode={store.setCaptureMode}
               />
             </Box>
           </Box>
