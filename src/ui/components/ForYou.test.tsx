@@ -18,8 +18,11 @@ vi.mock("../../util/openUrl", () => ({
   imdbTitleUrl: (id: string) => `https://www.imdb.com/title/${id}/`,
 }));
 
+// ink flushes React passive effects via the scheduler's MessageChannel, which
+// fake timers can't drive — so these tests need real time to settle. `flush`
+// is a short settle; debounce/fetch-dependent assertions use vi.waitFor (below)
+// so they resolve as soon as ready rather than sleeping a fixed, CI-fragile span.
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
-const flushPlot = (): Promise<void> => new Promise((r) => setTimeout(r, 250));
 const ESC = String.fromCharCode(27);
 
 const REC = { imdbId: "tt1", title: "Chernobyl", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
@@ -240,7 +243,10 @@ describe("ForYou", () => {
   it("does not fetch a plot when no OMDb key is configured", async () => {
     const { impl, urls } = fetchStubWithPlot("A nuclear disaster.");
     render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
-    await flushPlot();
+    // No key ⇒ the lookup never even schedules; wait past the debounce window to
+    // be sure, then confirm nothing was requested. (Negative assertion, so there
+    // is nothing to poll for — a bounded wait is unavoidable here.)
+    await new Promise((r) => setTimeout(r, 250));
     expect(urls.some((u) => u.includes("omdbapi.com"))).toBe(false);
   });
 
@@ -252,10 +258,8 @@ describe("ForYou", () => {
       <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={60} visible active
         setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
-    await flushPlot();
-    const f = lastFrame() ?? "";
-    expect(f).toContain("·  Boom."); // inline plot on the selected row
-    expect(f).not.toContain("Preview"); // no split pane at 60 cols
+    await vi.waitFor(() => expect(lastFrame() ?? "").toContain("·  Boom."), { timeout: 5000 });
+    expect(lastFrame() ?? "").not.toContain("Preview"); // no split pane at 60 cols
   });
 
   it("shows a Preview pane with the plot and rendered poster on a wide terminal", async () => {
@@ -264,12 +268,18 @@ describe("ForYou", () => {
       <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={96} height={30} visible active
         setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
-    await flushPlot();
-    const f = lastFrame() ?? "";
-    expect(f).toContain("Preview");
-    expect(f).toContain("A firefighter investigates.");
-    expect(urls.some((u) => u.includes("poster.jpg"))).toBe(true); // poster fetched
-    expect(f).toContain("38;2;"); // poster rendered as truecolor half-blocks
+    // Poll until the whole debounce → metadata → poster chain has settled; this
+    // resolves the moment it's ready rather than sleeping a fixed, CI-fragile span.
+    await vi.waitFor(
+      () => {
+        const f = lastFrame() ?? "";
+        expect(f).toContain("Preview");
+        expect(f).toContain("A firefighter investigates."); // plot
+        expect(urls.some((u) => u.includes("poster.jpg"))).toBe(true); // poster fetched
+        expect(f).toContain("38;2;"); // poster rendered as truecolor half-blocks
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("toggles the preview pane off and on with 'p'", async () => {
@@ -278,14 +288,11 @@ describe("ForYou", () => {
       <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={96} height={30} visible active
         setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
-    await flushPlot();
-    expect(lastFrame()).toContain("Preview");
+    await vi.waitFor(() => expect(lastFrame()).toContain("Preview"), { timeout: 5000 });
     stdin.write("p");
-    await flush();
-    expect(lastFrame()).not.toContain("Preview");
+    await vi.waitFor(() => expect(lastFrame()).not.toContain("Preview"));
     stdin.write("p");
-    await flush();
-    expect(lastFrame()).toContain("Preview");
+    await vi.waitFor(() => expect(lastFrame()).toContain("Preview"));
   });
 
   it("adds the selected pick to the watchlist on 'w' without dismissing it", async () => {
