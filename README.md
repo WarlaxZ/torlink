@@ -118,7 +118,7 @@ If you run [reccd](https://github.com/WarlaxZ/reccd) — a small, self-hosted re
 
 Seed reccd with what you've already watched on Netflix, so its recommendations know your taste.
 
-1. In Netflix: **Account → Profile & Parental Controls → Viewing activity → Download all**. You'll get a CSV.
+1. Open [netflix.com/viewingactivity](https://www.netflix.com/viewingactivity) and click **Download all** (bottom of the page). You'll get a CSV.
 2. Import it, either way:
    - **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and give it the CSV path — you can drag the file onto the terminal to paste the path.
    - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`

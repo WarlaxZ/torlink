@@ -126,8 +126,8 @@ export function NetflixImportPrompt({ width, state, onSubmit, onClose }: Netflix
           </Box>
           <Box marginTop={1}>
             <Text dimColor>
-              Get the file: Netflix → Account → Profile &amp; Parental Controls → Viewing activity →
-              Download all. You'll get a CSV.
+              Get the file: open <Text color={COLOR.accent}>https://www.netflix.com/viewingactivity</Text>{" "}
+              and click Download all (bottom of the page) to get a CSV.
             </Text>
           </Box>
         </Panel>
