@@ -25,6 +25,10 @@ interface AccountsProps {
   onManageRecc: () => void;
   onSignOutRecc: () => void;
   onImportRecc: () => void;
+  omdbConfigured: boolean;
+  omdbEnvOverride?: boolean;
+  onManageOmdb: () => void;
+  onSignOutOmdb: () => void;
 }
 
 interface Row {
@@ -62,6 +66,10 @@ export function Accounts({
   onManageRecc,
   onSignOutRecc,
   onImportRecc,
+  omdbConfigured,
+  omdbEnvOverride = false,
+  onManageOmdb,
+  onSignOutOmdb,
 }: AccountsProps) {
   const { region, section, contentWidth, listRows } = useStore();
   const focused = region === "content" && section === "accounts";
@@ -114,6 +122,21 @@ export function Accounts({
       onSignOut: onSignOutRecc,
       importable: true,
       onImport: onImportRecc,
+    },
+    {
+      tag: "OMDb",
+      color: "#f5c518", // IMDb yellow
+      label: "OMDb",
+      homepage: "omdbapi.com · plot summaries",
+      signedIn: omdbConfigured,
+      ok: omdbConfigured,
+      status: `Key set${omdbEnvOverride ? " · env override active" : ""}`,
+      emptyStatus: "Not configured",
+      verbSignedIn: "edit",
+      verbSignOut: "clear",
+      verbSignedOut: "add key",
+      onManage: onManageOmdb,
+      onSignOut: onSignOutOmdb,
     },
   ];
 

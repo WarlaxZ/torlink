@@ -18,6 +18,25 @@ vi.mock("../hooks/useConcurrentSearch", () => ({
   useConcurrentSearch: () => searchState.current,
 }));
 
+// Keep the preview pane's OMDb/poster lookups off the network. Unused by most
+// tests (the default content width is below the split threshold), so they're
+// only exercised by the preview test.
+const omdb = vi.hoisted(() => ({ byName: vi.fn(), byId: vi.fn() }));
+vi.mock("../../recc/omdb", () => ({
+  fetchTitleMeta: omdb.byId,
+  fetchTitleMetaByName: omdb.byName,
+}));
+vi.mock("../../util/poster", () => ({
+  fetchPosterRows: vi.fn(async () => ["\x1b[38;2;9;9;9m▀\x1b[0m"]),
+}));
+
+const openUrl = vi.hoisted(() => vi.fn(async (_u: string) => true));
+vi.mock("../../util/openUrl", () => ({
+  openUrl: (u: string) => openUrl(u),
+  imdbTitleUrl: (id: string) => `https://www.imdb.com/title/${id}/`,
+  imdbFindUrl: (q: string) => `https://www.imdb.com/find/?q=${encodeURIComponent(q)}`,
+}));
+
 const t = (infoHash: string, name: string): TorrentResult => ({
   infoHash,
   name,
@@ -53,6 +72,9 @@ let ui: RenderedUI | null = null;
 afterEach(() => {
   ui?.unmount();
   ui = null;
+  omdb.byName.mockClear();
+  omdb.byId.mockClear();
+  openUrl.mockClear();
 });
 
 async function mount(results: TorrentResult[] = LIST): Promise<RenderedUI> {
@@ -183,5 +205,70 @@ describe("Results filter UI", () => {
     u.press(KEY.enter);
     await vi.waitFor(() => expect(u.frame()).not.toContain("Filter"));
     expect(u.frame()).toContain("Results (8)");
+  });
+});
+
+describe("Results preview pane", () => {
+  const wide = (results: TorrentResult[], overrides = {}) => {
+    searchState.current = settled(results);
+    const u = renderUI(
+      <StoreContext.Provider
+        value={makeTestStore({ query: "the bear", omdbApiKey: "KEY", contentWidth: 96, ...overrides })}
+      >
+        <Results />
+      </StoreContext.Provider>,
+      { cols: 110 },
+    );
+    ui = u;
+    return u;
+  };
+
+  it("shows a poster + plot preview for the selected result on a wide terminal", async () => {
+    omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A great film.", posterUrl: "https://x/p.jpg" });
+    const u = wide([t("v1", "The.Bear.S01.1080p.WEB-DL.x264-GROUP")]);
+    await vi.waitFor(() => expect(u.frame()).toContain("Preview"));
+    await vi.waitFor(() => expect(u.frame()).toContain("A great film."));
+    // Looked up by the parsed title, as a series (season detected).
+    expect(omdb.byName).toHaveBeenCalled();
+    const call = omdb.byName.mock.calls[0]!;
+    expect(call[0]).toBe("The Bear");
+    expect(call[2].type).toBe("series");
+    await vi.waitFor(() => expect(u.rawFrame()).toContain("38;2;9;9;9")); // poster rendered
+  });
+
+  it("toggles the preview pane off and on with p", async () => {
+    omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A great film.", posterUrl: null });
+    const u = wide([t("v1", "The.Bear.S01.1080p")]);
+    await vi.waitFor(() => expect(u.frame()).toContain("Preview"));
+    u.press("p");
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Preview"));
+    u.press("p");
+    await vi.waitFor(() => expect(u.frame()).toContain("Preview"));
+  });
+
+  it("stays a single column with no preview when no OMDb key is set", async () => {
+    const u = wide([t("v1", "The.Bear.S01.1080p")], { omdbApiKey: "" });
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (1)"));
+    expect(u.frame()).not.toContain("Preview");
+    expect(omdb.byName).not.toHaveBeenCalled();
+  });
+
+  it("opens the resolved IMDb title page on 'i' when matched", async () => {
+    omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A resolved plot.", posterUrl: null });
+    const u = wide([t("v1", "The.Bear.S01.1080p.WEB-DL")]);
+    // Wait for the plot to render — it lands together with the imdbId, so by now
+    // the exact id is in state (rather than racing the fallback title search).
+    await vi.waitFor(() => expect(u.frame()).toContain("A resolved plot."));
+    u.press("i");
+    await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/title/tt9/"));
+  });
+
+  it("falls back to an IMDb title search on 'i' with no key (no exact id)", async () => {
+    const u = wide([t("v1", "Weapons.2025.1080p.BluRay.x264-GRP")], { omdbApiKey: "" });
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (1)"));
+    u.press("i");
+    await vi.waitFor(() =>
+      expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/find/?q=Weapons%202025"),
+    );
   });
 });

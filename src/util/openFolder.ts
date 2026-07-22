@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
-function launch(cmd: string, args: string[], anyExit = false): Promise<boolean> {
+export function launch(cmd: string, args: string[], anyExit = false): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       // Unlike clipboard.ts, no windowsHide here: it maps to SW_HIDE in the

@@ -7,6 +7,10 @@ import { TextField } from "./TextField";
 import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
+import { useTitlePreview } from "../hooks/useTitlePreview";
+import { PreviewPane } from "./PreviewPane";
+import { parseRelease, hintForSection } from "../../util/release";
+import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { wrapStep, windowStart, resultsPanelOuter } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
@@ -35,6 +39,9 @@ function stateMark(state: DownloadState | null): { icon: string; color?: string;
 }
 
 const PLACEHOLDER = "Search or paste a magnet link…";
+
+// Below this the terminal is too narrow to split the results list and preview.
+const PREVIEW_MIN_WIDTH = 74;
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -209,7 +216,9 @@ export function Results() {
     toggleFavourite,
     isFavourited,
     adultEnabled,
+    omdbApiKey,
   } = useStore();
+  const [previewOn, setPreviewOn] = useState(true);
 
   const search = useConcurrentSearch(query, disabledSources, adultEnabled);
   const enabled = useMemo(
@@ -284,6 +293,42 @@ export function Results() {
   const listHeight = Math.max(3, panelOuter - 4);
   const pageJump = Math.max(1, listHeight - 1);
 
+  // Poster/plot preview for the highlighted result. Search results carry no
+  // imdbId, so we parse a title+year out of the release name and look it up by
+  // name — best-effort, gated to video sections and an OMDb key.
+  const selectedResult = results[clamped];
+  const previewSection = useMemo(() => {
+    const g = CATEGORIES.find((c) => c.key === section)?.group;
+    return !g || g === "Movies" || g === "TV" || g === "Anime";
+  }, [section]);
+  const showPreview =
+    previewOn && omdbApiKey !== "" && previewSection && mode !== "detail" && contentWidth >= PREVIEW_MIN_WIDTH;
+  const previewWidth = showPreview ? Math.min(46, Math.max(30, Math.round(contentWidth * 0.4))) : 0;
+  const listWidth = showPreview ? contentWidth - previewWidth - 1 : contentWidth;
+  const parsed = useMemo(
+    () => (selectedResult ? parseRelease(selectedResult.name, hintForSection(section)) : null),
+    [selectedResult, section],
+  );
+
+  // Open a result on IMDb: the exact title page when we've resolved an id,
+  // otherwise a best-effort IMDb title search from the parsed name.
+  const openImdbFor = (name: string, resolvedId?: string | null): void => {
+    if (resolvedId) {
+      void openUrl(imdbTitleUrl(resolvedId));
+      return;
+    }
+    const p = parseRelease(name, hintForSection(section));
+    if (p?.title) void openUrl(imdbFindUrl(p.year ? `${p.title} ${p.year}` : p.title));
+  };
+  const preview = useTitlePreview({
+    omdbApiKey,
+    enabled: showPreview,
+    cacheKey: parsed?.key ?? "",
+    query: parsed ? { by: "name", title: parsed.title, year: parsed.year, type: parsed.type } : null,
+    posterCols: Math.max(8, previewWidth - 4),
+    posterMaxRows: Math.max(4, panelOuter - 8),
+  });
+
   const inputFor = (r: TorrentResult) => ({
     id: r.infoHash,
     name: r.name,
@@ -350,6 +395,8 @@ export function Results() {
         setMode("filter");
       } else if (input === "w" && query.trim()) {
         toggleSavedSearch(query.trim());
+      } else if (input === "p") {
+        setPreviewOn((v) => !v);
       } else if (results.length === 0) {
         return;
       } else if (key.downArrow || input === "j") {
@@ -379,6 +426,9 @@ export function Results() {
       } else if (input === "y") {
         const r = results[clamped];
         if (r) copyResultMagnet(r);
+      } else if (input === "i") {
+        const r = results[clamped];
+        if (r) openImdbFor(r.name, preview.imdbId);
       }
     },
     { isActive: focused && mode === "list" },
@@ -394,6 +444,7 @@ export function Results() {
       else if (input === "r" && detail) openDebrid(detail);
       else if (input === "v" && detail) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
+      else if (input === "i" && detail) openImdbFor(detail.name);
       else if (input === "b" && detail && canFavourite(detail)) toggleFavourite(favInput(detail));
     },
     { isActive: focused && mode === "detail" },
@@ -534,9 +585,10 @@ export function Results() {
         onExitLeft={() => setRegion("sidebar")}
       />
       <Box marginTop={1}>
+        <Box marginRight={showPreview ? 1 : 0}>
         <Panel
           title={mode === "detail" ? "details" : browsing ? "latest" : "results"}
-          width={contentWidth}
+          width={listWidth}
           focused={focused && mode !== "search"}
           count={mode === "detail" ? undefined : count}
           height={panelOuter}
@@ -641,6 +693,18 @@ export function Results() {
             </>
           )}
         </Panel>
+        </Box>
+        {showPreview && selectedResult ? (
+          <PreviewPane
+            width={previewWidth}
+            height={panelOuter}
+            focused={focused && mode === "list"}
+            title={parsed?.title ?? cleanText(selectedResult.name)}
+            year={parsed?.year}
+            plot={preview.plot}
+            posterRows={preview.posterRows}
+          />
+        ) : null}
       </Box>
       {(mode === "filter" || textFilter.trim()) && (
         <Box width={contentWidth} paddingLeft={1}>

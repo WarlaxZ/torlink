@@ -28,6 +28,10 @@ export interface Config {
   reccUrl?: string;
   // Bearer token for authenticating with reccd
   reccToken?: string;
+  // OMDb API key, used to fetch short plot summaries for For You picks (reccd
+  // deliberately carries no plot text). Stored as-is; a TORLINK_OMDB_KEY env
+  // var overrides it at read time.
+  omdbApiKey?: string;
   // Preferred media-player command for streaming (e.g. "mpv", "iina", "vlc",
   // or an absolute path). Empty/unset falls back to auto-detection. A
   // TORLINK_PLAYER env var overrides it.
@@ -38,10 +42,13 @@ export interface Config {
   // Opt-in adult ("Porn") category. Absent/false = OFF: the Porn tab and its
   // sources are hidden and never searched. A TORLINK_ADULT env var overrides it.
   adultContent?: boolean;
-  // Remembered UI preferences, so torlink reopens the way you left it. Both are
-  // stored as opaque strings validated by the UI layer (parseSort/parseCategory)
-  // so a hand-edited or stale value degrades gracefully to the default.
+  // Remembered UI preferences, so torlink reopens the way you left it. Stored
+  // as opaque strings validated by the UI layer (parseSort/parseSection) so a
+  // hand-edited or stale value degrades gracefully to the default.
   sort?: string;
+  // The last section the user was on (any sidebar tab). `category` is the older
+  // field (categories only); still read for back-compat with pre-upgrade configs.
+  lastSection?: string;
   category?: string;
   // Recently-run searches (most-recent first) for up-arrow recall in the
   // search bar.
@@ -137,6 +144,16 @@ export function resolveReccConfig(config: Config): ReccClientConfig {
   const url = process.env[RECC_URL_ENV]?.trim() || config.reccUrl?.trim() || undefined;
   const token = process.env[RECC_TOKEN_ENV]?.trim() || config.reccToken?.trim() || undefined;
   return { reccUrl: url, reccToken: token };
+}
+
+const OMDB_KEY_ENV = "TORLINK_OMDB_KEY";
+
+// The effective OMDb API key (env wins over config, matching the other resolve*
+// helpers). Empty string means "not configured" — For You then skips plot
+// fetching and just deep-links to IMDb instead.
+export function resolveOmdbApiKey(config: Config): string {
+  const env = process.env[OMDB_KEY_ENV];
+  return (env?.trim() || config.omdbApiKey?.trim()) ?? "";
 }
 
 export async function loadConfig(): Promise<Config> {
