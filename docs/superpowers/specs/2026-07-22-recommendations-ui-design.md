@@ -130,7 +130,12 @@ existing `postEvent` wiring records the resulting activity back to reccd — clo
 
 - `Section` type: add `"forYou"`. `isCategory()` already excludes non-category sections by
   explicit checks; add `"forYou"` to that exclusion list.
-- `Sidebar.tsx`: add `{ key: "forYou", label: "For You" }` at the **top of the `LIBRARY` group**.
+- `Sidebar.tsx`: add `{ key: "forYou", label: "For You" }` at the **top of the `LIBRARY` group**,
+  but **only when reccd is configured** — the item is filtered out entirely when `reccConfigured`
+  is false, so an unconfigured install never shows it. A `reccConfigured: boolean` field is added
+  to the store (computed as `Boolean(resolveReccConfig(config).reccUrl)`, mirroring the existing
+  `debridConfigured`) and read by the sidebar. The rail width (`RAIL_WIDTH`) is still derived from
+  the full nav list so it stays stable regardless.
 - `App.tsx`: render a `display`-toggled content block
   `display={section === "forYou" ? "flex" : "none"}` wrapping `<ForYou … />`, passing reccd
   config, `submitQuery`, and `setSection`.
@@ -148,7 +153,7 @@ existing `postEvent` wiring records the resulting activity back to reccd — clo
 
 | Situation | Behaviour |
 |---|---|
-| `reccUrl` unset | View shows setup hint; no fetch. |
+| `reccUrl` unset | The "For You" nav item is hidden entirely; no fetch. The in-pane setup hint remains only as a defensive fallback for the rare case where config is removed at runtime while the section is open. |
 | 401 from reccd | Error row: "reccd rejected the token — check reccToken", `r` retries. |
 | Network/timeout | Error row: "couldn't reach reccd", `r` retries. |
 | Empty array | Friendly empty state, not an error. |
