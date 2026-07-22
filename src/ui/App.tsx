@@ -14,7 +14,7 @@ import { setDnsServers } from "../util/dns";
 import { normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
-import { detectPlayer, launchPlayer, streamCandidates } from "../util/player";
+import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { classifyStreamRoute } from "./streamRoute";
@@ -162,7 +162,19 @@ export function App({
   const [editingVpn, setEditingVpn] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
-  const [pendingStreamUrl, setPendingStreamUrl] = useState<string | null>(null);
+  // Context for a stream awaiting a player-command decision: the URL, an
+  // optional display name, an onPlayed callback fired ONLY when a player really
+  // launches (e.g. to mark an episode watched), and the configured command that
+  // failed (set only for the auto-detect/edit choice prompt).
+  const [pendingStream, setPendingStream] = useState<{
+    url: string;
+    name?: string;
+    onPlayed?: () => void;
+    configured?: string;
+  } | null>(null);
+  // Which media-player prompt is showing: the auto-detect/edit choice (after a
+  // configured player failed) or the plain command entry.
+  const [playerPromptMode, setPlayerPromptMode] = useState<"choice" | "edit">("edit");
   // A result waiting on the "download to" prompt (f); null when the prompt is
   // closed. lastDownloadToDir pre-fills the next prompt so queueing a batch
   // into the same alternate folder only costs one typed path per session.
@@ -455,6 +467,19 @@ export function App({
     });
   }, []);
 
+  // Mark a file streamed this session and, when its torrent is favourited,
+  // persist watched progress. Called only once a player actually launches, so a
+  // failed/cancelled stream never earns a ✓.
+  const markPlayed = useCallback(
+    (favId: string, filename: string) => {
+      setStreamedFiles((prev) => new Set(prev).add(filename));
+      if (isFavouritedIn(config?.favourites ?? [], favId)) {
+        markWatchedInFavourite(favId, filename);
+      }
+    },
+    [config, markWatchedInFavourite],
+  );
+
   const isFavourited = useCallback(
     (id: string) => isFavouritedIn(config?.favourites ?? [], id),
     [config],
@@ -613,21 +638,29 @@ export function App({
   // Try to play a resolved stream URL: use the configured/detected player, else
   // copy the link to the clipboard and prompt for a player command.
   const playStream = useCallback(
-    async (url: string, name?: string) => {
+    async (url: string, name?: string, onPlayed?: () => void) => {
       if (!config) return;
-      let player = resolveMediaPlayer(config);
-      if (!player) player = (await detectPlayer()) ?? "";
-      if (player && (await launchPlayer(player, url))) {
+      const configured = resolveMediaPlayer(config);
+      const outcome = await attemptAutoPlay(configured, url);
+      if (outcome.played) {
         const copied = await writeClipboard(url);
         setNotice(
-          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${player}${copied ? " · link copied" : ""}`,
+          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${outcome.player}${copied ? " · link copied" : ""}`,
         );
+        onPlayed?.();
         return;
       }
-      // No player available (or it failed to launch): stash the URL, put it on
-      // the clipboard, and ask the user for a command to use.
-      setPendingStreamUrl(url);
+      // Couldn't play automatically: stash context, copy the link, and open the
+      // right prompt — a configured player that failed to launch gets the
+      // auto-detect/edit choice; otherwise the plain command entry.
+      setPendingStream({
+        url,
+        name,
+        onPlayed,
+        configured: outcome.configuredFailed ? configured : undefined,
+      });
       await writeClipboard(url);
+      setPlayerPromptMode(outcome.configuredFailed ? "choice" : "edit");
       setEditingPlayer(true);
     },
     [config],
@@ -635,10 +668,10 @@ export function App({
 
   // Hand a resolved file to the player path and clear any picker/preparing UI.
   const finishStream = useCallback(
-    (file: ResolvedFile, name?: string) => {
+    (file: ResolvedFile, name?: string, onPlayed?: () => void) => {
       setStreamFiles(null);
       setPreparing(null);
-      void playStream(file.url, name ?? file.filename);
+      void playStream(file.url, name ?? file.filename, onPlayed);
     },
     [playStream],
   );
@@ -648,13 +681,13 @@ export function App({
   // persists watched progress when the current torrent is favourited.
   const playFromPicker = useCallback(
     (file: ResolvedFile) => {
-      void playStream(file.url, file.filename);
-      setStreamedFiles((prev) => new Set(prev).add(file.filename));
-      if (streamSource && isFavouritedIn(config?.favourites ?? [], streamSource.id)) {
-        markWatchedInFavourite(streamSource.id, file.filename);
-      }
+      // Mark streamed/watched ONLY once a player actually launches (the
+      // onPlayed callback), so a failed stream never gets a ✓.
+      void playStream(file.url, file.filename, () => {
+        if (streamSource) markPlayed(streamSource.id, file.filename);
+      });
     },
-    [playStream, streamSource, config, markWatchedInFavourite],
+    [playStream, streamSource, markPlayed],
   );
 
   const cancelPreparing = useCallback(() => {
@@ -706,7 +739,9 @@ export function App({
             setStreamSource(input);
             setStreamFiles(candidates);
           } else {
-            void playStream(candidates[0]!.url, input.name);
+            void playStream(candidates[0]!.url, input.name, () =>
+              markPlayed(input.id, candidates[0]!.filename),
+            );
           }
         } catch (e) {
           prepareAbort.current = null;
@@ -716,7 +751,7 @@ export function App({
         }
       })();
     },
-    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe],
+    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed],
   );
 
   useEffect(() => {
@@ -842,7 +877,9 @@ export function App({
             setStreamFiles(candidates);
             return;
           }
-          finishStream(candidates[0]!, input.name);
+          finishStream(candidates[0]!, input.name, () =>
+            markPlayed(input.id, candidates[0]!.filename),
+          );
         } catch (e) {
           prepareAbort.current = null;
           setPreparing(null);
@@ -863,7 +900,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream],
+    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed],
   );
 
   // Reopen a favourited series: re-resolve its magnet through the same stream
@@ -883,7 +920,7 @@ export function App({
 
   const closePlayerPrompt = useCallback(() => {
     setEditingPlayer(false);
-    setPendingStreamUrl(null);
+    setPendingStream(null);
     setNotice("Stream link is on your clipboard.");
   }, []);
 
@@ -892,24 +929,59 @@ export function App({
       setEditingPlayer(false);
       if (!config) return;
       const cmd = raw.trim();
-      const url = pendingStreamUrl;
-      setPendingStreamUrl(null);
+      const ctx = pendingStream;
+      setPendingStream(null);
       if (!cmd) {
         setNotice("Stream link is on your clipboard.");
         return;
       }
       setConfig({ ...config, mediaPlayer: cmd });
       void (async () => {
-        if (!url) {
+        if (!ctx?.url) {
           setNotice(`Media player set: ${cmd}`);
           return;
         }
-        const ok = await launchPlayer(cmd, url);
-        setNotice(ok ? `${ICON.done} Streaming in ${cmd}` : `Couldn't launch ${cmd}. Link is on your clipboard.`);
+        const ok = await launchPlayer(cmd, ctx.url);
+        if (ok) {
+          setNotice(`${ICON.done} Streaming in ${cmd}`);
+          ctx.onPlayed?.();
+        } else {
+          setNotice(`Couldn't launch ${cmd}. Link is on your clipboard.`);
+        }
       })();
     },
-    [config, setConfig, pendingStreamUrl],
+    [config, setConfig, pendingStream],
   );
+
+  // Auto-detect a working player, launch it, and persist it so a bad saved
+  // command self-heals. Falls back to the command-entry prompt when detection
+  // finds nothing or the detected player won't launch.
+  const autoDetectPlayer = useCallback(() => {
+    const ctx = pendingStream;
+    if (!config || !ctx) {
+      setEditingPlayer(false);
+      setPendingStream(null);
+      return;
+    }
+    void (async () => {
+      const player = await detectAndPlay(ctx.url);
+      if (player) {
+        setConfig({ ...config, mediaPlayer: player });
+        setNotice(`${ICON.done} Streaming in ${player}`);
+        ctx.onPlayed?.();
+        setEditingPlayer(false);
+        setPendingStream(null);
+      } else {
+        setNotice("No player detected — enter a command.");
+        setPlayerPromptMode("edit");
+      }
+    })();
+  }, [config, pendingStream, setConfig]);
+
+  // Switch the choice prompt to the plain command-entry prompt.
+  const editPlayerCommand = useCallback(() => {
+    setPlayerPromptMode("edit");
+  }, []);
 
   const openDnsPrompt = useCallback(() => {
     setShowHelp(false);
@@ -1499,12 +1571,25 @@ export function App({
 
         {editingPlayer ? (
           <Box marginTop={1}>
-            <StreamPlayerPrompt
-              width={Math.max(24, Math.min(cols - 4, 62))}
-              value={resolveMediaPlayer(store.config)}
-              onSubmit={setMediaPlayer}
-              onCancel={closePlayerPrompt}
-            />
+            {playerPromptMode === "choice" && pendingStream?.configured ? (
+              <ConfirmPrompt
+                width={Math.max(24, Math.min(cols - 4, 62))}
+                title="media player"
+                message={`Couldn't launch "${pendingStream.configured}". Auto-detect a player?`}
+                altKey="e"
+                altLabel="edit command"
+                onConfirm={autoDetectPlayer}
+                onAlt={editPlayerCommand}
+                onCancel={closePlayerPrompt}
+              />
+            ) : (
+              <StreamPlayerPrompt
+                width={Math.max(24, Math.min(cols - 4, 62))}
+                value={resolveMediaPlayer(store.config)}
+                onSubmit={setMediaPlayer}
+                onCancel={closePlayerPrompt}
+              />
+            )}
           </Box>
         ) : null}
 

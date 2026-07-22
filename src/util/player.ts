@@ -277,3 +277,53 @@ export async function launchPlayer(command: string, url: string): Promise<boolea
   if (process.platform === "darwin") return openWithApp(command, url);
   return false;
 }
+
+export interface PlayDeps {
+  detect?: () => Promise<string | null>;
+  launch?: (command: string, url: string) => Promise<boolean>;
+}
+
+// Outcome of the automatic (no-prompt) part of starting playback.
+export interface AutoPlayOutcome {
+  // A player launched successfully.
+  played: boolean;
+  // The command/path that launched (present only when played).
+  player?: string;
+  // A non-empty configured command was tried and failed to launch — the caller
+  // should offer the auto-detect/edit choice rather than the plain prompt.
+  configuredFailed: boolean;
+}
+
+// Auto-detect a player and launch it on the URL. Returns the launched
+// command/path (so the caller can persist it) or null when nothing was detected
+// or the detected player failed to launch. Deps injectable for testing.
+export async function detectAndPlay(url: string, deps: PlayDeps = {}): Promise<string | null> {
+  const detect = deps.detect ?? detectPlayer;
+  const launch = deps.launch ?? launchPlayer;
+  const detected = await detect();
+  if (detected && (await launch(detected, url))) return detected;
+  return null;
+}
+
+// The automatic part of playing a stream: try the configured player first, and
+// only auto-detect when nothing is configured. Never prompts or touches config —
+// it reports what happened so the UI can decide whether/what to prompt. A
+// configured command that fails is reported as configuredFailed (NOT silently
+// auto-detected) so the UI can offer the auto-detect/edit choice.
+export async function attemptAutoPlay(
+  configured: string,
+  url: string,
+  deps: PlayDeps = {},
+): Promise<AutoPlayOutcome> {
+  const launch = deps.launch ?? launchPlayer;
+  if (configured) {
+    if (await launch(configured, url)) {
+      return { played: true, player: configured, configuredFailed: false };
+    }
+    return { played: false, configuredFailed: true };
+  }
+  const player = await detectAndPlay(url, deps);
+  return player
+    ? { played: true, player, configuredFailed: false }
+    : { played: false, configuredFailed: false };
+}
