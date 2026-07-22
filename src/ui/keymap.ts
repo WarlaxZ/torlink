@@ -33,7 +33,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "↑ ↓", label: "Move between services" },
       { keys: "↵", label: "Sign in / switch account" },
       { keys: "x", label: "Sign out" },
-      { keys: "i", label: "Import Netflix history (reccd)" },
+      { keys: "i", label: "Import history — Netflix or Trakt (reccd)" },
     ],
   },
   {

@@ -30,7 +30,7 @@ if (cmd.kind === "invalid") {
 // try/catch or error event can reach (see util/crashlog.ts). Contained and
 // logged for every mode; headless runs also echo one line to their log.
 containUnhandledRejections({
-  echo: cmd.kind === "update" || cmd.kind === "watch" || cmd.kind === "serve" || cmd.kind === "files" || cmd.kind === "import-netflix",
+  echo: cmd.kind === "update" || cmd.kind === "watch" || cmd.kind === "serve" || cmd.kind === "files" || cmd.kind === "import-netflix" || cmd.kind === "import-trakt",
 });
 
 // Run/reattach the TUI inside a persistent tmux session (execs tmux, then exits).
@@ -83,6 +83,10 @@ if (cmd.kind === "update") {
   void import("./cli/runImportNetflix").then(({ runImportNetflix }) =>
     runImportNetflix(cmd.file).catch(failHeadless),
   );
+} else if (cmd.kind === "import-trakt") {
+  // Like import-netflix: no forced exit(0) on success, so the summary/titles
+  // aren't truncated when stdout is a pipe. Errors exit non-zero via failHeadless.
+  void import("./cli/runImportTrakt").then(({ runImportTrakt }) => runImportTrakt().catch(failHeadless));
 } else {
 
 // Enter the alt-screen and hide the hardware cursor: the TUI draws its own
