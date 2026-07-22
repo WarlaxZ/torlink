@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { FetchImpl } from "../../util/net";
 import type { ReccClientConfig } from "../../recc/client";
@@ -15,6 +15,8 @@ interface ForYouProps {
   active: boolean;
   setSection: (s: Section) => void;
   submitQuery: (q: string) => void;
+  onRatePick?: (name: string, onRated: () => void) => void;
+  toggleSavedSearch?: (query: string) => void;
   setCaptureMode?: (m: CaptureMode) => void;
   fetchImpl?: FetchImpl;
   width?: number;
@@ -29,6 +31,8 @@ export function ForYou({
   active,
   setSection,
   submitQuery,
+  onRatePick,
+  toggleSavedSearch,
   setCaptureMode,
   fetchImpl,
   width = 60,
@@ -39,6 +43,12 @@ export function ForYou({
 
   const configured = Boolean(reccConfig.reccUrl);
   const count = recs.items.length;
+
+  // Keep the highlight in range when the list shrinks (e.g. after a pick is
+  // rated and dismissed).
+  useEffect(() => {
+    if (selected >= count && count > 0) setSelected(count - 1);
+  }, [count, selected]);
 
   useInput(
     (input, key) => {
@@ -51,6 +61,14 @@ export function ForYou({
         setCaptureMode?.("text");
       }
       else if (input === "r") recs.refresh();
+      else if (input === "w") {
+        const item = recs.items[selected];
+        if (item) toggleSavedSearch?.(item.title);
+      }
+      else if (input === "f") {
+        const item = recs.items[selected];
+        if (item) onRatePick?.(item.title, () => recs.dismiss(item.imdbId));
+      }
       else if (key.return) {
         const item = recs.items[selected];
         if (item) {

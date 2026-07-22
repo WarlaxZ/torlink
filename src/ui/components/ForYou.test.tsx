@@ -124,4 +124,52 @@ describe("ForYou", () => {
     await flush();
     expect(setCaptureMode).toHaveBeenCalledWith("none");
   });
+
+  it("opens the rate prompt for the selected pick on 'f' and dismisses it when rated", async () => {
+    const { impl } = fetchStub();
+    const onRatePick = vi.fn();
+    const { stdin, lastFrame } = render(
+      <ForYou
+        reccConfig={CONFIG}
+        visible
+        active
+        setSection={vi.fn()}
+        submitQuery={vi.fn()}
+        onRatePick={onRatePick}
+        toggleSavedSearch={vi.fn()}
+        fetchImpl={impl}
+      />,
+    );
+    await flush();
+    stdin.write("f");
+    await flush();
+    expect(onRatePick).toHaveBeenCalledWith("Chernobyl", expect.any(Function));
+    // Invoking the provided callback dismisses the pick from the list.
+    const onRated = onRatePick.mock.calls[0]![1] as () => void;
+    onRated();
+    await flush();
+    expect(lastFrame()).not.toContain("Chernobyl");
+  });
+
+  it("adds the selected pick to the watchlist on 'w' without dismissing it", async () => {
+    const { impl } = fetchStub();
+    const toggleSavedSearch = vi.fn();
+    const { stdin, lastFrame } = render(
+      <ForYou
+        reccConfig={CONFIG}
+        visible
+        active
+        setSection={vi.fn()}
+        submitQuery={vi.fn()}
+        onRatePick={vi.fn()}
+        toggleSavedSearch={toggleSavedSearch}
+        fetchImpl={impl}
+      />,
+    );
+    await flush();
+    stdin.write("w");
+    await flush();
+    expect(toggleSavedSearch).toHaveBeenCalledWith("Chernobyl");
+    expect(lastFrame()).toContain("Chernobyl"); // stays in the list
+  });
 });

@@ -65,6 +65,8 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "t", label: "Cycle movie / TV / all" },
       { keys: "g", label: "Filter by genre" },
       { keys: "e", label: "Toggle explore mode" },
+      { keys: "f", label: "Rate — watched / like / dislike" },
+      { keys: "w", label: "Add to watchlist" },
       { keys: "r", label: "Refresh recommendations" },
     ],
   },
@@ -143,6 +145,8 @@ export function footerHints(
     return [
       NAVIGATE,
       { keys: "↵", label: "Search title" },
+      { keys: "f", label: "Rate" },
+      { keys: "w", label: "Watch" },
       { keys: "t", label: "Type" },
       { keys: "g", label: "Genre" },
       { keys: "e", label: "Explore" },
