@@ -3,6 +3,7 @@ import { configFile, defaultDownloadDir } from "./paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import { parseDnsServers } from "../util/dns";
 import type { SourceId } from "../sources/types";
+import type { ReccClientConfig } from "../recc/client";
 
 // A pinned VIDEO torrent/series to return to, remembering which episodes have
 // been streamed. Never stores stream URLs — only the magnet + metadata, so it
@@ -109,6 +110,18 @@ export function resolveDnsServers(config: Config): string[] {
   const env = process.env[DNS_ENV];
   const raw = env !== undefined ? env : (config.dnsServers ?? []).join(",");
   return parseDnsServers(raw);
+}
+
+const RECC_URL_ENV = "TORLINK_RECC_URL";
+const RECC_TOKEN_ENV = "TORLINK_RECC_TOKEN";
+
+// The effective reccd connection (env wins over config, matching the other
+// resolve* helpers). An undefined reccUrl means "recommendations not
+// configured" — the For You view then shows a setup hint instead of fetching.
+export function resolveReccConfig(config: Config): ReccClientConfig {
+  const url = process.env[RECC_URL_ENV]?.trim() || config.reccUrl?.trim() || undefined;
+  const token = process.env[RECC_TOKEN_ENV]?.trim() || config.reccToken?.trim() || undefined;
+  return { reccUrl: url, reccToken: token };
 }
 
 export async function loadConfig(): Promise<Config> {

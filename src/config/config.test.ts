@@ -5,6 +5,7 @@ import {
   resolveRealDebridToken,
   resolveMediaPlayer,
   resolveDnsServers,
+  resolveReccConfig,
 } from "./config";
 
 describe("config realDebridToken", () => {
@@ -180,5 +181,38 @@ describe("config favourites", () => {
   it("defaults to [] when favourites is missing", async () => {
     await saveConfig({ downloadDir: "/tmp/dl", trackers: [] });
     expect((await loadConfig()).favourites).toEqual([]);
+  });
+});
+
+describe("resolveReccConfig", () => {
+  const base = { downloadDir: "/tmp/dl", trackers: [] as string[] };
+
+  it("uses config values when no env override is set", () => {
+    delete process.env.TORLINK_RECC_URL;
+    delete process.env.TORLINK_RECC_TOKEN;
+    expect(resolveReccConfig({ ...base, reccUrl: "http://host:4100", reccToken: "tok" })).toEqual({
+      reccUrl: "http://host:4100",
+      reccToken: "tok",
+    });
+  });
+
+  it("prefers env vars over config values", () => {
+    process.env.TORLINK_RECC_URL = "http://env:4100";
+    process.env.TORLINK_RECC_TOKEN = "envtok";
+    try {
+      expect(resolveReccConfig({ ...base, reccUrl: "http://host:4100", reccToken: "tok" })).toEqual({
+        reccUrl: "http://env:4100",
+        reccToken: "envtok",
+      });
+    } finally {
+      delete process.env.TORLINK_RECC_URL;
+      delete process.env.TORLINK_RECC_TOKEN;
+    }
+  });
+
+  it("returns undefined fields when neither env nor config is set", () => {
+    delete process.env.TORLINK_RECC_URL;
+    delete process.env.TORLINK_RECC_TOKEN;
+    expect(resolveReccConfig({ ...base })).toEqual({ reccUrl: undefined, reccToken: undefined });
   });
 });
