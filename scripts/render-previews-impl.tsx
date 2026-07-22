@@ -338,10 +338,14 @@ save(
           rdToken="rd_live_xxx"
           rdStatus={RD_STATUS}
           rutrackerUser="you"
+          reccConfigured
+          reccStatus={{ state: "connected", host: "reccd.local:4100" }}
           onManageRd={() => {}}
           onSignOutRd={() => {}}
           onManageRutracker={() => {}}
           onSignOutRutracker={() => {}}
+          onManageRecc={() => {}}
+          onSignOutRecc={() => {}}
         />
       </Box>
     </Box>

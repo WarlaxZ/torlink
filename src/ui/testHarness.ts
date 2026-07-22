@@ -157,6 +157,7 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     isFavourited: () => false,
     section: "all",
     setSection: noop,
+    reccConfigured: false,
     sort: "none",
     setSort: noop,
     disabledSources: [],
