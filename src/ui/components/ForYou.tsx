@@ -85,7 +85,7 @@ export function ForYou({
     return (
       <Box flexDirection="column">
         <Text color={COLOR.text}>Recommendations aren't set up yet.</Text>
-        <Text dimColor>To set up, add reccUrl and reccToken to config.json,</Text>
+        <Text dimColor>Set up reccd in the Accounts pane (↵ on reccd),</Text>
         <Text dimColor>or set TORLINK_RECC_URL / TORLINK_RECC_TOKEN.</Text>
       </Box>
     );

@@ -35,7 +35,7 @@ describe("ForYou", () => {
       <ForYou reccConfig={{}} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
-    expect(lastFrame()).toContain("set up");
+    expect(lastFrame()).toContain("Accounts");
   });
 
   it("cycles the type filter with 't' and refetches", async () => {

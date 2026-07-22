@@ -79,6 +79,8 @@ import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
+import { ReccdPrompt } from "./components/ReccdPrompt";
+import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
 import { Favourites } from "./components/Favourites";
@@ -161,6 +163,8 @@ export function App({
   const [showHelp, setShowHelp] = useState(false);
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
+  const [editingRecc, setEditingRecc] = useState(false);
+  const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
@@ -650,6 +654,49 @@ export function App({
     setRdStatus(null);
     setNotice("Real-Debrid token cleared.");
   }, [config, setConfig, closeTokenPrompt]);
+
+  const refreshReccStatus = useCallback((cfg: Config | null) => {
+    const rc = cfg ? resolveReccConfig(cfg) : {};
+    if (!rc.reccUrl) {
+      setReccStatus(null);
+      return;
+    }
+    void checkReccConnection(rc).then(setReccStatus);
+  }, []);
+
+  useEffect(() => {
+    refreshReccStatus(config);
+  }, [config?.reccUrl, config?.reccToken, refreshReccStatus]);
+
+  const closeReccPrompt = useCallback(() => setEditingRecc(false), []);
+
+  const openReccPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setEditingRecc(true);
+    refreshReccStatus(config);
+  }, [config, refreshReccStatus]);
+
+  const saveReccConfig = useCallback(
+    (rawUrl: string, rawToken: string) => {
+      closeReccPrompt();
+      const url = rawUrl.trim().replace(/\/+$/, "");
+      const token = rawToken.trim();
+      persistConfig({ reccUrl: url || undefined, reccToken: token || undefined });
+      setNotice(url ? `${ICON.done} reccd set to ${url}` : "reccd connection cleared.");
+    },
+    [closeReccPrompt, persistConfig],
+  );
+
+  const clearReccConfig = useCallback(() => {
+    closeReccPrompt();
+    if (process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim()) {
+      setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
+      return;
+    }
+    persistConfig({ reccUrl: undefined, reccToken: undefined });
+    setNotice("reccd connection cleared.");
+  }, [closeReccPrompt, persistConfig]);
 
   const startDownload = useCallback(
     (input: DownloadInput) => {
@@ -1351,7 +1398,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt
+        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt
           ? "help"
           : region,
       setRegion,
@@ -1402,6 +1449,7 @@ export function App({
     showHelp,
     editingFolder,
     editingToken,
+    editingRecc,
     editingPlayer,
     editingSources,
     editingDns,
@@ -1450,6 +1498,7 @@ export function App({
       }
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
+      if (editingRecc) return; // the reccd prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
@@ -1625,6 +1674,19 @@ export function App({
               onSubmit={setRealDebridToken}
               onClear={clearRealDebridToken}
               onCancel={closeTokenPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {editingRecc ? (
+          <Box marginTop={1}>
+            <ReccdPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              url={store.config.reccUrl ?? ""}
+              token={store.config.reccToken ?? ""}
+              status={reccStatus}
+              onSubmit={saveReccConfig}
+              onCancel={closeReccPrompt}
             />
           </Box>
         ) : null}
@@ -1931,7 +1993,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
               ? "none"
               : "flex"
           }
@@ -1970,6 +2032,13 @@ export function App({
                 onSignOutRd={clearRealDebridToken}
                 onManageRutracker={openRutrackerPrompt}
                 onSignOutRutracker={signOutRutracker}
+                reccConfigured={store.reccConfigured}
+                reccStatus={reccStatus}
+                reccEnvOverride={Boolean(
+                  process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim(),
+                )}
+                onManageRecc={openReccPrompt}
+                onSignOutRecc={clearReccConfig}
               />
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
@@ -1994,7 +2063,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
                 ? "none"
                 : "flex"
             }
