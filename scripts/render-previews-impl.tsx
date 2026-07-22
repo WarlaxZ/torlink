@@ -130,6 +130,7 @@ function makeStore(
     startDebridDownload: noop,
     streamResult: noop,
     debridConfigured: false,
+    reccConfigured: false,
     streamActive: false,
     rdStatus: null,
     copyLink: noop,

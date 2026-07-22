@@ -33,17 +33,21 @@ export const RAIL_WIDTH =
   GUTTER + Math.max(...NAV.map((n) => n.label.length + (BADGED(n.key) ? BADGE_W : 0)));
 
 export function Sidebar() {
-  const { section, setSection, region, setRegion, queue } = useStore();
+  const { section, setSection, region, setRegion, queue, reccConfigured } = useStore();
   const focused = region === "sidebar";
-  const idx = Math.max(0, NAV.findIndex((n) => n.key === section));
+  // Hide the For You entry entirely until reccd is configured.
+  const library = reccConfigured ? LIBRARY : LIBRARY.filter((n) => n.key !== "forYou");
+  const groups: NavItem[][] = [FILTERS, library];
+  const nav = groups.flat();
+  const idx = Math.max(0, nav.findIndex((n) => n.key === section));
   useQueueItems(queue);
   const active = queue.activeCount;
   const seeding = queue.seedingCount;
 
   useInput(
     (input, key) => {
-      if (key.upArrow || input === "k") setSection(NAV[wrapStep(idx, -1, NAV.length)]!.key);
-      else if (key.downArrow || input === "j") setSection(NAV[wrapStep(idx, 1, NAV.length)]!.key);
+      if (key.upArrow || input === "k") setSection(nav[wrapStep(idx, -1, nav.length)]!.key);
+      else if (key.downArrow || input === "j") setSection(nav[wrapStep(idx, 1, nav.length)]!.key);
       else if (key.return) setRegion("content");
     },
     { isActive: focused },
@@ -51,7 +55,7 @@ export function Sidebar() {
 
   return (
     <Box flexDirection="column" width={RAIL_WIDTH} marginRight={1}>
-      {GROUPS.map((items, gi) => (
+      {groups.map((items, gi) => (
         <Box key={gi} flexDirection="column" marginTop={gi > 0 ? 1 : 0}>
           {items.map((item) => {
             const selected = item.key === section;

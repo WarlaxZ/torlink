@@ -1367,6 +1367,7 @@ export function App({
       startDebridDownload,
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
+      reccConfigured: Boolean(resolveReccConfig(config).reccUrl),
       streamActive: activeStream !== null,
       rdStatus,
       copyLink,

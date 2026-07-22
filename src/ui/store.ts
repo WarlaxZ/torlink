@@ -138,6 +138,8 @@ export interface Store {
   }) => void;
   // True when an RD token is available (config or env var).
   debridConfigured: boolean;
+  // True when a recc (recommendation engine) URL is configured.
+  reccConfigured: boolean;
   // True while a torrent-stream session is live. While true, "x" is reserved
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.
