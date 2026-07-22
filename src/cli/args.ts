@@ -28,6 +28,7 @@ export type CliCommand =
   | { kind: "attach" }
   | { kind: "update"; force?: boolean }
   | { kind: "import-netflix"; file: string }
+  | { kind: "import-trakt" }
   | { kind: "invalid"; arg: string };
 
 // Valueless boolean flags for the headless subcommands (everything else is a
@@ -84,6 +85,7 @@ export function parseCliArgs(argv: string[]): CliCommand {
     if (!file) return { kind: "invalid", arg: "import-netflix (missing file)" };
     return { kind: "import-netflix", file };
   }
+  if (a === "import-trakt") return { kind: "import-trakt" };
   if (a === "watch") {
     const { bools, rest: r0 } = splitBooleans(args.slice(1));
     const { flags, rest } = readFlags(r0);
@@ -143,6 +145,7 @@ usage
   torlnk update [--force]     update to the latest release and restart any daemon
                               (--force rebuilds/restarts even if already current)
   torlnk import-netflix <csv>  send a Netflix "viewing activity" CSV to reccd
+  torlnk import-trakt          connect Trakt and import your history into reccd
   torlnk --version            print the version
 
 once open: type to search every source at once, enter to run, arrows to move,

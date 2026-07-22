@@ -52,6 +52,9 @@ describe("parseCliArgs", () => {
       arg: "import-netflix (missing file)",
     });
   });
+  it("parses import-trakt", () => {
+    expect(parseCliArgs(["import-trakt"])).toEqual({ kind: "import-trakt" });
+  });
   it("parses watch with a directory", () => {
     expect(parseCliArgs(["watch", "/srv/blackhole"])).toEqual({
       kind: "watch",
