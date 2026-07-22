@@ -10,12 +10,13 @@ import type { SourceId } from "../../sources/types";
 interface SourcesPromptProps {
   width: number;
   disabled: SourceId[];
+  adultEnabled: boolean;
   onToggle: (id: SourceId) => void;
   onCancel: () => void;
 }
 
-export function SourcesPrompt({ width, disabled, onToggle, onCancel }: SourcesPromptProps) {
-  const groups = sourcesByGroup();
+export function SourcesPrompt({ width, disabled, adultEnabled, onToggle, onCancel }: SourcesPromptProps) {
+  const groups = sourcesByGroup(adultEnabled);
   const flat = groups.flatMap((g) => g.sources);
   const [cursor, setCursor] = useState(0);
   const clamped = Math.min(cursor, Math.max(0, flat.length - 1));

@@ -208,10 +208,14 @@ export function Results() {
     toggleSavedSearch,
     toggleFavourite,
     isFavourited,
+    adultEnabled,
   } = useStore();
 
-  const search = useConcurrentSearch(query, disabledSources);
-  const enabled = useMemo(() => enabledSources(disabledSources), [disabledSources]);
+  const search = useConcurrentSearch(query, disabledSources, adultEnabled);
+  const enabled = useMemo(
+    () => enabledSources(disabledSources, adultEnabled),
+    [disabledSources, adultEnabled],
+  );
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);

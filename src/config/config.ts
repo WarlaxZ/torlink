@@ -35,6 +35,9 @@ export interface Config {
   // Set once the user has acknowledged that streaming via torrent exposes their
   // IP to the swarm (the no-Real-Debrid path). Absent/false = not yet warned.
   torrentStreamAck?: boolean;
+  // Opt-in adult ("Porn") category. Absent/false = OFF: the Porn tab and its
+  // sources are hidden and never searched. A TORLINK_ADULT env var overrides it.
+  adultContent?: boolean;
   // Remembered UI preferences, so torlink reopens the way you left it. Both are
   // stored as opaque strings validated by the UI layer (parseSort/parseCategory)
   // so a hand-edited or stale value degrades gracefully to the default.
@@ -110,6 +113,18 @@ export function resolveDnsServers(config: Config): string[] {
   const env = process.env[DNS_ENV];
   const raw = env !== undefined ? env : (config.dnsServers ?? []).join(",");
   return parseDnsServers(raw);
+}
+
+const ADULT_ENV = "TORLINK_ADULT";
+
+// Whether the adult ("Porn") category is enabled. The env var wins over the
+// persisted config (matching the other resolve* helpers) so it can be turned on
+// or off per-session without touching config.json. Anything other than a
+// truthy token (1/true/yes/on) in the env var forces it off.
+export function resolveAdultContent(config: Config): boolean {
+  const env = process.env[ADULT_ENV];
+  if (env !== undefined) return /^(1|true|yes|on)$/i.test(env.trim());
+  return config.adultContent === true;
 }
 
 const RECC_URL_ENV = "TORLINK_RECC_URL";

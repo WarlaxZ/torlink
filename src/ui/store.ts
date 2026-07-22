@@ -9,7 +9,7 @@ import type { Sort } from "./sort";
 
 export type View = "splash" | "browser";
 
-export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books";
+export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books" | "porn";
 
 export type Section =
   | Category
@@ -41,6 +41,8 @@ export const CATEGORIES: { key: Category; label: string; group?: SourceGroup }[]
   { key: "anime", label: "Anime", group: "Anime" },
   { key: "music", label: "Music", group: "Music" },
   { key: "books", label: "Books", group: "Books" },
+  // Adult category; only rendered when adult content is enabled (see Sidebar).
+  { key: "porn", label: "Porn", group: "Porn" },
 ];
 
 // Parse a persisted category preference, falling back to "all" for anything
@@ -140,6 +142,9 @@ export interface Store {
   debridConfigured: boolean;
   // True when a recc (recommendation engine) URL is configured.
   reccConfigured: boolean;
+  // True when the adult ("Porn") category is enabled (config or TORLINK_ADULT).
+  // Gates the Porn tab, its sources, and the Porn group in the sources panel.
+  adultEnabled: boolean;
   // True while a torrent-stream session is live. While true, "x" is reserved
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.

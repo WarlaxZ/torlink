@@ -157,6 +157,12 @@ Games are the only category that intentionally distributes executable software, 
   <img src="preview/sources.svg" alt="torlink's source picker: toggle any source on or off, grouped by category" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
+### Adult content (optional, off by default)
+
+torlink ships with an optional **Porn** category that is **off by default** — its tab, sources, and results stay completely hidden until you turn it on. Press **`Shift+X`** to toggle it; when enabled you get a **Porn** tab (backed by The Pirate Bay and 1337x) and adult results also appear under **All**.
+
+Prefer to control it without touching the app? Set `TORLINK_ADULT=1` before launching to force it on, or `TORLINK_ADULT=0` to force it off (the env var takes precedence over the in-app setting). It can also be persisted by setting `"adultContent": true` in your config file.
+
 ### Blocked by your network?
 
 Some networks (ISPs, work Wi-Fi, some routers) quietly block torrent sites at the DNS level, so every source looks offline. If that's happening, point torlink's own lookups at a public resolver over DNS-over-HTTPS — it doesn't touch the rest of your system.

@@ -6,6 +6,7 @@ import {
   resolveMediaPlayer,
   resolveDnsServers,
   resolveReccConfig,
+  resolveAdultContent,
 } from "./config";
 
 describe("config realDebridToken", () => {
@@ -125,6 +126,39 @@ describe("config torrentStreamAck", () => {
     });
     const cfg = await loadConfig();
     expect(cfg.torrentStreamAck).toBe(true);
+  });
+});
+
+describe("resolveAdultContent", () => {
+  const KEY = "TORLINK_ADULT";
+  afterEach(() => {
+    delete process.env[KEY];
+  });
+
+  it("defaults to OFF and honours the persisted flag", () => {
+    delete process.env[KEY];
+    expect(resolveAdultContent({ downloadDir: "/d", trackers: [] })).toBe(false);
+    expect(resolveAdultContent({ downloadDir: "/d", trackers: [], adultContent: false })).toBe(false);
+    expect(resolveAdultContent({ downloadDir: "/d", trackers: [], adultContent: true })).toBe(true);
+  });
+
+  it("lets the env var override the config in both directions", () => {
+    // Env forces ON even when config is off/unset.
+    for (const truthy of ["1", "true", "YES", "on"]) {
+      process.env[KEY] = truthy;
+      expect(resolveAdultContent({ downloadDir: "/d", trackers: [] })).toBe(true);
+    }
+    // Env forces OFF even when config is on.
+    for (const falsy of ["0", "false", "no", ""]) {
+      process.env[KEY] = falsy;
+      expect(resolveAdultContent({ downloadDir: "/d", trackers: [], adultContent: true })).toBe(false);
+    }
+  });
+
+  it("round-trips adultContent across a save/load cycle", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [], adultContent: true });
+    const cfg = await loadConfig();
+    expect(cfg.adultContent).toBe(true);
   });
 });
 

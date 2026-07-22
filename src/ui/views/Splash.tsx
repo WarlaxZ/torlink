@@ -7,16 +7,18 @@ import { useStore } from "../store";
 import { sourcesByGroup } from "../../sources/registry";
 import { COLOR, ICON } from "../theme";
 
-const CATEGORIES = sourcesByGroup()
-  .map((g) => g.group.toLowerCase())
-  .join(`  ${ICON.dot}  `);
+const categoryLine = (adultEnabled: boolean): string =>
+  sourcesByGroup(adultEnabled)
+    .map((g) => g.group.toLowerCase())
+    .join(`  ${ICON.dot}  `);
 
 export function Splash({
   updateVersion,
   recovered,
 }: { updateVersion?: string | null; recovered?: boolean } = {}) {
-  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion } = useStore();
+  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion, adultEnabled } = useStore();
   const { isRawModeSupported } = useStdin();
+  const categories = categoryLine(adultEnabled);
 
   useInput(
     (input, key) => {
@@ -59,7 +61,7 @@ export function Splash({
         <Text color={COLOR.text}>A curated, terminal-native torrent downloader.</Text>
       </Box>
       <Box>
-        <Text dimColor>{CATEGORIES}</Text>
+        <Text dimColor>{categories}</Text>
       </Box>
       <Box marginTop={1}>
         {debridConfigured ? (

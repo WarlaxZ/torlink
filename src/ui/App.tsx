@@ -8,6 +8,7 @@ import {
   resolveMediaPlayer,
   resolveDnsServers,
   resolveReccConfig,
+  resolveAdultContent,
   type Config,
   type FavouriteItem,
 } from "../config/config";
@@ -320,7 +321,9 @@ export function App({
         setSection("downloads");
         setRegion("content");
       } else {
-        setSection(parseCategory(cfg.category));
+        // Don't restore into the hidden Porn tab when adult content is off.
+        const restored = parseCategory(cfg.category);
+        setSection(restored === "porn" && !resolveAdultContent(cfg) ? "all" : restored);
       }
     })();
     return () => {
@@ -1533,6 +1536,7 @@ export function App({
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
       reccConfigured: Boolean(resolveReccConfig(config).reccUrl),
+      adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
       rdStatus,
       copyLink,
@@ -1681,6 +1685,20 @@ export function App({
       if (input === "V") {
         setShowHelp(false);
         setEditingVpn(true);
+        return;
+      }
+      if (input === "X") {
+        setShowHelp(false);
+        // The env var wins over config (resolveAdultContent), so flipping the
+        // stored preference can't override it — say so rather than silently
+        // no-op'ing.
+        if (process.env.TORLINK_ADULT !== undefined) {
+          setNotice("Adult content is controlled by the TORLINK_ADULT env var.");
+          return;
+        }
+        const enabled = config?.adultContent !== true;
+        persistConfig({ adultContent: enabled });
+        setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
         return;
       }
       if (input === "m") {
@@ -1875,6 +1893,7 @@ export function App({
             <SourcesPrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
               disabled={(store.config.disabledSources ?? []) as SourceId[]}
+              adultEnabled={store.adultEnabled}
               onToggle={toggleSource}
               onCancel={() => setEditingSources(false)}
             />

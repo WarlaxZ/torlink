@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseUploadDate } from "./x1337";
+import { parseUploadDate, x1337Porn } from "./x1337";
 
 const detail = (span: string) =>
   `<ul class="list"><li><strong>Date uploaded</strong><span>${span}</span> </li></ul>`;
@@ -19,5 +19,13 @@ describe("parseUploadDate", () => {
   it("returns undefined when the field is missing or unparseable", () => {
     expect(parseUploadDate("<div>no date here</div>")).toBeUndefined();
     expect(parseUploadDate(detail("sometime"))).toBeUndefined();
+  });
+});
+
+describe("x1337Porn", () => {
+  it("is an adult source in the Porn group", () => {
+    expect(x1337Porn.id).toBe("x1337-porn");
+    expect(x1337Porn.groups).toContain("Porn");
+    expect(x1337Porn.adult).toBe(true);
   });
 });

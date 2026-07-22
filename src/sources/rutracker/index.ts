@@ -30,7 +30,8 @@ interface Row {
   added?: number;
 }
 
-type RutrackerGroup = SourceGroup;
+// RuTracker never feeds the adult category, so drop "Porn" from its group set.
+type RutrackerGroup = Exclude<SourceGroup, "Porn">;
 
 const SECTION_GROUP: Record<string, RutrackerGroup> = {
   "Сериалы": "TV",
