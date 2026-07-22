@@ -11,7 +11,10 @@ const CATEGORIES = sourcesByGroup()
   .map((g) => g.group.toLowerCase())
   .join(`  ${ICON.dot}  `);
 
-export function Splash({ updateVersion }: { updateVersion?: string | null } = {}) {
+export function Splash({
+  updateVersion,
+  recovered,
+}: { updateVersion?: string | null; recovered?: boolean } = {}) {
   const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion } = useStore();
   const { isRawModeSupported } = useStdin();
 
@@ -42,6 +45,9 @@ export function Splash({ updateVersion }: { updateVersion?: string | null } = {}
       alignItems="center"
     >
       <UpdateBanner latest={updateVersion ?? null} />
+      {recovered ? (
+        <Text dimColor>{`↻ recovered from a crashed start · downloads paused`}</Text>
+      ) : null}
       {showLogo ? (
         <Logo />
       ) : (
