@@ -138,12 +138,17 @@ describe("applyBundleUpdate", () => {
     const { deps, log } = applyDeps();
     const ok = await applyBundleUpdate(release, "/opt/torlnk-runtime", deps);
     expect(ok).toBe(true);
+    // Paths are built with path.join, so the separator is platform-specific
+    // (backslash on Windows). Build the expectations the same way rather than
+    // hard-coding forward slashes.
+    const archive = path.join("/tmp/torlnk-upd", "torlnk-linux-x64.tar.gz");
+    const stage = path.join("/tmp/torlnk-upd", "stage");
     expect(log).toEqual([
       "download https://d/asset.tar.gz",
-      "write /tmp/torlnk-upd/torlnk-linux-x64.tar.gz",
+      `write ${archive}`,
       "readText https://d/SHA256SUMS",
       "verify",
-      "extract /tmp/torlnk-upd/torlnk-linux-x64.tar.gz -> /tmp/torlnk-upd/stage",
+      `extract ${archive} -> ${stage}`,
       "swap",
     ]);
   });
