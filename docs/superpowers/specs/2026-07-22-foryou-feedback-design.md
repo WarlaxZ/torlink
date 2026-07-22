@@ -9,7 +9,9 @@ Add the ability to give reccd feedback on a "For You" recommendation directly
 from the pick list: mark it **watched**, **liked**, or **disliked**. Choosing an
 action posts the corresponding event to reccd and dismisses the pick from the
 list, closing the loop so acting on suggestions improves future recommendations.
-Refresh already exists (the `r` key re-fetches) and is unchanged.
+Also add **add to watchlist** (`w`, matching the results view) so a pick can be
+saved to watch later. Refresh already exists (the `r` key re-fetches) and is
+unchanged.
 
 ## Background
 
@@ -29,6 +31,14 @@ Refresh already exists (the `r` key re-fetches) and is unchanged.
   global `useInput` guards it with `if (ratePrompt) return` (~1638) so the modal
   owns keyboard input while open.
 - Today no `watched`/`liked`/`disliked` event is ever emitted from For You.
+- The "watchlist" (sidebar section) is the app's saved-searches list:
+  `config.savedSearches` — an array of plain query strings, not magnets. It's
+  managed by the store action `toggleSavedSearch(query: string)` (`App.tsx:475`),
+  which dedups (`src/ui/savedSearches.ts`), caps at 50, persists via `saveConfig`,
+  and shows a "Watchlist updated." notice. It's bound to `w` in the results view
+  (`Results.tsx:347`) and Enter on a watchlist row re-runs the query. So "add a
+  pick to the watchlist" = `toggleSavedSearch(pick.title)`; no magnet needed. `w`
+  is currently unbound on For You.
 
 ## Goals
 
@@ -61,6 +71,13 @@ Refresh already exists (the `r` key re-fetches) and is unchanged.
   3. closes the prompt.
 - `esc`/skip closes the prompt and leaves the pick in place.
 
+New key **`w`** on For You toggles the highlighted pick into the watchlist via
+`toggleSavedSearch(item.title)` (same title string that Enter searches). This is
+a direct action (no modal): it shows the existing "Watchlist updated." notice and
+**does not dismiss** the pick — you're saving it to watch later, so it stays.
+Pressing `w` again toggles it back off (the action is a toggle). No reccd event
+is posted (watchlist is local config, not a recommendation signal).
+
 ### Component changes
 
 **`RatePrompt`** — add an optional `onWatched?: () => void` prop. When provided,
@@ -75,10 +92,13 @@ with that id from `items`. Selection lives in ForYou, so ForYou re-clamps
 `selected` after the list shrinks (e.g. via an effect keyed on `items.length`,
 mirroring how it already resets selection to 0 on type/explore changes).
 
-**`ForYou`** — add a new prop `onRatePick: (name: string, onRated: () => void) => void`.
-The `useInput` handler gains `else if (input === "f")` that, for the selected
-item, calls `onRatePick(item.title, () => recs.dismiss(item.imdbId))` (no-op if
-there is no selected item).
+**`ForYou`** — add two new props: `onRatePick: (name: string, onRated: () => void) => void`
+and `toggleSavedSearch: (query: string) => void` (mirroring the existing
+`submitQuery` prop). The `useInput` handler gains:
+- `else if (input === "f")` — for the selected item, calls
+  `onRatePick(item.title, () => recs.dismiss(item.imdbId))` (no-op if no selection).
+- `else if (input === "w")` — for the selected item, calls
+  `toggleSavedSearch(item.title)` (no-op if no selection). No dismissal.
 
 ForYou's own `useInput` must be inert while the rate prompt is open — otherwise
 keys like `r`/`t`/`e` would act on the list underneath the modal. ForYou's
@@ -99,6 +119,8 @@ to true.
 - The `<ForYou>` `active` prop changes from
   `store.region === "content" && section === "forYou"` to that same expression
   `&& !ratePrompt`, so ForYou's handler is inert while the prompt is open.
+- `<ForYou>` also receives `toggleSavedSearch={store.toggleSavedSearch}` (already
+  on the store).
 - The `<RatePrompt>` render passes `onWatched` only when `showWatched` is true.
   Each of onLike/onDislike/onWatched: post the matching event (as today for
   like/dislike), then call `ratePrompt.onRated?.()`, then `setRatePrompt(null)`.
@@ -121,8 +143,12 @@ ForYou: press `f` on pick P
 
 ## Keymap / Footer
 
-- `keymap.ts` For You `?` group (lines ~59-69): add `{ keys: "f", label: "Rate — watched / like / dislike" }`.
-- `keymap.ts` footer hints for `forYou` (lines ~141-152): add `{ keys: "f", label: "Rate" }`.
+- `keymap.ts` For You `?` group (lines ~59-69): add
+  `{ keys: "f", label: "Rate — watched / like / dislike" }` and
+  `{ keys: "w", label: "Add to watchlist" }`.
+- `keymap.ts` footer hints for `forYou` (lines ~141-152): add
+  `{ keys: "f", label: "Rate" }` and `{ keys: "w", label: "Watch" }`
+  (matching the results-view footer label for `w`).
 
 ## Error Handling
 
@@ -137,6 +163,9 @@ configured (and harmlessly no-ops otherwise).
 
 - `ForYou.test.tsx`: pressing `f` on a pick invokes `onRatePick` with the pick's
   title; the provided `onRated` closure dismisses the pick from the list.
+- `ForYou.test.tsx`: pressing `w` on a pick invokes `toggleSavedSearch` with the
+  pick's title and does NOT dismiss the pick. (The test harness stub
+  `src/ui/testHarness.ts` already provides a `toggleSavedSearch` noop to spy on.)
 - `RatePrompt.test.tsx` (new or extended): with `onWatched` provided, the `w`
   affordance renders and `w` fires `onWatched`; without it, only like/dislike
   render (post-stream behavior preserved).
