@@ -1494,7 +1494,7 @@ export function App({
         openDnsPrompt();
         return;
       }
-      if (input === "t") {
+      if (input === "t" && !(region === "content" && section === "forYou")) {
         setShowHelp(false);
         setEditingTrackers(true);
         return;
