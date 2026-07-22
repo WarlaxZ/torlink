@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { chunkNetflixCsv } from "./netflixImport.js";
+import { describe, it, expect, vi } from "vitest";
+import { chunkNetflixCsv, formatImportSummary, uploadNetflixCsv } from "./netflixImport.js";
+import type { FetchImpl } from "../util/net";
 
 const HEADER = "Title,Date";
 
@@ -23,9 +24,14 @@ describe("chunkNetflixCsv", () => {
   it("splits into multiple chunks that each re-include the header, honoring the byte budget", () => {
     const rows = ["A,1/1/20", "B,2/2/20", "C,3/3/20", "D,4/4/20"];
     const csv = `${HEADER}\n${rows.join("\n")}`;
-    const chunks = chunkNetflixCsv(csv, 30);
+    const budget = 30;
+    const chunks = chunkNetflixCsv(csv, budget);
     expect(chunks.length).toBeGreaterThan(1);
-    for (const c of chunks) expect(c.startsWith(`${HEADER}\n`)).toBe(true);
+    for (const c of chunks) {
+      expect(c.startsWith(`${HEADER}\n`)).toBe(true);
+      // Every chunk (no oversized rows here) stays within the byte budget.
+      expect(Buffer.byteLength(c, "utf8")).toBeLessThanOrEqual(budget);
+    }
     const seen = chunks.flatMap((c) => c.split("\n").slice(1));
     expect(seen.sort()).toEqual([...rows].sort());
   });
@@ -34,7 +40,8 @@ describe("chunkNetflixCsv", () => {
     const big = `${"X".repeat(100)},1/1/20`;
     const csv = `${HEADER}\nsmall,1/1/20\n${big}`;
     const chunks = chunkNetflixCsv(csv, 30);
-    expect(chunks.some((c) => c.includes(big))).toBe(true);
+    // The oversized row lands in a chunk by itself (header + that one row only).
+    expect(chunks).toContain(`${HEADER}\n${big}`);
   });
 
   it("tolerates CRLF line endings", () => {
@@ -43,8 +50,6 @@ describe("chunkNetflixCsv", () => {
   });
 });
 
-import { formatImportSummary } from "./netflixImport.js";
-
 describe("formatImportSummary", () => {
   it("renders imported, matched and unmatched counts", () => {
     expect(
@@ -52,10 +57,6 @@ describe("formatImportSummary", () => {
     ).toBe("Imported 342 · 128 matched · 214 unmatched");
   });
 });
-
-import { vi } from "vitest";
-import { uploadNetflixCsv } from "./netflixImport.js";
-import type { FetchImpl } from "../util/net";
 
 function jsonRes(status: number, body: unknown = {}) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -101,6 +102,19 @@ describe("uploadNetflixCsv", () => {
       expect(outcome.result.chunks).toBe(2);
     }
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("coerces stringy numeric fields and ignores non-string titles from the response", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonRes(202, { imported: "2", resolved: "1", unresolved: "1", unresolvedTitles: ["Heat", 42] }));
+    const outcome = await uploadNetflixCsv(CONFIG, CSV, { fetchImpl: fetchImpl as unknown as FetchImpl });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.result.imported).toBe(2);
+      expect(outcome.result.resolved).toBe(1);
+      expect(outcome.result.unresolvedTitles).toEqual(["Heat"]);
+    }
   });
 
   it("reports progress per chunk", async () => {

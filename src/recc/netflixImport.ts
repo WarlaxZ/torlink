@@ -48,6 +48,9 @@ export interface NetflixImportResult {
   chunks: number;
 }
 
+// `unresolved` is an event-level count (a title watched twice counts twice),
+// whereas `unresolvedTitles` is the distinct set — so the number here can
+// legitimately exceed the length of the titles list.
 export function formatImportSummary(r: NetflixImportResult): string {
   return `Imported ${r.imported} · ${r.resolved} matched · ${r.unresolved} unmatched`;
 }
@@ -73,8 +76,9 @@ interface RawImportResponse {
 // Uploads a Netflix CSV to reccd, one <1 MiB multipart chunk at a time. Unlike
 // the fire-and-forget postEvent, the user is waiting on this, so failures are
 // surfaced as a discriminated outcome (with any partial progress) rather than
-// swallowed. reccd's import is idempotent, so a chunk boundary that overlaps a
-// previous upload updates in place instead of double-counting.
+// swallowed. reccd's import is idempotent (keyed on source+user+raw_name), so
+// re-uploading the same file — or a failed run's earlier chunks — updates in
+// place instead of double-counting.
 export async function uploadNetflixCsv(
   config: ReccClientConfig,
   csvText: string,
@@ -116,11 +120,13 @@ export async function uploadNetflixCsv(
     if (!res.ok) return { ok: false, error: `import failed (HTTP ${res.status}, ${where})`, partial: agg };
 
     const body = (await res.json().catch(() => ({}))) as RawImportResponse;
-    agg.imported += body.imported ?? 0;
-    agg.resolved += body.resolved ?? 0;
-    agg.unresolved += body.unresolved ?? 0;
+    // Coerce defensively: the fields are typed but come off the wire untrusted,
+    // and `+=` on a stray string would silently corrupt the accumulator.
+    agg.imported += Number(body.imported) || 0;
+    agg.resolved += Number(body.resolved) || 0;
+    agg.unresolved += Number(body.unresolved) || 0;
     for (const t of body.unresolvedTitles ?? []) {
-      if (!seen.has(t)) {
+      if (typeof t === "string" && !seen.has(t)) {
         seen.add(t);
         agg.unresolvedTitles.push(t);
       }
