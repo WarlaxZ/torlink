@@ -12,7 +12,7 @@ import {
   type FavouriteItem,
 } from "../config/config";
 import { setDnsServers } from "../util/dns";
-import { normalizeDownloadDir } from "../config/folder";
+import { expandHome, normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
@@ -725,13 +725,16 @@ export function App({
       if (!config) return;
       const gen = netflixImportGen.current;
       const isCurrent = (): boolean => netflixImportGen.current === gen;
+      // Expand a leading ~ ourselves — we read the raw input field, so (unlike the
+      // shell-expanded CLI arg) a typed "~/Downloads/…" wouldn't otherwise resolve.
+      const filePath = expandHome(path);
       setNetflixImport({ phase: "running", progress: { done: 0, total: 0 } });
       void (async () => {
         let csvText: string;
         try {
-          csvText = await fs.readFile(path, "utf8");
+          csvText = await fs.readFile(filePath, "utf8");
         } catch {
-          if (isCurrent()) setNetflixImport({ phase: "done", error: `Couldn't read ${path}` });
+          if (isCurrent()) setNetflixImport({ phase: "done", error: `Couldn't read ${filePath}` });
           return;
         }
         const outcome = await uploadNetflixCsv(resolveReccConfig(config), csvText, {
