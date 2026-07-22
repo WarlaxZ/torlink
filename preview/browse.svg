@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="832" height="540" viewBox="0 0 832 540" style="max-width: 832px; width: 100%; height: auto;" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="782" viewBox="0 0 1024 782" style="max-width: 1024px; width: 100%; height: auto;" role="img">
   <rect width="100%" height="100%" rx="14" fill="#0a0810"/>
-  <rect x="0.5" y="0.5" width="831" height="539" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
-  <text x="416" y="23" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="13" fill="#8a8a8a">torlink</text>
+  <rect x="0.5" y="0.5" width="1023" height="781" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
+  <text x="512" y="23" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="13" fill="#8a8a8a">torlink</text>
   <g font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="16" fill="#ddd8ea">
     <text x="99.2" y="84" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#87ff87" font-weight="600">𐓏</text>
     <rect x="51.2" y="90" width="9.6" height="11" fill="#ffffff"/>
@@ -52,95 +52,398 @@
     <rect x="377.6" y="112" width="9.6" height="22" fill="#875faf"/>
     <rect x="387.2" y="123" width="9.6" height="11" fill="#875faf"/>
     <rect x="396.8" y="112" width="9.6" height="11" fill="#5f5faf"/>
-    <text x="41.6" y="150" textLength="748.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">──────────────────────────────────────────────────────────────────────────────</text>
-    <rect x="41.6" y="178" width="4.8" height="22" fill="#878787"/>
-    <text x="60.8" y="194" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">All</text>
+    <text x="41.6" y="150" textLength="940.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">──────────────────────────────────────────────────────────────────────────────────────────────────</text>
+    <text x="60.8" y="194" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">All</text>
     <text x="204.8" y="194" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">╭─</text>
     <text x="233.6" y="194" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787" font-weight="600">Search</text>
-    <text x="300.8" y="194" textLength="489.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">──────────────────────────────────────────────────╮</text>
+    <text x="300.8" y="194" textLength="681.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">──────────────────────────────────────────────────────────────────────╮</text>
     <text x="60.8" y="216" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Games</text>
     <rect x="208.9" y="200" width="1.4" height="22" fill="#878787"/>
     <text x="224" y="216" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">❯</text>
-    <text x="243.2" y="216" textLength="288" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Search or paste a magnet link…</text>
-    <rect x="784.9" y="200" width="1.4" height="22" fill="#878787"/>
-    <text x="60.8" y="238" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Movies</text>
-    <text x="204.8" y="238" textLength="585.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">╰───────────────────────────────────────────────────────────╯</text>
+    <text x="243.2" y="216" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">oppenheimer</text>
+    <rect x="976.9" y="200" width="1.4" height="22" fill="#878787"/>
+    <rect x="41.6" y="222" width="4.8" height="22" fill="#878787"/>
+    <text x="60.8" y="238" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">Movies</text>
+    <text x="204.8" y="238" textLength="777.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#878787">╰───────────────────────────────────────────────────────────────────────────────╯</text>
     <text x="60.8" y="260" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">TV</text>
     <text x="60.8" y="282" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Anime</text>
     <text x="204.8" y="282" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╭─</text>
-    <text x="233.6" y="282" textLength="96" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Latest (5)</text>
-    <text x="339.2" y="282" textLength="451.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">──────────────────────────────────────────────╮</text>
+    <text x="233.6" y="282" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Results (7)</text>
+    <text x="348.8" y="282" textLength="316.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">────────────────────────────────╮</text>
+    <text x="675.2" y="282" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╭─</text>
+    <text x="704" y="282" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Preview</text>
+    <text x="780.8" y="282" textLength="201.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">────────────────────╮</text>
     <text x="60.8" y="304" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Music</text>
     <rect x="208.9" y="288" width="1.4" height="22" fill="#afafff"/>
-    <text x="224" y="304" textLength="240" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">newest across all sources</text>
-    <rect x="784.9" y="288" width="1.4" height="22" fill="#afafff"/>
+    <text x="224" y="304" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">7 results</text>
+    <rect x="660.1" y="288" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="288" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="288" width="9.6" height="11" fill="#910505"/>
+    <rect x="704" y="288" width="9.6" height="11" fill="#a20302"/>
+    <rect x="713.6" y="288" width="9.6" height="11" fill="#b00503"/>
+    <rect x="723.2" y="288" width="9.6" height="11" fill="#cf0c03"/>
+    <rect x="732.8" y="288" width="9.6" height="11" fill="#e71703"/>
+    <rect x="742.4" y="288" width="9.6" height="11" fill="#90402b"/>
+    <rect x="752" y="288" width="9.6" height="11" fill="#95775c"/>
+    <rect x="761.6" y="288" width="9.6" height="11" fill="#584231"/>
+    <rect x="771.2" y="288" width="9.6" height="11" fill="#6f5743"/>
+    <rect x="780.8" y="288" width="9.6" height="11" fill="#99b2ac"/>
+    <rect x="790.4" y="288" width="9.6" height="11" fill="#41a5ac"/>
+    <rect x="800" y="288" width="9.6" height="11" fill="#33403e"/>
+    <rect x="809.6" y="288" width="9.6" height="11" fill="#3c3e39"/>
+    <rect x="819.2" y="288" width="9.6" height="11" fill="#5f4d3c"/>
+    <rect x="828.8" y="288" width="9.6" height="11" fill="#857564"/>
+    <rect x="838.4" y="288" width="9.6" height="11" fill="#659b9d"/>
+    <rect x="848" y="288" width="9.6" height="11" fill="#19869d"/>
+    <rect x="857.6" y="288" width="9.6" height="11" fill="#17859b"/>
+    <rect x="867.2" y="288" width="9.6" height="11" fill="#13748b"/>
+    <rect x="976.9" y="288" width="1.4" height="22" fill="#afafff"/>
     <text x="60.8" y="326" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Books</text>
     <rect x="208.9" y="310" width="1.4" height="22" fill="#afafff"/>
-    <rect x="784.9" y="310" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="310" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="310" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="310" width="9.6" height="11" fill="#96170c"/>
+    <rect x="704" y="310" width="9.6" height="11" fill="#a11609"/>
+    <rect x="713.6" y="310" width="9.6" height="11" fill="#a61309"/>
+    <rect x="723.2" y="310" width="9.6" height="11" fill="#ce1606"/>
+    <rect x="732.8" y="310" width="9.6" height="11" fill="#f24109"/>
+    <rect x="742.4" y="310" width="9.6" height="11" fill="#b16530"/>
+    <rect x="752" y="310" width="9.6" height="11" fill="#ab8264"/>
+    <rect x="761.6" y="310" width="9.6" height="11" fill="#6a5140"/>
+    <rect x="771.2" y="310" width="9.6" height="11" fill="#735b4d"/>
+    <rect x="780.8" y="310" width="9.6" height="11" fill="#a4c6bd"/>
+    <rect x="790.4" y="310" width="9.6" height="11" fill="#61cfc0"/>
+    <rect x="800" y="310" width="9.6" height="11" fill="#413126"/>
+    <rect x="809.6" y="310" width="9.6" height="11" fill="#917660"/>
+    <rect x="819.2" y="310" width="9.6" height="11" fill="#7d624d"/>
+    <rect x="828.8" y="310" width="9.6" height="11" fill="#5a483a"/>
+    <rect x="838.4" y="310" width="9.6" height="11" fill="#7fe1de"/>
+    <rect x="848" y="310" width="9.6" height="11" fill="#25c5d1"/>
+    <rect x="857.6" y="310" width="9.6" height="11" fill="#1aa6bf"/>
+    <rect x="867.2" y="310" width="9.6" height="11" fill="#1ba6c3"/>
+    <rect x="976.9" y="310" width="1.4" height="22" fill="#afafff"/>
     <rect x="208.9" y="332" width="1.4" height="22" fill="#afafff"/>
     <text x="252.8" y="348" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">#</text>
     <text x="272" y="348" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Name</text>
-    <text x="588.8" y="348" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Size</text>
-    <text x="646.4" y="348" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Seed:Lch</text>
-    <text x="742.4" y="348" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Src</text>
-    <rect x="784.9" y="332" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="370" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watchlist</text>
+    <text x="521.6" y="348" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Seed:Lch</text>
+    <text x="617.6" y="348" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55" font-weight="600">Src</text>
+    <rect x="660.1" y="332" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="332" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="332" width="9.6" height="11" fill="#95301f"/>
+    <rect x="704" y="332" width="9.6" height="11" fill="#ca461a"/>
+    <rect x="713.6" y="332" width="9.6" height="11" fill="#c53914"/>
+    <rect x="723.2" y="332" width="9.6" height="11" fill="#c7260d"/>
+    <rect x="732.8" y="332" width="9.6" height="11" fill="#f24e0b"/>
+    <rect x="742.4" y="332" width="9.6" height="11" fill="#b25a21"/>
+    <rect x="752" y="332" width="9.6" height="11" fill="#4f3c30"/>
+    <rect x="761.6" y="332" width="9.6" height="11" fill="#272422"/>
+    <rect x="771.2" y="332" width="9.6" height="11" fill="#292827"/>
+    <rect x="780.8" y="332" width="9.6" height="11" fill="#191d23"/>
+    <rect x="790.4" y="332" width="9.6" height="11" fill="#343639"/>
+    <rect x="800" y="332" width="9.6" height="11" fill="#151311"/>
+    <rect x="809.6" y="332" width="9.6" height="11" fill="#32241c"/>
+    <rect x="819.2" y="332" width="9.6" height="11" fill="#504438"/>
+    <rect x="828.8" y="332" width="9.6" height="11" fill="#94ada3"/>
+    <rect x="838.4" y="332" width="9.6" height="11" fill="#71f2ef"/>
+    <rect x="848" y="332" width="9.6" height="11" fill="#22cbcd"/>
+    <rect x="857.6" y="332" width="9.6" height="11" fill="#11808f"/>
+    <rect x="867.2" y="332" width="9.6" height="11" fill="#117180"/>
+    <rect x="976.9" y="332" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="370" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">For You</text>
     <rect x="208.9" y="354" width="1.4" height="22" fill="#afafff"/>
     <text x="224" y="370" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">❯</text>
     <text x="252.8" y="370" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">1</text>
-    <text x="272" y="370" textLength="249.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Oppenheimer (2023) [1080p…</text>
-    <text x="560" y="370" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">1.96 GB</text>
-    <text x="656" y="370" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">1240:88</text>
-    <text x="742.4" y="370" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">YTS</text>
-    <rect x="784.9" y="354" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="392" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Library</text>
+    <text x="272" y="370" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Oppenheimer (2023) [108…</text>
+    <text x="531.2" y="370" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">1240:88</text>
+    <text x="617.6" y="370" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">YTS</text>
+    <rect x="660.1" y="354" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="354" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="354" width="9.6" height="11" fill="#942f1c"/>
+    <rect x="704" y="354" width="9.6" height="11" fill="#c74c1c"/>
+    <rect x="713.6" y="354" width="9.6" height="11" fill="#cc4618"/>
+    <rect x="723.2" y="354" width="9.6" height="11" fill="#991012"/>
+    <rect x="732.8" y="354" width="9.6" height="11" fill="#f06a13"/>
+    <rect x="742.4" y="354" width="9.6" height="11" fill="#613418"/>
+    <rect x="752" y="354" width="9.6" height="11" fill="#3f2e24"/>
+    <rect x="761.6" y="354" width="9.6" height="11" fill="#342821"/>
+    <rect x="771.2" y="354" width="9.6" height="11" fill="#1b191c"/>
+    <rect x="780.8" y="354" width="9.6" height="11" fill="#222329"/>
+    <rect x="790.4" y="354" width="9.6" height="11" fill="#191d23"/>
+    <rect x="800" y="354" width="9.6" height="11" fill="#151a1f"/>
+    <rect x="809.6" y="354" width="9.6" height="11" fill="#53727e"/>
+    <rect x="819.2" y="354" width="9.6" height="11" fill="#8ab6b8"/>
+    <rect x="828.8" y="354" width="9.6" height="11" fill="#a8e1c9"/>
+    <rect x="838.4" y="354" width="9.6" height="11" fill="#6eded4"/>
+    <rect x="848" y="354" width="9.6" height="11" fill="#24bdcb"/>
+    <rect x="857.6" y="354" width="9.6" height="11" fill="#189cb0"/>
+    <rect x="867.2" y="354" width="9.6" height="11" fill="#168898"/>
+    <rect x="976.9" y="354" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="392" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watchlist</text>
     <rect x="208.9" y="376" width="1.4" height="22" fill="#afafff"/>
     <text x="252.8" y="392" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">2</text>
-    <text x="272" y="392" textLength="249.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Dune: Part Two (2024) [21…</text>
-    <text x="560" y="392" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">7.82 GB</text>
-    <text x="665.6" y="392" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">910:41</text>
-    <text x="742.4" y="392" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af" fill-opacity="0.55">YTS</text>
-    <rect x="784.9" y="376" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="414" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Downloads</text>
+    <text x="272" y="392" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Dune: Part Two (2024) […</text>
+    <text x="540.8" y="392" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">910:41</text>
+    <text x="617.6" y="392" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#87d7d7" fill-opacity="0.55">TPB</text>
+    <rect x="660.1" y="376" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="376" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="376" width="9.6" height="11" fill="#84240f"/>
+    <rect x="704" y="376" width="9.6" height="11" fill="#d75e10"/>
+    <rect x="713.6" y="376" width="9.6" height="11" fill="#ef6912"/>
+    <rect x="723.2" y="376" width="9.6" height="11" fill="#bb4e27"/>
+    <rect x="732.8" y="376" width="9.6" height="11" fill="#5a2f25"/>
+    <rect x="742.4" y="376" width="9.6" height="11" fill="#241919"/>
+    <rect x="752" y="376" width="9.6" height="11" fill="#221716"/>
+    <rect x="761.6" y="376" width="9.6" height="11" fill="#2e2725"/>
+    <rect x="771.2" y="376" width="9.6" height="11" fill="#281f1d"/>
+    <rect x="780.8" y="376" width="9.6" height="11" fill="#40322d"/>
+    <rect x="790.4" y="376" width="9.6" height="11" fill="#64544a"/>
+    <rect x="800" y="376" width="9.6" height="11" fill="#5e5f5a"/>
+    <rect x="809.6" y="376" width="9.6" height="11" fill="#334851"/>
+    <rect x="819.2" y="376" width="9.6" height="11" fill="#416370"/>
+    <rect x="828.8" y="376" width="9.6" height="11" fill="#7ec6c7"/>
+    <rect x="838.4" y="376" width="9.6" height="11" fill="#42c5bf"/>
+    <rect x="848" y="376" width="9.6" height="11" fill="#1cb4c7"/>
+    <rect x="857.6" y="376" width="9.6" height="11" fill="#14a0be"/>
+    <rect x="867.2" y="376" width="9.6" height="11" fill="#128ba5"/>
+    <rect x="976.9" y="376" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="414" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Library</text>
     <rect x="208.9" y="398" width="1.4" height="22" fill="#afafff"/>
     <text x="252.8" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">3</text>
-    <text x="272" y="414" textLength="249.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Breaking Bad S05E14 1080p…</text>
-    <text x="560" y="414" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">1.49 GB</text>
-    <text x="665.6" y="414" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">540:31</text>
-    <text x="732.8" y="414" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#ffd787" fill-opacity="0.55">EZTV</text>
-    <rect x="784.9" y="398" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="436" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Seeding</text>
+    <text x="272" y="414" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Poor Things (2023) 1080…</text>
+    <text x="540.8" y="414" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">612:27</text>
+    <text x="608" y="414" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#ffaf87" fill-opacity="0.55">1337</text>
+    <rect x="660.1" y="398" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="398" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="398" width="9.6" height="11" fill="#811707"/>
+    <rect x="704" y="398" width="9.6" height="11" fill="#e56409"/>
+    <rect x="713.6" y="398" width="9.6" height="11" fill="#d7500d"/>
+    <rect x="723.2" y="398" width="9.6" height="11" fill="#7f3b21"/>
+    <rect x="732.8" y="398" width="9.6" height="11" fill="#281c1c"/>
+    <rect x="742.4" y="398" width="9.6" height="11" fill="#0d0f11"/>
+    <rect x="752" y="398" width="9.6" height="11" fill="#1f1e20"/>
+    <rect x="761.6" y="398" width="9.6" height="11" fill="#16191c"/>
+    <rect x="771.2" y="398" width="9.6" height="11" fill="#261e17"/>
+    <rect x="780.8" y="398" width="9.6" height="11" fill="#433325"/>
+    <rect x="790.4" y="398" width="9.6" height="11" fill="#56463d"/>
+    <rect x="800" y="398" width="9.6" height="11" fill="#1f282d"/>
+    <rect x="809.6" y="398" width="9.6" height="11" fill="#1d292f"/>
+    <rect x="819.2" y="398" width="9.6" height="11" fill="#11191f"/>
+    <rect x="828.8" y="398" width="9.6" height="11" fill="#356a74"/>
+    <rect x="838.4" y="398" width="9.6" height="11" fill="#208f9b"/>
+    <rect x="848" y="398" width="9.6" height="11" fill="#0e5c76"/>
+    <rect x="857.6" y="398" width="9.6" height="11" fill="#094c68"/>
+    <rect x="867.2" y="398" width="9.6" height="11" fill="#09697d"/>
+    <rect x="976.9" y="398" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="436" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Downloads</text>
     <rect x="208.9" y="420" width="1.4" height="22" fill="#afafff"/>
     <text x="252.8" y="436" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">4</text>
-    <text x="272" y="436" textLength="249.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">[Erai-raws] Jujutsu Kaise…</text>
-    <text x="560" y="436" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">1.21 GB</text>
-    <text x="665.6" y="436" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">320:12</text>
-    <text x="732.8" y="436" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7d7ff" fill-opacity="0.55">NYAA</text>
-    <rect x="784.9" y="420" width="1.4" height="22" fill="#afafff"/>
-    <text x="60.8" y="458" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Accounts</text>
+    <text x="272" y="436" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Killers of the Flower M…</text>
+    <text x="540.8" y="436" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">388:19</text>
+    <text x="617.6" y="436" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af" fill-opacity="0.55">YTS</text>
+    <rect x="660.1" y="420" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="420" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="420" width="9.6" height="11" fill="#a41106"/>
+    <rect x="704" y="420" width="9.6" height="11" fill="#d72606"/>
+    <rect x="713.6" y="420" width="9.6" height="11" fill="#dd3308"/>
+    <rect x="723.2" y="420" width="9.6" height="11" fill="#b8571c"/>
+    <rect x="732.8" y="420" width="9.6" height="11" fill="#221817"/>
+    <rect x="742.4" y="420" width="9.6" height="11" fill="#1b1919"/>
+    <rect x="752" y="420" width="9.6" height="11" fill="#b38162"/>
+    <rect x="761.6" y="420" width="9.6" height="11" fill="#33241c"/>
+    <rect x="771.2" y="420" width="9.6" height="11" fill="#0f0b0c"/>
+    <rect x="780.8" y="420" width="9.6" height="11" fill="#15181c"/>
+    <rect x="790.4" y="420" width="9.6" height="11" fill="#7a784b"/>
+    <rect x="800" y="420" width="9.6" height="11" fill="#3c3025"/>
+    <rect x="809.6" y="420" width="9.6" height="11" fill="#0e141a"/>
+    <rect x="819.2" y="420" width="9.6" height="11" fill="#18252d"/>
+    <rect x="828.8" y="420" width="9.6" height="11" fill="#29606c"/>
+    <rect x="838.4" y="420" width="9.6" height="11" fill="#107085"/>
+    <rect x="848" y="420" width="9.6" height="11" fill="#0d4155"/>
+    <rect x="857.6" y="420" width="9.6" height="11" fill="#0f4e67"/>
+    <rect x="867.2" y="420" width="9.6" height="11" fill="#249a98"/>
+    <rect x="976.9" y="420" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="458" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Seeding</text>
     <rect x="208.9" y="442" width="1.4" height="22" fill="#afafff"/>
     <text x="252.8" y="458" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">5</text>
-    <text x="272" y="458" textLength="192" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Frieren - 28 [1080p]</text>
-    <text x="560" y="458" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">1.30 GB</text>
-    <text x="713.6" y="458" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">-</text>
-    <text x="742.4" y="458" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff" fill-opacity="0.55">SUB</text>
-    <rect x="784.9" y="442" width="1.4" height="22" fill="#afafff"/>
-    <text x="204.8" y="480" textLength="585.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╰───────────────────────────────────────────────────────────╯</text>
-    <text x="41.6" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑↓←→</text>
-    <text x="89.6" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move</text>
-    <text x="156.8" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">d</text>
-    <text x="176" y="502" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download</text>
-    <text x="281.6" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">v</text>
-    <text x="300.8" y="502" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stream</text>
-    <text x="387.2" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">y</text>
-    <text x="406.4" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Copy</text>
-    <text x="473.6" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">s</text>
-    <text x="492.8" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sort</text>
-    <text x="560" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">z</text>
-    <text x="579.2" y="502" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Alive</text>
-    <text x="656" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">w</text>
-    <text x="675.2" y="502" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watch</text>
-    <text x="752" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">/</text>
-    <text x="771.2" y="502" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">S…</text>
+    <text x="272" y="458" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">The Holdovers (2023) 10…</text>
+    <text x="540.8" y="458" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">274:14</text>
+    <text x="608" y="458" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#ffaf87" fill-opacity="0.55">1337</text>
+    <rect x="660.1" y="442" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="442" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="442" width="9.6" height="11" fill="#732714"/>
+    <rect x="704" y="442" width="9.6" height="11" fill="#ec530e"/>
+    <rect x="713.6" y="442" width="9.6" height="11" fill="#f76016"/>
+    <rect x="723.2" y="442" width="9.6" height="11" fill="#b15220"/>
+    <rect x="732.8" y="442" width="9.6" height="11" fill="#0f0908"/>
+    <rect x="742.4" y="442" width="9.6" height="11" fill="#1c1615"/>
+    <rect x="752" y="442" width="9.6" height="11" fill="#614333"/>
+    <rect x="761.6" y="442" width="9.6" height="11" fill="#3d2920"/>
+    <rect x="771.2" y="442" width="9.6" height="11" fill="#1b1d2a"/>
+    <rect x="780.8" y="442" width="9.6" height="11" fill="#1b1f2c"/>
+    <rect x="790.4" y="442" width="9.6" height="11" fill="#33363e"/>
+    <rect x="800" y="442" width="9.6" height="11" fill="#3c3a36"/>
+    <rect x="809.6" y="442" width="9.6" height="11" fill="#504231"/>
+    <rect x="819.2" y="442" width="9.6" height="11" fill="#2a4048"/>
+    <rect x="828.8" y="442" width="9.6" height="11" fill="#193341"/>
+    <rect x="838.4" y="442" width="9.6" height="11" fill="#25758e"/>
+    <rect x="848" y="442" width="9.6" height="11" fill="#399fa9"/>
+    <rect x="857.6" y="442" width="9.6" height="11" fill="#13425d"/>
+    <rect x="867.2" y="442" width="9.6" height="11" fill="#071937"/>
+    <rect x="976.9" y="442" width="1.4" height="22" fill="#afafff"/>
+    <text x="60.8" y="480" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Accounts</text>
+    <rect x="208.9" y="464" width="1.4" height="22" fill="#afafff"/>
+    <text x="252.8" y="480" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">6</text>
+    <text x="272" y="480" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">The Zone of Interest (2…</text>
+    <text x="550.4" y="480" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">141:9</text>
+    <text x="617.6" y="480" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#87d7d7" fill-opacity="0.55">TPB</text>
+    <rect x="660.1" y="464" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="464" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="464" width="9.6" height="11" fill="#60161c"/>
+    <rect x="704" y="464" width="9.6" height="11" fill="#6e121c"/>
+    <rect x="713.6" y="464" width="9.6" height="11" fill="#7a121b"/>
+    <rect x="723.2" y="464" width="9.6" height="11" fill="#3d1f19"/>
+    <rect x="732.8" y="464" width="9.6" height="11" fill="#060303"/>
+    <rect x="742.4" y="464" width="9.6" height="11" fill="#453029"/>
+    <rect x="752" y="464" width="9.6" height="11" fill="#342823"/>
+    <rect x="761.6" y="464" width="9.6" height="11" fill="#3a3027"/>
+    <rect x="771.2" y="464" width="9.6" height="11" fill="#121211"/>
+    <rect x="780.8" y="464" width="9.6" height="11" fill="#1d2425"/>
+    <rect x="790.4" y="464" width="9.6" height="11" fill="#162122"/>
+    <rect x="800" y="464" width="9.6" height="11" fill="#191d13"/>
+    <rect x="809.6" y="464" width="9.6" height="11" fill="#0a0a07"/>
+    <rect x="819.2" y="464" width="9.6" height="11" fill="#231d15"/>
+    <rect x="828.8" y="464" width="9.6" height="11" fill="#645747"/>
+    <rect x="838.4" y="464" width="9.6" height="11" fill="#31858e"/>
+    <rect x="848" y="464" width="9.6" height="11" fill="#4fbbc3"/>
+    <rect x="857.6" y="464" width="9.6" height="11" fill="#164665"/>
+    <rect x="867.2" y="464" width="9.6" height="11" fill="#0c1f3c"/>
+    <rect x="976.9" y="464" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="486" width="1.4" height="22" fill="#afafff"/>
+    <text x="252.8" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">7</text>
+    <text x="272" y="502" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Anatomy of a Fall (2023…</text>
+    <text x="560" y="502" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af">96:5</text>
+    <text x="617.6" y="502" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afd7af" fill-opacity="0.55">YTS</text>
+    <rect x="660.1" y="486" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="486" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="486" width="9.6" height="11" fill="#643629"/>
+    <rect x="704" y="486" width="9.6" height="11" fill="#432c27"/>
+    <rect x="713.6" y="486" width="9.6" height="11" fill="#090607"/>
+    <rect x="723.2" y="486" width="9.6" height="11" fill="#3c130a"/>
+    <rect x="732.8" y="486" width="9.6" height="11" fill="#e32605"/>
+    <rect x="742.4" y="486" width="9.6" height="11" fill="#ef2204"/>
+    <rect x="752" y="486" width="9.6" height="11" fill="#a53008"/>
+    <rect x="761.6" y="486" width="9.6" height="11" fill="#a32108"/>
+    <rect x="771.2" y="486" width="9.6" height="11" fill="#790e06"/>
+    <rect x="780.8" y="486" width="9.6" height="11" fill="#c11c06"/>
+    <rect x="790.4" y="486" width="9.6" height="11" fill="#a72109"/>
+    <rect x="800" y="486" width="9.6" height="11" fill="#a72206"/>
+    <rect x="809.6" y="486" width="9.6" height="11" fill="#c42c06"/>
+    <rect x="819.2" y="486" width="9.6" height="11" fill="#b22007"/>
+    <rect x="828.8" y="486" width="9.6" height="11" fill="#c43909"/>
+    <rect x="838.4" y="486" width="9.6" height="11" fill="#592317"/>
+    <rect x="848" y="486" width="9.6" height="11" fill="#060c1e"/>
+    <rect x="857.6" y="486" width="9.6" height="11" fill="#0a172f"/>
+    <rect x="867.2" y="486" width="9.6" height="11" fill="#101d2d"/>
+    <rect x="976.9" y="486" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="508" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="508" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="508" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="508" width="9.6" height="11" fill="#080810"/>
+    <rect x="704" y="508" width="9.6" height="11" fill="#100d1f"/>
+    <rect x="713.6" y="508" width="9.6" height="11" fill="#161027"/>
+    <rect x="723.2" y="508" width="9.6" height="11" fill="#93650f"/>
+    <rect x="732.8" y="508" width="9.6" height="11" fill="#aa5606"/>
+    <rect x="742.4" y="508" width="9.6" height="11" fill="#9e3807"/>
+    <rect x="752" y="508" width="9.6" height="11" fill="#86320a"/>
+    <rect x="761.6" y="508" width="9.6" height="11" fill="#933407"/>
+    <rect x="771.2" y="508" width="9.6" height="11" fill="#a12a06"/>
+    <rect x="780.8" y="508" width="9.6" height="11" fill="#922a07"/>
+    <rect x="790.4" y="508" width="9.6" height="11" fill="#973905"/>
+    <rect x="800" y="508" width="9.6" height="11" fill="#994207"/>
+    <rect x="809.6" y="508" width="9.6" height="11" fill="#a23e08"/>
+    <rect x="819.2" y="508" width="9.6" height="11" fill="#902907"/>
+    <rect x="828.8" y="508" width="9.6" height="11" fill="#a6350e"/>
+    <rect x="838.4" y="508" width="9.6" height="11" fill="#2e111a"/>
+    <rect x="848" y="508" width="9.6" height="11" fill="#00061e"/>
+    <rect x="857.6" y="508" width="9.6" height="11" fill="#01081f"/>
+    <rect x="867.2" y="508" width="9.6" height="11" fill="#030c22"/>
+    <rect x="976.9" y="508" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="530" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="530" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="530" width="1.4" height="22" fill="#afafff"/>
+    <rect x="694.4" y="530" width="9.6" height="11" fill="#030721"/>
+    <rect x="704" y="530" width="9.6" height="11" fill="#020320"/>
+    <rect x="713.6" y="530" width="9.6" height="11" fill="#020220"/>
+    <rect x="723.2" y="530" width="9.6" height="11" fill="#02020b"/>
+    <rect x="732.8" y="530" width="9.6" height="11" fill="#000000"/>
+    <rect x="742.4" y="530" width="9.6" height="11" fill="#000001"/>
+    <rect x="752" y="530" width="9.6" height="11" fill="#030205"/>
+    <rect x="761.6" y="530" width="9.6" height="11" fill="#945a07"/>
+    <rect x="771.2" y="530" width="9.6" height="11" fill="#9b4f07"/>
+    <rect x="780.8" y="530" width="9.6" height="11" fill="#7a2005"/>
+    <rect x="790.4" y="530" width="9.6" height="11" fill="#952006"/>
+    <rect x="800" y="530" width="9.6" height="11" fill="#ba3507"/>
+    <rect x="809.6" y="530" width="9.6" height="11" fill="#0a0403"/>
+    <rect x="819.2" y="530" width="9.6" height="11" fill="#020204"/>
+    <rect x="828.8" y="530" width="9.6" height="11" fill="#06090b"/>
+    <rect x="838.4" y="530" width="9.6" height="11" fill="#010113"/>
+    <rect x="848" y="530" width="9.6" height="11" fill="#000012"/>
+    <rect x="857.6" y="530" width="9.6" height="11" fill="#000114"/>
+    <rect x="867.2" y="530" width="9.6" height="11" fill="#020417"/>
+    <rect x="976.9" y="530" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="552" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="552" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="552" width="1.4" height="22" fill="#afafff"/>
+    <rect x="976.9" y="552" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="574" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="574" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="574" width="1.4" height="22" fill="#afafff"/>
+    <rect x="976.9" y="574" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="596" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="596" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="596" width="1.4" height="22" fill="#afafff"/>
+    <text x="694.4" y="612" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" font-weight="600">Oppenheimer</text>
+    <text x="809.6" y="612" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff" fill-opacity="0.55" font-weight="600">(2023)</text>
+    <rect x="976.9" y="596" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="618" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="618" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="618" width="1.4" height="22" fill="#afafff"/>
+    <rect x="976.9" y="618" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="640" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="640" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="640" width="1.4" height="22" fill="#afafff"/>
+    <text x="694.4" y="656" textLength="268.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">A dramatization of J. Robert</text>
+    <rect x="976.9" y="640" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="662" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="662" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="662" width="1.4" height="22" fill="#afafff"/>
+    <text x="704" y="678" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Oppenheimer and his role in</text>
+    <rect x="976.9" y="662" width="1.4" height="22" fill="#afafff"/>
+    <rect x="208.9" y="684" width="1.4" height="22" fill="#afafff"/>
+    <rect x="660.1" y="684" width="1.4" height="22" fill="#afafff"/>
+    <rect x="679.3" y="684" width="1.4" height="22" fill="#afafff"/>
+    <text x="704" y="700" textLength="249.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">developing the atomic bomb</text>
+    <rect x="976.9" y="684" width="1.4" height="22" fill="#afafff"/>
+    <text x="204.8" y="722" textLength="460.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╰──────────────────────────────────────────────╯</text>
+    <text x="675.2" y="722" textLength="307.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#afafff">╰──────────────────────────────╯</text>
+    <text x="41.6" y="744" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">↑↓←→</text>
+    <text x="89.6" y="744" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move</text>
+    <text x="156.8" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">d</text>
+    <text x="176" y="744" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download</text>
+    <text x="281.6" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">v</text>
+    <text x="300.8" y="744" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stream</text>
+    <text x="387.2" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">y</text>
+    <text x="406.4" y="744" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Copy</text>
+    <text x="473.6" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">s</text>
+    <text x="492.8" y="744" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sort</text>
+    <text x="560" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">z</text>
+    <text x="579.2" y="744" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Alive</text>
+    <text x="656" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">w</text>
+    <text x="675.2" y="744" textLength="48" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Watch</text>
+    <text x="752" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">/</text>
+    <text x="771.2" y="744" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Search</text>
+    <text x="857.6" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">f</text>
+    <text x="876.8" y="744" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter</text>
+    <text x="963.2" y="744" textLength="19.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#d7afff">t…</text>
   </g>
 </svg>
