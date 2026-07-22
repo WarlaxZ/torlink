@@ -8,6 +8,7 @@ import {
   resolveMediaPlayer,
   resolveDnsServers,
   resolveReccConfig,
+  resolveOmdbApiKey,
   resolveAdultContent,
   type Config,
   type FavouriteItem,
@@ -40,7 +41,7 @@ import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { openFolder } from "../util/openFolder";
 import { cleanText, formatBytes, truncate } from "../util/format";
-import { isCategory, parseCategory } from "./store";
+import { isCategory, parseSection } from "./store";
 import {
   StoreContext,
   type CaptureMode,
@@ -67,7 +68,7 @@ import { RdBadge } from "./components/RdBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
 import { Rule } from "./components/Rule";
 import { Footer } from "./components/Footer";
-import { HelpOverlay } from "./components/HelpOverlay";
+import { HelpOverlay, helpContentHeight } from "./components/HelpOverlay";
 import { Results } from "./components/Results";
 import { Downloads } from "./components/Downloads";
 import { Seeding } from "./components/Seeding";
@@ -83,6 +84,7 @@ import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
+import { OmdbPrompt } from "./components/OmdbPrompt";
 import { NetflixImportPrompt, type NetflixImportView } from "./components/NetflixImportPrompt";
 import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
 import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
@@ -167,9 +169,11 @@ export function App({
   const [downloadFocus, setDownloadFocus] = useState<DownloadFocus | null>(null);
   const [seedFocus, setSeedFocus] = useState<SeedFocus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [helpScroll, setHelpScroll] = useState(0);
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
   const [editingRecc, setEditingRecc] = useState(false);
+  const [editingOmdb, setEditingOmdb] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
   const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
   // Bumped whenever the import overlay opens or closes. An in-flight upload can't
@@ -326,9 +330,14 @@ export function App({
         setSection("downloads");
         setRegion("content");
       } else {
-        // Don't restore into the hidden Porn tab when adult content is off.
-        const restored = parseCategory(cfg.category);
-        setSection(restored === "porn" && !resolveAdultContent(cfg) ? "all" : restored);
+        // Reopen on the last section the user was on. `lastSection` is the
+        // current field; fall back to the older category-only `category` for
+        // pre-upgrade configs. Never restore into a tab that's currently hidden
+        // (Porn with adult content off, For You without reccd) — land on "all".
+        let restored = parseSection(cfg.lastSection ?? cfg.category);
+        if (restored === "porn" && !resolveAdultContent(cfg)) restored = "all";
+        if (restored === "forYou" && !resolveReccConfig(cfg).reccUrl) restored = "all";
+        setSection(restored);
       }
     })();
     return () => {
@@ -456,12 +465,12 @@ export function App({
     [persistConfig],
   );
 
-  // Change the section; remember the last *category* so torlink reopens on it
-  // (downloads/seeding are transient and never persisted).
+  // Change the section, remembering it so torlink reopens on the same tab next
+  // launch (any section — categories and downloads/seeding/For You alike).
   const changeSection = useCallback(
     (s: Section) => {
       setSection(s);
-      if (isCategory(s)) persistConfig({ category: s });
+      persistConfig({ lastSection: s });
     },
     [persistConfig],
   );
@@ -730,6 +739,34 @@ export function App({
     persistConfig({ reccUrl: undefined, reccToken: undefined });
     setNotice("reccd connection cleared.");
   }, [closeReccPrompt, persistConfig]);
+
+  const closeOmdbPrompt = useCallback(() => setEditingOmdb(false), []);
+
+  const openOmdbPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setEditingOmdb(true);
+  }, []);
+
+  const saveOmdbKey = useCallback(
+    (rawKey: string) => {
+      closeOmdbPrompt();
+      const key = rawKey.trim();
+      persistConfig({ omdbApiKey: key || undefined });
+      setNotice(key ? `${ICON.done} OMDb key saved.` : "OMDb key cleared.");
+    },
+    [closeOmdbPrompt, persistConfig],
+  );
+
+  const clearOmdbKey = useCallback(() => {
+    closeOmdbPrompt();
+    if (process.env["TORLINK_OMDB_KEY"]?.trim()) {
+      setNotice("OMDb key is set via the TORLINK_OMDB_KEY env var — unset it to clear.");
+      return;
+    }
+    persistConfig({ omdbApiKey: undefined });
+    setNotice("OMDb key cleared.");
+  }, [closeOmdbPrompt, persistConfig]);
 
   const closeNetflixImport = useCallback(() => {
     netflixImportGen.current++; // supersede any in-flight run so it can't update state after close
@@ -1503,6 +1540,10 @@ export function App({
     (showFooter ? 1 : 0);
   const bodyH = Math.max(6, rows - 1 - chrome);
   const listRows = Math.max(4, bodyH);
+  // The help sheet replaces the body region. Cap its scrollable groups area so
+  // its header and footer stay on screen; `helpMaxScroll` bounds paging.
+  const helpMaxRows = Math.max(4, bodyH - 9);
+  const helpMaxScroll = Math.max(0, helpContentHeight(cols) - helpMaxRows);
   const contentWidth = Math.max(24, cols - RAIL_WIDTH - 3);
   const ruleWidth = Math.max(10, cols - 2);
 
@@ -1531,7 +1572,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -1548,6 +1589,8 @@ export function App({
       streamResult,
       debridConfigured: resolveRealDebridToken(config) !== "",
       reccConfigured: Boolean(resolveReccConfig(config).reccUrl),
+      omdbConfigured: resolveOmdbApiKey(config) !== "",
+      omdbApiKey: resolveOmdbApiKey(config),
       adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
       rdStatus,
@@ -1584,6 +1627,7 @@ export function App({
     editingFolder,
     editingToken,
     editingRecc,
+    editingOmdb,
     editingPlayer,
     editingSources,
     editingDns,
@@ -1636,6 +1680,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingRecc) return; // the reccd prompt owns input
+      if (editingOmdb) return; // the OMDb key prompt owns input
       if (importingNetflix) return; // the Netflix import prompt owns input
       if (importChooser) return; // the import-source chooser owns input
       if (importingTrakt) return; // the Trakt import prompt owns input
@@ -1663,10 +1708,21 @@ export function App({
       }
       if (captureMode === "text") return;
       if (showHelp) {
+        // While the sheet overflows, arrows/jk page through it; any other key
+        // (and arrows once it fits) dismisses it.
+        if (helpMaxScroll > 0 && (key.upArrow || input === "k")) {
+          setHelpScroll((s) => Math.max(0, s - 1));
+          return;
+        }
+        if (helpMaxScroll > 0 && (key.downArrow || input === "j")) {
+          setHelpScroll((s) => Math.min(helpMaxScroll, s + 1));
+          return;
+        }
         setShowHelp(false);
         return;
       }
       if (input === "?") {
+        setHelpScroll(0);
         setShowHelp(true);
         return;
       }
@@ -1804,7 +1860,7 @@ export function App({
 
         {showHelp ? (
           <Box marginTop={1}>
-            <HelpOverlay />
+            <HelpOverlay maxRows={helpMaxRows} scroll={helpScroll} />
           </Box>
         ) : null}
 
@@ -1841,6 +1897,18 @@ export function App({
               status={reccStatus}
               onSubmit={saveReccConfig}
               onCancel={closeReccPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {editingOmdb ? (
+          <Box marginTop={1}>
+            <OmdbPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              value={store.config.omdbApiKey ?? ""}
+              onSubmit={saveOmdbKey}
+              onClear={clearOmdbKey}
+              onCancel={closeOmdbPrompt}
             />
           </Box>
         ) : null}
@@ -2196,7 +2264,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2243,6 +2311,10 @@ export function App({
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
                 onImportRecc={openImportChooser}
+                omdbConfigured={store.omdbConfigured}
+                omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
+                onManageOmdb={openOmdbPrompt}
+                onSignOutOmdb={clearOmdbKey}
               />
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
@@ -2254,6 +2326,9 @@ export function App({
             <Box display={section === "forYou" ? "flex" : "none"} flexDirection="column">
               <ForYou
                 reccConfig={resolveReccConfig(store.config)}
+                omdbApiKey={resolveOmdbApiKey(store.config)}
+                width={contentWidth}
+                height={bodyH}
                 visible={section === "forYou"}
                 active={store.region === "content" && section === "forYou"}
                 setSection={store.setSection}
@@ -2269,7 +2344,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }

@@ -57,12 +57,14 @@ That's the only thing you'll type. torlink opens straight to a search bar: searc
 
 Type what you're looking for and press Enter. Results stream in from every source as they answer, tagged with size and how many people are sharing each one, so you can see what'll come down fast. Arrow to what you want and press `d` to save it, or `shift+d` to pick a different folder for just that download.
 
-Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to bring back a recent search. torlink remembers your sort and last category between runs, so it opens right where you left off.
+Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to bring back a recent search. torlink remembers your sort and the tab you were on between runs, so it opens right where you left off.
+
+On a wide enough terminal a preview pane opens beside the results: highlight a film or show and torlink fetches its poster and plot and renders them right in the terminal (bring your own free [OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Accounts). Press `p` to toggle the pane, or `i` on any result to open its IMDb page.
 
 Press `w` on any named search to add or remove it from your Watchlist. The Watchlist pane keeps up to 50 saved searches; press `Enter` to run one again or `x` to remove it.
 
 <p align="center">
-  <img src="preview/browse.svg" alt="torlink's browse view: the sidebar, the search bar, and merged results from every source" style="max-width: 832px; width: 100%; height: auto;">
+  <img src="preview/browse.svg" alt="torlink's Movies view: the sidebar, search bar, merged results, and a preview pane showing the highlighted film's poster and plot" style="max-width: 1024px; width: 100%; height: auto;">
 </p>
 
 ## Your downloads

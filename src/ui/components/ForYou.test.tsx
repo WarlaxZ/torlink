@@ -1,8 +1,27 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
+import jpeg from "jpeg-js";
 import { ForYou } from "./ForYou";
 import type { FetchImpl } from "../../util/net";
 
+// A tiny solid-red JPEG, used to exercise the full poster pipeline.
+function redJpeg(): Buffer {
+  const w = 12, h = 18;
+  const data = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < w * h; i++) { data[i * 4] = 220; data[i * 4 + 3] = 255; }
+  return Buffer.from(jpeg.encode({ data, width: w, height: h }, 90).data);
+}
+
+const openUrl = vi.fn(async (_url: string) => true);
+vi.mock("../../util/openUrl", () => ({
+  openUrl: (url: string) => openUrl(url),
+  imdbTitleUrl: (id: string) => `https://www.imdb.com/title/${id}/`,
+}));
+
+// ink flushes React passive effects via the scheduler's MessageChannel, which
+// fake timers can't drive — so these tests need real time to settle. `flush`
+// is a short settle; debounce/fetch-dependent assertions use vi.waitFor (below)
+// so they resolve as soon as ready rather than sleeping a fixed, CI-fragile span.
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
 const ESC = String.fromCharCode(27);
 
@@ -14,6 +33,39 @@ function fetchStub(): { impl: FetchImpl; urls: string[] } {
   const impl = (async (url: string) => {
     urls.push(String(url));
     return { ok: true, status: 200, json: async () => [REC] } as unknown as Response;
+  }) as unknown as FetchImpl;
+  return { impl, urls };
+}
+
+// Serves reccd's list on the recommendations URL and an OMDb plot on omdbapi.com.
+function fetchStubWithPlot(plot: string): { impl: FetchImpl; urls: string[] } {
+  const urls: string[] = [];
+  const impl = (async (url: string) => {
+    urls.push(String(url));
+    const body = String(url).includes("omdbapi.com")
+      ? { Response: "True", Plot: plot }
+      : [REC];
+    return { ok: true, status: 200, json: async () => body } as unknown as Response;
+  }) as unknown as FetchImpl;
+  return { impl, urls };
+}
+
+// Serves the reccd list, an OMDb record with a plot + poster URL, and the
+// poster image bytes themselves — the full preview pipeline.
+function fetchStubFull(plot: string): { impl: FetchImpl; urls: string[] } {
+  const urls: string[] = [];
+  const posterUrl = "https://img.example/poster.jpg";
+  const jpg = redJpeg();
+  const impl = (async (url: string) => {
+    const u = String(url);
+    urls.push(u);
+    if (u === posterUrl) {
+      return { ok: true, status: 200, arrayBuffer: async () => jpg } as unknown as Response;
+    }
+    const body = u.includes("omdbapi.com")
+      ? { Response: "True", Plot: plot, Poster: posterUrl }
+      : [REC];
+    return { ok: true, status: 200, json: async () => body } as unknown as Response;
   }) as unknown as FetchImpl;
   return { impl, urls };
 }
@@ -149,6 +201,98 @@ describe("ForYou", () => {
     onRated();
     await flush();
     expect(lastFrame()).not.toContain("Chernobyl");
+  });
+
+  it("renders the title with the year inline", async () => {
+    const { impl } = fetchStub();
+    const { lastFrame } = render(
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    await flush();
+    expect(lastFrame()).toContain("Chernobyl (2019)");
+  });
+
+  it("opens the selected pick's IMDb page on 'i'", async () => {
+    openUrl.mockClear();
+    const { impl } = fetchStub();
+    const { stdin } = render(
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    await flush();
+    stdin.write("i");
+    await flush();
+    expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/title/tt1/");
+  });
+
+  it("toggles the reason tags off and on with 'b'", async () => {
+    const { impl } = fetchStub();
+    const { stdin, lastFrame } = render(
+      <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    await flush();
+    expect(lastFrame()).toContain("highly rated classic");
+    stdin.write("b");
+    await flush();
+    expect(lastFrame()).not.toContain("highly rated classic");
+    expect(lastFrame()).toContain("reasons hidden");
+    stdin.write("b");
+    await flush();
+    expect(lastFrame()).toContain("highly rated classic");
+  });
+
+  it("does not fetch a plot when no OMDb key is configured", async () => {
+    const { impl, urls } = fetchStubWithPlot("A nuclear disaster.");
+    render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
+    // No key ⇒ the lookup never even schedules; wait past the debounce window to
+    // be sure, then confirm nothing was requested. (Negative assertion, so there
+    // is nothing to poll for — a bounded wait is unavoidable here.)
+    await new Promise((r) => setTimeout(r, 250));
+    expect(urls.some((u) => u.includes("omdbapi.com"))).toBe(false);
+  });
+
+  // The test terminal is 100 cols, so the preview pane only appears below when
+  // width leaves room; 60 keeps it hidden, 96 shows it.
+  it("shows the plot inline on a narrow terminal (no preview pane)", async () => {
+    const { impl } = fetchStubWithPlot("Boom.");
+    const { lastFrame } = render(
+      <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={60} visible active
+        setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    await vi.waitFor(() => expect(lastFrame() ?? "").toContain("·  Boom."), { timeout: 5000 });
+    expect(lastFrame() ?? "").not.toContain("Preview"); // no split pane at 60 cols
+  });
+
+  it("shows a Preview pane with the plot and rendered poster on a wide terminal", async () => {
+    const { impl, urls } = fetchStubFull("A firefighter investigates.");
+    const { lastFrame } = render(
+      <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={96} height={30} visible active
+        setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    // Poll until the whole debounce → metadata → poster chain has settled; this
+    // resolves the moment it's ready rather than sleeping a fixed, CI-fragile span.
+    await vi.waitFor(
+      () => {
+        const f = lastFrame() ?? "";
+        expect(f).toContain("Preview");
+        expect(f).toContain("A firefighter investigates."); // plot
+        expect(urls.some((u) => u.includes("poster.jpg"))).toBe(true); // poster fetched
+        expect(f).toContain("38;2;"); // poster rendered as truecolor half-blocks
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("toggles the preview pane off and on with 'p'", async () => {
+    const { impl } = fetchStubFull("A firefighter investigates.");
+    const { stdin, lastFrame } = render(
+      <ForYou reccConfig={CONFIG} omdbApiKey="KEY" width={96} height={30} visible active
+        setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
+    );
+    await vi.waitFor(() => expect(lastFrame()).toContain("Preview"), { timeout: 5000 });
+    stdin.write("p");
+    await vi.waitFor(() => expect(lastFrame()).not.toContain("Preview"));
+    stdin.write("p");
+    await vi.waitFor(() => expect(lastFrame()).toContain("Preview"));
   });
 
   it("adds the selected pick to the watchlist on 'w' without dismissing it", async () => {

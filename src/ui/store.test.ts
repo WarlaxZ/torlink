@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCategory, parseCategory } from "./store";
+import { isCategory, parseCategory, parseSection } from "./store";
 
 describe("parseCategory", () => {
   it("accepts the known category keys", () => {
@@ -20,6 +20,24 @@ describe("parseCategory", () => {
     // downloads/seeding are sections but not result categories
     expect(parseCategory("downloads")).toBe("all");
     expect(parseCategory("seeding")).toBe("all");
+  });
+});
+
+describe("parseSection", () => {
+  it("accepts any known sidebar section, not just categories", () => {
+    expect(parseSection("all")).toBe("all");
+    expect(parseSection("movies")).toBe("movies");
+    expect(parseSection("downloads")).toBe("downloads");
+    expect(parseSection("seeding")).toBe("seeding");
+    expect(parseSection("forYou")).toBe("forYou");
+    expect(parseSection("watchlist")).toBe("watchlist");
+    expect(parseSection("accounts")).toBe("accounts");
+  });
+
+  it("falls back to 'all' for missing or unknown values", () => {
+    expect(parseSection(undefined)).toBe("all");
+    expect(parseSection("")).toBe("all");
+    expect(parseSection("garbage")).toBe("all");
   });
 });
 

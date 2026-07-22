@@ -51,6 +51,23 @@ export function parseCategory(raw: string | undefined): Category {
   return CATEGORIES.some((c) => c.key === raw) ? (raw as Category) : "all";
 }
 
+// Every navigable sidebar section, in display order.
+const SECTIONS: Section[] = [
+  ...CATEGORIES.map((c) => c.key),
+  "forYou",
+  "watchlist",
+  "library",
+  "downloads",
+  "seeding",
+  "accounts",
+];
+
+// Parse a persisted "last section" preference (any sidebar tab), falling back
+// to "all" for unknown/stale values so torlink reopens where you left off.
+export function parseSection(raw: string | undefined): Section {
+  return (SECTIONS as string[]).includes(raw ?? "") ? (raw as Section) : "all";
+}
+
 export type Region = "sidebar" | "content" | "help";
 
 export type CaptureMode = "none" | "text" | "esc";
@@ -142,6 +159,11 @@ export interface Store {
   debridConfigured: boolean;
   // True when a recc (recommendation engine) URL is configured.
   reccConfigured: boolean;
+  // True when an OMDb API key is configured (enables For You plot summaries).
+  omdbConfigured: boolean;
+  // The resolved OMDb API key ("" when unset). Drives the search-results and
+  // For You poster/plot preview panes.
+  omdbApiKey: string;
   // True when the adult ("Porn") category is enabled (config or TORLINK_ADULT).
   // Gates the Porn tab, its sources, and the Porn group in the sources panel.
   adultEnabled: boolean;

@@ -17,9 +17,11 @@ import { HelpOverlay } from "../src/ui/components/HelpOverlay";
 import { SourcesPrompt } from "../src/ui/components/SourcesPrompt";
 import { Accounts } from "../src/ui/components/Accounts";
 import { Seeding } from "../src/ui/components/Seeding";
+import { PreviewPane } from "../src/ui/components/PreviewPane";
 import { footerHints } from "../src/ui/keymap";
 import { sourcesByGroup } from "../src/sources/registry";
-import { cleanText, formatBytes, formatRelative } from "../src/util/format";
+import { fetchPosterRows } from "../src/util/poster";
+import { cleanText } from "../src/util/format";
 import { ansiToSvg, type AnsiToSvgOptions } from "./ansi-to-svg";
 import type { Config } from "../src/config/config";
 import type { DownloadQueue } from "../src/download/queue";
@@ -37,13 +39,16 @@ mkdirSync(OUT_DIR, { recursive: true });
 const NOW = Math.floor(Date.now() / 1000);
 const NOW_MS = Date.now();
 
+// The "latest" fixture, now movie-focused so the Movies view can show off the
+// poster/plot preview pane. Varied sources keep the Src column lively.
 const RESULTS: TorrentResult[] = [
   { infoHash: "b2", name: "Oppenheimer (2023) [1080p WEB]", source: "yts", sizeBytes: 2.1e9, seeders: 1240, leechers: 88, magnet: "", added: NOW - 7200 },
-  { infoHash: "g7", name: "Dune: Part Two (2024) [2160p BluRay]", source: "yts", sizeBytes: 8.4e9, seeders: 910, leechers: 41, magnet: "", added: NOW - 90000 },
-  { infoHash: "c3", name: "Breaking Bad S05E14 1080p WEB-DL", source: "eztv", sizeBytes: 1.6e9, seeders: 540, leechers: 31, magnet: "", added: NOW - 1800 },
-  { infoHash: "e5", name: "[Erai-raws] Jujutsu Kaisen S2 - 23 [1080p]", source: "nyaa", sizeBytes: 1.3e9, seeders: 320, leechers: 12, magnet: "", added: NOW - 900 },
-  { infoHash: "d4", name: "Frieren - 28 [1080p]", source: "subsplease", sizeBytes: 1.4e9, seeders: 0, leechers: 0, magnet: "", added: NOW - 600 },
-  { infoHash: "a1", name: "Elden Ring: Shadow of the Erdtree Edition", source: "fitgirl", sizeBytes: 0, seeders: 0, leechers: 0, magnet: "", added: NOW - 3600 },
+  { infoHash: "g7", name: "Dune: Part Two (2024) [2160p BluRay]", source: "tpb-movies", sizeBytes: 8.4e9, seeders: 910, leechers: 41, magnet: "", added: NOW - 90000 },
+  { infoHash: "p1", name: "Poor Things (2023) 1080p BluRay x264", source: "x1337-movies", sizeBytes: 2.4e9, seeders: 612, leechers: 27, magnet: "", added: NOW - 5400 },
+  { infoHash: "k1", name: "Killers of the Flower Moon (2023) 2160p", source: "yts", sizeBytes: 9.1e9, seeders: 388, leechers: 19, magnet: "", added: NOW - 172800 },
+  { infoHash: "h1", name: "The Holdovers (2023) 1080p WEB-DL", source: "x1337-movies", sizeBytes: 2.0e9, seeders: 274, leechers: 14, magnet: "", added: NOW - 43200 },
+  { infoHash: "z1", name: "The Zone of Interest (2023) 1080p", source: "tpb-movies", sizeBytes: 1.8e9, seeders: 141, leechers: 9, magnet: "", added: NOW - 129600 },
+  { infoHash: "a2", name: "Anatomy of a Fall (2023) 1080p BluRay", source: "yts", sizeBytes: 2.3e9, seeders: 96, leechers: 5, magnet: "", added: NOW - 259200 },
 ];
 
 const DOWNLOADS: QueueItem[] = [
@@ -131,6 +136,8 @@ function makeStore(
     streamResult: noop,
     debridConfigured: false,
     reccConfigured: false,
+    omdbConfigured: false,
+    omdbApiKey: "",
     adultEnabled: false,
     streamActive: false,
     rdStatus: null,
@@ -205,81 +212,104 @@ save(
   </Box>,
 );
 
-const browseResults = RESULTS.slice(0, 5);
-const showStats = browseResults.some((r) => r.sizeBytes > 0 || r.seeders > 0);
+const browseResults = RESULTS;
 const numW = Math.max(2, String(browseResults.length).length);
+
+// A 100-column terminal (the widest the preview renderer models) is where the
+// results list splits to reveal the poster/plot preview pane — so this scene
+// renders wider and taller than the others to show it off.
+const BROWSE_COLS = 100;
+const BROWSE_CW = Math.max(24, BROWSE_COLS - RAIL_WIDTH - 3);
+const BROWSE_RULE = Math.max(10, BROWSE_COLS - 2);
+const PANEL_H = 20;
+const PREVIEW_W = Math.min(46, Math.max(30, Math.round(BROWSE_CW * 0.4)));
+const LIST_W = BROWSE_CW - PREVIEW_W - 1;
+
+// Fetch a real poster (OMDb's public sample) and render it as half-blocks, just
+// as the app does at runtime. Requires network access when regenerating.
+const browsePoster = await fetchPosterRows(
+  "https://www.omdbapi.com/src/poster.jpg",
+  Math.max(8, PREVIEW_W - 4),
+  Math.max(4, PANEL_H - 6),
+);
+if (!browsePoster) {
+  console.warn("browse: poster fetch failed — screenshot will show the empty state");
+}
+
+const OPPENHEIMER_PLOT =
+  "A dramatization of J. Robert Oppenheimer and his role in developing the atomic bomb during World War II.";
 
 save(
   "browse",
-  makeStore({ section: "all", contentWidth: CONTENT_WIDTH, listRows: 14, cols: COLS, rows: 24 }),
-  <Box flexDirection="column" width={COLS} paddingX={1}>
+  makeStore({ section: "movies", reccConfigured: true, contentWidth: BROWSE_CW, listRows: PANEL_H, cols: BROWSE_COLS, rows: 28 }),
+  <Box flexDirection="column" width={BROWSE_COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
-    <Rule width={RULE_WIDTH} />
-    <Box height={14} marginTop={1}>
+    <Rule width={BROWSE_RULE} />
+    <Box marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
-        <SearchBar width={CONTENT_WIDTH} value="" editing={false} placeholder="Search or paste a magnet link…" onSubmit={() => {}} />
+        <SearchBar width={BROWSE_CW} value="oppenheimer" editing={false} placeholder="Search or paste a magnet link…" onSubmit={() => {}} />
         <Box marginTop={1}>
-          <Panel title="latest" width={CONTENT_WIDTH} focused count={`(${browseResults.length})`} height={9}>
-            <Box><Text dimColor>newest across all sources</Text></Box>
-            <Box flexDirection="column" marginTop={1}>
-              <Box>
-                <Box width={2} flexShrink={0} />
-                <Box width={numW} flexShrink={0} justifyContent="flex-end"><Text bold dimColor>#</Text></Box>
-                <Box flexGrow={1} minWidth={0} marginLeft={1}><Text bold dimColor>Name</Text></Box>
-                <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end"><Text bold dimColor>Size</Text></Box>
-                <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end"><Text bold dimColor>Seed:Lch</Text></Box>
-                <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end"><Text bold dimColor>Src</Text></Box>
-              </Box>
-              {browseResults.map((r, i) => {
-                const here = i === 0;
-                const ss = SOURCE_STYLE[r.source];
-                return (
-                  <Box key={r.infoHash}>
-                    <Box width={2} flexShrink={0}>
-                      <Text color={COLOR.accent}>{here ? ICON.pointer : ""}</Text>
-                    </Box>
-                    <Box width={numW} flexShrink={0} justifyContent="flex-end">
-                      <Text dimColor>{i + 1}</Text>
-                    </Box>
-                    <Box flexGrow={1} minWidth={0} marginLeft={1}>
-                      <Text wrap="truncate-end" color={here ? COLOR.accent : undefined} dimColor={!here} bold={here}>
-                        {cleanText(r.name)}
-                      </Text>
-                    </Box>
-                    {showStats ? (
-                      <>
-                        <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                          <Text dimColor>{r.sizeBytes > 0 ? formatBytes(r.sizeBytes) : "-"}</Text>
-                        </Box>
-                        <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                          <Text color={r.seeders > 0 ? COLOR.good : undefined} dimColor={r.seeders === 0}>
-                            {r.seeders || r.leechers ? `${r.seeders}:${r.leechers}` : "-"}
-                          </Text>
-                        </Box>
-                      </>
-                    ) : (
-                      <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                        <Text dimColor>{formatRelative(r.added) || "-"}</Text>
+          <Box marginRight={1}>
+            <Panel title="results" width={LIST_W} focused count={`(${browseResults.length})`} height={PANEL_H}>
+              <Box><Text dimColor>{`${browseResults.length} results`}</Text></Box>
+              <Box flexDirection="column" marginTop={1}>
+                <Box>
+                  <Box width={2} flexShrink={0} />
+                  <Box width={numW} flexShrink={0} justifyContent="flex-end"><Text bold dimColor>#</Text></Box>
+                  <Box flexGrow={1} minWidth={0} marginLeft={1}><Text bold dimColor>Name</Text></Box>
+                  <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end"><Text bold dimColor>Seed:Lch</Text></Box>
+                  <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end"><Text bold dimColor>Src</Text></Box>
+                </Box>
+                {browseResults.map((r, i) => {
+                  const here = i === 0;
+                  const ss = SOURCE_STYLE[r.source];
+                  return (
+                    <Box key={r.infoHash}>
+                      <Box width={2} flexShrink={0}>
+                        <Text color={COLOR.accent}>{here ? ICON.pointer : ""}</Text>
                       </Box>
-                    )}
-                    <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                      <Text color={ss.color} dimColor={!here}>
-                        {ss.tag}
-                      </Text>
+                      <Box width={numW} flexShrink={0} justifyContent="flex-end">
+                        <Text dimColor>{i + 1}</Text>
+                      </Box>
+                      <Box flexGrow={1} minWidth={0} marginLeft={1}>
+                        <Text wrap="truncate-end" color={here ? COLOR.accent : undefined} dimColor={!here} bold={here}>
+                          {cleanText(r.name)}
+                        </Text>
+                      </Box>
+                      <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+                        <Text color={r.seeders > 0 ? COLOR.good : undefined} dimColor={r.seeders === 0}>
+                          {r.seeders || r.leechers ? `${r.seeders}:${r.leechers}` : "-"}
+                        </Text>
+                      </Box>
+                      <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
+                        <Text color={ss.color} dimColor={!here}>
+                          {ss.tag}
+                        </Text>
+                      </Box>
                     </Box>
-                  </Box>
-                );
-              })}
-            </Box>
-          </Panel>
+                  );
+                })}
+              </Box>
+            </Panel>
+          </Box>
+          <PreviewPane
+            width={PREVIEW_W}
+            height={PANEL_H}
+            focused
+            title="Oppenheimer"
+            year={2023}
+            plot={OPPENHEIMER_PLOT}
+            posterRows={browsePoster}
+          />
         </Box>
       </Box>
     </Box>
-    <Footer hints={footerHints("content", "all")} />
+    <Footer hints={footerHints("content", "movies")} />
   </Box>,
+  { cols: BROWSE_COLS },
 );
 
 save(
@@ -348,6 +378,9 @@ save(
           onManageRecc={() => {}}
           onSignOutRecc={() => {}}
           onImportRecc={() => {}}
+          omdbConfigured
+          onManageOmdb={() => {}}
+          onSignOutOmdb={() => {}}
         />
       </Box>
     </Box>

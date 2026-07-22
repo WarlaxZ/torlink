@@ -158,6 +158,8 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     section: "all",
     setSection: noop,
     reccConfigured: false,
+    omdbConfigured: false,
+    omdbApiKey: "",
     adultEnabled: false,
     sort: "none",
     setSort: noop,

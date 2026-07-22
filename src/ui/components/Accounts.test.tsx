@@ -23,6 +23,10 @@ const baseProps = {
   onManageRecc: noop,
   onSignOutRecc: noop,
   onImportRecc: noop,
+  omdbConfigured: false,
+  omdbEnvOverride: false,
+  onManageOmdb: noop,
+  onSignOutOmdb: noop,
 };
 
 function renderAccounts(overrides: Partial<typeof baseProps> = {}) {
@@ -34,11 +38,17 @@ function renderAccounts(overrides: Partial<typeof baseProps> = {}) {
 }
 
 describe("Accounts", () => {
-  it("lists Real-Debrid, RuTracker and reccd", () => {
+  it("lists Real-Debrid, RuTracker, reccd and OMDb", () => {
     const frame = renderAccounts().lastFrame() ?? "";
     expect(frame).toContain("Real-Debrid");
     expect(frame).toContain("RuTracker");
     expect(frame).toContain("reccd");
+    expect(frame).toContain("OMDb");
+  });
+
+  it("shows the OMDb key as set once configured", () => {
+    const frame = renderAccounts({ omdbConfigured: true }).lastFrame() ?? "";
+    expect(frame).toContain("Key set");
   });
 
   it("shows Not configured for reccd when unconfigured", () => {
