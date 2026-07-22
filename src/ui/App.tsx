@@ -247,7 +247,12 @@ export function App({
     { session: TorrentStreamSession; input: DownloadInput } | null
   >(null);
   // Ask for an explicit like/dislike signal once a stream ends.
-  const [ratePrompt, setRatePrompt] = useState<{ name: string } | null>(null);
+  const [ratePrompt, setRatePrompt] = useState<{
+    name: string;
+    showWatched?: boolean;
+    title?: string;
+    onRated?: () => void;
+  } | null>(null);
   const vpnUnsafe = useRef(false);
   const prepareAbort = useRef<AbortController | null>(null);
   const [recovered, setRecovered] = useState(false);
@@ -484,6 +489,13 @@ export function App({
       return next;
     });
     setNotice("Watchlist updated.");
+  }, []);
+
+  // Opens the shared RatePrompt for a For You pick (adds the "watched" action and
+  // a fitting title). `onRated` fires only on a real rating (not on skip), so the
+  // caller can dismiss the pick from its list.
+  const openRatePick = useCallback((name: string, onRated: () => void) => {
+    setRatePrompt({ name, showWatched: true, title: "Rate this pick", onRated });
   }, []);
 
   const toggleFavourite = useCallback((item: FavouriteItem) => {
@@ -2070,6 +2082,21 @@ export function App({
             <RatePrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
               name={ratePrompt.name}
+              title={ratePrompt.title}
+              onWatched={
+                ratePrompt.showWatched
+                  ? () => {
+                      if (config) {
+                        void postEvent(
+                          resolveReccConfig(config),
+                          { type: "watched", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
+                        );
+                      }
+                      ratePrompt.onRated?.();
+                      setRatePrompt(null);
+                    }
+                  : undefined
+              }
               onLike={() => {
                 if (config) {
                   void postEvent(
@@ -2077,6 +2104,7 @@ export function App({
                     { type: "liked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
                   );
                 }
+                ratePrompt.onRated?.();
                 setRatePrompt(null);
               }}
               onDislike={() => {
@@ -2086,6 +2114,7 @@ export function App({
                     { type: "disliked", rawName: ratePrompt.name, ts: Date.now(), source: "torlink" },
                   );
                 }
+                ratePrompt.onRated?.();
                 setRatePrompt(null);
               }}
               onDismiss={() => setRatePrompt(null)}
@@ -2211,6 +2240,8 @@ export function App({
                 setSection={store.setSection}
                 submitQuery={store.submitQuery}
                 setCaptureMode={store.setCaptureMode}
+                onRatePick={openRatePick}
+                toggleSavedSearch={store.toggleSavedSearch}
               />
             </Box>
           </Box>
