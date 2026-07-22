@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { TextField } from "./TextField";
 import { Panel } from "./Panel";
@@ -19,12 +19,22 @@ interface NetflixImportPromptProps {
   onClose: () => void;
 }
 
-// How many unmatched titles to show at once; the rest are summarized as "+N more".
+// How many unmatched titles are visible at once; the rest are reachable by scrolling.
 const MAX_VISIBLE_UNMATCHED = 8;
 
 export function NetflixImportPrompt({ width, state, onSubmit, onClose }: NetflixImportPromptProps) {
   const [screen, setScreen] = useState<"intro" | "path">("intro");
   const [pathVal, setPathVal] = useState("");
+  const [scroll, setScroll] = useState(0);
+
+  const unmatched = state.result?.unresolvedTitles ?? [];
+  const maxScroll = Math.max(0, unmatched.length - MAX_VISIBLE_UNMATCHED);
+
+  // Reset the unmatched-list scroll each time we leave the result screen, so a
+  // later import doesn't open mid-scrolled.
+  useEffect(() => {
+    if (state.phase !== "done") setScroll(0);
+  }, [state.phase]);
 
   useInput((_input, key) => {
     if (key.escape) {
@@ -34,8 +44,12 @@ export function NetflixImportPrompt({ width, state, onSubmit, onClose }: Netflix
     // Advance the intro screen with Enter. On the path screen the TextField owns
     // Enter (it fires onSubmit), so we do nothing here.
     if (state.phase === "form" && screen === "intro" && key.return) setScreen("path");
-    // On the result screen, Enter closes the overlay.
-    if (state.phase === "done" && key.return) onClose();
+    // On the result screen, Enter closes and ↑/↓ scroll the unmatched list.
+    if (state.phase === "done") {
+      if (key.return) onClose();
+      else if (key.upArrow) setScroll((s) => Math.max(0, s - 1));
+      else if (key.downArrow) setScroll((s) => Math.min(maxScroll, s + 1));
+    }
   });
 
   if (state.phase === "running") {
@@ -54,12 +68,15 @@ export function NetflixImportPrompt({ width, state, onSubmit, onClose }: Netflix
   }
 
   if (state.phase === "done") {
-    const unmatched = state.result?.unresolvedTitles ?? [];
-    const visible = unmatched.slice(0, MAX_VISIBLE_UNMATCHED);
-    const extra = unmatched.length - visible.length;
+    const offset = Math.min(scroll, maxScroll);
+    const visible = unmatched.slice(offset, offset + MAX_VISIBLE_UNMATCHED);
+    const scrollable = unmatched.length > MAX_VISIBLE_UNMATCHED;
+    const listHeader = scrollable
+      ? `unmatched titles (${offset + 1}–${offset + visible.length} of ${unmatched.length}):`
+      : "unmatched titles:";
     return (
       <Box flexDirection="column" width={width}>
-        <Panel title="import Netflix history" width={width} focused height={Math.min(14, 4 + visible.length)}>
+        <Panel title="import Netflix history" width={width} focused height={4 + visible.length + (unmatched.length > 0 ? 1 : 0)}>
           {state.error ? (
             <Text color={COLOR.warn}>{`${ICON.warn} ${state.error}`}</Text>
           ) : null}
@@ -70,17 +87,23 @@ export function NetflixImportPrompt({ width, state, onSubmit, onClose }: Netflix
               {state.error ? <Text dimColor> (partial)</Text> : null}
             </Text>
           ) : null}
-          {visible.length > 0 ? (
+          {unmatched.length > 0 ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text dimColor>unmatched titles:</Text>
+              <Text dimColor>{listHeader}</Text>
               {visible.map((t, i) => (
-                <Text key={`${i}-${t}`} dimColor>{`  ${t}`}</Text>
+                <Text key={`${offset + i}-${t}`} dimColor>{`  ${t}`}</Text>
               ))}
-              {extra > 0 ? <Text dimColor>{`  +${extra} more`}</Text> : null}
             </Box>
           ) : null}
         </Panel>
         <Box marginTop={1}>
+          {scrollable ? (
+            <Text>
+              <Text color={COLOR.alt}>↑↓</Text>
+              <Text dimColor> scroll</Text>
+              <Text dimColor>{`     ${ICON.dot}     `}</Text>
+            </Text>
+          ) : null}
           <Text color={COLOR.alt}>↵ / esc</Text>
           <Text dimColor> close</Text>
         </Box>
