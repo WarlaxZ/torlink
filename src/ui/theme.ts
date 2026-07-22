@@ -46,6 +46,8 @@ export const SOURCE_STYLE: Record<SourceId, { tag: string; color: string }> = {
   "x1337-movies": { tag: "1337", color: "#f6a55c" },
   "x1337-tv": { tag: "1337", color: "#f6a55c" },
   "x1337-music": { tag: "1337", color: "#f6a55c" },
+  "tpb-porn": { tag: "TPB", color: "#5fd0c5" },
+  "x1337-porn": { tag: "1337", color: "#f6a55c" },
   "rt-games": { tag: "RUT", color: "#8fce5a" },
   "rt-movies": { tag: "RUT", color: "#8fce5a" },
   "rt-tv": { tag: "RUT", color: "#8fce5a" },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tpbMovies, tpbTv, tpbMusic } from "./piratebay";
+import { tpbMovies, tpbTv, tpbMusic, tpbPorn } from "./piratebay";
 
 describe("Pirate Bay sources", () => {
   it("should have tpbMovies", () => {
@@ -18,5 +18,12 @@ describe("Pirate Bay sources", () => {
     expect(tpbMusic).toBeDefined();
     expect(tpbMusic.id).toBe("tpb-music");
     expect(tpbMusic.groups).toContain("Music");
+  });
+
+  it("should have tpbPorn flagged as an adult Porn source", () => {
+    expect(tpbPorn).toBeDefined();
+    expect(tpbPorn.id).toBe("tpb-porn");
+    expect(tpbPorn.groups).toContain("Porn");
+    expect(tpbPorn.adult).toBe(true);
   });
 });

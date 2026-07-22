@@ -158,6 +158,7 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     section: "all",
     setSection: noop,
     reccConfigured: false,
+    adultEnabled: false,
     sort: "none",
     setSort: noop,
     disabledSources: [],

@@ -10,11 +10,15 @@ const TV_CATS = new Set([205, 208]);
 export const TPB_BOOK_CATEGORIES: ReadonlySet<number> = new Set([102, 601, 602]);
 // Audio Books (102) belong to Books, not Music.
 const MUSIC_CATS = new Set([100, 101, 103, 104, 199]);
+// Porn (video only): Movies (501), Movies DVDR (502), HD-Movies (505), Movie
+// clips (506). Skips Pictures (503) and Games (504), which aren't streamable.
+const PORN_CATS = new Set([501, 502, 505, 506]);
 
 const TOP_MOVIES = `${API}/precompiled/data_top100_207.json`;
 const TOP_TV = `${API}/precompiled/data_top100_208.json`;
 const TOP_BOOKS = `${API}/precompiled/data_top100_601.json`;
 const TOP_MUSIC = `${API}/precompiled/data_top100_100.json`;
+const TOP_PORN = `${API}/precompiled/data_top100_500.json`;
 
 interface ApibayItem {
   id?: string;
@@ -115,4 +119,14 @@ export const tpbMusic: Source = {
   homepage: "https://thepiratebay.org",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, MUSIC_CATS, TOP_MUSIC, "tpb-music", opts),
+};
+
+export const tpbPorn: Source = {
+  id: "tpb-porn",
+  label: "TPB",
+  groups: ["Porn"],
+  adult: true,
+  homepage: "https://thepiratebay.org",
+  reportsHealth: true,
+  search: (query, opts = {}) => search(query, PORN_CATS, TOP_PORN, "tpb-porn", opts),
 };

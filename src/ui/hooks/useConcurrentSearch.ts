@@ -86,11 +86,12 @@ const RESULT_FLUSH_MS = 150;
 export function useConcurrentSearch(
   query: string,
   disabled: readonly SourceId[] = [],
+  adultEnabled = false,
 ): ConcurrentSearchState {
   // A stable key so the search only re-runs when the *set* of enabled sources
   // changes, not on every render that hands in a fresh array.
-  const disabledKey = disabled.join(",");
-  const sources = useMemo(() => enabledSources(disabled), [disabledKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const disabledKey = `${disabled.join(",")}|${adultEnabled ? "1" : "0"}`;
+  const sources = useMemo(() => enabledSources(disabled, adultEnabled), [disabledKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState<ConcurrentSearchState>(() => idleState(sources));
 
   useEffect(() => {

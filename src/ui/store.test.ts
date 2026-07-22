@@ -10,6 +10,7 @@ describe("parseCategory", () => {
     expect(parseCategory("anime")).toBe("anime");
     expect(parseCategory("music")).toBe("music");
     expect(parseCategory("books")).toBe("books");
+    expect(parseCategory("porn")).toBe("porn");
   });
 
   it("falls back to 'all' for missing, unknown, or non-category values", () => {

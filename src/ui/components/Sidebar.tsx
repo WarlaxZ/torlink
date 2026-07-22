@@ -33,11 +33,13 @@ export const RAIL_WIDTH =
   GUTTER + Math.max(...NAV.map((n) => n.label.length + (BADGED(n.key) ? BADGE_W : 0)));
 
 export function Sidebar() {
-  const { section, setSection, region, setRegion, queue, reccConfigured } = useStore();
+  const { section, setSection, region, setRegion, queue, reccConfigured, adultEnabled } = useStore();
   const focused = region === "sidebar";
+  // Hide the Porn tab entirely until adult content is enabled.
+  const filters = adultEnabled ? FILTERS : FILTERS.filter((n) => n.key !== "porn");
   // Hide the For You entry entirely until reccd is configured.
   const library = reccConfigured ? LIBRARY : LIBRARY.filter((n) => n.key !== "forYou");
-  const groups: NavItem[][] = [FILTERS, library];
+  const groups: NavItem[][] = [filters, library];
   const nav = groups.flat();
   const idx = Math.max(0, nav.findIndex((n) => n.key === section));
   useQueueItems(queue);

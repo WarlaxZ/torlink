@@ -79,17 +79,31 @@ async function detailInfo(
   }
 }
 
+// 1337x category names used in /category-search/<q>/<Cat>/ and the slug used in
+// the /popular-<slug> browse pages. "XXX" is 1337x's adult category.
+const CAT_SLUG: Record<"Movies" | "TV" | "Music" | "Porn", string> = {
+  Movies: "movies",
+  TV: "tv",
+  Music: "music",
+  Porn: "xxx",
+};
+const CAT_SEGMENT: Record<"Movies" | "TV" | "Music" | "Porn", string> = {
+  Movies: "Movies",
+  TV: "TV",
+  Music: "Music",
+  Porn: "XXX",
+};
+
 async function search(
   query: string,
-  cat: "Movies" | "TV" | "Music",
+  cat: "Movies" | "TV" | "Music" | "Porn",
   source: SourceId,
   opts: SearchOptions = {},
 ): Promise<TorrentResult[]> {
   const q = query.trim();
-  const catSlug =
-    cat === "Movies" ? "movies" : cat === "TV" ? "tv" : "music";
+  const catSlug = CAT_SLUG[cat];
   const path = q
-    ? `/category-search/${encodeURIComponent(q).replace(/%20/g, "+")}/${cat}/1/`
+    ? `/category-search/${encodeURIComponent(q).replace(/%20/g, "+")}/${CAT_SEGMENT[cat]}/1/`
     : `/popular-${catSlug}`;
 
   let base = "";
@@ -168,4 +182,14 @@ export const x1337Music: Source = {
   homepage: "https://1337x.to",
   reportsHealth: true,
   search: (query, opts = {}) => search(query, "Music", "x1337-music", opts),
+};
+
+export const x1337Porn: Source = {
+  id: "x1337-porn",
+  label: "1337x",
+  groups: ["Porn"],
+  adult: true,
+  homepage: "https://1337x.to",
+  reportsHealth: true,
+  search: (query, opts = {}) => search(query, "Porn", "x1337-porn", opts),
 };

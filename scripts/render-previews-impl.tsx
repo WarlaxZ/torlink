@@ -131,6 +131,7 @@ function makeStore(
     streamResult: noop,
     debridConfigured: false,
     reccConfigured: false,
+    adultEnabled: false,
     streamActive: false,
     rdStatus: null,
     copyLink: noop,
@@ -368,6 +369,7 @@ save(
       <SourcesPrompt
         width={PROMPT_WIDTH}
         disabled={["torrents-csv", "x1337-music"] as SourceId[]}
+        adultEnabled={false}
         onToggle={() => {}}
         onCancel={() => {}}
       />
