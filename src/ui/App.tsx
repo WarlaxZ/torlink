@@ -20,6 +20,7 @@ import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
+import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "./streamRoute";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
@@ -82,6 +83,8 @@ import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
 import { NetflixImportPrompt, type NetflixImportView } from "./components/NetflixImportPrompt";
+import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
+import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
@@ -173,6 +176,12 @@ export function App({
   // late completion must not flash stale state onto a reopened overlay — so each
   // run captures the current generation and ignores its own setState once superseded.
   const netflixImportGen = useRef(0);
+  const [importChooser, setImportChooser] = useState(false);
+  const [importingTrakt, setImportingTrakt] = useState(false);
+  const [traktImport, setTraktImport] = useState<TraktImportView>({ phase: "checking" });
+  // Same generation guard as Netflix: an in-flight poll/import can't be aborted,
+  // but a late completion must not flash stale state onto a reopened overlay.
+  const traktImportGen = useRef(0);
   const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
@@ -751,6 +760,60 @@ export function App({
       })();
     },
     [config],
+  );
+
+  const openImportChooser = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    setImportChooser(true);
+  }, []);
+
+  const closeImportChooser = useCallback(() => setImportChooser(false), []);
+
+  const closeTraktImport = useCallback(() => {
+    traktImportGen.current++; // supersede any in-flight run so it can't update state after close
+    setImportingTrakt(false);
+  }, []);
+
+  const openTraktImport = useCallback(() => {
+    if (!config) return;
+    setImportChooser(false);
+    const gen = ++traktImportGen.current;
+    const isCurrent = (): boolean => traktImportGen.current === gen;
+    setTraktImport({ phase: "checking" });
+    setImportingTrakt(true);
+    void (async () => {
+      const outcome = await runTraktFlow(resolveReccConfig(config), {
+        onConnect: (info) => {
+          if (isCurrent()) {
+            setTraktImport({ phase: "connect", connect: { userCode: info.userCode, verificationUrl: info.verificationUrl } });
+          }
+        },
+        onStatus: (status: TraktStatus) => {
+          if (isCurrent() && status === "pending") {
+            setTraktImport((s) => (s.phase === "connect" ? s : { phase: "checking" }));
+          }
+        },
+        onImporting: () => {
+          if (isCurrent()) setTraktImport({ phase: "running", progress: { message: "Importing from Trakt…" } });
+        },
+      });
+      if (!isCurrent()) return;
+      if (outcome.ok) setTraktImport({ phase: "done", result: outcome.result });
+      else setTraktImport({ phase: "done", error: outcome.error });
+    })();
+  }, [config]);
+
+  const chooseImportSource = useCallback(
+    (source: ImportSource) => {
+      if (source === "netflix") {
+        setImportChooser(false);
+        openNetflixImport();
+      } else {
+        openTraktImport();
+      }
+    },
+    [openNetflixImport, openTraktImport],
   );
 
   const startDownload = useCallback(
@@ -1453,7 +1516,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix
+        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -1556,6 +1619,8 @@ export function App({
       if (editingToken) return; // the token prompt owns input
       if (editingRecc) return; // the reccd prompt owns input
       if (importingNetflix) return; // the Netflix import prompt owns input
+      if (importChooser) return; // the import-source chooser owns input
+      if (importingTrakt) return; // the Trakt import prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
@@ -1755,6 +1820,26 @@ export function App({
               state={netflixImport}
               onSubmit={runNetflixImport}
               onClose={closeNetflixImport}
+            />
+          </Box>
+        ) : null}
+
+        {importChooser ? (
+          <Box marginTop={1}>
+            <ImportSourcePrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              onSelect={chooseImportSource}
+              onCancel={closeImportChooser}
+            />
+          </Box>
+        ) : null}
+
+        {importingTrakt ? (
+          <Box marginTop={1}>
+            <TraktImportPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              state={traktImport}
+              onClose={closeTraktImport}
             />
           </Box>
         ) : null}
@@ -2061,7 +2146,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix
+            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2107,7 +2192,7 @@ export function App({
                 )}
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
-                onImportRecc={openNetflixImport}
+                onImportRecc={openImportChooser}
               />
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
@@ -2132,7 +2217,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix
+              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }
