@@ -114,7 +114,9 @@ Real-Debrid torrents are fetched, not seeded, so they land in Recently downloade
 
 If you run [reccd](https://github.com/WarlaxZ/reccd) — a small, self-hosted recommendations engine — torlink can suggest what to watch next in a **For You** tab. Connect it from the **Accounts** tab: select reccd, enter its URL and the bearer token from reccd's `user:add`. (Prefer to keep it off disk? Set `TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your environment instead.)
 
-### Import your Netflix history
+### Import your history
+
+#### From Netflix
 
 Seed reccd with what you've already watched on Netflix, so its recommendations know your taste.
 
@@ -124,6 +126,15 @@ Seed reccd with what you've already watched on Netflix, so its recommendations k
    - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
 
 torlink doesn't care what you watch — titles go only to your own reccd server to seed recommendations, and nothing else is done with them. Large exports upload in batches automatically, and re-importing the same file won't double-count anything.
+
+#### From Trakt
+
+Already track your watching on [Trakt](https://trakt.tv)? Pull your watch history and ratings straight in — no file needed.
+
+- **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and choose **Trakt**. You'll get a short code and a URL — open the URL, enter the code to authorize, and torlink imports automatically. After the first time you won't need to re-authorize.
+- **From the shell:** `torlnk import-trakt` — it prints the code + URL, waits for you to authorize, then imports.
+
+This needs the reccd server to have a Trakt app configured (`RECCD_TRAKT_CLIENT_ID` / `RECCD_TRAKT_CLIENT_SECRET`); without it, torlink will tell you Trakt isn't enabled on your server.
 
 ## What it searches
 
@@ -167,6 +178,7 @@ torlink also runs without the TUI, for servers and seedboxes:
     torlnk files          stream finished downloads over HTTP
     torlnk attach         keep the TUI alive across ssh sessions
     torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
+    torlnk import-trakt           connect Trakt and import your history into reccd
 
 Add `--daemon` to keep watch, serve, or files running after you log out; `torlnk --help` has the full list of modes and flags.
 
