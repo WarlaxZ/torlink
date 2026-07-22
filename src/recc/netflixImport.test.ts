@@ -52,3 +52,100 @@ describe("formatImportSummary", () => {
     ).toBe("Imported 342 · 128 matched · 214 unmatched");
   });
 });
+
+import { vi } from "vitest";
+import { uploadNetflixCsv } from "./netflixImport.js";
+import type { FetchImpl } from "../util/net";
+
+function jsonRes(status: number, body: unknown = {}) {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+const CONFIG = { reccUrl: "http://host:4100", reccToken: "tok" };
+const CSV = "Title,Date\nThe Matrix,1/2/20\nHeat,3/4/21";
+
+describe("uploadNetflixCsv", () => {
+  it("POSTs multipart to /import/netflix with a bearer token and returns the aggregated result", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonRes(202, { imported: 2, resolved: 1, unresolved: 1, unresolvedTitles: ["Heat"] }));
+    const outcome = await uploadNetflixCsv(CONFIG, CSV, { fetchImpl: fetchImpl as unknown as FetchImpl });
+
+    expect(outcome).toEqual({
+      ok: true,
+      result: { imported: 2, resolved: 1, unresolved: 1, unresolvedTitles: ["Heat"], chunks: 1 },
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, { method: string; headers: Record<string, string>; body: FormData }];
+    expect(url).toBe("http://host:4100/import/netflix");
+    expect(init.method).toBe("POST");
+    expect(init.headers.authorization).toBe("Bearer tok");
+    expect(init.body).toBeInstanceOf(FormData);
+    const file = init.body.get("file") as Blob;
+    expect(await file.text()).toContain("Title,Date");
+  });
+
+  it("aggregates counts and de-duplicates unresolved titles across chunks", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 1, unresolved: 1, unresolvedTitles: ["Heat"] }))
+      .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 0, unresolved: 2, unresolvedTitles: ["Heat", "Dune"] }));
+    const outcome = await uploadNetflixCsv(CONFIG, CSV, {
+      fetchImpl: fetchImpl as unknown as FetchImpl,
+      budgetBytes: 25,
+    });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.result.imported).toBe(2);
+      expect(outcome.result.unresolved).toBe(3);
+      expect(outcome.result.unresolvedTitles).toEqual(["Heat", "Dune"]);
+      expect(outcome.result.chunks).toBe(2);
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports progress per chunk", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(202, { imported: 1, resolved: 1, unresolved: 0, unresolvedTitles: [] }));
+    const seen: Array<[number, number]> = [];
+    await uploadNetflixCsv(CONFIG, CSV, {
+      fetchImpl: fetchImpl as unknown as FetchImpl,
+      budgetBytes: 25,
+      onProgress: (done, total) => seen.push([done, total]),
+    });
+    expect(seen).toEqual([[1, 2], [2, 2]]);
+  });
+
+  it("returns a not-linked error when reccUrl is missing", async () => {
+    const outcome = await uploadNetflixCsv({ reccToken: "t" }, CSV);
+    expect(outcome).toEqual({ ok: false, error: "reccd is not linked — set it up in Accounts first" });
+  });
+
+  it("returns a no-rows error for a header-only CSV", async () => {
+    const fetchImpl = vi.fn();
+    const outcome = await uploadNetflixCsv(CONFIG, "Title,Date", { fetchImpl: fetchImpl as unknown as FetchImpl });
+    expect(outcome).toEqual({ ok: false, error: "no rows found in the CSV" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("maps 401 to a token error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: "unauthorized" }));
+    const outcome = await uploadNetflixCsv(CONFIG, CSV, { fetchImpl: fetchImpl as unknown as FetchImpl });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toBe("reccd rejected the token — check reccToken");
+  });
+
+  it("reports which chunk failed and includes the partial result so far", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 1, unresolved: 0, unresolvedTitles: [] }))
+      .mockRejectedValueOnce(new Error("ECONNRESET"));
+    const outcome = await uploadNetflixCsv(CONFIG, CSV, {
+      fetchImpl: fetchImpl as unknown as FetchImpl,
+      budgetBytes: 25,
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error).toContain("chunk 2/2");
+      expect(outcome.partial?.imported).toBe(1);
+    }
+  });
+});
