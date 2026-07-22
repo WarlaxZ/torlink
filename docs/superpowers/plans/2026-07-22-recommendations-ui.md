@@ -877,14 +877,14 @@ git commit -m "feat(ui): wire For You section into nav, App, and keymap"
 
 - [ ] **Step 1: Point torlink at the live reccd**
 
-Add `reccUrl`/`reccToken` to the runtime config (NOT the repo). The token is local-network only and rotatable:
+Add `reccUrl`/`reccToken` to the runtime config (NOT the repo — this is a real secret, keep it out of git). Substitute your own reccd host and the bearer token printed by reccd's `user:add`:
 
 ```bash
 node -e '
 const fs=require("fs"),os=require("os"),p=require("path");
 const f=p.join(os.homedir(),".config","torlink","config.json");
 const c=JSON.parse(fs.readFileSync(f,"utf8"));
-c.reccUrl="http://192.168.0.98:4100";
+c.reccUrl="http://<RECCD_HOST>:4100";
 c.reccToken="<YOUR_RECCD_TOKEN>";
 fs.writeFileSync(f,JSON.stringify(c,null,2));
 console.log("updated",f);
@@ -896,7 +896,7 @@ console.log("updated",f);
 Run:
 ```bash
 curl -s -H "Authorization: Bearer <YOUR_RECCD_TOKEN>" \
-  "http://192.168.0.98:4100/recommendations?limit=3"
+  "http://<RECCD_HOST>:4100/recommendations?limit=3"
 ```
 Expected: a JSON array of `{ imdbId, title, year, score, reasons }`.
 
