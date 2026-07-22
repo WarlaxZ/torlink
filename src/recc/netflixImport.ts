@@ -1,6 +1,7 @@
 import { log } from "../util/logger";
 import type { FetchImpl } from "../util/net";
 import type { ReccClientConfig } from "./client";
+export { formatImportSummary } from "./importSummary";
 
 // ~900 KiB of CSV text per chunk, comfortably under reccd's 1 MiB multipart
 // cap once the boundary/part-header overhead is added.
@@ -46,13 +47,6 @@ export interface NetflixImportResult {
   unresolved: number;
   unresolvedTitles: string[];
   chunks: number;
-}
-
-// `unresolved` is an event-level count (a title watched twice counts twice),
-// whereas `unresolvedTitles` is the distinct set — so the number here can
-// legitimately exceed the length of the titles list.
-export function formatImportSummary(r: NetflixImportResult): string {
-  return `Imported ${r.imported} · ${r.resolved} matched · ${r.unresolved} unmatched`;
 }
 
 export type NetflixImportOutcome =
