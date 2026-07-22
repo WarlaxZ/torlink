@@ -467,6 +467,19 @@ export function App({
     });
   }, []);
 
+  // Mark a file streamed this session and, when its torrent is favourited,
+  // persist watched progress. Called only once a player actually launches, so a
+  // failed/cancelled stream never earns a ✓.
+  const markPlayed = useCallback(
+    (favId: string, filename: string) => {
+      setStreamedFiles((prev) => new Set(prev).add(filename));
+      if (isFavouritedIn(config?.favourites ?? [], favId)) {
+        markWatchedInFavourite(favId, filename);
+      }
+    },
+    [config, markWatchedInFavourite],
+  );
+
   const isFavourited = useCallback(
     (id: string) => isFavouritedIn(config?.favourites ?? [], id),
     [config],
@@ -655,10 +668,10 @@ export function App({
 
   // Hand a resolved file to the player path and clear any picker/preparing UI.
   const finishStream = useCallback(
-    (file: ResolvedFile, name?: string) => {
+    (file: ResolvedFile, name?: string, onPlayed?: () => void) => {
       setStreamFiles(null);
       setPreparing(null);
-      void playStream(file.url, name ?? file.filename);
+      void playStream(file.url, name ?? file.filename, onPlayed);
     },
     [playStream],
   );
@@ -671,13 +684,10 @@ export function App({
       // Mark streamed/watched ONLY once a player actually launches (the
       // onPlayed callback), so a failed stream never gets a ✓.
       void playStream(file.url, file.filename, () => {
-        setStreamedFiles((prev) => new Set(prev).add(file.filename));
-        if (streamSource && isFavouritedIn(config?.favourites ?? [], streamSource.id)) {
-          markWatchedInFavourite(streamSource.id, file.filename);
-        }
+        if (streamSource) markPlayed(streamSource.id, file.filename);
       });
     },
-    [playStream, streamSource, config, markWatchedInFavourite],
+    [playStream, streamSource, markPlayed],
   );
 
   const cancelPreparing = useCallback(() => {
@@ -729,7 +739,9 @@ export function App({
             setStreamSource(input);
             setStreamFiles(candidates);
           } else {
-            void playStream(candidates[0]!.url, input.name);
+            void playStream(candidates[0]!.url, input.name, () =>
+              markPlayed(input.id, candidates[0]!.filename),
+            );
           }
         } catch (e) {
           prepareAbort.current = null;
@@ -739,7 +751,7 @@ export function App({
         }
       })();
     },
-    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe],
+    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed],
   );
 
   useEffect(() => {
@@ -865,7 +877,9 @@ export function App({
             setStreamFiles(candidates);
             return;
           }
-          finishStream(candidates[0]!, input.name);
+          finishStream(candidates[0]!, input.name, () =>
+            markPlayed(input.id, candidates[0]!.filename),
+          );
         } catch (e) {
           prepareAbort.current = null;
           setPreparing(null);
@@ -886,7 +900,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream],
+    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed],
   );
 
   // Reopen a favourited series: re-resolve its magnet through the same stream
