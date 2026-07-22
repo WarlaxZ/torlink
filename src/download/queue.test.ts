@@ -383,3 +383,54 @@ describe("strayDownload (missing-file safety-net)", () => {
     expect(strayDownload({ total: 0, progress: 0, speed: 0 })).toBe(false);
   });
 });
+
+describe("DownloadQueue error resilience on boot", () => {
+  it("restore() marks item failed if engine.add throws synchronously", () => {
+    const q = new DownloadQueue();
+    // Spy on internal engine to force synchronous throw when add is called
+    const fakeEngine = (q as unknown as { engine: { add: () => void } }).engine;
+    fakeEngine.add = () => {
+      throw new Error("Disk error during add");
+    };
+
+    expect(() =>
+      q.restore([
+        {
+          id: "err1",
+          name: "Broken Download",
+          source: undefined,
+          magnet: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
+          dir: "/downloads",
+          status: "downloading",
+          progress: 0,
+          totalBytes: 100,
+          downloadedBytes: 0,
+          speed: 0,
+          peers: 0,
+          addedAt: Date.now(),
+        },
+      ])
+    ).not.toThrow();
+
+    const errItem = q.getItems().find((i) => i.id === "err1");
+    expect(errItem?.status).toBe("failed");
+    expect(errItem?.error).toContain("Disk error during add");
+    q.suspend();
+  });
+
+  it("restoreSeeds() marks seed paused if engine.add throws synchronously", () => {
+    const q = new DownloadQueue();
+    q.restoreHistory([h({ id: "h-broken" })]);
+    const fakeEngine = (q as unknown as { engine: { add: () => void } }).engine;
+    fakeEngine.add = () => {
+      throw new Error("Chunk store init failed");
+    };
+
+    expect(() =>
+      q.restoreSeeds([{ id: "h-broken", status: "seeding" }])
+    ).not.toThrow();
+
+    expect(q.getSeed("h-broken")?.status).toBe("paused");
+    q.suspend();
+  });
+});

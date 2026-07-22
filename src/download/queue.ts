@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { TorrentEngine, type AddHandlers } from "./engine";
+import { TorrentEngine, message, type AddHandlers } from "./engine";
 import {
   saveQueue,
   saveQueueSync,
@@ -22,6 +22,7 @@ import { backoffDelay } from "../util/net";
 import { log } from "../util/logger";
 import { pickStreamFile } from "../util/player";
 import { deleteSeedData } from "./delete-data";
+import { disarmBootMarker } from "./bootguard";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
 
@@ -93,6 +94,13 @@ export function seedPolicyReached(
 ): boolean {
   return (ratio > 0 && sizeBytes > 0 && uploaded / sizeBytes >= ratio) ||
     (minutes > 0 && ageMs >= minutes * 60_000);
+}
+
+export interface RestoreOptions {
+  // Safe mode: the previous boot died while restoring (see bootguard.ts), so
+  // bring every item back paused and start no engines. The list stays intact
+  // and visible; the user resumes each item on their own terms.
+  safe?: boolean;
 }
 
 export class DownloadQueue extends EventEmitter {
@@ -218,14 +226,25 @@ export class DownloadQueue extends EventEmitter {
       item.error = "VPN kill switch blocked peer-to-peer traffic.";
       return;
     }
-    this.engine.add(
-      item.id,
-      item.magnet,
-      item.dir,
-      this.engineHandlers(item.id),
-      this.trackers,
-      item.selectedFileIndices,
-    );
+    try {
+      this.engine.add(
+        item.id,
+        item.magnet,
+        item.dir,
+        this.engineHandlers(item.id),
+        this.trackers,
+        item.selectedFileIndices,
+      );
+    } catch (e) {
+      // engine.add routes webtorrent's own synchronous failures through
+      // onError, so the only throw that reaches here is the client failing to
+      // construct at all (a broken native module, a hostile environment). Fail
+      // this one item instead of the caller, which is usually a whole restore.
+      item.status = "failed";
+      item.error = message(e);
+      item.speed = 0;
+      item.peers = 0;
+    }
   }
 
   selectFiles(id: string, indices: number[]): boolean {
@@ -918,7 +937,16 @@ export class DownloadQueue extends EventEmitter {
     // Seed from the stored .torrent metadata when we have it (verifies the local
     // file immediately, no swarm needed); fall back to the magnet otherwise.
     const source = torrentMetaExists(h.id) ? torrentMetaPath(h.id) : h.magnet;
-    this.engine.add(h.id, source, h.dir, this.engineHandlers(h.id), this.trackers);
+    try {
+      this.engine.add(h.id, source, h.dir, this.engineHandlers(h.id), this.trackers);
+    } catch {
+      // Same narrow case as startEngine: only a client that won't construct
+      // lands here. Leave the seed paused so it stays visible and resumable.
+      this.seeds.set(h.id, { ...base, status: "paused" });
+      this.changed();
+      void this.persistSeeds();
+      return;
+    }
     this.ensurePoll();
     this.changed();
     void this.persistSeeds();
@@ -945,15 +973,17 @@ export class DownloadQueue extends EventEmitter {
     else this.startSeeding(h);
   }
 
-  restoreSeeds(records: SeedRecord[]): void {
+  restoreSeeds(records: SeedRecord[], opts: RestoreOptions = {}): void {
     for (const r of records) {
       const h = this.history.find((x) => x.id === r.id);
       if (!h) continue;
       // Respect the persisted choice: resume seeders, but leave a paused seed
-      // paused (and visibly so) instead of auto-starting it.
-      if (r.status === "seeding") this.startSeeding(h);
+      // paused (and visibly so) instead of auto-starting it. In safe mode even
+      // seeders come back paused, since re-seeding also feeds the engine.
+      if (r.status === "seeding" && !opts.safe) this.startSeeding(h);
       else this.restorePaused(h);
     }
+    if (opts.safe) void this.persistSeeds();
   }
 
   // Rebuild a paused seed from history without touching the engine, so it shows
@@ -990,7 +1020,18 @@ export class DownloadQueue extends EventEmitter {
     return saveSeeds(this.seedRecords()).catch(() => {});
   }
 
-  restore(items: QueueItem[]): void {
+  restore(items: QueueItem[], opts: RestoreOptions = {}): void {
+    if (opts.safe) {
+      // Engines stay cold: pause everything that would have started and keep
+      // the rest as saved, then persist so the paused state is the new truth.
+      for (const raw of items) {
+        if (raw.status === "downloading" || raw.status === "queued") raw.status = "paused";
+        this.items.set(raw.id, raw);
+      }
+      this.changed();
+      void this.persist();
+      return;
+    }
     let active = 0;
     for (const raw of items) {
       // A Real-Debrid transfer can't be resumed across a restart (no resolved
@@ -1098,6 +1139,9 @@ export class DownloadQueue extends EventEmitter {
     saveQueueSync(this.getItems());
     saveHistorySync(this.history);
     saveSeedsSync(this.seedRecords());
+    // A clean flush doubles as proof this run did not die mid-restore, so the
+    // crash-boot breaker stands down (see bootguard.ts).
+    disarmBootMarker();
   }
 
   suspend(): void {
