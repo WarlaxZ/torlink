@@ -27,6 +27,7 @@ export type CliCommand =
   | { kind: "files"; port?: number; host?: string; token?: string; dir?: string; daemon?: boolean }
   | { kind: "attach" }
   | { kind: "update"; force?: boolean }
+  | { kind: "import-netflix"; file: string }
   | { kind: "invalid"; arg: string };
 
 // Valueless boolean flags for the headless subcommands (everything else is a
@@ -78,6 +79,11 @@ export function parseCliArgs(argv: string[]): CliCommand {
   if (a === "--help" || a === "-h") return { kind: "help" };
   if (a === "attach") return { kind: "attach" };
   if (a === "update") return { kind: "update", force: args.slice(1).includes("--force") };
+  if (a === "import-netflix") {
+    const file = args[1];
+    if (!file) return { kind: "invalid", arg: "import-netflix (missing file)" };
+    return { kind: "import-netflix", file };
+  }
   if (a === "watch") {
     const { bools, rest: r0 } = splitBooleans(args.slice(1));
     const { flags, rest } = readFlags(r0);
@@ -136,6 +142,7 @@ usage
   torlnk attach               open/reattach the TUI in a persistent tmux session
   torlnk update [--force]     update to the latest release and restart any daemon
                               (--force rebuilds/restarts even if already current)
+  torlnk import-netflix <csv>  send a Netflix "viewing activity" CSV to reccd
   torlnk --version            print the version
 
 once open: type to search every source at once, enter to run, arrows to move,

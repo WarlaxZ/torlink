@@ -110,6 +110,21 @@ Once it's connected, downloading and streaming get an upgrade:
 
 Real-Debrid torrents are fetched, not seeded, so they land in Recently downloaded and never join the Seeding tab. Heads up: Real-Debrid's torrent features need an active **premium** account — torlink will tell you if yours isn't.
 
+## Recommendations (optional)
+
+If you run [reccd](https://github.com/WarlaxZ/reccd) — a small, self-hosted recommendations engine — torlink can suggest what to watch next in a **For You** tab. Connect it from the **Accounts** tab: select reccd, enter its URL and the bearer token from reccd's `user:add`. (Prefer to keep it off disk? Set `TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your environment instead.)
+
+### Import your Netflix history
+
+Seed reccd with what you've already watched on Netflix, so its recommendations know your taste.
+
+1. Open [netflix.com/viewingactivity](https://www.netflix.com/viewingactivity) and click **Download all** (bottom of the page). You'll get a CSV.
+2. Import it, either way:
+   - **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and give it the CSV path — you can drag the file onto the terminal to paste the path.
+   - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
+
+torlink doesn't care what you watch — titles go only to your own reccd server to seed recommendations, and nothing else is done with them. Large exports upload in batches automatically, and re-importing the same file won't double-count anything.
+
 ## What it searches
 
 A short, hand-picked list of trusted sources:
@@ -151,6 +166,7 @@ torlink also runs without the TUI, for servers and seedboxes:
     torlnk serve          take magnets over HTTP
     torlnk files          stream finished downloads over HTTP
     torlnk attach         keep the TUI alive across ssh sessions
+    torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
 
 Add `--daemon` to keep watch, serve, or files running after you log out; `torlnk --help` has the full list of modes and flags.
 

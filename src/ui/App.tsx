@@ -12,13 +12,14 @@ import {
   type FavouriteItem,
 } from "../config/config";
 import { setDnsServers } from "../util/dns";
-import { normalizeDownloadDir } from "../config/folder";
+import { expandHome, normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { postEvent } from "../recc/client";
+import { uploadNetflixCsv } from "../recc/netflixImport";
 import { classifyStreamRoute } from "./streamRoute";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
@@ -80,6 +81,7 @@ import { SourcesPrompt } from "./components/SourcesPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
+import { NetflixImportPrompt, type NetflixImportView } from "./components/NetflixImportPrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
 import { Watchlist } from "./components/Watchlist";
@@ -164,6 +166,13 @@ export function App({
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState(false);
   const [editingRecc, setEditingRecc] = useState(false);
+  const [importingNetflix, setImportingNetflix] = useState(false);
+  const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
+  // Bumped whenever the import overlay opens or closes. An in-flight upload can't
+  // be aborted (reccd is idempotent, so a stray extra chunk is harmless), but a
+  // late completion must not flash stale state onto a reopened overlay — so each
+  // run captures the current generation and ignores its own setState once superseded.
+  const netflixImportGen = useRef(0);
   const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
@@ -697,6 +706,52 @@ export function App({
     persistConfig({ reccUrl: undefined, reccToken: undefined });
     setNotice("reccd connection cleared.");
   }, [closeReccPrompt, persistConfig]);
+
+  const closeNetflixImport = useCallback(() => {
+    netflixImportGen.current++; // supersede any in-flight run so it can't update state after close
+    setImportingNetflix(false);
+  }, []);
+
+  const openNetflixImport = useCallback(() => {
+    netflixImportGen.current++; // fresh generation; a stale upload's late setState is ignored
+    setView("browser");
+    setShowHelp(false);
+    setNetflixImport({ phase: "form" });
+    setImportingNetflix(true);
+  }, []);
+
+  const runNetflixImport = useCallback(
+    (path: string) => {
+      if (!config) return;
+      const gen = netflixImportGen.current;
+      const isCurrent = (): boolean => netflixImportGen.current === gen;
+      // Expand a leading ~ ourselves — we read the raw input field, so (unlike the
+      // shell-expanded CLI arg) a typed "~/Downloads/…" wouldn't otherwise resolve.
+      const filePath = expandHome(path);
+      setNetflixImport({ phase: "running", progress: { done: 0, total: 0 } });
+      void (async () => {
+        let csvText: string;
+        try {
+          csvText = await fs.readFile(filePath, "utf8");
+        } catch {
+          if (isCurrent()) setNetflixImport({ phase: "done", error: `Couldn't read ${filePath}` });
+          return;
+        }
+        const outcome = await uploadNetflixCsv(resolveReccConfig(config), csvText, {
+          onProgress: (done, total) => {
+            if (isCurrent()) setNetflixImport({ phase: "running", progress: { done, total } });
+          },
+        });
+        if (!isCurrent()) return;
+        if (outcome.ok) {
+          setNetflixImport({ phase: "done", result: outcome.result });
+        } else {
+          setNetflixImport({ phase: "done", error: outcome.error, result: outcome.partial });
+        }
+      })();
+    },
+    [config],
+  );
 
   const startDownload = useCallback(
     (input: DownloadInput) => {
@@ -1398,7 +1453,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt
+        showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix
           ? "help"
           : region,
       setRegion,
@@ -1466,6 +1521,7 @@ export function App({
     torrentPrompt,
     keepPrompt,
     ratePrompt,
+    importingNetflix,
     activeStream,
     captureMode,
     downloadFocus,
@@ -1499,6 +1555,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingRecc) return; // the reccd prompt owns input
+      if (importingNetflix) return; // the Netflix import prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
       if (editingDns) return; // the DNS prompt owns input
@@ -1687,6 +1744,17 @@ export function App({
               status={reccStatus}
               onSubmit={saveReccConfig}
               onCancel={closeReccPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {importingNetflix ? (
+          <Box marginTop={1}>
+            <NetflixImportPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              state={netflixImport}
+              onSubmit={runNetflixImport}
+              onClose={closeNetflixImport}
             />
           </Box>
         ) : null}
@@ -1993,7 +2061,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt
+            showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix
               ? "none"
               : "flex"
           }
@@ -2039,6 +2107,7 @@ export function App({
                 )}
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
+                onImportRecc={openNetflixImport}
               />
             </Box>
             <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
@@ -2063,7 +2132,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt
+              showHelp || editingFolder || editingToken || editingRecc || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix
                 ? "none"
                 : "flex"
             }

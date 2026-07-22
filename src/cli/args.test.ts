@@ -40,6 +40,18 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["update"])).toEqual({ kind: "update", force: false });
     expect(parseCliArgs(["update", "--force"])).toEqual({ kind: "update", force: true });
   });
+  it("parses import-netflix with a file path", () => {
+    expect(parseCliArgs(["import-netflix", "/home/me/NetflixViewingActivity.csv"])).toEqual({
+      kind: "import-netflix",
+      file: "/home/me/NetflixViewingActivity.csv",
+    });
+  });
+  it("rejects import-netflix with no file", () => {
+    expect(parseCliArgs(["import-netflix"])).toEqual({
+      kind: "invalid",
+      arg: "import-netflix (missing file)",
+    });
+  });
   it("parses watch with a directory", () => {
     expect(parseCliArgs(["watch", "/srv/blackhole"])).toEqual({
       kind: "watch",

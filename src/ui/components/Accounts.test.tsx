@@ -22,6 +22,7 @@ const baseProps = {
   onSignOutRutracker: noop,
   onManageRecc: noop,
   onSignOutRecc: noop,
+  onImportRecc: noop,
 };
 
 function renderAccounts(overrides: Partial<typeof baseProps> = {}) {
