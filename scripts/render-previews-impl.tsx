@@ -346,6 +346,7 @@ save(
           onSignOutRutracker={() => {}}
           onManageRecc={() => {}}
           onSignOutRecc={() => {}}
+          onImportRecc={() => {}}
         />
       </Box>
     </Box>

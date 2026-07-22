@@ -17,7 +17,7 @@ export async function runImportNetflix(filePath: string): Promise<void> {
   try {
     csvText = await readFile(filePath, "utf8");
   } catch (err) {
-    throw new Error(`could not read file: ${filePath} (${err instanceof Error ? err.message : String(err)})`);
+    throw new Error(`could not read file: ${filePath} (${err instanceof Error ? err.message : String(err)})`, { cause: err });
   }
 
   const outcome = await uploadNetflixCsv(reccConfig, csvText, {

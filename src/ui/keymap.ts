@@ -33,6 +33,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "↑ ↓", label: "Move between services" },
       { keys: "↵", label: "Sign in / switch account" },
       { keys: "x", label: "Sign out" },
+      { keys: "i", label: "Import Netflix history (reccd)" },
     ],
   },
   {
@@ -126,6 +127,7 @@ export function footerHints(
       NAVIGATE,
       { keys: "↵", label: "Sign in" },
       { keys: "x", label: "Sign out" },
+      { keys: "i", label: "Import" },
       SWITCH,
       ALWAYS,
     ];

@@ -24,6 +24,7 @@ interface AccountsProps {
   onSignOutRutracker: () => void;
   onManageRecc: () => void;
   onSignOutRecc: () => void;
+  onImportRecc: () => void;
 }
 
 interface Row {
@@ -42,6 +43,8 @@ interface Row {
   verbSignedOut: string;
   onManage: () => void;
   onSignOut: () => void;
+  importable?: boolean;
+  onImport?: () => void;
 }
 
 export function Accounts({
@@ -58,6 +61,7 @@ export function Accounts({
   onSignOutRutracker,
   onManageRecc,
   onSignOutRecc,
+  onImportRecc,
 }: AccountsProps) {
   const { region, section, contentWidth, listRows } = useStore();
   const focused = region === "content" && section === "accounts";
@@ -108,6 +112,8 @@ export function Accounts({
       verbSignedOut: "set up",
       onManage: onManageRecc,
       onSignOut: onSignOutRecc,
+      importable: true,
+      onImport: onImportRecc,
     },
   ];
 
@@ -119,6 +125,7 @@ export function Accounts({
       else if (key.downArrow) setCursor(wrapStep(clamped, 1, rows.length));
       else if (key.return) rows[clamped]!.onManage();
       else if (input === "x" && !streamActive && rows[clamped]!.signedIn) rows[clamped]!.onSignOut();
+      else if (input === "i" && rows[clamped]!.importable && rows[clamped]!.signedIn) rows[clamped]!.onImport?.();
     },
     { isActive: focused },
   );
@@ -163,6 +170,13 @@ export function Accounts({
                     <Text dimColor>{`  ${ICON.dot}  `}</Text>
                     <Text color={COLOR.alt}>x</Text>
                     <Text dimColor>{` ${r.verbSignOut}`}</Text>
+                    {r.importable ? (
+                      <Text>
+                        <Text dimColor>{`  ${ICON.dot}  `}</Text>
+                        <Text color={COLOR.alt}>i</Text>
+                        <Text dimColor> import</Text>
+                      </Text>
+                    ) : null}
                   </Text>
                 ) : (
                   <Text>
