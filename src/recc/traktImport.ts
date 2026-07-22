@@ -1,5 +1,5 @@
 import { log } from "../util/logger";
-import type { FetchImpl } from "../util/net";
+import type { FetchImpl, SleepImpl } from "../util/net";
 import type { ReccClientConfig } from "./client";
 
 const NOT_LINKED = "reccd is not linked — set it up in Accounts first";
@@ -133,4 +133,53 @@ export async function runTraktImport(config: ReccClientConfig, opts: TraktReques
       unresolvedTitles: titles,
     },
   };
+}
+
+export interface TraktFlowCallbacks {
+  // Fires once the device code is issued: show the code + verification URL.
+  onConnect?: (info: TraktConnectInfo) => void;
+  // Fires on each poll result while waiting for the user to authorize.
+  onStatus?: (status: TraktStatus) => void;
+  // Fires just before the (post-authorization) import runs.
+  onImporting?: () => void;
+}
+
+export interface TraktFlowOptions extends TraktRequestOptions {
+  sleepImpl?: SleepImpl;
+}
+
+const defaultSleep: SleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Orchestrates the full import. reccd persists the Trakt token, so the first
+// step is an optimistic import: if a token is already stored it succeeds and we
+// return straight away (no re-authorization). Only a "not connected" result
+// drops into the device-code handshake (connect → poll → import).
+export async function runTraktFlow(
+  config: ReccClientConfig,
+  callbacks: TraktFlowCallbacks = {},
+  opts: TraktFlowOptions = {},
+): Promise<TraktImportOutcome> {
+  const sleep = opts.sleepImpl ?? defaultSleep;
+
+  const first = await runTraktImport(config, opts);
+  if (first.ok || !first.notConnected) return first; // success, or a real error (incl. notConfigured)
+
+  const connect = await connectTrakt(config, opts);
+  if (!connect.ok) return connect;
+  callbacks.onConnect?.(connect.info);
+
+  const interval = Math.max(1, connect.info.interval);
+  const maxPolls = Math.max(1, Math.ceil(connect.info.expiresIn / interval));
+  for (let i = 0; i < maxPolls; i++) {
+    await sleep(interval * 1000);
+    const status = await checkTraktStatus(config, opts);
+    if (!status.ok) return status;
+    callbacks.onStatus?.(status.status);
+    if (status.status === "connected") {
+      callbacks.onImporting?.();
+      return runTraktImport(config, opts);
+    }
+    if (status.status === "expired") break;
+  }
+  return { ok: false, error: "Trakt authorization expired — try again" };
 }
