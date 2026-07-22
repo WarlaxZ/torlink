@@ -396,7 +396,7 @@ export async function uploadNetflixCsv(
       res = await fetchImpl(`${config.reccUrl}/import/netflix`, {
         method: "POST",
         headers: { authorization: `Bearer ${config.reccToken ?? ""}` },
-        body: form as unknown as BodyInit,
+        body: form, // FormData is a valid RequestInit["body"]; no cast (repo tsconfig has no DOM lib, so `BodyInit` isn't global)
         signal: AbortSignal.timeout(opts.timeoutMs ?? 30000),
       });
     } catch (err) {
