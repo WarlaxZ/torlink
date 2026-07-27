@@ -76,6 +76,19 @@ describe("getPoster", () => {
     await expect(fs.readdir(dir)).resolves.toEqual([]);
   });
 
+  // The gate runs before the cache stat, so a file already sitting in the cache
+  // directory under a disallowed URL's hash is still never served. Writes go
+  // through the same gate, so such an entry can't get there legitimately — but
+  // that argument is exactly the sort a later refactor breaks silently.
+  it("refuses a disallowed url even when the cache already holds a file for it", async () => {
+    const url = "http://169.254.169.254/latest/meta-data";
+    await fs.writeFile(path.join(dir, posterFileName(url)), JPEG);
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+
+    expect(await getPoster(url, { dir, fetchImpl })).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("refuses a lookalike subdomain of an allowlisted host", async () => {
     const fetchImpl = vi.fn(async () => okResponse(JPEG));
     expect(
@@ -133,7 +146,8 @@ describe("getPoster", () => {
 // ever look at the response. These pin the hop itself.
 describe("getPoster redirects", () => {
   it("follows one hop to another allowlisted CDN", async () => {
-    const fetchImpl = vi.fn(async (u: string) =>
+    // Typed with the init param so the shared-signal assertion below can reach it.
+    const fetchImpl = vi.fn(async (u: string, _init?: RequestInit) =>
       u.includes("omdbapi")
         ? redirectResponse("https://m.media-amazon.com/real.jpg")
         : okResponse(JPEG),
@@ -143,6 +157,9 @@ describe("getPoster redirects", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(hit).not.toBeNull();
     expect(hit?.bytes).toBe(JPEG.length);
+    // One deadline for the whole exchange: a fresh timeout per hop would let a
+    // redirect chain double the time a caller can be made to wait.
+    expect(fetchImpl.mock.calls[0]![1]!.signal).toBe(fetchImpl.mock.calls[1]![1]!.signal);
   });
 
   // Without redirect: "manual" the real fetch follows hops internally and every
@@ -157,6 +174,33 @@ describe("getPoster redirects", () => {
       "https://m.media-amazon.com/a.jpg",
       expect.objectContaining({ redirect: "manual" }),
     );
+  });
+
+  // 302 is the only status the other tests here exercise, so without this every
+  // other redirect status is an untested claim: a real 301 from a CDN would fall
+  // through to the !res.ok check and silently produce a placeholder.
+  it.each([301, 303, 307, 308])("follows a %i redirect to an allowlisted CDN", async (status) => {
+    const fetchImpl = vi.fn(async (u: string) =>
+      u.includes("omdbapi")
+        ? new Response(null, { status, headers: { location: "https://m.media-amazon.com/real.jpg" } })
+        : okResponse(JPEG),
+    );
+    const hit = await getPoster(`https://img.omdbapi.com/?i=tt${status}`, { dir, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(hit).not.toBeNull();
+  });
+
+  // A relative Location is legal and common; resolving it needs the URL we
+  // actually requested as a base, or it throws and degrades to a placeholder.
+  it("resolves a relative Location against the requested url", async () => {
+    const fetchImpl = vi.fn(async (u: string) =>
+      u.endsWith("/a.jpg") ? redirectResponse("/b.jpg") : okResponse(JPEG),
+    );
+    const hit = await getPoster("https://m.media-amazon.com/images/a.jpg", { dir, fetchImpl });
+
+    expect(hit).not.toBeNull();
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "https://m.media-amazon.com/b.jpg", expect.anything());
   });
 
   it("refuses a redirect off the allowlist without following it", async () => {
@@ -197,6 +241,41 @@ describe("getPoster redirects", () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 302 }));
     expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Two properties getPoster's docblock asserts but nothing exercised: the cache
+// cap is actually enforced from the write path, and a hit is LRU rather than FIFO.
+// Both fail silently — the cache just grows, or evicts the wrong thing.
+describe("getPoster housekeeping", () => {
+  it("prunes to the cap from the write path", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    // writesSincePrune is module state shared with the tests above, so make no
+    // assumption about its value: PRUNE_EVERY_N_WRITES successful writes cross
+    // the threshold from anywhere in its range.
+    for (let i = 0; i < 50; i++) {
+      await getPoster(`https://m.media-amazon.com/p${i}.jpg`, { dir, fetchImpl, maxBytes: 100 });
+    }
+
+    // prunePosters is fire-and-forget from getPoster, so wait for it to land.
+    await vi.waitFor(async () => {
+      expect((await fs.readdir(dir)).length).toBeLessThan(50);
+    });
+  });
+
+  it("touches mtime on a cache hit so eviction is LRU, not FIFO", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    const url = "https://m.media-amazon.com/lru.jpg";
+    const hit = await getPoster(url, { dir, fetchImpl });
+
+    // Backdate the cached file, then read it through the cache again.
+    const old = new Date("2000-01-01T00:00:00Z").getTime() / 1000;
+    await fs.utimes(hit!.path, old, old);
+    await getPoster(url, { dir, fetchImpl });
+
+    const { mtimeMs } = await fs.stat(hit!.path);
+    expect(mtimeMs).toBeGreaterThan(old * 1000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // served from disk, not refetched
   });
 });
 

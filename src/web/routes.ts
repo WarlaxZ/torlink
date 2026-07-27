@@ -3,10 +3,6 @@ import { isAuthorized } from "../daemon/auth";
 import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
 import type { Runtime } from "../daemon/runtime";
 
-// The allowlist lives in core/posterCache, next to the fetch that has to honour
-// it on redirects too. Re-exported so the server unit can reach it from here.
-export { POSTER_HOSTS };
-
 export interface WebDeps {
   runtime: Runtime;
   token: string | null;
@@ -96,7 +92,7 @@ export async function handleWebApi(
     // host is a 400 (the caller asked for something we won't do) while a cache
     // miss is a 404, and a null return can't tell the two apart.
     if (!POSTER_HOSTS.has(host)) return { status: 400, json: { error: "host not allowed" } };
-    const hit = await (deps.getPosterImpl ?? ((u: string) => getPoster(u)))(url);
+    const hit = await (deps.getPosterImpl ?? getPoster)(url);
     if (!hit) return { status: 404, json: { error: "poster unavailable" } };
     return posterResponse(hit);
   }

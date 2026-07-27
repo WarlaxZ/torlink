@@ -103,6 +103,10 @@ describe("handleWebApi — /api/poster", () => {
     expect(res.status).toBe(200);
     expect(res.filePath).toBe("/tmp/posters/abc.jpg");
     expect(res.headers?.["Content-Type"]).toBe("image/jpeg");
+    // Content-Length is load-bearing for the server unit, which streams the file
+    // rather than buffering it, so it can't derive the length at write time.
+    expect(res.headers?.["Content-Length"]).toBe("42");
+    expect(res.headers?.["Cache-Control"]).toBe("private, max-age=86400");
   });
 
   it("refuses a host outside the allowlist without fetching", async () => {

@@ -179,6 +179,12 @@ export async function prunePosters(dir: string, maxBytes: number): Promise<void>
  *
  * A hit updates the file's mtime so `prunePosters` treats the cache as LRU
  * rather than first-in-first-out.
+ *
+ * If this grows another phase, the clean cut is
+ * `posterBytes(url, fetchImpl, timeoutMs): Promise<Buffer | null>` covering the
+ * redirect loop plus the ok / content-length / size / magic-byte validation: that
+ * span touches only the network and a buffer, never the filesystem, so it
+ * separates without having to thread cache paths through it.
  */
 export async function getPoster(
   url: string,
@@ -205,18 +211,23 @@ export async function getPoster(
     // One deadline for the whole exchange, shared across the hop, so following a
     // redirect can't double the time a caller waits.
     const signal = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const get = (u: string): Promise<Response> =>
+      fetchImpl(u, { method: "GET", redirect: "manual", signal });
+
     let target = url;
-    let res: Response;
-    for (let hop = 0; ; hop++) {
-      res = await fetchImpl(target, { method: "GET", redirect: "manual", signal });
-      if (!REDIRECT_STATUS.has(res.status)) break;
-      if (hop >= MAX_POSTER_REDIRECTS) return null;
+    let hops = 0;
+    let res = await get(target);
+    while (REDIRECT_STATUS.has(res.status)) {
+      if (hops++ >= MAX_POSTER_REDIRECTS) return null;
       const next = redirectTarget(res, target);
       if (!next) return null;
       target = next;
+      res = await get(target);
     }
-    // Every check below now runs against the final response, redirect or not: a
-    // hop is a path through the guards, never around them.
+
+    // The loop above only exits on a non-redirect, so everything from here down
+    // is validating the *final* response: a hop is a path through these guards,
+    // never around them.
     if (!res.ok) return null;
     // Trust content-length only to bail out early; the real check is the
     // buffer length below, since the header is optional and can lie.
