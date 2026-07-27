@@ -19,6 +19,15 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute is only `display: none` in the user-agent stylesheet,
+   so ANY author rule that sets `display` silently defeats it — author styles
+   beat UA styles. `.card { display: flex }` did exactly that, leaving the
+   access-token form on screen even after the app had unlocked. Every element
+   app.ts hides is styled, so this needs to win outright. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   margin-inline: auto;
@@ -160,6 +169,20 @@ button:hover {
   font-size: 0.75rem;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* On a phone the meta line is nearly as wide as the viewport, which squeezes
+   the name to a few characters — and the name is what you check before tapping
+   `delete`. Stack them so the name gets the full width. */
+@media (max-width: 34rem) {
+  .row-head {
+    display: block;
+  }
+
+  .row-meta {
+    display: block;
+    margin-top: 0.2rem;
+  }
 }
 
 .bar {
