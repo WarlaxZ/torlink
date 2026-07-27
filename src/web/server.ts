@@ -14,6 +14,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { handleWebApi, isApiPath, type WebResponse } from "./routes";
 import { subscribeToQueue } from "./sse";
+import { handleStreamRequest, isStreamPath } from "./stream";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
@@ -278,6 +279,24 @@ export async function startWebServer(
       // one request in, one complete response out, which a stream is not.
       if (method === "GET" && urlPath === "/api/events") {
         serveEvents(req, res, url.searchParams);
+        return;
+      }
+
+      // Media, and the second route that owns its own socket: a range response
+      // is a long body the router's one-value-out contract cannot express.
+      // Mounted outside /api/ deliberately — it authenticates with a session
+      // capability in ?k=, not the bearer token, because <video> and VLC cannot
+      // send an Authorization header. Only the path is logged: the query string
+      // carries that capability, and a Real-Debrid Location is a credential.
+      if (isStreamPath(urlPath)) {
+        const wrote = await handleStreamRequest(
+          { sessions: runtime.sessions, log },
+          req,
+          res,
+          urlPath,
+          url.searchParams,
+        );
+        log(`${method} ${urlPath} -> ${wrote}`);
         return;
       }
 
