@@ -2223,6 +2223,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
+  // The browser bundle ships a sourcemap, so /app.js.map will be requested.
+  // Without this it falls through to octet-stream, which devtools tolerates but
+  // does not reliably parse — and an unusable sourcemap defeats shipping one.
+  ".map": "application/json; charset=utf-8",
 };
 
 export function contentTypeFor(file: string): string {
@@ -3962,6 +3966,19 @@ torlnk.example.com {
 > Behind a reverse proxy the dashboard works today because every URL it uses is
 > relative. Streaming (coming next) generates absolute URLs for playlists and
 > will add a `--trust-proxy` flag for forwarded-host handling.
+
+### Posters
+
+### Working on the web UI
+
+The dashboard is served from `dist/web`, not from `src`. If you edit anything in
+`src/web/static/` — `app.ts`, `index.html` or `styles.css` — and reload the
+browser, **you get silently stale assets**. It reads exactly like a browser cache
+bug, so people lose time in devtools before thinking of the build. Rerun
+`npm run build` after any change in that directory.
+
+`npm run dev` only re-executes the server's TypeScript; it does not rebuild the
+browser bundle.
 
 ### Posters
 
