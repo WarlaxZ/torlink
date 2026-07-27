@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runSearch, type SearchSnapshot } from "./search";
+import { AuthRequiredError } from "../sources/rutracker";
 import type { Health } from "../sources/sourceHealth";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 
@@ -99,6 +100,20 @@ describe("runSearch", () => {
     expect(health.get("eztv")?.skipUntil).toBeGreaterThan(1000);
   });
 
+  it("does not count an auth error against a source's health", async () => {
+    const health = new Map<SourceId, Health>();
+    for (let i = 0; i < 3; i++) {
+      await runSearch("q", [source("eztv")], {
+        health,
+        now: () => 1000,
+        searchImpl: async () => {
+          throw new AuthRequiredError();
+        },
+      });
+    }
+    expect(health.has("eztv")).toBe(false);
+  });
+
   it("clears health on success", async () => {
     const health = new Map<SourceId, Health>([["yts", { fails: 2, skipUntil: 0 }]]);
     await runSearch("q", [source("yts")], {
@@ -115,13 +130,12 @@ describe("runSearch", () => {
       const promise = runSearch("q", [source("eztv")], {
         health,
         now: () => 1000,
-        timeoutMs: 500,
         searchImpl: (_s, _q, opts) =>
           new Promise((_resolve, reject) => {
             opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
           }),
       });
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(25_001);
       const snap = await promise;
       expect(snap.perSource.eztv).toMatchObject({ error: "timed out", code: "timed out" });
     } finally {
