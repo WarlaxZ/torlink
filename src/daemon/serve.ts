@@ -11,7 +11,7 @@ import http from "node:http";
 import { startRuntime, addInput, type Runtime } from "./runtime";
 import { disarmBootMarker } from "../download/bootguard";
 import { startSeedReaper } from "./seed-reaper";
-import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk } from "./auth";
+import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } from "./auth";
 import { startWebServer, type WebServerHandle } from "../web/server";
 import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
@@ -353,6 +353,18 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "forbidden host" }));
         log(`${method} ${urlPath} -> 403 (host)`);
+        return;
+      }
+      // CSRF: a browser page on another origin can reach this port with a POST
+      // that passes both guards above (it sets Host itself, and tokenless means
+      // no credential to forge), which for `{"action":"delete"}` means deleting
+      // a visitor's files. Rejected only when the headers positively say
+      // cross-site, so curl and scripts — which send neither header — keep
+      // working. GETs are untouched.
+      if (method !== "GET" && method !== "HEAD" && isCrossSiteHttpRequest(req.headers)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "cross-site request blocked" }));
+        log(`${method} ${urlPath} -> 403 (cross-site)`);
         return;
       }
       const body = method === "POST" ? await readBody(req) : { text: "", tooLarge: false };

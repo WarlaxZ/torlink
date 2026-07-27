@@ -200,6 +200,8 @@ Under `serve` the UI binds serve's own `--host` and reuses its `--token`, so one
 
 You enter the token once in the browser. It's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
 
+On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
+
 ### From outside your network
 
 **Don't port-forward this to the internet.** Two reasonable options:

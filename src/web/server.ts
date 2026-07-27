@@ -16,7 +16,7 @@ import { handleWebApi, isApiPath, type WebResponse } from "./routes";
 import { subscribeToQueue } from "./sse";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
-import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized } from "../daemon/auth";
+import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
 import type { Runtime } from "../daemon/runtime";
 
 export const DEFAULT_WEB_PORT = 9162;
@@ -255,6 +255,22 @@ export async function startWebServer(
       if (!token && !hostHeaderOk(req.headers.host)) {
         writeJson(res, 403, { error: "forbidden host" });
         log(`${method} ${urlPath} -> 403 (host)`);
+        return;
+      }
+
+      // CSRF, and the reason it sits here rather than in the router: the router
+      // never sees the request headers. Tokenless is the normal way to run the
+      // dashboard, and tokenless means `isAuthorized` says yes to anyone —
+      // leaving `Host`, which a browser sets to the target itself, as the only
+      // gate. So `POST /api/control {"action":"delete"}` from any page the user
+      // was visiting reached `queue.remove(id, { deleteFiles: true })`.
+      //
+      // Only state-changing methods, and only when the headers positively say
+      // cross-site: the dashboard's own fetch sends a same-origin `Origin` and
+      // passes, while curl and scripts send neither header and also pass.
+      if (method !== "GET" && method !== "HEAD" && isCrossSiteHttpRequest(req.headers)) {
+        writeJson(res, 403, { error: "cross-site request blocked" });
+        log(`${method} ${urlPath} -> 403 (cross-site)`);
         return;
       }
 

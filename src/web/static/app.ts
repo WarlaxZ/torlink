@@ -15,8 +15,13 @@ import {
 } from "./dashboard";
 
 // The token is held in sessionStorage and sent as an Authorization header on
-// every API call. No cookie authenticates the API, so there is no CSRF vector
-// to defend against.
+// every API call. No cookie authenticates the API — but that does NOT mean there
+// is no CSRF vector, which is what this comment used to claim: the usual way to
+// run the dashboard is with no token at all, and then there is no credential to
+// forge in the first place. A cross-origin page's POST would simply have been
+// authorized. The server rejects state-changing requests whose Origin /
+// Sec-Fetch-Site say cross-site (daemon/auth.ts, isCrossSiteRequest); this
+// page's own fetches are same-origin and unaffected.
 const TOKEN_KEY = "torlnk.token";
 
 const EMPTY_TEXT = "Nothing in the queue.";

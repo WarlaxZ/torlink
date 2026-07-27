@@ -264,6 +264,63 @@ describe("startWebServer", () => {
     handle = null;
   });
 
+  // CSRF. Tokenless is the normal way to run this, and tokenless means there is
+  // no credential for a hostile page to forge — Host is set by the browser to
+  // whatever it is targeting, so it proves nothing. `delete` reaches
+  // queue.remove(id, { deleteFiles: true }).
+  describe("cross-site POSTs", () => {
+    const control = { id: "abc", action: "delete" };
+
+    it("rejects a POST a browser labelled cross-site", async () => {
+      const base = await start();
+      const cases: Record<string, string>[] = [
+        { origin: "https://evil.example" },
+        { "sec-fetch-site": "cross-site" },
+        { origin: "http://127.0.0.1:3000" }, // another local page, another port
+      ];
+      for (const headers of cases) {
+        const res = await fetch(`${base}/api/control`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(control),
+        });
+        expect(res.status, JSON.stringify(headers)).toBe(403);
+        await expect(res.json()).resolves.toMatchObject({ error: "cross-site request blocked" });
+      }
+    });
+
+    it("allows the dashboard's own same-origin POST", async () => {
+      const base = await start();
+      const res = await fetch(`${base}/api/control`, {
+        method: "POST",
+        headers: { origin: base, "sec-fetch-site": "same-origin" },
+        body: JSON.stringify(control),
+      });
+      // 404 = "no such torrent", i.e. it reached the handler. Not 403.
+      expect(res.status).toBe(404);
+    });
+
+    it("allows a curl-shaped POST with no Origin at all", async () => {
+      const base = await start();
+      // The existing API contract: a loopback POST from a shell works. This is
+      // the request curl actually sends — no Origin, no Sec-Fetch-Site, and (as
+      // curl does by default here) no JSON content type either.
+      const res = await fetch(`${base}/api/control`, {
+        method: "POST",
+        body: JSON.stringify(control),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("leaves GETs alone", async () => {
+      const base = await start();
+      const res = await fetch(`${base}/api/status`, { headers: { origin: "https://evil.example" } });
+      // A cross-origin *read* is the browser's own CORS check to fail, and the
+      // dashboard's EventSource cannot set headers, so GETs are not gated here.
+      expect(res.status).toBe(200);
+    });
+  });
+
   it("caps the request body at 64KB with a 413", async () => {
     const base = await start();
     const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(64 * 1024 + 1) });

@@ -273,6 +273,29 @@ describe("runServe web mount", () => {
     }
   });
 
+  // The same CSRF gate on the pre-existing 9161 API, checked over a real socket.
+  // A bad magnet answers 400 *before* the handler touches the queue, so 400 here
+  // means "the request got through" and 403 means "it was blocked" — no fake
+  // queue method is involved either way.
+  it("blocks a cross-site POST to the api but not a curl-shaped one", async () => {
+    const port = await freePortPair();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+
+    const post = (headers: Record<string, string>): Promise<Response> =>
+      fetch(`http://127.0.0.1:${port}/add`, { method: "POST", headers, body: "nope" });
+
+    expect((await post({ origin: "https://evil.example" })).status).toBe(403);
+    expect((await post({ "sec-fetch-site": "cross-site" })).status).toBe(403);
+    // The dashboard-shaped request, and the curl-shaped one with no headers.
+    expect((await post({ origin: `http://127.0.0.1:${port}` })).status).toBe(400);
+    expect((await post({})).status).toBe(400);
+
+    newSignalHandler(before)();
+    await done;
+  });
+
   it("releases the web port, stops stream sessions and suspends the queue on a signal", async () => {
     const port = await freePortPair();
     const before = new Set(process.listeners("SIGTERM"));
