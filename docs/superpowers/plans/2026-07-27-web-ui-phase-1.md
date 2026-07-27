@@ -66,15 +66,23 @@
 **Files:**
 - Modify: `src/config/paths.ts`
 
-- [ ] **Step 1: Add the posters directory**
+- [ ] **Step 1: Add a cache directory and the posters directory**
 
-Add after the `torrentsDir` export in `src/config/paths.ts`:
+Poster originals are a *cache*, not user state: they must not live under `dataDir`,
+where backup and sync tools would sweep them up. Add a `cacheDir` beside the
+existing `dataDir`/`configDir`, honouring the same `TORLINK_STATE_DIR` override:
+
+```ts
+const cacheDir = override ? path.join(override, "cache") : base.cache;
+```
+
+Then add after the `torrentsDir` export in `src/config/paths.ts`:
 
 ```ts
 // Cached poster originals, keyed by a hash of the source URL. The browser is
 // served these bytes as-is (full quality); the TUI half-blocks the same file
 // rather than re-fetching it. Safe to delete at any time — it is a cache.
-export const postersDir = path.join(dataDir, "posters");
+export const postersDir = path.join(cacheDir, "posters");
 ```
 
 - [ ] **Step 2: Typecheck**
@@ -3841,6 +3849,46 @@ capped and pruned least-recently-used; deleting it is always safe.
 ```bash
 git add README.md
 git commit -m "docs: document the web UI, LAN access and poster caching"
+```
+
+---
+
+## Task 28b: Remove the superseded poster fetcher
+
+**Files:**
+- Modify: `src/util/poster.ts`, `src/util/poster.test.ts`
+
+Deferred from Task 3 deliberately: deleting it mid-phase would have added diff
+noise to an unrelated review. By this point `cachedPosterRows` has replaced it
+everywhere, so leaving it would strand a second implementation of the same job —
+its own scheme guard, its own 8s timeout, its own error handling — that no caller
+exercises and that can silently drift from the cache's behaviour.
+
+- [ ] **Step 1: Confirm it is genuinely unused**
+
+Run: `grep -rn "fetchPosterRows" src/`
+Expected: matches only in `src/util/poster.ts` (the definition) and
+`src/util/poster.test.ts` (its tests). If anything else references it, stop —
+something in an earlier task did not get rewired, and that is the real bug.
+
+- [ ] **Step 2: Delete the function and its tests**
+
+Remove the `fetchPosterRows` export from `src/util/poster.ts` and its
+`describe("fetchPosterRows", …)` block from `src/util/poster.test.ts`. Leave
+`renderJpegPoster`, `renderPosterFile`, `downscale` and `halfBlockRows` alone —
+they are all still used.
+
+- [ ] **Step 3: Verify nothing depended on it**
+
+Run: `npm run typecheck && npm test`
+Expected: no type errors; the full suite passes with the `fetchPosterRows` tests
+gone and no other test newly failing.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/util/poster.ts src/util/poster.test.ts
+git commit -m "refactor: drop fetchPosterRows, superseded by the poster cache"
 ```
 
 ---
