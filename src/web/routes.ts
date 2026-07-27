@@ -90,6 +90,11 @@ export async function handleWebApi(
     } catch {
       return { status: 400, json: { error: "invalid url" } };
     }
+    // DELIBERATELY REDUNDANT: getPoster enforces this allowlist itself on every
+    // hop, and that check is the authoritative one — do not delete it in favour
+    // of this. This one exists only to pick the status code, because a refused
+    // host is a 400 (the caller asked for something we won't do) while a cache
+    // miss is a 404, and a null return can't tell the two apart.
     if (!POSTER_HOSTS.has(host)) return { status: 400, json: { error: "host not allowed" } };
     const hit = await (deps.getPosterImpl ?? ((u: string) => getPoster(u)))(url);
     if (!hit) return { status: 404, json: { error: "poster unavailable" } };

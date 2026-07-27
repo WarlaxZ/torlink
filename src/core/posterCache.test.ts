@@ -67,6 +67,23 @@ describe("getPoster", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  // The allowlist is enforced here, not at each call site, so that "getPoster
+  // only ever fetches poster CDNs" holds for callers that never thought about it.
+  it("refuses a url outside the host allowlist without fetching", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    expect(await getPoster("http://169.254.169.254/latest/meta-data", { dir, fetchImpl })).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("refuses a lookalike subdomain of an allowlisted host", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    expect(
+      await getPoster("https://m.media-amazon.com.evil.example/a.jpg", { dir, fetchImpl }),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("returns null when the fetch fails and writes nothing", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 }));
     expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
@@ -186,12 +203,12 @@ describe("getPoster redirects", () => {
 describe("cachedPosterRows", () => {
   it("returns null when the poster can't be fetched", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 }));
-    expect(await cachedPosterRows("https://x/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
+    expect(await cachedPosterRows("https://m.media-amazon.com/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
   });
 
   it("renders rows from the cached file on a hit", async () => {
     const fetchImpl = vi.fn(async () => okResponse(REAL_JPEG));
-    const rows = await cachedPosterRows("https://x/a.jpg", 2, 2, { dir, fetchImpl });
+    const rows = await cachedPosterRows("https://m.media-amazon.com/a.jpg", 2, 2, { dir, fetchImpl });
     expect(rows).not.toBeNull();
     expect(rows!.length).toBeGreaterThan(0);
     expect(rows![0]).toContain("▀");
@@ -199,7 +216,7 @@ describe("cachedPosterRows", () => {
 
   it("returns null when the cached bytes aren't decodable", async () => {
     const fetchImpl = vi.fn(async () => okResponse(JPEG));
-    expect(await cachedPosterRows("https://x/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
+    expect(await cachedPosterRows("https://m.media-amazon.com/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
   });
 });
 

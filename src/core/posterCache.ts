@@ -41,6 +41,34 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const MAX_POSTER_REDIRECTS = 1;
 
 /**
+ * Whether we're willing to issue a request for this URL at all: an http(s) URL
+ * on an allowlisted CDN.
+ *
+ * This lives inside getPoster rather than at each call site on purpose. "getPoster
+ * only ever fetches poster CDNs" is an invariant you can confirm by reading one
+ * function; "every caller validates first" can only be confirmed by auditing the
+ * whole tree, and it breaks silently the moment someone adds a caller.
+ */
+function posterUrlAllowed(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  if (!POSTER_HOSTS.has(parsed.hostname.toLowerCase())) {
+    // An unlisted CDN is now a hard failure, not a degraded one: the caller sees
+    // null and falls back to its placeholder. That's invisible without this line —
+    // if OMDb starts serving posters from a host we haven't listed, this is the
+    // only trace of why every poster suddenly stopped rendering.
+    log.debug(`poster cache: refusing url outside the host allowlist: ${parsed.hostname}`);
+    return false;
+  }
+  return true;
+}
+
+/**
  * The URL a redirect response points at, or null if we won't follow it.
  *
  * We fetch with `redirect: "manual"` and resolve the hop ourselves because the
@@ -65,7 +93,10 @@ function redirectTarget(res: Response, currentUrl: string): string | null {
   // bypass: new URL("https://m.media-amazon.com@evil.example/").hostname is
   // "evil.example". Scheme is re-checked so a hop can't leave http(s).
   if (resolved.protocol !== "https:" && resolved.protocol !== "http:") return null;
-  if (!POSTER_HOSTS.has(resolved.hostname.toLowerCase())) return null;
+  if (!POSTER_HOSTS.has(resolved.hostname.toLowerCase())) {
+    log.debug(`poster cache: refusing redirect to host outside the allowlist: ${resolved.hostname}`);
+    return null;
+  }
   return resolved.href;
 }
 
@@ -144,7 +175,7 @@ export async function getPoster(
   url: string,
   opts: PosterCacheOptions = {},
 ): Promise<CachedPoster | null> {
-  if (!/^https?:\/\//i.test(url)) return null;
+  if (!posterUrlAllowed(url)) return null;
   const dir = opts.dir ?? postersDir;
   const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
   const file = path.join(dir, posterFileName(url));

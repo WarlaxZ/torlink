@@ -54,7 +54,10 @@ function fetchStubWithPlot(plot: string): { impl: FetchImpl; urls: string[] } {
 // poster image bytes themselves — the full preview pipeline.
 function fetchStubFull(plot: string): { impl: FetchImpl; urls: string[] } {
   const urls: string[] = [];
-  const posterUrl = "https://img.example/poster.jpg";
+  // Must be a host in the poster cache's allowlist (see core/posterCache): a
+  // fictional host is refused before any fetch, so the preview would never
+  // render. Amazon's CDN is also what OMDb actually returns in production.
+  const posterUrl = "https://m.media-amazon.com/poster.jpg";
   const jpg = redJpeg();
   const impl = (async (url: string) => {
     const u = String(url);
