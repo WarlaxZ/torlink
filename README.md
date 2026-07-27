@@ -217,6 +217,14 @@ Posters are fetched once and cached on disk. The browser gets the full-quality i
 
 Poster fetches are restricted to a small allowlist of known image CDNs, re-checked on every redirect hop — a refusal is logged at `warn` level.
 
+### Searching
+
+The browser searches every source the TUI does, and results stream in as each one answers — you'll see `12/23 sources` climb rather than staring at a spinner. Category tabs, sort orders and the alive-only filter are the same code the terminal uses, so the two never disagree about what a result is or how the list is ordered.
+
+Selecting a result shows its poster, plot and IMDb link, if you've set an OMDb key (see below). Without one, everything still works — you just get the release names.
+
+From a result you can **add** it to the queue, **add via RD** where Real-Debrid is configured, or **play** it straight away.
+
 ### Playing something
 
 Hit **play** on any row. torlnk resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
@@ -232,7 +240,6 @@ With Real-Debrid the player redirects straight to their CDN, so the video never 
 
 ### What it doesn't do yet
 
-- **No searching in the browser.** Find things in the TUI, or `POST /api/add` a magnet directly.
 - **No For You feed.**
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
 - **No subtitles, no resume position, no next-episode queue.**
