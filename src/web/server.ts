@@ -223,8 +223,9 @@ export async function startWebServer(
   const server = http.createServer((req, res) => {
     void (async () => {
       const method = req.method ?? "GET";
-      // A relative-URL base: only pathname and search are used, and the host is
-      // never trusted for anything (it is checked as a header, above).
+      // A fixed base, because req.url is origin-form: only pathname and search
+      // are read off it. The literal "localhost" is never trusted for anything —
+      // the real Host header is checked separately, just below.
       const url = new URL(req.url ?? "/", "http://localhost");
       const urlPath = url.pathname;
 
