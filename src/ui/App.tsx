@@ -23,7 +23,7 @@ import { streamTorrent, type TorrentStreamSession } from "../integrations/torren
 import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
-import { classifyStreamRoute } from "./streamRoute";
+import { classifyStreamRoute } from "../core/streamRoute";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
