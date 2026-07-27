@@ -40,8 +40,39 @@ describe("StreamSessionRegistry — torrent route", () => {
       createdAt: 5000,
     });
     expect(session.files).toEqual(FILES);
+    expect(session.progress).toBe(100);
     expect(registry.get("sess1")).toBe(session);
     expect(registry.list()).toHaveLength(1);
+  });
+
+  it("falls back to the caller's name when the torrent has no name of its own", async () => {
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => ({ ...fakeTorrentSession(), name: "" }),
+    });
+
+    const session = await registry.start({
+      ...INPUT,
+      name: "Fallback Name",
+      route: { kind: "torrent-auto" },
+    });
+
+    expect(session.name).toBe("Fallback Name");
+  });
+
+  it("prefers the torrent's own name over the caller's", async () => {
+    // The swarm's name is the authoritative one: the caller's came from a
+    // tracker listing, which is often mangled or truncated.
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => ({ ...fakeTorrentSession(), name: "Real.Swarm.Name" }),
+    });
+
+    const session = await registry.start({
+      ...INPUT,
+      name: "Listing Name",
+      route: { kind: "torrent-auto" },
+    });
+
+    expect(session.name).toBe("Real.Swarm.Name");
   });
 
   it("marks the session failed when the torrent never resolves", async () => {
@@ -61,10 +92,12 @@ describe("StreamSessionRegistry — torrent route", () => {
   });
 
   it("clears files when the backend fails after they were adopted", async () => {
-    // The handle is foreign, WebTorrent-backed code that can blow up part-way
-    // through being adopted — here on the `name` read that follows the file
-    // adoption. A caller that only checks `state` must never be handed the
-    // half-populated file list from an errored session.
+    // Pins a defensive invariant: an errored session must never expose files.
+    // No current backend can actually fail after file adoption — streamTorrent
+    // snapshots `name` into a plain property, and the RD path assigns `files`
+    // only once its await has resolved — so the throwing `name` getter below is
+    // a deliberately impossible handle, the only way to reach the reset. Kept
+    // because a future backend doing real work after adoption would need it.
     const registry = new StreamSessionRegistry({
       streamTorrentImpl: async () => ({
         get name(): string {
@@ -113,11 +146,15 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
   ];
 
   it("resolves through Real-Debrid and reports progress while resolving", async () => {
-    const progressSeen: number[] = [];
-    const registry = new StreamSessionRegistry({
+    // Read off the session mid-flight, not off the callback argument: the
+    // session is already in the registry before the backend is invoked, and by
+    // the time `start` resolves `progress` has been overwritten with 100. This
+    // is what pins the callback actually being wired into the session.
+    let progressDuringResolve: number | null = null;
+    const registry: StreamSessionRegistry = new StreamSessionRegistry({
       resolveDebridImpl: async (_token, _magnet, opts) => {
         opts.onProgress?.(50);
-        progressSeen.push(50);
+        progressDuringResolve = registry.list()[0]!.progress;
         return RD_FILES;
       },
       idFactory: () => "sess1",
@@ -133,7 +170,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     expect(session.route).toBe("realdebrid");
     expect(session.state).toBe("ready");
     expect(session.files).toEqual(RD_FILES);
-    expect(progressSeen).toEqual([50]);
+    expect(progressDuringResolve).toBe(50);
   });
 
   it("passes the info hash as knownHash so an existing RD torrent is reused", async () => {
