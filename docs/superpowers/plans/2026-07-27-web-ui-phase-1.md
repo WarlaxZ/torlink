@@ -475,6 +475,7 @@ Create `src/core/search.test.ts`:
 ```ts
 import { describe, expect, it, vi } from "vitest";
 import { runSearch, type SearchSnapshot } from "./search";
+import { AuthRequiredError } from "../sources/rutracker";
 import type { Health } from "../sources/sourceHealth";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 
@@ -558,7 +559,7 @@ describe("runSearch", () => {
     expect(snap.perSource.nyaa).toBeUndefined();
   });
 
-  it("benches a source after repeated failures but not on an auth error", async () => {
+  it("benches a source after repeated failures", async () => {
     const health = new Map<SourceId, Health>();
     const failing = source("eztv");
     for (let i = 0; i < 3; i++) {
@@ -574,6 +575,21 @@ describe("runSearch", () => {
     expect(health.get("eztv")?.skipUntil).toBeGreaterThan(1000);
   });
 
+  // Without this, deleting the `if (shouldBench(e))` guard in runSearch leaves
+  // every other test passing — the benching test above only proves the true
+  // branch. An auth error means "log in", not "this tracker is down".
+  it("does not bench a source that only needs authentication", async () => {
+    const health = new Map<SourceId, Health>();
+    await runSearch("q", [source("rt-movies")], {
+      health,
+      now: () => 1000,
+      searchImpl: async () => {
+        throw new AuthRequiredError();
+      },
+    });
+    expect(health.has("rt-movies")).toBe(false);
+  });
+
   it("clears health on success", async () => {
     const health = new Map<SourceId, Health>([["yts", { fails: 2, skipUntil: 0 }]]);
     await runSearch("q", [source("yts")], {
@@ -587,16 +603,17 @@ describe("runSearch", () => {
     vi.useFakeTimers();
     try {
       const health = new Map<SourceId, Health>();
+      // Deliberately does NOT override timeoutMs: this must prove the real
+      // PER_SOURCE_TIMEOUT_MS default applies, not some test-only value.
       const promise = runSearch("q", [source("eztv")], {
         health,
         now: () => 1000,
-        timeoutMs: 500,
         searchImpl: (_s, _q, opts) =>
           new Promise((_resolve, reject) => {
             opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
           }),
       });
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(25_001);
       const snap = await promise;
       expect(snap.perSource.eztv).toMatchObject({ error: "timed out", code: "timed out" });
     } finally {
