@@ -3710,6 +3710,20 @@ to:
     };
 ```
 
+- [ ] **Step 1b: Stop sessions on the watch daemon's shutdown too**
+
+`src/daemon/watch.ts` runs on the same `Runtime` and has its own
+`SIGINT`/`SIGTERM` handler, so it needs the same cleanup — otherwise a stream
+started through the shared registry outlives `torlnk watch`. In its `shutdown`
+closure, alongside the existing `runtime.queue.suspend()`, add:
+
+```ts
+      void runtime.sessions.stopAll();
+```
+
+This is easy to miss because the watch daemon has nothing to do with the web UI;
+it needs the call only because `Runtime` now carries the registry.
+
 - [ ] **Step 2: Pass the flags through from the entry point**
 
 In `src/index.tsx`, find where `runServe` is called with the parsed `serve` command and add the two new options to the object it passes, alongside the existing `port`/`host`/`token`:
