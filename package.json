@@ -16,7 +16,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.tsx",
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.web.config.ts",
     "postbuild": "node scripts/postbuild.cjs",
     "build:win": "bash scripts/build-win.sh",
     "start": "node dist/index.js",
