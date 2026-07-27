@@ -53,6 +53,26 @@ import {
   type PreviewState,
   type PublicTitleMeta,
 } from "./previewModel";
+import {
+  ACTION_LABEL,
+  createReccController,
+  dismissesPick,
+  actionNotice,
+  pickSub,
+  reasonLine,
+  reasonTitle,
+  reccEventBody,
+  reccItems,
+  reccStatus,
+  recommendationsUrl,
+  RECC_ACTIONS,
+  searchGroupForType,
+  type PublicRecommendation,
+  type PublicRecommendations,
+  type ReccAction,
+  type ReccState,
+  type ReccType,
+} from "./reccModel";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -86,10 +106,19 @@ const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
+const viewReccTab = el<HTMLButtonElement>("view-recc");
 const viewQueueTab = el<HTMLButtonElement>("view-queue");
 const queueCount = el<HTMLSpanElement>("queue-count");
 const paneSearch = el<HTMLElement>("pane-search");
+const paneRecc = el<HTMLElement>("pane-recc");
 const paneQueue = el<HTMLElement>("pane-queue");
+
+const reccTypeSelect = el<HTMLSelectElement>("recc-type");
+const reccGenreInput = el<HTMLInputElement>("recc-genre");
+const reccExploreCheck = el<HTMLInputElement>("recc-explore");
+const reccRefreshButton = el<HTMLButtonElement>("recc-refresh");
+const reccStatusLine = el<HTMLParagraphElement>("recc-status");
+const reccList = el<HTMLUListElement>("recc-list");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
@@ -490,7 +519,7 @@ async function play(row: DashRow): Promise<void> {
 // Search opens first. This app is a torrent finder; a queue monitor is what it
 // looks like when it opens on the queue. The Queue tab carries a count so
 // nothing in flight is out of sight.
-type ViewName = "search" | "queue";
+type ViewName = "search" | "recc" | "queue";
 let view: ViewName = "search";
 
 let searchView: SearchView = emptyView();
@@ -504,12 +533,19 @@ let selectedHash: string | null = null;
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
+  paneRecc.hidden = next !== "recc";
   paneQueue.hidden = next !== "queue";
   viewSearchTab.setAttribute("aria-pressed", String(next === "search"));
+  viewReccTab.setAttribute("aria-pressed", String(next === "recc"));
   viewQueueTab.setAttribute("aria-pressed", String(next === "queue"));
+  // The feed's first load happens here and nowhere else — `open()` is a no-op
+  // after the first call, so this is "the tab has been visited", not "fetch
+  // again". Nothing asks reccd for anything until a human opens this pane.
+  if (next === "recc") recc.open();
 }
 
 viewSearchTab.addEventListener("click", () => showView("search"));
+viewReccTab.addEventListener("click", () => showView("recc"));
 viewQueueTab.addEventListener("click", () => showView("queue"));
 
 // The tab strip, from GET /api/sources. The adult category is absent from that
@@ -879,6 +915,254 @@ const preview = createPreviewController({
   cancel: (handle) => clearTimeout(handle),
   render: renderPreview,
 });
+
+// ---- for you --------------------------------------------------------------
+// The feed. Its decisions — lazy first load, refetch on a real filter change,
+// the request counter that drops a stale answer, and which event each button
+// posts — all live in reccModel.ts. What is here is fetch and DOM.
+
+// Poster object URLs by IMDb id, and the lookups still in flight.
+//
+// Cached across renders because the list is rebuilt whenever a card is rated
+// away, and re-fetching twenty posters for a one-card change would cost twenty
+// OMDb lookups against a key with a daily cap. Cleared (and revoked) whenever
+// the feed itself is re-fetched, which is the only time the set of picks can
+// change underneath it.
+const reccPosterCache = new Map<string, string | null>();
+const reccPosterPending = new Map<string, Promise<string | null>>();
+
+function clearReccPosters(): void {
+  for (const url of reccPosterCache.values()) {
+    if (url !== null) URL.revokeObjectURL(url);
+  }
+  reccPosterCache.clear();
+  reccPosterPending.clear();
+}
+
+/**
+ * A pick's poster: OMDb by IMDb id, then the bytes through `/api/poster`.
+ *
+ * Two hops because reccd returns no artwork — only an id — and because the
+ * poster must not be fetched from the CDN by the browser directly: an `<img
+ * src>` pointing at Amazon leaks the user's IP and referer on every card, which
+ * is what `/api/poster` exists to prevent. Every failure (no OMDb key, a title
+ * OMDb doesn't know, a 404 from the cache) resolves to null and the card keeps
+ * its labelled frame rather than a broken image.
+ */
+async function fetchReccPoster(imdbId: string): Promise<string | null> {
+  try {
+    const metaRes = await fetch(`/api/title?imdb=${encodeURIComponent(imdbId)}`, {
+      headers: authHeaders(),
+    });
+    if (!metaRes.ok) return null;
+    const meta = (await metaRes.json()) as PublicTitleMeta;
+    if (!meta || meta.status !== "ok" || !meta.posterUrl) return null;
+    const posterRes = await fetch(posterPath(meta.posterUrl), { headers: authHeaders() });
+    if (!posterRes.ok) return null;
+    return URL.createObjectURL(await posterRes.blob());
+  } catch {
+    return null;
+  }
+}
+
+function reccPosterNote(host: HTMLElement, note: string): void {
+  const span = document.createElement("span");
+  span.className = "poster-note";
+  span.textContent = note;
+  host.replaceChildren(span);
+}
+
+function paintReccPoster(host: HTMLElement, url: string | null): void {
+  if (url === null) {
+    reccPosterNote(host, "No poster");
+    return;
+  }
+  const img = document.createElement("img");
+  img.src = url;
+  img.alt = "";
+  host.replaceChildren(img);
+}
+
+function mountReccPoster(imdbId: string, host: HTMLElement): void {
+  const cached = reccPosterCache.get(imdbId);
+  if (cached !== undefined) {
+    paintReccPoster(host, cached);
+    return;
+  }
+  reccPosterNote(host, "Loading");
+  let inflight = reccPosterPending.get(imdbId);
+  if (!inflight) {
+    inflight = fetchReccPoster(imdbId).then((url) => {
+      reccPosterPending.delete(imdbId);
+      // A feed reload between the request and its answer clears the cache; the
+      // URL created for a pick nobody is showing any more is revoked rather
+      // than leaked back into an empty map.
+      if (reccPosterCache.size === 0 && reccPosterPending.size === 0 && url !== null) {
+        URL.revokeObjectURL(url);
+        return null;
+      }
+      reccPosterCache.set(imdbId, url);
+      return url;
+    });
+    reccPosterPending.set(imdbId, inflight);
+  }
+  void inflight.then((url) => {
+    // The card this was for may have been rated away or re-rendered while the
+    // two round trips were in flight; a detached node is not worth painting.
+    if (host.isConnected) paintReccPoster(host, url);
+  });
+}
+
+/** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
+async function actOnPick(action: ReccAction, item: PublicRecommendation): Promise<void> {
+  // Optimistic, exactly as the TUI is: the event is fire-and-forget on both
+  // sides of the wire, so there is nothing to wait for before the card goes.
+  if (dismissesPick(action)) recc.dismiss(item.imdbId);
+  let res: Response;
+  try {
+    res = await fetch("/api/recc-event", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(reccEventBody(action, item)),
+    });
+  } catch {
+    showNotice("That didn't reach the server.");
+    setConn("lost");
+    return;
+  }
+  if (!res.ok) {
+    const body = await readEnvelope(res);
+    showNotice(body.error ?? `That didn't stick (HTTP ${res.status}).`);
+    return;
+  }
+  const body = await readJson(res);
+  if (body.status === "not-configured") {
+    showNotice("Recommendations aren't set up, so that wasn't recorded.");
+    return;
+  }
+  showNotice(actionNotice(action, item));
+}
+
+/** Hand a pick to the search pane — the feed's way out into the rest of the app. */
+function searchForPick(item: PublicRecommendation): void {
+  const group = searchGroupForType(recc.state().filters.type, sources);
+  searchView = { ...searchView, group };
+  renderTabs();
+  queryInput.value = item.title;
+  showView("search");
+  startSearch(item.title);
+}
+
+// Same createElement/textContent rule as every other list on this page, and for
+// the same reason: a title and a "because you liked …" line are strings from a
+// remote service this app does not control.
+function renderPick(item: PublicRecommendation): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row recc-card";
+
+  // The poster is a button: it is the card's primary target, and what it does
+  // is the TUI's Enter — search for this pick.
+  const posterButton = document.createElement("button");
+  posterButton.type = "button";
+  posterButton.className = "recc-poster";
+  posterButton.title = `Search for ${item.title}`;
+  const posterFrame = document.createElement("div");
+  posterFrame.className = "poster";
+  posterButton.append(posterFrame);
+  posterButton.addEventListener("click", () => searchForPick(item));
+  mountReccPoster(item.imdbId, posterFrame);
+
+  const title = document.createElement("p");
+  title.className = "recc-title";
+  title.textContent = item.title;
+  title.title = item.title;
+
+  const sub = document.createElement("p");
+  sub.className = "recc-sub";
+  sub.textContent = pickSub(item);
+
+  li.append(posterButton, title, sub);
+
+  const reason = reasonLine(item);
+  if (reason) {
+    const why = document.createElement("p");
+    why.className = "recc-reason";
+    why.textContent = reason;
+    // Every reason, not just the strongest. An attribute, not markup.
+    why.title = reasonTitle(item);
+    li.append(why);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const searchButton = document.createElement("button");
+  searchButton.type = "button";
+  searchButton.className = "play";
+  searchButton.textContent = "search";
+  searchButton.addEventListener("click", () => searchForPick(item));
+  actions.append(searchButton);
+
+  for (const action of RECC_ACTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = ACTION_LABEL[action];
+    button.addEventListener("click", () => void actOnPick(action, item));
+    actions.append(button);
+  }
+
+  li.append(actions);
+  return li;
+}
+
+function renderRecc(state: ReccState): void {
+  const items = reccItems(state);
+  reccList.replaceChildren(...items.map(renderPick));
+
+  const status = reccStatus(state);
+  reccStatusLine.textContent = status.text;
+  reccStatusLine.classList.toggle("error", status.tone === "error");
+  reccStatusLine.hidden = !status.show;
+
+  // The controls are meaningless with nothing behind them, and a genre box over
+  // an unconfigured reccd is an invitation to a second nothing.
+  const usable = state.phase.kind !== "not-configured";
+  reccTypeSelect.disabled = !usable;
+  reccGenreInput.disabled = !usable;
+  reccExploreCheck.disabled = !usable;
+  reccRefreshButton.disabled = !usable;
+}
+
+const recc = createReccController({
+  async fetch(filters): Promise<PublicRecommendations | null> {
+    // A new feed means a new set of picks; the posters cached for the old one
+    // are released here rather than accumulating a blob per pick per refresh.
+    clearReccPosters();
+    try {
+      const res = await fetch(recommendationsUrl(filters), { headers: authHeaders() });
+      if (!res.ok) return null;
+      const body = (await res.json()) as unknown;
+      return body && typeof body === "object" ? (body as PublicRecommendations) : null;
+    } catch {
+      return null;
+    }
+  },
+  render: renderRecc,
+});
+
+reccTypeSelect.addEventListener("change", () => {
+  // The select's values are the model's own type names, so no mapping here —
+  // and an unexpected value would be the bug rather than something to paper
+  // over with a fallback.
+  recc.setType(reccTypeSelect.value as ReccType);
+});
+
+// `change`, not `input`: each edit is a request to reccd, so the box commits on
+// Enter or blur the way the TUI's genre prompt commits on submit. A per-keystroke
+// refetch would be five requests to type "drama".
+reccGenreInput.addEventListener("change", () => recc.setGenre(reccGenreInput.value));
+reccExploreCheck.addEventListener("change", () => recc.setExplore(reccExploreCheck.checked));
+reccRefreshButton.addEventListener("click", () => recc.refresh());
 
 // ---- connection -----------------------------------------------------------
 

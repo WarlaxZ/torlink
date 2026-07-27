@@ -10,12 +10,13 @@
   <body>
     <header>
       <h1>torlnk</h1>
-      <!-- Search / Queue, the two things this app is. Buttons rather than links
-           or a router: it is one page with two panes, and a URL that could be
-           bookmarked mid-search would promise a restored search it cannot
-           deliver (the stream is not replayable). -->
+      <!-- Search / For You / Queue, the three things this app is. Buttons
+           rather than links or a router: it is one page with three panes, and a
+           URL that could be bookmarked mid-search would promise a restored
+           search it cannot deliver (the stream is not replayable). -->
       <nav id="views" class="views" hidden>
         <button id="view-search" type="button" class="view-tab" aria-pressed="true">search</button>
+        <button id="view-recc" type="button" class="view-tab" aria-pressed="false">for you</button>
         <button id="view-queue" type="button" class="view-tab" aria-pressed="false">
           queue<span id="queue-count" class="badge" hidden></span>
         </button>
@@ -105,6 +106,40 @@
             <a id="preview-imdb" class="button-link preview-imdb" target="_blank" rel="noreferrer noopener">IMDb</a>
           </aside>
         </div>
+      </section>
+
+      <!-- ---- for you ----------------------------------------------------- -->
+      <!-- The feed itself is built by app.js with createElement: titles and
+           "because you liked …" reasons come out of reccd, a remote service,
+           and are as much a stranger's strings as a release name is. The
+           filters are markup because they are fixed — the type list is reccd's
+           own, not a config-dependent one like the category tabs. -->
+      <section id="pane-recc" hidden>
+        <div class="controls">
+          <label class="control" for="recc-type">
+            <span>type</span>
+            <select id="recc-type">
+              <option value="all" selected>all</option>
+              <option value="movie">movies</option>
+              <option value="tv">tv</option>
+            </select>
+          </label>
+          <label class="control" for="recc-genre">
+            <span>genre</span>
+            <!-- A search input, and read on change rather than on input: each
+                 edit is a request to reccd, so the box commits on Enter or
+                 blur the way the TUI's genre prompt commits on submit. -->
+            <input id="recc-genre" type="search" placeholder="horror" autocomplete="off" />
+          </label>
+          <label class="control control-check" for="recc-explore">
+            <input id="recc-explore" type="checkbox" />
+            <span>explore</span>
+          </label>
+          <button id="recc-refresh" type="button">refresh</button>
+        </div>
+
+        <p id="recc-status" class="empty">Picks based on what you've watched.</p>
+        <ul id="recc-list" class="recc-grid"></ul>
       </section>
 
       <!-- ---- queue ------------------------------------------------------- -->

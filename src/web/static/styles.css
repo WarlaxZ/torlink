@@ -540,6 +540,81 @@ select:focus-visible {
 }
 
 /* ---------------------------------------------------------------------------
+   The For You feed. Cards rather than the search pane's rows because a pick is
+   a poster first — the same .poster frame the preview uses, so a card with no
+   artwork is a labelled box and not a hole in the grid. Everything else here is
+   .row, .row-actions and the palette the rest of the page already uses. */
+.recc-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* auto-fill, not auto-fit: with three picks the cards stay poster-width
+     instead of stretching to a third of the page each. minmax(0, …) for the
+     same reason .rows uses it — a long title must be allowed to ellipsis
+     rather than widen the track past the viewport. */
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.recc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem;
+}
+
+/* The poster is the card's primary target (it selects the pick and offers the
+   search), so it has to look like one without becoming a second button style. */
+.recc-poster {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.recc-poster .poster {
+  max-width: none;
+  margin-bottom: 0;
+}
+
+.recc-title {
+  margin: 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.recc-sub {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* reccd's "because you liked …". Dim and small: it explains the pick, it is not
+   the pick. Clamped to two lines so one verbose reason cannot make its card
+   twice the height of its neighbours and tear the grid. */
+.recc-reason {
+  margin: 0.3rem 0 0;
+  font-size: 0.7rem;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Pushed to the bottom edge so every card's buttons line up across a row,
+   whatever its title and reason did to the space above them. */
+.recc-card .row-actions {
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
    The player page (/play/:sid/:idx). Same file as the dashboard on purpose:
    one palette, one button, one card. The two surfaces are the same app and a
    second stylesheet is how they stop looking like it. */
