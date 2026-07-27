@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { contentTypeFor, resolveAssetPath } from "./staticDir";
+import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 
 const ROOT = path.resolve("/srv/dist/web");
 
@@ -73,23 +73,89 @@ describe("resolveAssetPath", () => {
     expect(resolveAssetPath(ROOT, "/a/../app.js")).toBe(path.join(ROOT, "app.js"));
   });
 
-  // A path resolving to the root *directory* is contained, so the guard permits
-  // it and it is returned unchanged rather than rewritten to index.html (only a
-  // literally empty path gets that treatment). Callers must therefore be ready
-  // for a directory here: reading it yields EISDIR, not a 404.
-  it("returns the root itself for a path that resolves to it", () => {
-    expect(resolveAssetPath(ROOT, "/.")).toBe(ROOT);
+  // Requiring the separator in the prefix test means the root directory itself
+  // fails containment, which is what we want: every caller wants a *file*, and
+  // handing back a directory only converts a 404 into an EISDIR throw. `/` still
+  // works because it is mapped to index.html before the guard runs.
+  it("rejects a path that resolves to the root directory itself", () => {
+    expect(resolveAssetPath(ROOT, "/.")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/index.html/..")).toBeNull();
   });
 
   it("rejects a path that is nothing but slashes", () => {
     expect(resolveAssetPath(ROOT, "//")).toBeNull();
   });
 
+  // These are rejected to satisfy fs's contract, not to stop traversal. The NUL
+  // case is the one that matters: fs throws a TypeError (ERR_INVALID_ARG_VALUE)
+  // for an embedded NUL rather than setting err.code, so without this filter a
+  // request for /app.js%00.png escapes a caller's ENOENT handling as a 500. It
+  // would also be served as image/png while naming a .js file.
+  it("rejects control characters that fs cannot accept", () => {
+    expect(resolveAssetPath(ROOT, "/app.js%00.png")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/%00")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/%09app.js")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/app.js%0a")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/app.js%0d%0aX-Evil:%201")).toBeNull();
+  });
+
+  // A space is in the same rejected class, but for tidiness rather than safety:
+  // it cannot form a separator or a `..` segment. The cost is that an asset
+  // legitimately named "my file.css" is unreachable — rename it in the build.
   it("rejects a path containing a space", () => {
     expect(resolveAssetPath(ROOT, "/app.js .png")).toBeNull();
+    expect(resolveAssetPath(ROOT, "/my%20file.css")).toBeNull();
+  });
+
+  // Printable characters above the control range are untouched by the filter.
+  it("allows unusual but printable filenames", () => {
+    expect(resolveAssetPath(ROOT, "/app-2.0_x%2Bb.js")).toBe(path.join(ROOT, "app-2.0_x+b.js"));
   });
 
   it("rejects a malformed percent escape", () => {
     expect(resolveAssetPath(ROOT, "/%ZZ")).toBeNull();
+  });
+});
+
+describe("findStaticDir", () => {
+  // `here` mimics a published install: dist/index.js looks for dist/web.
+  const DIST = path.resolve("/opt/torlink/dist");
+
+  it("prefers the bundle-relative directory", () => {
+    const found = findStaticDir((p) => p === path.join(DIST, "web", "index.html"), DIST);
+    expect(found).toBe(path.join(DIST, "web"));
+  });
+
+  it("falls back to the repo's dist/web for a source run", () => {
+    // here = <repo>/src/web, so ../../dist/web is <repo>/dist/web.
+    const SRC = path.resolve("/repo/src/web");
+    const target = path.resolve("/repo/dist/web");
+    const found = findStaticDir((p) => p === path.join(target, "index.html"), SRC);
+    expect(found).toBe(target);
+  });
+
+  it("takes the first candidate when several would match", () => {
+    const SRC = path.resolve("/repo/src/web");
+    const found = findStaticDir(() => true, SRC);
+    expect(found).toBe(path.join(SRC, "web"));
+  });
+
+  it("ignores a directory that exists without index.html", () => {
+    // A partial build leaves the *directory* present but empty. That must not
+    // match, and must not shadow a later candidate that is complete — so the
+    // earlier candidate's directory exists here while only the later one has the
+    // sentinel file inside it.
+    const SRC = path.resolve("/repo/src/web");
+    const empty = path.join(SRC, "web");
+    const complete = path.resolve("/repo/dist/web");
+    const found = findStaticDir(
+      (p) => p === empty || p === path.join(complete, "index.html"),
+      SRC,
+    );
+    expect(found).toBe(complete);
+  });
+
+  it("returns null when no candidate has been built", () => {
+    expect(findStaticDir(() => false, path.resolve("/repo/src/web"))).toBeNull();
   });
 });
