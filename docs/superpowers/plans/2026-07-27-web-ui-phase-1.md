@@ -1470,6 +1470,12 @@ Three corrections to the code block above, applied during implementation:
 3. **`deps.streamTorrentImpl ?? streamTorrent`** — the arrow wrapper was
    redundant and its asymmetry with `resolveDebridImpl` invited a hunt for a
    reason that didn't exist.
+4. **`start()` guards against an orphaned handle.** Aborting only helps a backend
+   that honours its signal. If one ignores it and returns a handle after `stop()`
+   already removed the session, that handle would never be stopped. So after the
+   backend returns, if the id is gone from `sessions`, stop the handle instead of
+   adopting it — which is what makes `stopAll`'s guarantee unconditional rather
+   than "true for well-behaved backends".
 
 ### Deferred, deliberately
 
