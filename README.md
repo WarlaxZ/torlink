@@ -238,11 +238,15 @@ There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so 
 
 With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
 
+### For You
+
+If you've connected reccd, the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Paradise"). Rate a pick watched, liked or disliked, add it to your watchlist, or hand it straight to the search pane. Ratings feed back into reccd exactly as they do from the terminal.
+
 ### What it doesn't do yet
 
-- **No For You feed.**
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
 - **No subtitles, no resume position, no next-episode queue.**
+- **No configuration.** Tokens, sources, limits and folders are set in the TUI; the browser reads that config but never writes it.
 
 ### Working on the web UI
 
