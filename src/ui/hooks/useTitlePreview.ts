@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FetchImpl } from "../../util/net";
 import { fetchTitleMeta, fetchTitleMetaByName, type OmdbType } from "../../recc/omdb";
-import { fetchPosterRows } from "../../util/poster";
+import { cachedPosterRows } from "../../core/posterCache";
 
 // How to look a title up: by IMDb id (For You, where reccd supplies it) or by
 // name parsed from a release string (search results).
@@ -100,7 +100,7 @@ export function useTitlePreview(args: Args): TitlePreview {
   useEffect(() => {
     if (!posterEnabled || !posterUrl || !posterKey || posters.current.has(posterKey)) return;
     let cancelled = false;
-    void fetchPosterRows(posterUrl, posterCols, posterMaxRows, { fetchImpl }).then((rows) => {
+    void cachedPosterRows(posterUrl, posterCols, posterMaxRows, { fetchImpl }).then((rows) => {
       if (cancelled) return;
       posters.current.set(posterKey, rows);
       bump((n) => n + 1);
