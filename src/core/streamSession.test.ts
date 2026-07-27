@@ -143,9 +143,12 @@ describe("StreamSessionRegistry — stopAll", () => {
     const stopA = vi.fn(async () => {});
     const stopB = vi.fn(async () => {});
     let n = 0;
+    // Counted separately from `n`: which stop a session gets must not depend on
+    // whether the registry mints its id before or after it starts the backend.
+    let started = 0;
     const stops = [stopA, stopB];
     const registry = new StreamSessionRegistry({
-      streamTorrentImpl: async () => fakeTorrentSession(stops[n]!),
+      streamTorrentImpl: async () => fakeTorrentSession(stops[started++]!),
       idFactory: () => `sess${++n}`,
       capabilityFactory: () => "cap",
     });
