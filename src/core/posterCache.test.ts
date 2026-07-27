@@ -1,10 +1,23 @@
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import jpeg from "jpeg-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getPoster, posterFileName, prunePosters } from "./posterCache";
+import {
+  cachedPosterRows,
+  getPoster,
+  MAX_POSTER_BYTES,
+  posterFileName,
+  prunePosters,
+} from "./posterCache";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+
+// A real, decodable 2x2 JPEG — the stub above has a JPEG magic number but no
+// scan data, so only an encoded image exercises the render path end to end.
+const REAL_JPEG = Buffer.from(
+  jpeg.encode({ data: Buffer.alloc(2 * 2 * 4, 0x40), width: 2, height: 2 }, 80).data,
+);
 
 function okResponse(body: Buffer): Response {
   return new Response(body, { status: 200 });
@@ -62,6 +75,55 @@ describe("getPoster", () => {
     });
     expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
   });
+
+  it("rejects a 200 body that is not a JPEG and caches nothing", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(Buffer.from("<html>not an image</html>")));
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("rejects a body over the size cap and caches nothing", async () => {
+    const huge = Buffer.alloc(MAX_POSTER_BYTES + 1);
+    huge[0] = 0xff;
+    huge[1] = 0xd8;
+    const fetchImpl = vi.fn(async () => okResponse(huge));
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("bails on an oversized content-length without reading the body", async () => {
+    const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
+    const fetchImpl = vi.fn(async () => {
+      const res = new Response(JPEG, {
+        status: 200,
+        headers: { "content-length": String(MAX_POSTER_BYTES + 1) },
+      });
+      return Object.assign(res, { arrayBuffer }) as unknown as Response;
+    });
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+});
+
+describe("cachedPosterRows", () => {
+  it("returns null when the poster can't be fetched", async () => {
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 500 }));
+    expect(await cachedPosterRows("https://x/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
+  });
+
+  it("renders rows from the cached file on a hit", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(REAL_JPEG));
+    const rows = await cachedPosterRows("https://x/a.jpg", 2, 2, { dir, fetchImpl });
+    expect(rows).not.toBeNull();
+    expect(rows!.length).toBeGreaterThan(0);
+    expect(rows![0]).toContain("▀");
+  });
+
+  it("returns null when the cached bytes aren't decodable", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    expect(await cachedPosterRows("https://x/a.jpg", 4, 4, { dir, fetchImpl })).toBeNull();
+  });
 });
 
 describe("prunePosters", () => {
@@ -77,7 +139,8 @@ describe("prunePosters", () => {
 
     await prunePosters(dir, 250);
 
-    await expect(fs.readdir(dir)).resolves.toEqual(["mid.jpg", "new.jpg"]);
+    // readdir order is not guaranteed by POSIX; compare the set, sorted.
+    expect((await fs.readdir(dir)).sort()).toEqual(["mid.jpg", "new.jpg"]);
   });
 
   it("is a no-op under the cap", async () => {

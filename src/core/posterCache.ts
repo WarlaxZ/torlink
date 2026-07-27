@@ -1,5 +1,5 @@
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { postersDir } from "../config/paths";
 import { renderPosterFile } from "../util/poster";
@@ -10,7 +10,21 @@ import { log } from "../util/logger";
 // this holds a few thousand — far more than a session browses.
 export const MAX_POSTER_CACHE_BYTES = 200 * 1024 * 1024;
 
+// A single poster is tens to hundreds of KB. The URL is caller-supplied once
+// the web layer exposes /api/poster, so refuse anything implausibly large
+// rather than buffering it into memory.
+export const MAX_POSTER_BYTES = 8 * 1024 * 1024;
+
 const DEFAULT_TIMEOUT_MS = 8000;
+
+// Pruning walks and stats the whole directory, and during a browse session
+// almost every lookup is a miss — so prune periodically rather than on every
+// write. The cache can drift a little over the cap between sweeps; that's fine.
+const PRUNE_EVERY_N_WRITES = 50;
+// Starts "due" so each process sweeps once on its first write: a session that
+// caches fewer than N posters would otherwise never prune at all, and the cap
+// would drift upwards run after run.
+let writesSincePrune = PRUNE_EVERY_N_WRITES;
 
 export interface PosterCacheOptions {
   dir?: string;
@@ -101,17 +115,27 @@ export async function getPoster(
       signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!res.ok) return null;
+    // Trust content-length only to bail out early; the real check is the
+    // buffer length below, since the header is optional and can lie.
+    const declared = Number(res.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_POSTER_BYTES) return null;
     buf = Buffer.from(await res.arrayBuffer());
   } catch (err) {
     log.debug(`poster cache: fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
-  if (buf.length === 0) return null;
+  if (buf.length === 0 || buf.length > MAX_POSTER_BYTES) return null;
+  // A 200 that isn't actually a JPEG (an HTML error page, a placeholder GIF)
+  // must not be cached: it would fail to decode forever, and every lookup would
+  // touch its mtime so LRU could never evict it.
+  if (buf.length < 2 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
 
   try {
     await fs.mkdir(dir, { recursive: true });
     // Write-then-rename so a concurrent reader never sees a half-written file.
-    const tmp = `${file}.${process.pid}.tmp`;
+    // The tmp name is unique per write so two concurrent writers for the same
+    // URL can't interleave and publish each other's partial bytes.
+    const tmp = `${file}.${randomUUID()}.tmp`;
     await fs.writeFile(tmp, buf);
     await fs.rename(tmp, file);
   } catch (err) {
@@ -119,7 +143,10 @@ export async function getPoster(
     return null;
   }
 
-  void prunePosters(dir, opts.maxBytes ?? MAX_POSTER_CACHE_BYTES);
+  if (++writesSincePrune >= PRUNE_EVERY_N_WRITES) {
+    writesSincePrune = 0;
+    void prunePosters(dir, opts.maxBytes ?? MAX_POSTER_CACHE_BYTES);
+  }
   return { path: file, bytes: buf.length };
 }
 

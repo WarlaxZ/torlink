@@ -60,7 +60,14 @@ function fetchStubFull(plot: string): { impl: FetchImpl; urls: string[] } {
     const u = String(url);
     urls.push(u);
     if (u === posterUrl) {
-      return { ok: true, status: 200, arrayBuffer: async () => jpg } as unknown as Response;
+      // Real responses always carry headers; the poster cache reads
+      // content-length off them to reject oversized bodies early.
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-length": String(jpg.length) }),
+        arrayBuffer: async () => jpg,
+      } as unknown as Response;
     }
     const body = u.includes("omdbapi.com")
       ? { Response: "True", Plot: plot, Poster: posterUrl }
