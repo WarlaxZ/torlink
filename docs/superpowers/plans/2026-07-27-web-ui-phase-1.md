@@ -2053,10 +2053,18 @@ export function subscribeToQueue(
   let pending = false;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const send = (event: string, data: unknown): void => {
+  // snapshot() must be called INSIDE the try. Called outside, a throw at
+  // subscribe time propagates out of subscribeToQueue after the listener and
+  // heartbeat are already installed, leaking both with no handle for the caller
+  // to clean up — exactly what the doc comment above promises cannot happen.
+  // From the flush path it is worse: the throw escapes a setTimeout callback and
+  // becomes a process-level uncaughtException, which in the TUI-hosted server
+  // takes down the terminal app. U12 supplies a real serialiser here; the
+  // trivial stub is the only reason this looks safe.
+  const send = (event: string, build: () => unknown): void => {
     if (!live) return;
     try {
-      write(sseFrame(event, data));
+      write(sseFrame(event, build()));
     } catch {
       stop();
     }
@@ -2098,7 +2106,18 @@ export function subscribeToQueue(
 - [ ] **Step 2: Run the test to verify it passes**
 
 Run: `npx vitest run src/web/sse.test.ts`
-Expected: PASS — all 8 tests.
+Expected: PASS — all 7 tests.
+
+> **These 7 tests pin almost nothing.** Mutation testing killed 1 of 9 mutants:
+> the throttle guard, the listener removal, both timer clears, `.unref()`, and
+> `?? null` all survived. The cause is worth understanding before writing tests
+> for anything shaped like this — each surviving guard is masked by a *different*
+> guard, so the leak never reaches an assertion about `write`. Deleting the
+> throttle still yields one frame per burst (the second flush finds
+> `pending === false`) while orphaning 19 timers; leaving the listener and
+> interval installed still yields no writes (`if (!live) return` short-circuits).
+> Resource leaks need `vi.getTimerCount()` and `queue.listenerCount("update")`,
+> not output assertions.
 
 - [ ] **Step 3: Commit**
 
