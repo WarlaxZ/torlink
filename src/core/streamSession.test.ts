@@ -60,6 +60,31 @@ describe("StreamSessionRegistry — torrent route", () => {
     expect(session.files).toEqual([]);
   });
 
+  it("clears files when the backend fails after they were adopted", async () => {
+    // The handle is foreign, WebTorrent-backed code that can blow up part-way
+    // through being adopted — here on the `name` read that follows the file
+    // adoption. A caller that only checks `state` must never be handed the
+    // half-populated file list from an errored session.
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => ({
+        get name(): string {
+          throw new Error("torrent destroyed");
+        },
+        files: FILES,
+        dir: "/tmp/x",
+        isComplete: () => false,
+        stop: vi.fn(async () => {}),
+      }),
+      idFactory: () => "sess1",
+      capabilityFactory: () => "cap1",
+    });
+
+    const session = await registry.start({ ...INPUT, route: { kind: "torrent-auto" } });
+
+    expect(session.state).toBe("error");
+    expect(session.files).toEqual([]);
+  });
+
   it("stops the underlying session and forgets it", async () => {
     const stop = vi.fn(async () => {});
     const registry = new StreamSessionRegistry({
