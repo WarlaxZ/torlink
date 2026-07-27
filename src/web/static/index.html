@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>torlnk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>torlnk</h1>
+      <span id="conn" class="conn" data-state="connecting">connecting</span>
+    </header>
+
+    <form id="auth" class="card" hidden>
+      <label for="token">Access token</label>
+      <input id="token" type="password" autocomplete="current-password" />
+      <button type="submit">Unlock</button>
+      <p id="auth-error" class="error" hidden></p>
+    </form>
+
+    <main id="app" hidden>
+      <form id="add" class="card">
+        <label for="magnet">Add a magnet or info hash</label>
+        <input id="magnet" type="text" placeholder="magnet:?xt=urn:btih:…" />
+        <button type="submit">Add</button>
+      </form>
+      <p id="notice" class="notice" hidden></p>
+      <ul id="rows" class="rows"></ul>
+      <p id="empty" class="empty">Nothing in the queue.</p>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

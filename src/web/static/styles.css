@@ -1,0 +1,216 @@
+/* Dashboard styling. Deliberately plain CSS with no build step beyond a copy:
+   the file is served as-is, so what you read here is what the browser gets.
+   The palette mirrors the TUI's so the two surfaces read as one tool. */
+
+:root {
+  color-scheme: dark light;
+  --bg: #12131a;
+  --fg: #e6e6ea;
+  --dim: #8b8d9b;
+  --line: #262838;
+  --accent: #7aa2f7;
+  --error: #f7768e;
+  --sunken: #0c0d13;
+  --raised: #1b1d29;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  margin-inline: auto;
+  padding: 1.5rem;
+  max-width: 60rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Connection state. The dot is a text glyph rather than a pseudo-element shape
+   so it inherits the state colour without a second rule per state. */
+.conn {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.conn::before {
+  content: "\25CF\00A0";
+}
+
+.conn[data-state="live"] {
+  color: var(--accent);
+}
+
+.conn[data-state="lost"] {
+  color: var(--error);
+}
+
+.card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.card label {
+  flex: 1 0 100%;
+  font-size: 0.75rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card > .error {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  color: inherit;
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.row {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.row-head {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* min-width: 0 is what actually lets the ellipsis happen — a flex item's
+   default min-width: auto refuses to shrink below its content. */
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  height: 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--line);
+  margin-top: 0.6rem;
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.row-actions button {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.55rem;
+  color: var(--dim);
+}
+
+.row-actions button:hover {
+  color: var(--accent);
+}
+
+.empty,
+.notice,
+.error {
+  color: var(--dim);
+  font-size: 0.8rem;
+}
+
+.notice {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+}
+
+.error {
+  color: var(--error);
+}
+
+/* Reused by the empty-state paragraph when the server is unreachable, so the
+   honest failure message reads as an error rather than as "queue is empty". */
+.empty.error {
+  color: var(--error);
+}
