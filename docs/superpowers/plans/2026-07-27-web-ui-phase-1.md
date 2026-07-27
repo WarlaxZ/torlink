@@ -4031,6 +4031,36 @@ Confirm that no `/stream`, `.m3u`, or player route exists yet — those are phas
 
 ---
 
+## Known limitations, recorded deliberately
+
+**Poster fetching follows redirects, so the host allowlist validates only the
+first hop.** `core/posterCache.ts` calls `fetch` with the default
+`redirect: "follow"`. An allowlisted CDN with an open redirect — or one that is
+compromised or MITM'd — can bounce the daemon to an internal address such as
+`169.254.169.254`.
+
+Why it is not closed here: the magic-byte check in `getPoster` rejects any body
+that is not a JPEG and never caches it, so metadata cannot be exfiltrated through
+the poster route. What remains is blind SSRF (timing and error-shape probing),
+which additionally requires the caller to already hold the token or loopback
+access. Against that, `redirect: "manual"` risks breaking legitimate posters —
+`img.omdbapi.com` plausibly redirects to Amazon's CDN — and closing it properly
+means threading a host validator from `src/web/` into `src/core/`, which is a
+layering decision rather than a one-line change.
+
+If it is closed later: `redirect: "manual"` in `posterCache.ts`, re-validate the
+`Location` host against the same allowlist, follow once. Its own unit.
+
+**`Content-Length` on a poster response comes from the `stat` inside
+`getPoster`.** A poster rewritten between the cache lookup and the response being
+streamed would send a stale length. Task 23, which implements the file-streaming
+side, should stat at send time or drop the header.
+
+**The router's own auth gate is only observable on `/api/poster`.** Every other
+`/api/*` route delegates to `handleApi`, which re-checks the token itself, so
+deleting the gate in `routes.ts` leaves those routes still returning 401. Any
+future non-delegating route must carry its own test for the unauthenticated case.
+
 ## Deferred to later phases
 
 Per the spec, these are deliberately absent from this plan:
