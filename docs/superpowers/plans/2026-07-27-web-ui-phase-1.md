@@ -2104,8 +2104,11 @@ describe("resolveAssetPath", () => {
     expect(resolveAssetPath(ROOT, "/..%2f..%2fetc/passwd")).toBeNull();
   });
 
-  it("rejects an absolute path escape", () => {
-    expect(resolveAssetPath(ROOT, "//etc/passwd")).toBeNull();
+  // A leading-slash-stripped path is NOT an escape: it lands inside the asset
+  // root and simply 404s. Asserting null here would be asserting the wrong
+  // thing — what matters is containment, not rejection.
+  it("contains a leading-double-slash path inside the root", () => {
+    expect(resolveAssetPath(ROOT, "//etc/passwd")).toBe(path.join(ROOT, "etc/passwd"));
   });
 
   it("rejects a path containing a space", () => {
@@ -2966,6 +2969,7 @@ git commit -m "build: bundle and ship the web UI assets to dist/web"
 Create `src/web/server.test.ts`:
 
 ```ts
+import http from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startWebServer, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
@@ -3014,10 +3018,30 @@ describe("startWebServer", () => {
     expect(ok.status).toBe(200);
   });
 
+  // Node's fetch() silently DROPS a Host header override (verified: the server
+  // still sees 127.0.0.1). Use raw http.request, which honours it — otherwise
+  // this test would send a loopback Host, get 200, and quietly stop covering
+  // the DNS-rebinding guard it exists for.
   it("rejects a non-loopback Host header when tokenless", async () => {
-    const base = await start();
-    const res = await fetch(`${base}/api/status`, { headers: { Host: "evil.example" } });
-    expect(res.status).toBe(403);
+    await start();
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: handle!.port,
+          path: "/api/status",
+          method: "GET",
+          headers: { Host: "evil.example" },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(403);
   });
 
   it("refuses to bind a public host without a token", async () => {
