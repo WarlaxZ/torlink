@@ -1236,8 +1236,8 @@ describe("StreamSessionRegistry — stopAll", () => {
     let n = 0;
     // Counted separately from `n`: which stop a session gets must not depend on
     // whether the registry mints its id before or after it starts the backend.
-    // Sharing the counter silently hands session 1 stopB and session 2
-    // undefined, and the test passes while asserting nothing.
+    // Sharing the counter hands session 1 stopB and session 2 undefined, so
+    // stopA is never wired and the test fails on `expect(stopA)`.
     let started = 0;
     const stops = [stopA, stopB];
     const registry = new StreamSessionRegistry({
