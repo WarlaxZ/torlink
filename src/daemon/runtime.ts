@@ -6,7 +6,7 @@
 // would, then exposes a single addInput() the watch folder and HTTP API share.
 
 import { promises as fs } from "node:fs";
-import { loadConfig } from "../config/config";
+import { type Config, loadConfig, resolveRealDebridToken } from "../config/config";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -32,6 +32,22 @@ export interface Runtime {
   recovered?: boolean;
 }
 
+// One line describing the policy the queue was just given, so a headless run
+// makes its limits discoverable the way it already prints its listen address
+// and download dir. A seedbox that was uncapped before this shipped needs to be
+// able to see, in its own log, why it is now capped.
+export function policySummary(cfg: Config): string {
+  const rate = (kbps?: number): string => (kbps && kbps > 0 ? `${kbps} KB/s` : "unlimited");
+  const parts = [
+    `down ${rate(cfg.downloadLimitKbps)}`,
+    `up ${rate(cfg.uploadLimitKbps)}`,
+    `seed ratio ${cfg.seedRatio && cfg.seedRatio > 0 ? cfg.seedRatio : "off"}`,
+    `seed time ${cfg.seedMinutes && cfg.seedMinutes > 0 ? `${cfg.seedMinutes}m` : "off"}`,
+    `real-debrid ${resolveRealDebridToken(cfg) ? "on" : "off"}`,
+  ];
+  return `policy: ${parts.join(" · ")}`;
+}
+
 // Build a queue and restore persisted state, matching the TUI's boot order
 // (history before seeds — seeds resolve against history). `downloadDir` falls
 // back to the saved config's dir when the caller doesn't override it.
@@ -39,6 +55,24 @@ export async function startRuntime(overrideDir?: string): Promise<Runtime> {
   const cfg = await loadConfig();
   const queue = new DownloadQueue();
   queue.setTrackers(cfg.trackers);
+  // Everything below matches App.tsx's boot: without it a headless run ignores
+  // the configured transfer limits, never auto-stops a seed, and fails a
+  // resumed Real-Debrid download with "set a token" for a token that is set.
+  queue.setTransferPolicy(cfg);
+  // resolveRealDebridToken, not cfg.realDebridToken: REALDEBRID_API_TOKEN wins
+  // over the file, and the two front-ends must agree on which token is live.
+  queue.setRealDebridToken(resolveRealDebridToken(cfg));
+  // Deliberately no setP2PAllowed here. In the TUI it isn't a setting but a
+  // 1 Hz vpnRouteIsSafe() loop; a one-shot check at boot would go stale and
+  // look like a kill switch that isn't one. A configured vpnInterface gets the
+  // loud warning below instead of silent, absent protection.
+  console.log(`[torlnk] ${policySummary(cfg)}`);
+  if (cfg.vpnInterface?.trim()) {
+    console.error(
+      `[torlnk] warning: VPN kill switch (${cfg.vpnInterface.trim()}) is not enforced headlessly; ` +
+        "it only runs in the interactive TUI.",
+    );
+  }
   // Crash-boot breaker, mirroring the TUI: a marker left by the previous run
   // means it died mid-restore, so restore paused with the engine cold.
   const safe = wasBootInterrupted();
