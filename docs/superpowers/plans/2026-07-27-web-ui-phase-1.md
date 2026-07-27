@@ -3738,6 +3738,23 @@ to:
     };
 ```
 
+- [ ] **Step 0: Warn on web options set without `--web`**
+
+`--web-port`, `--web-host` and `--web-token` all parse whether or not `--web` is
+present, so `torlnk serve --web-port 8080` accepts the port and silently ignores
+it. `--web-port` deliberately does NOT imply `--web`: a port left behind in a
+script would then quietly start a public-facing dashboard, which is worse than
+ignoring it. So the mount site must say so instead of staying silent — log a
+warning when any web option is set while `web` is false.
+
+- [ ] **Step 0b: The TUI mount must read `TORLINK_API_TOKEN` itself**
+
+`parseCliArgs` is a pure function and deliberately does not read the environment.
+`src/index.tsx` already applies `cmd.token ?? process.env.TORLINK_API_TOKEN` for
+the daemon; the TUI's `--web` path needs the same, or
+`torlnk --web --web-host 0.0.0.0` with only the env var set is refused with a
+message about a missing token the user believes they supplied.
+
 - [ ] **Step 1b: Stop sessions on the watch daemon's shutdown too**
 
 `src/daemon/watch.ts` runs on the same `Runtime` and has its own
