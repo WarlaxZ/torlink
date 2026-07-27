@@ -121,6 +121,10 @@ export async function runWatch(
   await new Promise<void>((resolve) => {
     const shutdown = (): void => {
       clearInterval(timer);
+      // The watch daemon has nothing to do with the web UI, but it holds the same
+      // Runtime — and that now carries the shared stream session registry. Without
+      // this a stream started through it outlives `torlnk watch`.
+      void runtime.sessions.stopAll();
       runtime.queue.suspend();
       resolve();
     };

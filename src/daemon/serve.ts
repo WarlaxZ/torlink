@@ -11,6 +11,7 @@ import http from "node:http";
 import { startRuntime, addInput, type Runtime } from "./runtime";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk } from "./auth";
+import { startWebServer, type WebServerHandle } from "../web/server";
 import { VERSION } from "../version";
 
 export { isAuthorized } from "./auth";
@@ -33,6 +34,10 @@ export interface ServeOptions {
   seedTimeMs?: number;
   /** With seedTimeMs, also delete the files when the timer expires. */
   deleteFiles?: boolean;
+  /** Also serve the browser UI. */
+  web?: boolean;
+  /** Port for the browser UI; defaults to the API port + 1. */
+  webPort?: number;
 }
 
 // Pull a magnet / info hash out of a request body. Accepts JSON ({ magnet } or
@@ -240,10 +245,56 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     return;
   }
 
+  // --web-port deliberately does NOT imply --web: a port left behind in a script
+  // would otherwise quietly start a public-facing dashboard. But accepting the
+  // flag and doing nothing is its own trap, so say so.
+  if (!options.web && options.webPort !== undefined) {
+    log(`warning: --web-port ${options.webPort} ignored without --web`);
+  }
+
+  // The two servers are separate processes' worth of exposure in one process, so
+  // catch the overlap here rather than letting the API's listen() die of
+  // EADDRINUSE on a port the user believes they configured deliberately.
+  const webPort = options.webPort ?? port + 1;
+  if (options.web && webPort === port) {
+    console.error(
+      `error: the web ui port (${webPort}) must differ from the api port (${port}). ` +
+        `Pass a different --web-port.`,
+    );
+    process.exit(1);
+    return;
+  }
+
   const runtime = await startRuntime(options.downloadDir);
 
   if (options.seedTimeMs && options.seedTimeMs > 0) {
     startSeedReaper(runtime.queue, options.seedTimeMs, { deleteFiles: options.deleteFiles, log });
+  }
+
+  // The browser UI listens on its own port so the JSON API's port stays a stable,
+  // documented contract and can be firewalled separately. It binds the *same*
+  // host as the API: one process makes one exposure decision, so nobody who
+  // deliberately kept the API on loopback can publish the dashboard by way of a
+  // flag that reads as cosmetic.
+  let web: WebServerHandle | null = null;
+  if (options.web) {
+    try {
+      web = await startWebServer(runtime, {
+        port: webPort,
+        host,
+        ...(token ? { token } : {}),
+        log,
+      });
+    } catch (e) {
+      // A startup failure, not a degraded mode: coming up with the API live and
+      // the dashboard silently missing is worse than not coming up at all.
+      console.error(
+        `error: could not start the web ui on port ${webPort}: ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      );
+      process.exit(1);
+      return;
+    }
   }
 
   const server = http.createServer((req, res) => {
@@ -282,17 +333,40 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     })();
   });
 
-  await new Promise<void>((resolve) => {
+  // A bind failure arrives as an 'error' event, not a throw. Unhandled it is an
+  // uncaught exception — an EADDRINUSE stack trace, which reads like a crash
+  // rather than "that port is taken". Turned into the same one-line refusal the
+  // host/token guard above uses. Detached once listening so a later runtime error
+  // still goes somewhere.
+  const listenErr = await new Promise<Error | null>((resolve) => {
+    const onError = (err: Error): void => resolve(err);
+    server.once("error", onError);
     server.listen(port, host, () => {
+      server.off("error", onError);
       log(`listening on http://${host}:${port}  (downloads -> ${runtime.downloadDir})`);
       log(token ? "auth: token required" : "auth: none (loopback only)");
-      resolve();
+      resolve(null);
     });
   });
+  if (listenErr) {
+    console.error(`error: could not start the api on port ${port}: ${listenErr.message}`);
+    await web?.close();
+    process.exit(1);
+    return;
+  }
 
   await new Promise<void>((resolve) => {
     const shutdown = (): void => {
+      // Order matters. The API server first, so nothing new arrives. Then the web
+      // server, which ends its event streams and cuts any half-open browser
+      // socket — a request genuinely mid-flight is sacrificed, deliberately, so a
+      // quit can never block on a browser. Then the stream sessions, which can
+      // only shrink once no new one can be started. The queue last: it is what
+      // the streams and requests were reading, so suspending it first would tear
+      // state out from under work still unwinding.
       server.close();
+      void web?.close();
+      void runtime.sessions.stopAll();
       runtime.queue.suspend();
       resolve();
     };

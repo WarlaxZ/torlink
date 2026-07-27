@@ -64,6 +64,8 @@ if (cmd.kind === "update") {
     downloadDir: cmd.downloadDir,
     seedTimeMs: cmd.seedTimeMs,
     deleteFiles: cmd.deleteFiles,
+    web: cmd.web,
+    webPort: cmd.webPort,
   };
   void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
 } else if (cmd.kind === "files") {
