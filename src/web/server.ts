@@ -341,11 +341,11 @@ export async function startWebServer(
         entry.res.end();
       }
       streams.clear();
+      // No closeIdleConnections() call: since Node 19 close() already drops
+      // idle keep-alive sockets itself, so adding one is dead code (verified by
+      // mutation — removing it changed nothing). package.json requires >=22.
+      // Only a stream, which is never idle, needed the handling above.
       server.close(() => resolve());
-      // Keep-alive sockets with no request in flight are idle and would also
-      // hold close() open (undici pools them by default). This drops those
-      // while letting a response that is genuinely mid-flight finish.
-      server.closeIdleConnections();
     });
     return closed;
   };

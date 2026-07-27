@@ -113,6 +113,44 @@ describe("startWebServer", () => {
     ).rejects.toThrow(/token/i);
   });
 
+  // The other half of the bind rule: a token is what makes a public bind legal,
+  // so the guard must be about the *pair*. A guard that only looked at the host
+  // would make --web-host 0.0.0.0 impossible however it was configured.
+  it("binds a public host when a token is set", async () => {
+    handle = await startWebServer(runtime(), {
+      port: 0,
+      host: "0.0.0.0",
+      token: "secret",
+      log: () => {},
+    });
+    expect(handle.port).toBeGreaterThan(0);
+  });
+
+  // The Host check is the *substitute* for a token, not an addition to it. A
+  // tokened server is reachable by name or from another host on purpose, and
+  // rebinding buys an attacker nothing there because they still lack the token.
+  it("allows a non-loopback Host header once a token is set", async () => {
+    await start({ token: "secret" });
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: handle!.port,
+          path: "/api/status",
+          method: "GET",
+          headers: { Host: "torlnk.example", Authorization: "Bearer secret" },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(200);
+  });
+
   it("never writes to the console", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
