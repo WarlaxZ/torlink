@@ -11,8 +11,15 @@ describe("sseFrame", () => {
     expect(sseFrame("status", { s: "a\nb" })).toBe('event: status\ndata: {"s":"a\\nb"}\n\n');
   });
 
-  it("emits a comment for a heartbeat", () => {
+  it("emits a null-payload event for a heartbeat", () => {
     expect(sseFrame("ping", null)).toBe("event: ping\ndata: null\n\n");
+  });
+
+  it("strips newlines from the event name so it cannot forge a second event", () => {
+    expect(sseFrame("status\n\nevent: ping\ndata: null", { a: 1 })).toBe(
+      'event: statusevent: pingdata: null\ndata: {"a":1}\n\n',
+    );
+    expect(sseFrame("status\r\nx", null)).toBe("event: statusx\ndata: null\n\n");
   });
 
   // `JSON.stringify(undefined)` is the value `undefined`, which would render as
@@ -131,6 +138,52 @@ describe("subscribeToQueue", () => {
 
       stop();
 
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // U12 supplies a real snapshot over live queue state; the fixture above is the
+  // only reason it cannot throw today. A throw must be handled like a dead
+  // socket, not propagated: at subscribe time it would escape with the listener
+  // and heartbeat already installed and no handle to clear them, and from a
+  // flush it would escape a setTimeout callback as an uncaughtException.
+  it("tears down without rethrowing when the initial snapshot throws", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      const snapshot = () => {
+        throw new Error("snapshot failed");
+      };
+
+      expect(() => subscribeToQueue(queue, vi.fn(), snapshot)).not.toThrow();
+
+      expect(queue.listenerCount("update")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tears down without rethrowing when a snapshot throws during a flush", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      const write = vi.fn();
+      let healthy = true;
+      subscribeToQueue(queue, write, () => {
+        if (!healthy) throw new Error("snapshot failed");
+        return { downloads: [], seeds: [] };
+      });
+      healthy = false;
+      write.mockClear();
+
+      queue.emit("update");
+      expect(() => vi.advanceTimersByTime(300)).not.toThrow();
+
+      expect(write).not.toHaveBeenCalled();
+      expect(queue.listenerCount("update")).toBe(0);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
