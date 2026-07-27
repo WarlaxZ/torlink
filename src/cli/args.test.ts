@@ -123,6 +123,7 @@ describe("parseCliArgs", () => {
       seedTimeMs: undefined,
       deleteFiles: false,
       daemon: false,
+      web: false,
     });
   });
   it("parses serve flags", () => {
@@ -149,6 +150,7 @@ describe("parseCliArgs", () => {
       seedTimeMs: 1_800_000,
       deleteFiles: false,
       daemon: false,
+      web: false,
     });
   });
   it("ignores a bad --port", () => {
