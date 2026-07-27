@@ -12,6 +12,7 @@ import { startRuntime, addInput, type Runtime } from "./runtime";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk } from "./auth";
 import { startWebServer, type WebServerHandle } from "../web/server";
+import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 
 export { isAuthorized } from "./auth";
@@ -137,11 +138,20 @@ export async function applyControl(
 // must stay one implementation: a hand-copied version of this in an earlier
 // draft silently dropped `uploadSpeed`, so a seed showed a real rate on the
 // first fetch and an em dash on every frame after it.
-export function statusPayload(runtime: Runtime): Record<string, unknown> {
+//
+// The return type is the shared wire contract (web/wire.ts), which the browser
+// imports type-only. That is deliberate and load-bearing: it makes a renamed or
+// re-typed field a compile error *here*, at the producer, instead of a field the
+// dashboard reads as `undefined` and renders as nothing.
+export function statusPayload(runtime: Runtime): StatusPayload {
   const downloads = runtime.queue.getItems().map((it) => ({
     id: it.id,
     name: it.name,
     status: it.status,
+    // Integer percent 0–100, passed straight through — the same number the TUI
+    // prints as `${it.progress}%`. Do not scale it here: the browser's
+    // clampPercent once read this as a 0..1 fraction and showed every
+    // in-progress download at 100%.
     progress: it.progress,
     peers: it.peers,
     speed: it.speed,
@@ -173,7 +183,12 @@ export async function handleApi(
     return { status: 401, body: { error: "unauthorized" } };
   }
   if (method === "GET" && (urlPath === "/downloads" || urlPath === "/status")) {
-    return { status: 200, body: statusPayload(runtime) };
+    // Spread, not passed through: ApiResponse.body is a Record<string, unknown>
+    // and an interface has no implicit index signature, so the spread is what
+    // adapts the declared payload type to it. It is a shallow copy of two array
+    // references, and it keeps `statusPayload`'s return type declared (which is
+    // the whole point — a renamed field must fail to compile there).
+    return { status: 200, body: { ...statusPayload(runtime) } };
   }
   if (method === "POST" && urlPath === "/add") {
     const magnet = extractMagnet(bodyText);

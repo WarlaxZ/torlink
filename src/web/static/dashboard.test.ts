@@ -10,7 +10,7 @@ import {
 
 const PAYLOAD: StatusPayload = {
   downloads: [
-    { id: "a", name: "A Release", status: "downloading", progress: 0.5, peers: 4, speed: 1024 },
+    { id: "a", name: "A Release", status: "downloading", progress: 50, peers: 4, speed: 1024 },
     { id: "b", name: "B Release", status: "queued", progress: 0, peers: 0, speed: 0 },
   ],
   seeds: [
@@ -44,11 +44,11 @@ describe("rowsFromStatus", () => {
     });
   });
 
-  it("clamps a progress value outside 0..1", () => {
+  it("clamps a progress value outside 0..100", () => {
     const rows = rowsFromStatus({
       downloads: [
-        { id: "a", name: "A", status: "downloading", progress: 1.4, peers: 0, speed: 0 },
-        { id: "b", name: "B", status: "downloading", progress: -1, peers: 0, speed: 0 },
+        { id: "a", name: "A", status: "downloading", progress: 140, peers: 0, speed: 0 },
+        { id: "b", name: "B", status: "downloading", progress: -10, peers: 0, speed: 0 },
       ],
       seeds: [],
     });
@@ -86,7 +86,7 @@ describe("mergeRows", () => {
   it("takes updated values from the new snapshot", () => {
     const before = rowsFromStatus(PAYLOAD);
     const next = rowsFromStatus({
-      downloads: [{ ...PAYLOAD.downloads[0]!, progress: 0.9, speed: 4096 }],
+      downloads: [{ ...PAYLOAD.downloads[0]!, progress: 90, speed: 4096 }],
       seeds: [],
     });
     const merged = mergeRows(before, next);
@@ -117,21 +117,30 @@ describe("rowsFromStatus edge cases", () => {
   it("floors a fractional percent rather than rounding it", () => {
     const rows = rowsFromStatus({
       downloads: [
-        { id: "a", name: "A", status: "downloading", progress: 0.567, peers: 0, speed: 0 },
+        { id: "a", name: "A", status: "downloading", progress: 56.7, peers: 0, speed: 0 },
       ],
       seeds: [],
     });
     expect(rows[0]!.percent).toBe(56);
   });
 
-  it("never shows 100% for a download that is not finished", () => {
+  // The unit test, in the literal sense. `progress` is an integer percent, so
+  // small values are small percentages — this is the assertion that fails if
+  // anyone reintroduces the `* 100` that made every in-progress download read
+  // "100%". The previous version of this test asserted 0.999 -> 99, which pinned
+  // the wrong convention and agreed with the bug.
+  it("reads progress as a percent, not a 0..1 fraction", () => {
     const rows = rowsFromStatus({
       downloads: [
-        { id: "a", name: "A", status: "downloading", progress: 0.999, peers: 0, speed: 0 },
+        { id: "a", name: "A", status: "downloading", progress: 1, peers: 0, speed: 0 },
+        { id: "b", name: "B", status: "downloading", progress: 42, peers: 0, speed: 0 },
+        // 99 is what the queue caps a running torrent at, so an unfinished
+        // download still never reads 100%.
+        { id: "c", name: "C", status: "downloading", progress: 99, peers: 0, speed: 0 },
       ],
       seeds: [],
     });
-    expect(rows[0]!.percent).toBe(99);
+    expect(rows.map((r) => r.percent)).toEqual([1, 42, 99]);
   });
 
   it("takes a seed's rate from uploadSpeed", () => {

@@ -1,28 +1,18 @@
 // Pure view state for the dashboard. Kept separate from the DOM binding in
 // app.ts so the interesting logic is unit-testable without a headless browser.
 
-export interface StatusDownload {
-  id: string;
-  name: string;
-  status: string;
-  progress: number;
-  peers: number;
-  speed: number;
-}
-
-export interface StatusSeed {
-  id: string;
-  name: string;
-  status: string;
-  peers: number;
-  uploaded: number;
-  uploadSpeed: number;
-}
-
-export interface StatusPayload {
-  downloads: StatusDownload[];
-  seeds: StatusSeed[];
-}
+// The one import this file makes from outside its directory, and it is
+// `import type`: esbuild erases a type-only import entirely, so nothing from
+// ../wire.ts reaches the browser bundle and `platform: "browser"` still has
+// nothing to complain about. ../wire.ts is types-only and imports nothing
+// itself, so even a future accidental value import could not drag in node:*.
+//
+// Re-exported so app.ts (and the tests) keep a single import site, and — more to
+// the point — so these shapes can no longer be *redeclared* here. Hand-mirroring
+// the producer's payload is what let `uploadSpeed` go missing and `progress` be
+// read in the wrong unit.
+export type { StatusDownload, StatusPayload, StatusSeed } from "../wire";
+import type { StatusPayload } from "../wire";
 
 export interface DashRow {
   id: string;
@@ -35,12 +25,26 @@ export interface DashRow {
   uploaded: number;
 }
 
-// Floor, not round: this drives a completion indicator, and rounding would show
-// a still-downloading torrent at 0.999 as a full "100%" bar, which reads as a
-// bug in the app. Under-reporting by less than a percent is harmless.
-function clampPercent(progress: number): number {
-  if (!Number.isFinite(progress)) return 0;
-  return Math.max(0, Math.min(100, Math.floor(progress * 100)));
+/**
+ * UNIT BOUNDARY. `progress` on the wire is an **integer percent, 0–100** —
+ * `QueueItem.progress` passed straight through by `statusPayload`, the same
+ * number the TUI prints as `${it.progress}%`. It is NOT a 0..1 fraction.
+ *
+ * So there is no conversion to do here, and doing one is the bug this replaced:
+ * multiplying by 100 rendered every in-progress download at 100% (progress 1 →
+ * "100%", progress 42 → "100%"). The two conventions look identical at a glance,
+ * which is why the unit is named in the parameter and asserted by the shared
+ * types in ../wire.ts rather than left to a comment alone.
+ *
+ * Floor, not round, for the fractional values the type permits but the queue
+ * does not currently send: this drives a completion bar, and rounding 99.6 up to
+ * a full "100%" on a still-downloading torrent reads as a bug in the app.
+ * Under-reporting by less than a percent is harmless. (The queue already caps a
+ * running torrent at 99 itself, so 100 here means finished.)
+ */
+function clampPercent(progressPercent: number): number {
+  if (!Number.isFinite(progressPercent)) return 0;
+  return Math.max(0, Math.min(100, Math.floor(progressPercent)));
 }
 
 export function rowsFromStatus(payload: StatusPayload): DashRow[] {
