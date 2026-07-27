@@ -115,6 +115,10 @@ import {
 import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
 import { vpnRouteIsSafe } from "../util/vpn";
+import { StreamSessionRegistry } from "../core/streamSession";
+import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
+import type { Runtime } from "../daemon/runtime";
+import { log } from "../util/logger";
 
 export interface DownloadInput {
   id: string;
@@ -124,11 +128,38 @@ export interface DownloadInput {
   sizeBytes?: number;
 }
 
+/**
+ * Injection seam for the web server. Only a test uses it: the real starter binds
+ * a socket, and the point of the test is the *absence* of stdout writes, which a
+ * real server would make impossible to attribute.
+ */
+export type StartWebServerImpl = (
+  runtime: Runtime,
+  options: WebServerOptions,
+) => Promise<WebServerHandle>;
+
 export function App({
   initialMagnet,
   initialTorrent,
   onQuit,
-}: { initialMagnet?: string; initialTorrent?: string; onQuit?: () => void } = {}) {
+  // The TUI hosts the browser UI in-process, sharing this component's own
+  // in-memory DownloadQueue and stream registry: what the terminal sees, the
+  // browser sees, with no IPC and no second copy of the queue.
+  web,
+  webPort,
+  webHost,
+  webToken,
+  startWebServerImpl = startWebServer,
+}: {
+  initialMagnet?: string;
+  initialTorrent?: string;
+  onQuit?: () => void;
+  web?: boolean;
+  webPort?: number;
+  webHost?: string;
+  webToken?: string;
+  startWebServerImpl?: StartWebServerImpl;
+} = {}) {
   useMouseWheel();
   const { exit } = useApp();
   const { isRawModeSupported } = useStdin();
@@ -160,6 +191,14 @@ export function App({
 
   const [queue, setQueue] = useState<DownloadQueue | null>(null);
   const [config, setConfigState] = useState<Config | null>(null);
+
+  // Live stream sessions for this process. The TUI owns no Runtime, so it owns
+  // this: a stream started in the terminal has to be visible to the browser and
+  // vice versa, which means exactly one registry per process. Lazily built in a
+  // ref so it survives every re-render (a fresh one per render would strand the
+  // sessions the previous render's server handed out).
+  const sessionsRef = useRef<StreamSessionRegistry | null>(null);
+  if (!sessionsRef.current) sessionsRef.current = new StreamSessionRegistry();
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
@@ -408,6 +447,89 @@ export function App({
     [queue],
   );
 
+  // The download dir the in-process web server adds torrents into, read through
+  // a ref rather than a dependency (see the mount effect below). Assigned during
+  // render so it is already current by the time any effect in this commit runs —
+  // it is never read during render, only by the server's `downloadDir` getter.
+  const downloadDirRef = useRef("");
+  if (config) downloadDirRef.current = config.downloadDir;
+
+  // Host the browser UI inside the TUI process, over this component's own queue.
+  //
+  // Deps are deliberately narrow: `queue` flips null -> queue exactly once, and
+  // everything else here is a launch flag. `config` is NOT a dependency — it
+  // changes whenever the user edits a setting, and re-running this would tear
+  // down a listening socket and rebind it, which can fail EADDRINUSE against the
+  // copy of itself that has not finished closing.
+  useEffect(() => {
+    if (!web || !queue) return;
+    const sessions = sessionsRef.current!;
+    const host = webHost?.trim() || "127.0.0.1";
+    let handle: WebServerHandle | null = null;
+    // Teardown can happen while listen() is still in flight, in which case the
+    // cleanup below has no handle to close yet — so it sets this instead and the
+    // starter closes the server it just got. Without it, quitting during startup
+    // leaks a listening socket for the life of the process.
+    let cancelled = false;
+    const runtime: Runtime = {
+      queue,
+      // A getter, not a snapshot: the mount happens once, and a user who changes
+      // their download folder mid-session expects POST /api/add to honour it.
+      get downloadDir(): string {
+        return downloadDirRef.current;
+      },
+      sessions,
+    };
+    void (async () => {
+      try {
+        const started = await startWebServerImpl(runtime, {
+          ...(webPort !== undefined ? { port: webPort } : {}),
+          host,
+          ...(webToken?.trim() ? { token: webToken.trim() } : {}),
+          // THE constraint of this mount: Ink owns stdout and repaints by
+          // tracking cursor position, so a stray write from a request handler
+          // lands inside a rendered frame and corrupts it — and reads as a
+          // rendering bug, not a logging one. The file logger is the only safe
+          // sink here. Never console, never process.stdout.
+          log: (message: string) => log.info(`[web] ${message}`),
+        });
+        if (cancelled) {
+          void started.close();
+          return;
+        }
+        handle = started;
+        setNotice(`${ICON.done} Web UI on http://${host}:${started.port}`);
+      } catch (e) {
+        // Every failure mode lands here, including startWebServer's refusal to
+        // bind a non-loopback host without a token. The TUI keeps running: a
+        // thrown error would unmount mid-session, and a printed stack would go
+        // straight through the frame.
+        const message = e instanceof Error ? e.message : String(e);
+        log.error(`[web] could not start on ${host}:${webPort ?? "default"}: ${message}`);
+        if (!cancelled) setNotice(`Web UI failed: ${message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      void handle?.close();
+    };
+  }, [web, queue, webPort, webHost, webToken, startWebServerImpl]);
+
+  // `--web-port 8080` without `--web` parses fine and does nothing, which is the
+  // same trap `torlnk serve` warns about. Say so rather than silently accepting
+  // a flag the user believes turned something on.
+  useEffect(() => {
+    if (web) return;
+    const orphans = [
+      webPort !== undefined ? "--web-port" : null,
+      webHost ? "--web-host" : null,
+      webToken ? "--web-token" : null,
+    ].filter((f): f is string => f !== null);
+    if (orphans.length === 0) return;
+    log.warn(`[web] ${orphans.join(", ")} ignored without --web`);
+    setNotice(`${orphans.join(", ")} ignored without --web`);
+  }, [web, webPort, webHost, webToken]);
+
   // Keep the queue's Real-Debrid token in step with config (and the env var), so
   // a retry can re-run the pipeline without the UI handing it back in.
   useEffect(() => {
@@ -418,6 +540,10 @@ export function App({
     // Flush all state synchronously up front so nothing is lost to the hard
     // exit; the unmount effect still runs suspend() for the engine teardown.
     queue?.persistSync();
+    // Same reason as the unmount effect: a stream the browser started is a live
+    // engine, and quit is a hard exit — stop them here too, since forceExit()
+    // can beat the unmount cleanup to the process.
+    void sessionsRef.current?.stopAll();
     void activeStream?.session.stop();
     // A keep prompt awaiting a decision still holds a live (complete) stream
     // session — discard it too rather than leaking its temp dir on quit.
@@ -1085,6 +1211,12 @@ export function App({
     return () => {
       void activeStreamRef.current?.session.stop();
       void keepPromptRef.current?.session.stop();
+      // Stream sessions are engines and temp dirs, not just rows in a map: a
+      // stream the browser started outlives the TUI unless it is stopped on the
+      // same teardown path the queue's suspend() runs on. Deliberately in the
+      // unmount-only effect rather than beside that suspend(), whose cleanup
+      // also fires when `queue` flips null -> queue during boot.
+      void sessionsRef.current?.stopAll();
     };
   }, []);
 
