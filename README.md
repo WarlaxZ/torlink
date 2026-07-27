@@ -217,14 +217,25 @@ Posters are fetched once and cached on disk. The browser gets the full-quality i
 
 Poster fetches are restricted to a small allowlist of known image CDNs, re-checked on every redirect hop — a refusal is logged at `warn` level.
 
+### Playing something
+
+Hit **play** on any row. torlnk resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
+
+What happens next depends on the release, and it's worth knowing why:
+
+- **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because the server honours range requests.
+- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox. No browser ships those codecs. Rather than showing you a black rectangle, the page says so and offers a **Download .m3u** button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get a direct VLC link.
+
+There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
+
+With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
+
 ### What it doesn't do yet
 
-This is deliberately a monitoring dashboard, not the whole app:
-
 - **No searching in the browser.** Find things in the TUI, or `POST /api/add` a magnet directly.
-- **No streaming or playback.**
 - **No For You feed.**
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
+- **No subtitles, no resume position, no next-episode queue.**
 
 ### Working on the web UI
 
