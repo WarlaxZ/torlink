@@ -1594,3 +1594,239 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ name: "Example" }), "/tmp/dl");
   });
 });
+
+describe("GET /api/recommendations", () => {
+  const PICK = {
+    imdbId: "tt0133093",
+    title: "The Matrix",
+    year: 1999,
+    score: 0.91,
+    reasons: ["because you liked Blade Runner"],
+  };
+
+  beforeEach(() => {
+    // Both override the config file inside resolveReccConfig, so a developer
+    // with a real reccd exported would never see the not-configured path — and
+    // the "configured" tests would talk to their actual service.
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  function reccDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => searchConfig({ reccUrl: "http://recc.local", reccToken: "t" }),
+      fetchRecommendationsImpl: async () => ({ ok: true, items: [PICK] }),
+      ...over,
+    });
+  }
+
+  async function feed(d: WebDeps, qs = ""): Promise<WebResponse> {
+    return handleWebApi(d, "GET", "/api/recommendations", new URLSearchParams(qs), AUTH, "");
+  }
+
+  // The gate is the only thing between an anonymous caller and the user's taste
+  // profile: this route does not delegate to handleApi, so nothing re-checks.
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [PICK] }));
+    const res = await handleWebApi(
+      reccDeps({ token: "secret", fetchRecommendationsImpl }),
+      "GET",
+      "/api/recommendations",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+    expect(fetchRecommendationsImpl).not.toHaveBeenCalled();
+  });
+
+  it("returns reccd's picks with the reasons intact", async () => {
+    const res = await feed(reccDeps());
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "ok", items: [PICK] });
+  });
+
+  /**
+   * THE NOT-CONFIGURED PATH, and the same call `/api/title` makes for a missing
+   * OMDb key: a 200 with its own status. A 500 here makes a healthy install
+   * look broken when all the UI needs to say is "set up reccd".
+   */
+  it("answers not-configured with a 200 and its own status, never a 500", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [PICK] }));
+    const res = await feed(reccDeps({ loadConfigImpl: async () => searchConfig(), fetchRecommendationsImpl }));
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "not-configured" });
+    // reccd was never asked.
+    expect(fetchRecommendationsImpl).not.toHaveBeenCalled();
+  });
+
+  // The confusion the shape exists to prevent: reccd answering "nothing yet"
+  // must not read as "you have no reccd".
+  it("distinguishes not-configured from a configured reccd with no picks", async () => {
+    const res = await feed(reccDeps({ fetchRecommendationsImpl: async () => ({ ok: true, items: [] }) }));
+    expect(res.json).toEqual({ status: "ok", items: [] });
+    expect(res.json).not.toEqual({ status: "not-configured" });
+  });
+
+  it("reports a reccd failure as an error status carrying the message, still a 200", async () => {
+    const res = await feed(
+      reccDeps({ fetchRecommendationsImpl: async () => ({ ok: false, error: "couldn't reach reccd" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "error", error: "couldn't reach reccd" });
+  });
+
+  it("passes the filters through to reccd, capped at the TUI's limit", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [] }));
+    await feed(reccDeps({ fetchRecommendationsImpl }), "type=tv&genre=%20horror%20&explore=true");
+    expect(fetchRecommendationsImpl).toHaveBeenCalledWith(
+      { reccUrl: "http://recc.local", reccToken: "t" },
+      { type: "tv", genre: "horror", explore: true, limit: 20 },
+    );
+  });
+
+  it("treats type=all and an absent explore as no filter at all", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [] }));
+    await feed(reccDeps({ fetchRecommendationsImpl }), "type=all&genre=");
+    expect(fetchRecommendationsImpl).toHaveBeenCalledWith(expect.anything(), {
+      explore: false,
+      limit: 20,
+    });
+  });
+
+  it("rejects a type reccd does not have rather than quietly searching everything", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [] }));
+    const res = await feed(reccDeps({ fetchRecommendationsImpl }), "type=film");
+    expect(res.status).toBe(400);
+    expect(fetchRecommendationsImpl).not.toHaveBeenCalled();
+  });
+
+  it("ignores a caller-supplied limit", async () => {
+    const fetchRecommendationsImpl = vi.fn(async () => ({ ok: true as const, items: [] }));
+    await feed(reccDeps({ fetchRecommendationsImpl }), "limit=10000");
+    expect(fetchRecommendationsImpl).toHaveBeenCalledWith(expect.anything(), { explore: false, limit: 20 });
+  });
+});
+
+describe("POST /api/recc-event", () => {
+  beforeEach(() => {
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  function eventDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => searchConfig({ reccUrl: "http://recc.local", reccToken: "t" }),
+      postEventImpl: async () => {},
+      ...over,
+    });
+  }
+
+  async function post(d: WebDeps, body: unknown): Promise<WebResponse> {
+    return handleWebApi(d, "POST", "/api/recc-event", new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const postEventImpl = vi.fn(async () => {});
+    const res = await handleWebApi(
+      eventDeps({ token: "secret", postEventImpl }),
+      "POST",
+      "/api/recc-event",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ type: "liked", rawName: "The Matrix" }),
+    );
+    expect(res.status).toBe(401);
+    expect(postEventImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(["watched", "liked", "disliked", "favourited", "unfavourited", "abandoned"] as const)(
+    "forwards a %s event with the server's clock and source",
+    async (type) => {
+      const postEventImpl = vi.fn(async () => {});
+      const res = await post(eventDeps({ postEventImpl }), { type, rawName: "The Matrix" });
+      expect(res.status).toBe(200);
+      expect(res.json).toEqual({ status: "accepted" });
+      expect(postEventImpl).toHaveBeenCalledWith(
+        { reccUrl: "http://recc.local", reccToken: "t" },
+        { type, rawName: "The Matrix", ts: expect.any(Number), source: "torlink" },
+      );
+    },
+  );
+
+  // "started" is emitted by the code that actually starts a stream. Accepting
+  // it from a button would let a browser fabricate watch history.
+  it("refuses to forward a started event", async () => {
+    const postEventImpl = vi.fn(async () => {});
+    const res = await post(eventDeps({ postEventImpl }), { type: "started", rawName: "The Matrix" });
+    expect(res.status).toBe(400);
+    expect(postEventImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown event type and a missing name", async () => {
+    const postEventImpl = vi.fn(async () => {});
+    const d = eventDeps({ postEventImpl });
+    expect((await post(d, { type: "loved", rawName: "x" })).status).toBe(400);
+    expect((await post(d, { type: "liked", rawName: "   " })).status).toBe(400);
+    expect((await post(d, { rawName: "x" })).status).toBe(400);
+    expect(
+      (await handleWebApi(d, "POST", "/api/recc-event", new URLSearchParams(), AUTH, "not json")).status,
+    ).toBe(400);
+    expect(postEventImpl).not.toHaveBeenCalled();
+  });
+
+  it("ignores a client-supplied ts and source", async () => {
+    const sent: { ts: number; source: string }[] = [];
+    const postEventImpl = vi.fn(async (...args: unknown[]) => {
+      sent.push(args[1] as { ts: number; source: string });
+    });
+    const before = Date.now();
+    await post(eventDeps({ postEventImpl }), {
+      type: "liked",
+      rawName: "The Matrix",
+      ts: 1924992000000,
+      source: "somebody-else",
+    });
+    const event = sent[0]!;
+    expect(event.source).toBe("torlink");
+    expect(event.ts).toBeGreaterThanOrEqual(before);
+    expect(event.ts).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("answers not-configured with a 200, never a 500, and posts nothing", async () => {
+    const postEventImpl = vi.fn(async () => {});
+    const res = await post(eventDeps({ loadConfigImpl: async () => searchConfig(), postEventImpl }), {
+      type: "liked",
+      rawName: "The Matrix",
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "not-configured" });
+    expect(postEventImpl).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The fire-and-forget rule, at the HTTP layer. `postEvent` is deliberately a
+   * single attempt that swallows everything (see its comment); a route that
+   * awaited it would hold the connection open for reccd's whole timeout on
+   * every rating click, and a hung reccd would become a queue of stuck requests
+   * inside the TUI's own process.
+   */
+  it("answers without waiting for reccd, and survives a post that rejects", async () => {
+    let settle: (() => void) | null = null;
+    const postEventImpl = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          settle = () => reject(new Error("reccd exploded"));
+        }),
+    );
+    const res = await post(eventDeps({ postEventImpl }), { type: "watched", rawName: "The Matrix" });
+    // Answered while the post is still in flight — nothing awaited it.
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "accepted" });
+    expect(settle).not.toBeNull();
+    // And the failure it eventually reports is swallowed rather than becoming
+    // an unhandled rejection.
+    settle!();
+    await Promise.resolve();
+  });
+});

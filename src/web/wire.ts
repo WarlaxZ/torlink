@@ -395,3 +395,74 @@ export type PublicTitleMeta =
     }
   | { status: "no-key"; parsed?: PublicTitleParse }
   | { status: "error"; error: string; parsed?: PublicTitleParse };
+
+/** One reccd pick, as `GET /api/recommendations` hands it to the browser. */
+export interface PublicRecommendation {
+  /** `tt…`. Doubles as the key for the per-card `/api/title?imdb=` poster lookup. */
+  imdbId: string;
+  title: string;
+  year: number;
+  score: number;
+  /** reccd's own "because you liked …" lines, strongest first. Free text from a remote service. */
+  reasons: string[];
+}
+
+/**
+ * The body of `GET /api/recommendations` — always 200, always one of these three.
+ *
+ * DELIBERATELY THE SAME SHAPE AS `PublicTitleMeta`, for the same reason, and it
+ * should stay that way: "the server has no reccd configured" is not a failure,
+ * it is a thing the UI has to be able to *say* ("set up reccd to get
+ * recommendations"), and a 500 for it makes a healthy install look broken. A
+ * third bespoke encoding of that same idea — an empty `ok`, a 404, a `null` —
+ * would be drift, and the browser would grow a third way to ask the question.
+ *
+ * - `"ok"` means reccd answered. `items` may still be empty: that is "reccd
+ *   knows you but has nothing to suggest yet", which is distinct from both
+ *   other statuses.
+ * - `"not-configured"` means no `reccUrl` (and no `TORLINK_RECC_URL`). Nothing
+ *   was requested.
+ * - `"error"` means reccd was asked and it failed: unreachable, a rejected
+ *   token, a malformed body. `error` is `fetchRecommendations`' own message, so
+ *   the browser and the TUI show the user the same sentence.
+ */
+export type PublicRecommendations =
+  | { status: "ok"; items: PublicRecommendation[] }
+  | { status: "not-configured" }
+  | { status: "error"; error: string };
+
+/**
+ * The event types `POST /api/recc-event` will forward.
+ *
+ * A deliberate SUBSET of `ReccEventType` (src/recc/client.ts): `"started"` is
+ * emitted by the code that actually starts a stream, not by a button, so
+ * accepting it here would let a browser fabricate watch history. The two unions
+ * are tied together at the route, which assigns a value of this type into a
+ * `ReccEventType` — add a member here that reccd's client does not know and the
+ * build fails there rather than at runtime in front of reccd.
+ */
+export type PublicReccEventType =
+  | "watched"
+  | "liked"
+  | "disliked"
+  | "favourited"
+  | "unfavourited"
+  | "abandoned";
+
+/** The request body of `POST /api/recc-event`. `ts` and `source` are the server's to set. */
+export interface ReccEventRequest {
+  type: PublicReccEventType;
+  /** What was rated. The pick's title, as reccd itself returned it. */
+  rawName: string;
+}
+
+/**
+ * The 200 body of `POST /api/recc-event`.
+ *
+ * `"accepted"` means handed to `postEvent`, NOT delivered — the post is
+ * fire-and-forget by design (see the comment on `postEvent`), so the route
+ * cannot honestly promise more and does not wait to find out. Same
+ * not-configured story as the feed: nothing is broken, there is simply nowhere
+ * to send it, and that is a 200 the UI can read rather than a 500.
+ */
+export type PublicReccEventAck = { status: "accepted" } | { status: "not-configured" };

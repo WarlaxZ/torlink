@@ -9,7 +9,17 @@ import {
   resolveAdultContent,
   resolveOmdbApiKey,
   resolveRealDebridToken,
+  resolveReccConfig,
 } from "../config/config";
+import {
+  fetchRecommendations,
+  postEvent,
+  type FetchRecommendationsResult,
+  type ReccClientConfig,
+  type ReccEvent,
+  type ReccEventType,
+  type RecommendationQuery,
+} from "../recc/client";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { validateToken } from "../integrations/realdebrid";
 import { parseInput } from "../sources/magnet";
@@ -33,6 +43,9 @@ import type {
   PublicSearchSnapshot,
   PublicSource,
   PublicStreamFile,
+  PublicReccEventAck,
+  PublicReccEventType,
+  PublicRecommendations,
   PublicStreamSession,
   PublicTitleMeta,
   SourcesResponse,
@@ -94,6 +107,17 @@ export interface WebDeps {
     apiKey: string,
     opts: { year?: number; type?: OmdbType },
   ) => Promise<FetchTitleMetaResult>;
+  /** reccd's feed, for `/api/recommendations`. Injected to keep tests off the network. */
+  fetchRecommendationsImpl?: (
+    config: ReccClientConfig,
+    query: RecommendationQuery,
+  ) => Promise<FetchRecommendationsResult>;
+  /**
+   * How `/api/recc-event` reaches reccd. Injected for the same reason, and
+   * typed as returning void rather than a promise the route waits on — see the
+   * route for why nothing awaits it.
+   */
+  postEventImpl?: (config: ReccClientConfig, event: ReccEvent) => Promise<void>;
 }
 
 /** The path a client fetches to read one file of a session: `/stream/:sid/:idx`. */
@@ -924,6 +948,138 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
   return { status: 200, json: withParse(out, lookup.parsed) };
 }
 
+// ---- recommendations ---------------------------------------------------
+
+/**
+ * How many picks to ask reccd for. THE TUI'S NUMBER (`useRecommendations`), and
+ * not caller-supplied on purpose: the browser has no reason to want a different
+ * feed length than the terminal does, and a `?limit=` would let an anonymous —
+ * or merely enthusiastic — caller turn one click into reccd scoring ten thousand
+ * titles.
+ */
+const RECC_LIMIT = 20;
+
+/**
+ * `GET /api/recommendations?type=&genre=&explore=` — the For You feed.
+ *
+ * Config is read per request through the same `loadConfigImpl` seam as the
+ * stream routes, for the same reason: this server runs inside the TUI, where a
+ * reccd URL can be pasted into the Accounts pane at any moment, and a snapshot
+ * taken at boot would answer "not configured" until the app restarted.
+ */
+async function recommendations(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
+  const rawType = (query.get("type") ?? "").trim();
+  // "all" is the browser's own name for "no filter" and is accepted as such, so
+  // the UI can round-trip its select value without a special case. Anything
+  // else that is not a reccd type is a 400: silently searching everything would
+  // hide a typo behind a plausible-looking feed.
+  let type: "movie" | "tv" | undefined;
+  if (rawType && rawType !== "all") {
+    if (rawType !== "movie" && rawType !== "tv") return { status: 400, json: { error: "invalid type" } };
+    type = rawType;
+  }
+  const genre = (query.get("genre") ?? "").trim();
+  const rawExplore = (query.get("explore") ?? "").trim();
+  const explore = rawExplore === "true" || rawExplore === "1";
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config);
+  if (!reccConfig.reccUrl) {
+    // 200 with its own status, NOT a 500 — the same call `/api/title` makes for
+    // a missing OMDb key. Nothing is broken: the user has no reccd, and the
+    // browser needs to be able to say "set up reccd" rather than looking like
+    // the server fell over. Deliberately not cached, and reccd is not asked.
+    const out: PublicRecommendations = { status: "not-configured" };
+    return { status: 200, json: out };
+  }
+
+  const reccQuery: RecommendationQuery = { explore, limit: RECC_LIMIT };
+  if (type) reccQuery.type = type;
+  if (genre) reccQuery.genre = genre;
+
+  // `fetchRecommendations` never throws and bounds itself with its own timeout,
+  // so a reccd that is down or hanging costs this request that timeout and
+  // nothing else — it cannot reject into the server's request handler.
+  const result = await (deps.fetchRecommendationsImpl ?? fetchRecommendations)(reccConfig, reccQuery);
+  if (!result.ok) {
+    const out: PublicRecommendations = { status: "error", error: result.error };
+    return { status: 200, json: out };
+  }
+  // Assigned, not spread or re-mapped: `Recommendation` and
+  // `PublicRecommendation` are field-for-field the same, and this assignment is
+  // where the compiler checks they still are. Nothing in a pick is private —
+  // every field of it is already on screen in the TUI.
+  const out: PublicRecommendations = { status: "ok", items: result.items };
+  return { status: 200, json: out };
+}
+
+/** The event types this route will forward, as a set for the body check. */
+const RECC_EVENTS: ReadonlySet<string> = new Set<PublicReccEventType>([
+  "watched",
+  "liked",
+  "disliked",
+  "favourited",
+  "unfavourited",
+  "abandoned",
+]);
+
+/**
+ * `POST /api/recc-event` — forward one rating to reccd.
+ *
+ * NOTHING AWAITS THE POST, and that is the point rather than an oversight.
+ * `postEvent` is deliberately fire-and-forget with a single attempt (read its
+ * comment: retrying a dropped event during a reccd outage piles up concurrent
+ * requests exactly when the target is struggling). Awaiting it here would undo
+ * half of that at the HTTP layer — every rating click would hold a connection
+ * open for reccd's full timeout while a user taps like on the next card, and a
+ * reccd that hangs would turn into a queue of stuck requests inside the TUI's
+ * own process. So the 200 says "accepted", meaning handed off, and says so in
+ * the type.
+ */
+async function reccEvent(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>;
+    }
+  } catch {
+    return { status: 400, json: { error: "invalid JSON body" } };
+  }
+
+  const rawType = typeof body.type === "string" ? body.type.trim() : "";
+  if (!RECC_EVENTS.has(rawType)) return { status: 400, json: { error: "invalid event type" } };
+  // The one line that ties `PublicReccEventType` to reccd's own `ReccEventType`:
+  // widen a member of the first into the second and the build fails the day the
+  // wire union grows something the client cannot send.
+  const type: ReccEventType = rawType as PublicReccEventType;
+
+  const rawName = typeof body.rawName === "string" ? body.rawName.trim() : "";
+  if (!rawName) return { status: 400, json: { error: "missing rawName" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config);
+  if (!reccConfig.reccUrl) {
+    // Same clean answer as the feed. `postEvent` would no-op on this anyway;
+    // saying so explicitly is what lets the browser stop offering the buttons.
+    const out: PublicReccEventAck = { status: "not-configured" };
+    return { status: 200, json: out };
+  }
+
+  // `ts` is the server's clock and `source` is fixed: both are ours to state.
+  // A browser's clock can be years out, and an event that claims to be from
+  // 2031 poisons a recommender's recency weighting for good.
+  const event: ReccEvent = { type, rawName, ts: Date.now(), source: "torlink" };
+  // `.catch` on top of postEvent's own swallowing: this promise is unwatched,
+  // and an unhandled rejection from an injected impl would take the process
+  // down — which is the exact "reccd must never take the daemon with it" rule
+  // this route exists to honour.
+  void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
+
+  const out: PublicReccEventAck = { status: "accepted" };
+  return { status: 200, json: out };
+}
+
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
 export function isApiPath(urlPath: string): boolean {
   return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
@@ -990,6 +1146,17 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/title") {
     return titleMeta(deps, query);
+  }
+
+  // Both past the token gate above, and both need it: neither delegates to
+  // handleApi, so this is the only check between an anonymous caller and the
+  // user's taste profile — reading it out of reccd, or writing to it.
+  if (method === "GET" && urlPath === "/api/recommendations") {
+    return recommendations(deps, query);
+  }
+
+  if (method === "POST" && urlPath === "/api/recc-event") {
+    return reccEvent(deps, bodyText);
   }
 
   // Ahead of the legacy passthrough below, which still owns `POST /add` and the
