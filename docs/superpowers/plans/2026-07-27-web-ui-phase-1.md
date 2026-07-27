@@ -3327,6 +3327,9 @@ export async function startWebServer(
         } catch {
           out = { status: 500, json: { error: "internal error" } };
         }
+        // WebResponse has three optional body fields and nothing enforces that
+        // exactly one is set: a route that sets none yields a silent empty 200.
+        // Make the precedence explicit here and test the no-body case.
         if (out.filePath) {
           res.writeHead(out.status, out.headers);
           createReadStream(out.filePath)
