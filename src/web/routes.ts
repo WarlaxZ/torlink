@@ -1,0 +1,116 @@
+import { handleApi } from "../daemon/serve";
+import { isAuthorized } from "../daemon/auth";
+import { getPoster, type CachedPoster } from "../core/posterCache";
+import type { Runtime } from "../daemon/runtime";
+
+// Hosts we are willing to fetch poster images from. The daemon fetching an
+// arbitrary caller-supplied URL is server-side request forgery: on a cloud box
+// that reaches the instance metadata service. OMDb only ever hands back these
+// CDNs, so an allowlist costs nothing.
+export const POSTER_HOSTS = new Set([
+  "m.media-amazon.com",
+  "ia.media-imdb.com",
+  "img.omdbapi.com",
+]);
+
+export interface WebDeps {
+  runtime: Runtime;
+  token: string | null;
+  getPosterImpl?: (url: string) => Promise<CachedPoster | null>;
+}
+
+// NOTE for whoever serialises a StreamSession to a client (phase 2): build the
+// payload by picking fields explicitly, never by omitting them from the whole
+// object. `capability` and every `files[].url` must not reach a browser, and
+// `JSON.stringify(session)` is the obvious wrong thing to reach for. Picking
+// means a field added later defaults to private instead of leaking.
+
+// One response shape for every route. `filePath` streams a file from disk
+// (posters); `json` and `text` are written inline. Keeping this a plain value
+// means the router never touches a socket and is trivially testable.
+export interface WebResponse {
+  status: number;
+  headers?: Record<string, string>;
+  json?: unknown;
+  text?: string;
+  filePath?: string;
+}
+
+// The daemon's handler predates this layer and returns { status, body }; map it
+// into the richer WebResponse rather than changing a shape other callers use.
+function fromApi(res: { status: number; body: Record<string, unknown> }): WebResponse {
+  return { status: res.status, json: res.body };
+}
+
+function posterResponse(hit: CachedPoster): WebResponse {
+  return {
+    status: 200,
+    filePath: hit.path,
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Content-Length": String(hit.bytes),
+      // Poster URLs are content-addressed by the remote CDN; a cached one never
+      // changes meaning, so let the browser keep it for a day.
+      "Cache-Control": "private, max-age=86400",
+    },
+  };
+}
+
+/**
+ * Pure router for the web layer. Shared routes delegate to the daemon's
+ * existing `handleApi` rather than reimplementing them, so `/status` and
+ * `/api/status` cannot drift apart. `/health` stays unauthenticated (it is how
+ * a supervisor checks liveness); everything else requires the token when one
+ * is configured.
+ */
+export async function handleWebApi(
+  deps: WebDeps,
+  method: string,
+  urlPath: string,
+  query: URLSearchParams,
+  authHeader: string | undefined,
+  bodyText: string,
+): Promise<WebResponse> {
+  const { runtime, token } = deps;
+
+  // Legacy paths keep working exactly as before: /health, /status, /downloads,
+  // /add, /control are a documented API that may already be scripted against.
+  if (!urlPath.startsWith("/api/")) {
+    return fromApi(await handleApi(runtime, token, method, urlPath, authHeader, bodyText));
+  }
+
+  if (!isAuthorized(token, authHeader)) {
+    return { status: 401, json: { error: "unauthorized" } };
+  }
+
+  if (method === "GET" && urlPath === "/api/poster") {
+    const url = query.get("url") ?? "";
+    if (!url) return { status: 400, json: { error: "missing url" } };
+    let host: string;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return { status: 400, json: { error: "unsupported scheme" } };
+      }
+      host = parsed.hostname.toLowerCase();
+    } catch {
+      return { status: 400, json: { error: "invalid url" } };
+    }
+    if (!POSTER_HOSTS.has(host)) return { status: 400, json: { error: "host not allowed" } };
+    const hit = await (deps.getPosterImpl ?? ((u: string) => getPoster(u)))(url);
+    if (!hit) return { status: 404, json: { error: "poster unavailable" } };
+    return posterResponse(hit);
+  }
+
+  // Everything else under /api/ maps onto the shared handler by stripping the
+  // prefix, so /api/status, /api/add and /api/control are one implementation.
+  const legacyPath = urlPath.slice("/api".length);
+  if (
+    (method === "GET" && (legacyPath === "/status" || legacyPath === "/downloads")) ||
+    (method === "POST" && (legacyPath === "/add" || legacyPath === "/control"))
+  ) {
+    return fromApi(await handleApi(runtime, token, method, legacyPath, authHeader, bodyText));
+  }
+
+  return { status: 404, json: { error: "not found" } };
+}
