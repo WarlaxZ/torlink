@@ -4,6 +4,7 @@ import {
   formatRate,
   mergeRows,
   rowsFromStatus,
+  shortName,
   type DashRow,
   type StatusPayload,
 } from "./dashboard";
@@ -210,5 +211,20 @@ describe("formatRate", () => {
     expect(formatRate(0)).toBe("—");
     expect(formatRate(-1)).toBe("—");
     expect(formatRate(Number.NaN)).toBe("—");
+  });
+});
+
+describe("shortName", () => {
+  it("leaves a name that already fits alone", () => {
+    expect(shortName("A Release")).toBe("A Release");
+    expect(shortName("x".repeat(80))).toBe("x".repeat(80));
+  });
+
+  // A confirm() whose text runs past the viewport hides the buttons under it,
+  // which is the worst possible outcome for a dialog gating a delete.
+  it("clips a release-tag monster to something a phone dialog can show", () => {
+    const clipped = shortName("y".repeat(400));
+    expect(clipped).toHaveLength(80);
+    expect(clipped.endsWith("…")).toBe(true);
   });
 });

@@ -27,6 +27,18 @@
         <button type="submit">Add</button>
       </form>
       <p id="notice" class="notice" hidden></p>
+
+      <!-- The stream file picker. Shown only when a session resolves to more
+           than one playable file; every child below the heading is built by
+           app.js with createElement, because the filenames come out of a
+           torrent. It sits outside #rows on purpose: the row list is replaced
+           wholesale on every SSE tick, four times a second. -->
+      <div id="picker" class="card picker" hidden>
+        <p id="picker-title" class="picker-title"></p>
+        <ul id="picker-files" class="picker-files"></ul>
+        <button id="picker-cancel" type="button">Cancel</button>
+      </div>
+
       <ul id="rows" class="rows"></ul>
       <p id="empty" class="empty">Nothing in the queue.</p>
     </main>

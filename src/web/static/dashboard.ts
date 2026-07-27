@@ -92,6 +92,20 @@ export function mergeRows(previous: DashRow[], next: DashRow[]): DashRow[] {
   return out;
 }
 
+/**
+ * Clip a torrent name for a `confirm()` dialog.
+ *
+ * A confirm() on a phone has to stay readable, and a torrent name can be several
+ * hundred characters of release tags — which would push the actual question, and
+ * the buttons, off the screen. The row itself still shows the full name in its
+ * `title`. Lives here rather than in app.ts because both the destructive-action
+ * prompts and the Real-Debrid fallback prompt need the same clipping, and two
+ * copies would eventually disagree about the limit.
+ */
+export function shortName(name: string): string {
+  return name.length > 80 ? `${name.slice(0, 79)}…` : name;
+}
+
 // Byte formatting for the browser. Deliberately a copy of util/format.ts rather
 // than an import: that module is Node-facing and this file is bundled for the
 // browser. The copies must stay in step — the same torrent is visible in the TUI

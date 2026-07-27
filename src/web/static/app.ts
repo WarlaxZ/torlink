@@ -10,9 +10,21 @@ import {
   formatRate,
   mergeRows,
   rowsFromStatus,
+  shortName,
   type DashRow,
   type StatusPayload,
 } from "./dashboard";
+import {
+  fileLabel,
+  isPlayable,
+  playerPath,
+  runPlay,
+  type PublicStreamFile,
+  type PublicStreamSession,
+  type StartResult,
+  type StartStreamResponse,
+  type StreamConfirmResponse,
+} from "./streamFlow";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -39,6 +51,10 @@ const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
 const conn = el<HTMLSpanElement>("conn");
+const picker = el<HTMLDivElement>("picker");
+const pickerTitle = el<HTMLParagraphElement>("picker-title");
+const pickerFiles = el<HTMLUListElement>("picker-files");
+const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 
 // sessionStorage throws, rather than returning null, when storage is blocked
 // (Safari private mode, a hardened profile). Losing the remembered token is a
@@ -91,13 +107,6 @@ function showNotice(message: string): void {
 // the TUI offers it.
 const DOWNLOAD_ACTIONS = ["pause", "resume", "remove"] as const;
 const SEED_ACTIONS = ["stop-seed", "delete"] as const;
-
-// A confirm() dialog on a phone has to stay readable, and a torrent name can be
-// several hundred characters of release tags. Clip it for the prompt only — the
-// row itself still shows the full name in its title attribute.
-function shortName(name: string): string {
-  return name.length > 80 ? `${name.slice(0, 79)}…` : name;
-}
 
 // Gate the irreversible actions. pause, resume and stop-seed are all undone by
 // the button next to them, so they fire immediately; remove discards a torrent
@@ -161,6 +170,17 @@ function renderRow(row: DashRow): HTMLLIElement {
 
   const actions = document.createElement("div");
   actions.className = "row-actions";
+  // Play goes first and is the only highlighted control in the row: it is the
+  // one thing here that isn't queue housekeeping. Not on every row — see
+  // isPlayable in streamFlow.ts for which rows and why.
+  if (isPlayable(row)) {
+    const playButton = document.createElement("button");
+    playButton.type = "button";
+    playButton.className = "play";
+    playButton.textContent = "play";
+    playButton.addEventListener("click", () => void play(row));
+    actions.append(playButton);
+  }
   const available: readonly string[] = row.kind === "seed" ? SEED_ACTIONS : DOWNLOAD_ACTIONS;
   for (const action of available) {
     const button = document.createElement("button");
@@ -191,13 +211,19 @@ interface ApiError {
   outcome?: string;
 }
 
-async function readEnvelope(res: Response): Promise<ApiError> {
+// A response body as a plain object, or {} for anything that is not one —
+// including a body that never arrives and a proxy's HTML error page.
+async function readJson(res: Response): Promise<Record<string, unknown>> {
   try {
     const body = (await res.json()) as unknown;
-    return body && typeof body === "object" ? (body as ApiError) : {};
+    return body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   } catch {
     return {};
   }
+}
+
+async function readEnvelope(res: Response): Promise<ApiError> {
+  return (await readJson(res)) as ApiError;
 }
 
 async function control(id: string, action: string): Promise<void> {
@@ -217,6 +243,190 @@ async function control(id: string, action: string): Promise<void> {
   const body = await readEnvelope(res);
   showNotice(body.error ?? `${action} failed (HTTP ${res.status}).`);
 }
+
+// ---- streaming ------------------------------------------------------------
+// Everything below to the next banner is the Play flow. The decisions live in
+// streamFlow.ts; what is here is fetch, timers and DOM.
+
+// Rows with a Play already in flight. Starting a session takes a round trip and
+// then up to minutes of polling, and the row's buttons are rebuilt four times a
+// second by the SSE tick — so without this a second tap starts a second session
+// (a second swarm, a second Real-Debrid job) for the same torrent.
+const playing = new Set<string>();
+
+// The session the picker is currently offering. Held so Cancel can stop it: the
+// session is live by then, with a torrent attached, and closing the picker
+// without stopping it would leave that running until the idle reaper notices.
+let pickerSession: string | null = null;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/stream", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      // A queue item's id IS its info hash, and the server rebuilds a magnet
+      // with the default tracker list from it — so the row carries everything
+      // the session needs and the status payload doesn't have to ship magnets.
+      // `confirm` is sent only when a human said yes; it is never defaulted.
+      body: JSON.stringify({
+        infoHash: row.id,
+        name: row.name,
+        ...(confirmed ? { confirm: true } : {}),
+      }),
+    });
+  } catch {
+    showNotice("Play failed — the server is not responding.");
+    setConn("lost");
+    return { kind: "failed" };
+  }
+
+  if (res.status === 409) {
+    const body = (await readJson(res)) as Partial<StreamConfirmResponse>;
+    // A 409 with an unreadable body still has to prompt. Falling through to
+    // "failed" would be safe, but falling through to *proceeding* would not, so
+    // the missing-reason case is a prompt with a vague reason, never a silent
+    // one either way.
+    const reason =
+      typeof body.reason === "string" && body.reason.trim()
+        ? body.reason.trim()
+        : "it is configured but not usable right now";
+    return { kind: "confirm", reason };
+  }
+  if (!res.ok) {
+    const body = await readEnvelope(res);
+    showNotice(body.error ?? `Play failed (HTTP ${res.status}).`);
+    return { kind: "failed" };
+  }
+
+  const body = (await readJson(res)) as Partial<StartStreamResponse>;
+  if (
+    typeof body.sessionId !== "string" ||
+    typeof body.capability !== "string" ||
+    !body.session ||
+    typeof body.session !== "object"
+  ) {
+    showNotice("Play failed — the server sent something unreadable.");
+    return { kind: "failed" };
+  }
+  return {
+    kind: "started",
+    sessionId: body.sessionId,
+    capability: body.capability,
+    session: body.session,
+  };
+}
+
+async function pollSession(sessionId: string): Promise<PublicStreamSession | null> {
+  try {
+    const res = await fetch(`/api/stream/${encodeURIComponent(sessionId)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as unknown;
+    return body && typeof body === "object" ? (body as PublicStreamSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Best effort, and nothing waits on it: a session we are walking away from
+// should not hold a torrent open, but failing to say so is not worth a second
+// error message on top of the one that got us here.
+function stopSession(sessionId: string): void {
+  void fetch(`/api/stream/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  }).catch(() => {});
+}
+
+// Navigate this tab, rather than window.open(): by the time a session is ready
+// the click that started it is seconds or minutes old, so the popup has lost its
+// user activation and every browser blocks it — and on a phone there is nowhere
+// useful for a second tab to go anyway. The player page carries a "back to
+// queue" link.
+//
+// The session is deliberately NOT stopped here. It is what the player is about
+// to fetch. Nothing in this tab outlives the navigation, so a session whose
+// player tab is simply closed is cleaned up by the registry's idle reaping —
+// the player page cannot DELETE it itself, having a capability but no token.
+function openPlayer(path: string): void {
+  location.assign(path);
+}
+
+function hidePicker(): void {
+  pickerSession = null;
+  picker.hidden = true;
+  pickerFiles.replaceChildren();
+}
+
+// Same createElement/textContent rule as renderRow, and for a stronger reason:
+// these strings are filenames from inside a stranger's torrent.
+function showPicker(
+  sessionId: string,
+  capability: string,
+  name: string,
+  files: PublicStreamFile[],
+): void {
+  pickerSession = sessionId;
+  pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
+  pickerFiles.replaceChildren(
+    ...files.map((file) => {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "picker-file";
+      button.textContent = fileLabel(file);
+      button.title = file.filename;
+      button.addEventListener("click", () => {
+        // hidePicker() clears pickerSession, so the Cancel handler can no longer
+        // stop the session we are about to hand to the player.
+        hidePicker();
+        openPlayer(playerPath(sessionId, file, capability));
+      });
+      li.append(button);
+      return li;
+    }),
+  );
+  picker.hidden = false;
+}
+
+pickerCancel.addEventListener("click", () => {
+  const sessionId = pickerSession;
+  hidePicker();
+  if (sessionId) stopSession(sessionId);
+});
+
+// The flow itself is runPlay in streamFlow.ts, where a unit test can reach it —
+// including the two rules that matter, the torrent-confirm prompt and the
+// keep-polling-while-resolving loop. Everything bound here is an effect:
+//
+// `confirm` is the native dialog, deliberately, for the same reason the delete
+// gate uses it. Synchronous and unmissable are the right properties for a
+// decision whose consequence (your IP in a public swarm) cannot be taken back.
+async function play(row: DashRow): Promise<void> {
+  if (playing.has(row.id)) return;
+  playing.add(row.id);
+  try {
+    await runPlay(row, {
+      start: startSession,
+      poll: pollSession,
+      stop: stopSession,
+      confirm: (message) => confirm(message),
+      notice: showNotice,
+      choose: showPicker,
+      open: (path) => openPlayer(path),
+      sleep,
+      now: () => Date.now(),
+    });
+  } finally {
+    playing.delete(row.id);
+  }
+}
+
+// ---- connection -----------------------------------------------------------
 
 // One probe of the JSON API, which — unlike EventSource — reports why it failed.
 // Used for the initial unlock, for the auth form, and to explain a dropped

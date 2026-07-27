@@ -216,6 +216,49 @@ button:hover {
   color: var(--accent);
 }
 
+/* Play is the one control in a row that isn't queue housekeeping, so it carries
+   the accent at rest while pause/remove/delete stay dim until hovered. That is
+   also the safety argument: the destructive buttons sit millimetres away on a
+   phone and should not compete for the thumb. */
+.row-actions button.play {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The stream file picker. Overrides .card's row layout — it is a heading above
+   a list, not a form — in the same way .fallback does on the player page. */
+.picker {
+  display: block;
+}
+
+.picker-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+}
+
+.picker-files {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+/* Full-width rows rather than a wrapped strip of buttons: these are filenames,
+   which are long, and a target you tap on a phone. */
+.picker-file {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+
 .empty,
 .notice,
 .error {

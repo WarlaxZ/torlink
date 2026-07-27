@@ -3,27 +3,19 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 
+// The video-first heuristic lives in ./videoFiles because the web UI's browser
+// bundle needs it too and cannot import this module (node:child_process, and
+// three more builtins above). Re-exported here so every existing Node caller —
+// the TUI, the download queue — keeps its import site unchanged, and so there is
+// exactly one implementation for both front-ends to disagree about, which is to
+// say none.
+export { pickStreamFile, streamCandidates } from "./videoFiles";
+
 export interface StreamFile {
   url: string;
   filename: string;
   bytes: number;
 }
-
-// Extensions we treat as playable video, most-common first.
-const VIDEO_EXTS = new Set([
-  "mkv",
-  "mp4",
-  "m4v",
-  "avi",
-  "mov",
-  "webm",
-  "ts",
-  "m2ts",
-  "flv",
-  "wmv",
-  "mpg",
-  "mpeg",
-]);
 
 // Players we probe for, in preference order, when none is configured. Each has
 // a CLI name (looked up on PATH); on macOS an .app bundle name we can launch
@@ -95,32 +87,6 @@ const PLAYER_CANDIDATES: PlayerCandidate[] = [
     ],
   },
 ];
-
-function ext(name: string): string {
-  const i = name.lastIndexOf(".");
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
-}
-
-/**
- * Pick the file most worth streaming: the largest video file, or — if nothing
- * looks like video — the largest file overall. Returns null for an empty list.
- */
-export function pickStreamFile(files: StreamFile[]): StreamFile | null {
-  if (files.length === 0) return null;
-  const videos = files.filter((f) => VIDEO_EXTS.has(ext(f.filename)));
-  const pool = videos.length > 0 ? videos : files;
-  return pool.reduce((best, f) => (f.bytes > best.bytes ? f : best), pool[0]!);
-}
-
-/**
- * The files worth offering for streaming: the video files if any exist,
- * otherwise every file. Used to decide whether to show a picker (2+ items) and
- * what to list. Mirrors pickStreamFile's video heuristic.
- */
-export function streamCandidates(files: StreamFile[]): StreamFile[] {
-  const videos = files.filter((f) => VIDEO_EXTS.has(ext(f.filename)));
-  return videos.length > 0 ? videos : files;
-}
 
 export type WhichImpl = (cmd: string) => Promise<boolean>;
 
