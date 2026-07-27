@@ -237,3 +237,97 @@ button:hover {
 .empty.error {
   color: var(--error);
 }
+
+/* ---------------------------------------------------------------------------
+   The player page (/play/:sid/:idx). Same file as the dashboard on purpose:
+   one palette, one button, one card. The two surfaces are the same app and a
+   second stylesheet is how they stop looking like it. */
+
+.back {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+.file-name {
+  margin: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+
+.stage {
+  margin-bottom: 1rem;
+}
+
+/* A letterboxed frame rather than a bare element: a <video> with no source
+   sized to its intrinsic 300x150 default, which looked like a broken image
+   sitting above the buttons. */
+.player {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--sunken);
+}
+
+/* Overrides .card's row layout: the fallback is a heading above a paragraph,
+   not a form. */
+.fallback {
+  display: block;
+  margin-bottom: 0;
+}
+
+.fallback h2 {
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+
+.fallback-body {
+  margin: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* An <a> that has to sit next to a <button> and be indistinguishable from it.
+   The properties are duplicated from `button` rather than shared through a
+   selector list because an anchor needs three of its own (display, text
+   decoration, the centring) and a combined rule that only half applies to each
+   element is harder to read than this. */
+.button-link {
+  display: inline-block;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.button-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}

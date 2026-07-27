@@ -1,8 +1,19 @@
 import http from "node:http";
 import net from "node:net";
+import path from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startWebServer, type WebServerHandle } from "./server";
-import { isStreamPath, parseStreamPath } from "./stream";
+import {
+  isPlayPath,
+  isStreamPath,
+  parsePlayPath,
+  parseStreamPath,
+  playlistFilename,
+  requestOrigin,
+  splitPlaylistSuffix,
+} from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
 import type { TorrentStreamSession } from "../integrations/torrentStream";
@@ -572,5 +583,401 @@ describe("stream handle — Real-Debrid", () => {
     expect(all).not.toContain("real-debrid.example");
     expect(all).not.toContain(capability);
     expect(all).not.toContain("k=");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The .m3u playlist and the player page.
+
+/**
+ * A raw request, because Node's `fetch` silently DROPS a Host override (the
+ * same trap server.test.ts documents) and the whole point of these tests is
+ * which host header the generated URL is built from.
+ */
+function rawGet(
+  port: number,
+  path: string,
+  headers: Record<string, string> = {},
+  method = "GET",
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path, method, headers },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (body += c));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** A request with NO Host header at all, which http.request will not send. */
+function hostlessGet(port: number, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(`GET ${path} HTTP/1.0\r\n\r\n`);
+    });
+    let raw = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (c: string) => (raw += c));
+    socket.on("error", reject);
+    socket.on("close", () => {
+      const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(raw)?.[1] ?? 0);
+      resolve({ status, body: raw.split("\r\n\r\n").slice(1).join("\r\n\r\n") });
+    });
+  });
+}
+
+describe("splitPlaylistSuffix", () => {
+  it("splits a .m3u off and leaves everything else alone", () => {
+    expect(splitPlaylistSuffix("/stream/a/0.m3u")).toEqual({ path: "/stream/a/0", playlist: true });
+    expect(splitPlaylistSuffix("/stream/a/0")).toEqual({ path: "/stream/a/0", playlist: false });
+    expect(splitPlaylistSuffix("/stream/a/0.m3u8")).toEqual({
+      path: "/stream/a/0.m3u8",
+      playlist: false,
+    });
+  });
+});
+
+describe("requestOrigin", () => {
+  it("uses the Host header", () => {
+    expect(requestOrigin({ host: "box.local:9162" }, false)).toBe("http://box.local:9162");
+    expect(requestOrigin({ host: "[::1]:9162" }, false)).toBe("http://[::1]:9162");
+  });
+
+  /**
+   * THE MUTATION THIS UNIT EXISTS FOR. X-Forwarded-* are ordinary request
+   * headers: with nothing in front of this server, any client can set them.
+   * Honouring them by default lets a caller choose the host that ends up in a
+   * file the OS hands to a media player.
+   */
+  it("ignores forwarded headers unless trustProxy is on", () => {
+    const headers = {
+      host: "box.local:9162",
+      "x-forwarded-host": "evil.example",
+      "x-forwarded-proto": "https",
+    };
+    expect(requestOrigin(headers, false)).toBe("http://box.local:9162");
+    expect(requestOrigin(headers, true)).toBe("https://evil.example");
+  });
+
+  it("takes the client-most entry of a forwarded list", () => {
+    expect(
+      requestOrigin(
+        { host: "inner", "x-forwarded-host": "outer.example, inner.example" },
+        true,
+      ),
+    ).toBe("http://outer.example");
+  });
+
+  it("falls back to Host when trustProxy is on but nothing was forwarded", () => {
+    expect(requestOrigin({ host: "box.local" }, true)).toBe("http://box.local");
+  });
+
+  it("only ever produces http or https", () => {
+    expect(requestOrigin({ host: "h", "x-forwarded-proto": "javascript" }, true)).toBe("http://h");
+    expect(requestOrigin({ host: "h", "x-forwarded-proto": "HTTPS" }, true)).toBe("https://h");
+  });
+
+  // Anything that could carry a CRLF into a header, a slash into the authority,
+  // or credentials in front of the host is refused rather than sanitised.
+  it.each([
+    undefined,
+    "",
+    "box.local/evil.example",
+    "box.local\r\nX-Evil: 1",
+    "user@box.local",
+    "box.local:notaport",
+    "box local",
+    "http://box.local",
+  ])("refuses the host %p", (host) => {
+    expect(requestOrigin({ host }, false)).toBeNull();
+  });
+
+  it("refuses a malformed forwarded host too", () => {
+    expect(requestOrigin({ host: "ok.local", "x-forwarded-host": "a/b" }, true)).toBeNull();
+  });
+});
+
+describe("playlistFilename", () => {
+  it("swaps the media extension for .m3u", () => {
+    expect(playlistFilename("Big.Buck.Bunny.mp4")).toBe("Big.Buck.Bunny.m3u");
+  });
+
+  // The filename comes out of a torrent and lands in a response header and then
+  // on the user's disk: a whitelist, not an escape.
+  it.each([
+    ['evil"; drop.mkv', "evil_drop.m3u"],
+    ["a\r\nX-Evil: 1.mkv", "a_X-Evil_1.m3u"],
+    ["../../etc/passwd", "etc_passwd.m3u"],
+    [".hidden.mkv", "hidden.m3u"],
+    ["", "stream.m3u"],
+    ["🎬.mkv", "stream.m3u"],
+  ])("sanitises %p to %p", (input, want) => {
+    expect(playlistFilename(input)).toBe(want);
+  });
+
+  it("caps the length", () => {
+    expect(playlistFilename(`${"a".repeat(300)}.mkv`).length).toBe(84);
+  });
+});
+
+describe("GET /stream/:sid/:idx.m3u", () => {
+  async function ready(
+    over: Parameters<typeof startWebServer>[1] = {},
+  ): Promise<{ base: string; port: number; capability: string; id: string }> {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      {
+        url: `${upstream.base}/webtorrent/hash/Big.Buck.Bunny.mp4`,
+        filename: "Big.Buck.Bunny.mp4",
+        bytes: MEDIA.length,
+      },
+    ]);
+    const base = await start(reg, over);
+    return { base, port: handle!.port, capability, id };
+  }
+
+  it("serves a playlist whose one line is the absolute handle, capability included", async () => {
+    const { port, capability, id } = await ready();
+    const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("audio/x-mpegurl");
+    expect(res.headers["content-disposition"]).toBe(
+      'attachment; filename="Big.Buck.Bunny.m3u"',
+    );
+    expect(res.headers["cache-control"]).toBe("no-store");
+    const lines = res.body.trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe(`http://127.0.0.1:${port}/stream/${id}/0?k=${capability}`);
+    // Absolute, and playable on its own: a relative URL is meaningless once the
+    // file has been handed to another application.
+    expect(new URL(lines[0]!).searchParams.get("k")).toBe(capability);
+    // No upstream request: a playlist is metadata, not media.
+    expect(upstream!.seen).toEqual([]);
+  });
+
+  it("is fetchable end to end — the URL inside it serves the bytes", async () => {
+    const { port, capability, id } = await ready();
+    const playlist = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`);
+    const res = await fetch(playlist.body.trim());
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).equals(MEDIA)).toBe(true);
+  });
+
+  /**
+   * The `.m3u` is a representation of the handle, not a second route, so it
+   * cannot skip the capability — which would make a guessed session id enough
+   * to obtain a playable URL.
+   */
+  it("requires the capability", async () => {
+    const { port, id, capability } = await ready();
+    for (const q of ["", "?k=", "?k=nope", "?k=cap-two"]) {
+      const res = await rawGet(port, `/stream/${id}/0.m3u${q}`);
+      expect(`${q} -> ${res.status}`).toBe(`${q} -> 401`);
+      expect(res.body).not.toContain("/stream/");
+    }
+    expect((await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`)).status).toBe(200);
+  });
+
+  it("404s the same cases the handle does", async () => {
+    const { port, capability, id } = await ready();
+    expect((await rawGet(port, `/stream/nope/0.m3u?k=${capability}`)).status).toBe(404);
+    expect((await rawGet(port, `/stream/${id}/7.m3u?k=${capability}`)).status).toBe(404);
+    expect((await rawGet(port, `/stream/${id}/x.m3u?k=${capability}`)).status).toBe(404);
+  });
+
+  it("answers HEAD with the headers and no body", async () => {
+    const { port, capability, id } = await ready();
+    const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {}, "HEAD");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("audio/x-mpegurl");
+    expect(res.body).toBe("");
+  });
+
+  it("builds the URL from the Host the client actually used", async () => {
+    // Tokened, because the tokenless server requires a loopback Host and this
+    // test's whole point is a non-loopback one.
+    const { port, capability, id } = await ready({ token: "server-token" });
+    const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {
+      Host: "nas.lan:9162",
+    });
+    expect(res.body.trim()).toBe(`http://nas.lan:9162/stream/${id}/0?k=${capability}`);
+  });
+
+  /**
+   * MUTATION: trustProxy ignored. With the option off — the default — a client
+   * that sets X-Forwarded-Host must not steer the URL the playlist points at.
+   */
+  it("ignores X-Forwarded-* by default", async () => {
+    const { port, capability, id } = await ready({ token: "server-token" });
+    const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {
+      Host: "nas.lan:9162",
+      "X-Forwarded-Host": "evil.example",
+      "X-Forwarded-Proto": "https",
+    });
+    expect(res.body.trim()).toBe(`http://nas.lan:9162/stream/${id}/0?k=${capability}`);
+    expect(res.body).not.toContain("evil.example");
+  });
+
+  it("honours X-Forwarded-* when trustProxy is on", async () => {
+    const { port, capability, id } = await ready({ token: "server-token", trustProxy: true });
+    const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {
+      Host: "nas.lan:9162",
+      "X-Forwarded-Host": "torlnk.example",
+      "X-Forwarded-Proto": "https",
+    });
+    expect(res.body.trim()).toBe(`https://torlnk.example/stream/${id}/0?k=${capability}`);
+  });
+
+  it("400s rather than guessing when the Host is unusable", async () => {
+    const { port, capability, id } = await ready({ token: "server-token" });
+    const bad = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {
+      Host: "nas.lan/evil.example",
+    });
+    expect(bad.status).toBe(400);
+    const none = await hostlessGet(port, `/stream/${id}/0.m3u?k=${capability}`);
+    expect(none.status).toBe(400);
+    expect(none.body).not.toContain("/stream/");
+  });
+
+  /**
+   * A Real-Debrid session's playlist points at THIS server's handle, never at
+   * the unrestricted link: the redirect happens when the player follows it, so
+   * the credential never lands in a file on the user's disk (or in whatever
+   * their browser's download history syncs to).
+   */
+  it("never writes a Real-Debrid link into the file", async () => {
+    const RD_URL = "https://cdn.real-debrid.example/d/SECRETTOKEN123/movie.mkv";
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [{ url: RD_URL, filename: "movie.mkv", bytes: 123 }],
+    });
+    await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Movie",
+      route: { kind: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    await start(reg);
+    const res = await rawGet(handle!.port, "/stream/sid-rd/0.m3u?k=cap-rd");
+    expect(res.status).toBe(200);
+    expect(res.body.trim()).toBe(
+      `http://127.0.0.1:${handle!.port}/stream/sid-rd/0?k=cap-rd`,
+    );
+    expect(res.body).not.toContain("SECRETTOKEN123");
+    expect(res.body).not.toContain("real-debrid.example");
+  });
+
+  it("keeps the capability out of the log", async () => {
+    const { port, capability, id } = await ready();
+    await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`);
+    const all = logs.join("\n");
+    expect(all).toContain(`GET /stream/${id}/0.m3u -> 200`);
+    expect(all).not.toContain(capability);
+  });
+});
+
+describe("parsePlayPath / isPlayPath", () => {
+  it("claims /play and its children only", () => {
+    expect(isPlayPath("/play")).toBe(true);
+    expect(isPlayPath("/play/a/0")).toBe(true);
+    expect(isPlayPath("/player.html")).toBe(false);
+    expect(isPlayPath("/playlist")).toBe(false);
+  });
+
+  it("parses the same grammar as the stream handle", () => {
+    expect(parsePlayPath("/play/abc/3")).toEqual({ sid: "abc", index: 3 });
+    expect(parsePlayPath("/play/a%2Fb/0")).toEqual({ sid: "a/b", index: 0 });
+  });
+
+  it.each([
+    "/play",
+    "/play/abc",
+    "/play/abc/-1",
+    "/play/abc/1.5",
+    "/play/abc/length",
+    "/play//0",
+    "/play/a%ZZ/0",
+    "/play/abc/99999999999999999999",
+    "/stream/abc/0",
+  ])("rejects %s", (p) => {
+    expect(parsePlayPath(p)).toBeNull();
+  });
+});
+
+describe("GET /play/:sid/:idx", () => {
+  const assetDirs: string[] = [];
+
+  afterEach(() => {
+    while (assetDirs.length) rmSync(assetDirs.pop()!, { recursive: true, force: true });
+  });
+
+  function assets(): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "torlnk-play-"));
+    assetDirs.push(dir);
+    writeFileSync(path.join(dir, "index.html"), "<!doctype html><title>dash</title>");
+    writeFileSync(path.join(dir, "player.html"), "<!doctype html><title>player</title>");
+    return dir;
+  }
+
+  async function serve(over: Parameters<typeof startWebServer>[1] = {}): Promise<string> {
+    const { reg } = await torrentSession([
+      { url: "http://127.0.0.1:1/x.mp4", filename: "x.mp4", bytes: 1 },
+    ]);
+    return start(reg, { staticDir: assets(), ...over });
+  }
+
+  /**
+   * The page is served as static bytes with NOTHING templated into it — it
+   * learns which session it is for by parsing its own location. Server-side
+   * templating would mean interpolating a torrent's name into HTML.
+   */
+  it("serves the player HTML", async () => {
+    const base = await serve();
+    const res = await fetch(`${base}/play/sid-one/0?k=cap-one&n=Big%20Buck.mkv`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const body = await res.text();
+    expect(body).toContain("<title>player</title>");
+    // Whatever was in the URL is not reflected into the response.
+    expect(body).not.toContain("Big Buck");
+    expect(body).not.toContain("cap-one");
+  });
+
+  it("serves the same page for any session — it holds no session data", async () => {
+    const base = await serve();
+    const a = await fetch(`${base}/play/sid-one/0?k=cap-one`);
+    const b = await fetch(`${base}/play/does-not-exist/9`);
+    expect(b.status).toBe(200);
+    expect(await b.text()).toBe(await a.text());
+  });
+
+  it("404s a malformed play path", async () => {
+    const base = await serve();
+    for (const p of ["/play", "/play/abc", "/play/abc/-1", "/play/abc/x"]) {
+      expect(`${p} -> ${(await fetch(`${base}${p}`)).status}`).toBe(`${p} -> 404`);
+    }
+  });
+
+  it("404s when there are no built assets", async () => {
+    const { reg } = await torrentSession([
+      { url: "http://127.0.0.1:1/x.mp4", filename: "x.mp4", bytes: 1 },
+    ]);
+    const base = await start(reg, { findStaticDirImpl: () => null });
+    expect((await fetch(`${base}/play/sid-one/0`)).status).toBe(404);
+  });
+
+  it("rejects a non-GET method", async () => {
+    const base = await serve();
+    expect((await fetch(`${base}/play/sid-one/0`, { method: "POST" })).status).toBe(404);
   });
 });

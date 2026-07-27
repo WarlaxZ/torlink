@@ -14,7 +14,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { handleWebApi, isApiPath, type WebResponse } from "./routes";
 import { subscribeToQueue } from "./sse";
-import { handleStreamRequest, isStreamPath } from "./stream";
+import { handleStreamRequest, isPlayPath, isStreamPath, parsePlayPath } from "./stream";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
@@ -45,6 +45,16 @@ export interface WebServerOptions {
    * finds `dist/web` on some machines and not others.
    */
   findStaticDirImpl?: () => string | null;
+  /**
+   * Trust `X-Forwarded-Proto` / `X-Forwarded-Host` when this server needs to
+   * name its own absolute origin — today, only the `.m3u` playlist.
+   *
+   * Default off, and it must stay that way. Both headers are ordinary request
+   * headers: with no proxy in front, any client can set them and choose the
+   * host the generated playlist points a media player at. Turn it on only when
+   * something upstream overwrites (not appends to) them.
+   */
+  trustProxy?: boolean;
 }
 
 export interface WebServerHandle {
@@ -290,11 +300,37 @@ export async function startWebServer(
       // carries that capability, and a Real-Debrid Location is a credential.
       if (isStreamPath(urlPath)) {
         const wrote = await handleStreamRequest(
-          { sessions: runtime.sessions, log },
+          { sessions: runtime.sessions, log, trustProxy: options.trustProxy === true },
           req,
           res,
           urlPath,
           url.searchParams,
+        );
+        log(`${method} ${urlPath} -> ${wrote}`);
+        return;
+      }
+
+      // The player page. A path route rather than `player.html?s=…&i=…` so the
+      // URL is shareable and reads like one, but the response is the *static*
+      // asset with nothing templated into it: the page learns which session it
+      // is for by parsing its own location. Server-side templating here would
+      // mean interpolating a torrent's name into HTML, and the whole front end
+      // is built on the rule that attacker-controlled text only ever reaches
+      // the DOM through textContent.
+      //
+      // No capability check: the file is the same bytes for everybody and
+      // contains no session data. The media it points at is still behind ?k=.
+      if ((method === "GET" || method === "HEAD") && isPlayPath(urlPath)) {
+        const asset = staticRoot && parsePlayPath(urlPath) ? resolveAssetPath(staticRoot, "/player.html") : null;
+        if (!asset) {
+          writeJson(res, 404, { error: "not found" });
+          log(`${method} ${urlPath} -> 404`);
+          return;
+        }
+        const wrote = await writeWebResponse(
+          res,
+          { status: 200, filePath: asset, headers: { "Content-Type": contentTypeFor(asset) } },
+          log,
         );
         log(`${method} ${urlPath} -> ${wrote}`);
         return;

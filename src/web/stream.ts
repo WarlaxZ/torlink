@@ -18,6 +18,7 @@
 
 import http from "node:http";
 import { isAuthorized } from "../daemon/auth";
+import { streamHandle } from "./routes";
 import type { StreamSessionRegistry } from "../core/streamSession";
 
 /** Diagnostics sink. Same contract as the server's: injected, never `console`. */
@@ -26,6 +27,16 @@ export type StreamLog = (message: string) => void;
 export interface StreamDeps {
   sessions: StreamSessionRegistry;
   log: StreamLog;
+  /**
+   * Honour `X-Forwarded-Proto` / `X-Forwarded-Host` when building the absolute
+   * URL inside a `.m3u`. **Off unless the operator says otherwise**, because
+   * both headers are just request headers: anyone who can reach this port can
+   * send them, and trusting them unconditionally means any client can choose
+   * the host the playlist points a media player at. Behind a reverse proxy that
+   * sets them (and strips client-supplied copies) they are the only way to
+   * learn the real external origin, which is why the option exists at all.
+   */
+  trustProxy?: boolean;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -73,6 +84,119 @@ export function parseStreamPath(urlPath: string): { sid: string; index: number }
   return { sid, index };
 }
 
+const PLAYLIST_SUFFIX = ".m3u";
+
+/**
+ * Split a trailing `.m3u` off a stream path.
+ *
+ * The playlist is a *representation* of the handle, not a second resource, so
+ * it is deliberately not a second route: stripping the suffix here means the
+ * session lookup, the capability check, the readiness check and the bounds
+ * check below are literally the same code for both. A `.m3u` that skipped the
+ * capability would hand out a playable URL to anyone who guessed a session id,
+ * and the only durable way to stop that is for there to be one guard, not two.
+ */
+export function splitPlaylistSuffix(urlPath: string): { path: string; playlist: boolean } {
+  if (urlPath.endsWith(PLAYLIST_SUFFIX)) {
+    return { path: urlPath.slice(0, -PLAYLIST_SUFFIX.length), playlist: true };
+  }
+  return { path: urlPath, playlist: false };
+}
+
+const PLAY_BASE = "/play";
+
+/** True when this path is the player page rather than media or the router. */
+export function isPlayPath(urlPath: string): boolean {
+  return urlPath === PLAY_BASE || urlPath.startsWith(`${PLAY_BASE}/`);
+}
+
+/**
+ * `/play/:sid/:idx` → `{ sid, index }`, same grammar as the stream handle.
+ *
+ * The server only uses this as a shape check before serving a static file: the
+ * page itself carries no session data, so there is nothing here to authorise.
+ * It is validated anyway so `/play/nonsense` 404s rather than silently serving
+ * a player that will never load anything.
+ */
+export function parsePlayPath(urlPath: string): { sid: string; index: number } | null {
+  const m = /^\/play\/([^/]+)\/(\d+)$/.exec(urlPath);
+  if (!m) return null;
+  let sid: string;
+  try {
+    sid = decodeURIComponent(m[1]!);
+  } catch {
+    return null;
+  }
+  if (!sid) return null;
+  const index = Number(m[2]);
+  if (!Number.isSafeInteger(index)) return null;
+  return { sid, index };
+}
+
+// A Host (or X-Forwarded-Host) this server will build a URL from. Deliberately
+// strict: a hostname, an IPv4, or a bracketed IPv6, with an optional port. The
+// value lands in a file the OS hands to a media player, so anything that could
+// carry a CRLF into the response headers, a slash into the authority, or
+// credentials in front of the host is refused rather than sanitised.
+const HOST_RE = /^(?:[A-Za-z0-9._-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
+
+// A comma-separated forwarded header lists the *client-most* hop first, and
+// every proxy appends. The first entry is the origin the browser actually used.
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (raw === undefined) return undefined;
+  const first = raw.split(",")[0]?.trim();
+  return first ? first : undefined;
+}
+
+/**
+ * The absolute origin (`scheme://host[:port]`) this request arrived on, or null
+ * when the headers do not describe one.
+ *
+ * `Host` is the only source when `trustProxy` is off, and `http` the only
+ * scheme — this server never terminates TLS itself, so claiming `https` would
+ * be a guess. With `trustProxy` on, `X-Forwarded-Proto` and `X-Forwarded-Host`
+ * win, which is the whole point of the option and also exactly why it is off by
+ * default: those headers come from the client unless a proxy overwrites them.
+ *
+ * Null (rather than a fabricated default) when `Host` is missing or malformed.
+ * An HTTP/1.1 request without a Host is already invalid, and inventing
+ * `localhost` here would produce a playlist that silently plays on the machine
+ * running the daemon and nowhere else.
+ */
+export function requestOrigin(
+  headers: http.IncomingHttpHeaders,
+  trustProxy: boolean,
+): string | null {
+  const forwardedHost = trustProxy ? firstHeader(headers["x-forwarded-host"]) : undefined;
+  const host = forwardedHost ?? firstHeader(headers.host);
+  if (!host || !HOST_RE.test(host)) return null;
+  const forwardedProto = trustProxy ? firstHeader(headers["x-forwarded-proto"]) : undefined;
+  const proto = forwardedProto?.toLowerCase() === "https" ? "https" : "http";
+  return `${proto}://${host}`;
+}
+
+/**
+ * A `Content-Disposition` filename for the playlist, derived from the media
+ * file's own name.
+ *
+ * The input is attacker-controlled — it comes from a torrent, i.e. from
+ * whoever made the torrent — and it is about to be interpolated into a response
+ * header and then written to the user's disk by their browser. So this is a
+ * whitelist, not an escape: everything outside `[A-Za-z0-9._-]` collapses to
+ * `_`, which removes quotes, CR, LF, path separators and every non-ASCII byte
+ * in one rule. A leading dot is stripped so the download cannot land as a
+ * hidden file, and the whole thing is length-capped for filesystems that care.
+ */
+export function playlistFilename(mediaFilename: string): string {
+  const base = mediaFilename.replace(/\.[^.]{1,10}$/, "");
+  const safe = base
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^[._-]+/, "")
+    .slice(0, 80);
+  return `${safe || "stream"}.m3u`;
+}
+
 // Local, because importing the server's copy would make the dependency circular
 // (server.ts mounts this module).
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -111,7 +235,8 @@ export async function handleStreamRequest(
     return 405;
   }
 
-  const parsed = parseStreamPath(urlPath);
+  const { path: handlePath, playlist } = splitPlaylistSuffix(urlPath);
+  const parsed = parseStreamPath(handlePath);
   if (!parsed) {
     writeJson(res, 404, { error: "not found" });
     return 404;
@@ -151,6 +276,52 @@ export async function handleStreamRequest(
   if (!file) {
     writeJson(res, 404, { error: "unknown file" });
     return 404;
+  }
+
+  // The `.m3u`, and note where it sits: after every guard above, and *before*
+  // the backend split. A Real-Debrid session's playlist points at this handle,
+  // not at the unrestricted link — the redirect happens when the player
+  // follows it, so the credential never lands in a file on the user's disk.
+  //
+  // This route exists because there is no registered desktop `vlc://` scheme to
+  // link to. A three-line file with the right content type is the only thing
+  // that reliably opens the user's default media player on Windows, macOS and
+  // Linux alike.
+  if (playlist) {
+    const origin = requestOrigin(req.headers, deps.trustProxy === true);
+    if (!origin) {
+      // Not a 404: the request addressed a real file, we just cannot name it
+      // absolutely, and a relative URL in an .m3u is meaningless once the file
+      // has been handed to another application.
+      deps.log("stream: cannot build a playlist without a usable Host header");
+      writeJson(res, 400, { error: "bad host" });
+      return 400;
+    }
+    // `streamHandle`, not the request's own path: the canonical handle for this
+    // session, so nothing a client put in the URL is reflected into the body.
+    // The capability is re-encoded from the value that just passed the auth
+    // check — omit it and the playlist is a 401 in whatever player opens it.
+    const url = `${origin}${streamHandle(parsed.sid, parsed.index)}?k=${encodeURIComponent(k!)}`;
+    // One bare URL, no #EXTM3U and no #EXTINF title. Every player accepts the
+    // simplest form, and the alternative would mean interpolating a torrent's
+    // filename — attacker-controlled text — into a file another application
+    // parses. Nothing in this body is derived from the media at all.
+    const body = `${url}\n`;
+    res.writeHead(200, {
+      // The content type is what makes the browser hand the file to the OS
+      // instead of rendering it. text/plain and octet-stream both end with the
+      // URL displayed in a tab, which is precisely the failure this route
+      // exists to avoid.
+      "Content-Type": "audio/x-mpegurl",
+      "Content-Disposition": `attachment; filename="${playlistFilename(file.filename)}"`,
+      "Content-Length": String(Buffer.byteLength(body)),
+      // The URL inside carries a capability for a session that will be reaped.
+      "Cache-Control": "no-store",
+    });
+    // Node drops the body itself for a HEAD response, so the Content-Length
+    // above stays correct and this needs no HEAD branch.
+    res.end(body);
+    return 200;
   }
 
   if (session.backend === "realdebrid") {

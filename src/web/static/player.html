@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Same as the dashboard: the URL carries a stream capability in ?k=, and
+         a Referer would hand it to whatever a link on this page points at. -->
+    <meta name="referrer" content="no-referrer" />
+    <title>torlnk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>torlnk</h1>
+      <a class="back" href="/">back to queue</a>
+    </header>
+
+    <!-- Everything below is filled in by player.js from the page's own URL.
+         Nothing is templated server-side: this file ships as static bytes. -->
+    <p id="file-name" class="file-name"></p>
+    <div id="stage" class="stage"></div>
+    <div id="actions" class="actions"></div>
+    <p id="notice" class="notice" hidden></p>
+
+    <script type="module" src="/player.js"></script>
+  </body>
+</html>

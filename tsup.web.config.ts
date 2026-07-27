@@ -24,7 +24,10 @@ import { defineConfig } from "tsup";
 // unlike a source-text grep it follows transitive imports. That is why there is
 // no test asserting those files import nothing.
 export default defineConfig({
-  entry: { app: "src/web/static/app.ts" },
+  // One entry per page, each its own bundle: the dashboard and the player share
+  // only a stylesheet, and code-splitting them (which `splitting: false` below
+  // also rules out) would buy a shared chunk of nothing at this size.
+  entry: { app: "src/web/static/app.ts", player: "src/web/static/player.ts" },
   outDir: "dist/web",
   format: ["esm"],
   target: "es2022",

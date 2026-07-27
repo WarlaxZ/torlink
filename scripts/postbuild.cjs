@@ -12,11 +12,13 @@ copyFileSync(src, dest);
 // __dirname when the node-datachannel binary is unavailable.
 copyFileSync(resolve(root, 'scripts/webrtc-stub.mjs'), resolve(root, 'dist/webrtc-stub.mjs'));
 
-// The web UI's HTML and CSS aren't bundled by tsup (only app.ts is), so copy
-// them next to the generated dist/web/app.js.
+// The web UI's HTML and CSS aren't bundled by tsup (only the .ts entries are),
+// so copy them next to the generated dist/web/*.js. A page added to
+// tsup.web.config.ts needs its HTML added here too, or the bundle ships with
+// nothing loading it.
 const webOut = resolve(root, 'dist/web');
 mkdirSync(webOut, { recursive: true });
-for (const file of ['index.html', 'styles.css']) {
+for (const file of ['index.html', 'player.html', 'styles.css']) {
   copyFileSync(resolve(root, 'src/web/static', file), resolve(webOut, file));
 }
 
