@@ -22,11 +22,19 @@ describe("sseFrame", () => {
     expect(sseFrame("status\r\nx", null)).toBe("event: statusx\ndata: null\n\n");
   });
 
-  // `JSON.stringify(undefined)` is the value `undefined`, which would render as
-  // the literal text "data: undefined" — not JSON, so `JSON.parse` on the
-  // client throws. The `?? null` in sseFrame exists only for this case.
+  // `JSON.stringify` returns the value `undefined` — not a string — for several
+  // inputs, all of which would render as the literal text "data: undefined".
+  // That is not JSON, so `JSON.parse` on the client throws. Nullish input is
+  // only the most obvious member of the family; anything unrepresentable does
+  // the same, which is why the fallback is on the stringify result rather than
+  // on the input.
   it("renders a missing payload as null rather than the text undefined", () => {
     expect(sseFrame("status", undefined)).toBe("event: status\ndata: null\n\n");
+  });
+
+  it("renders an unserialisable payload as null rather than the text undefined", () => {
+    expect(sseFrame("status", () => 1)).toBe("event: status\ndata: null\n\n");
+    expect(sseFrame("status", Symbol("nope"))).toBe("event: status\ndata: null\n\n");
   });
 });
 
@@ -49,6 +57,54 @@ describe("subscribeToQueue", () => {
       queue.emit("update");
       vi.advanceTimersByTime(300);
       expect(write).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Deliberately literal, not `FLUSH_MS`-derived: a test that computes its own
+  // timing from the constant under test passes at any value of that constant
+  // and so pins only "there is a delay", never "the delay is 250ms".
+  it("holds an update for the full 250ms window before flushing", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      const write = vi.fn();
+      const stop = subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+      write.mockClear();
+
+      queue.emit("update");
+      vi.advanceTimersByTime(249);
+      expect(write).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(write).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The synchronous-burst test below coalesces at any window length, including
+  // zero. Spreading the updates across the window is what actually distinguishes
+  // a 250ms window from a short one, which would flush each update separately.
+  it("coalesces updates spread across the window into one frame", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      const write = vi.fn();
+      const stop = subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+      write.mockClear();
+
+      queue.emit("update");
+      vi.advanceTimersByTime(100);
+      queue.emit("update");
+      vi.advanceTimersByTime(100);
+      queue.emit("update");
+      vi.advanceTimersByTime(100);
+
+      expect(write).toHaveBeenCalledTimes(1);
+      stop();
     } finally {
       vi.useRealTimers();
     }
@@ -84,6 +140,33 @@ describe("subscribeToQueue", () => {
 
       expect(write).toHaveBeenCalledTimes(1);
       expect(write.mock.calls[0]![0]).toContain("event: ping");
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Literal 25_000 for the same reason as the flush window: the test above
+  // advances by `HEARTBEAT_MS + 10`, which is self-referential and therefore
+  // proves only that a heartbeat exists, at any interval.
+  it("sends the first heartbeat at 25s and not before", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      const write = vi.fn();
+      const stop = subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+      write.mockClear();
+
+      vi.advanceTimersByTime(24_999);
+      expect(write).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(write.mock.calls[0]![0]).toContain("event: ping");
+
+      // The exported constant is part of the contract — a client uses it to size
+      // its own connection timeout — so it must agree with the observed timing.
+      expect(HEARTBEAT_MS).toBe(25_000);
       stop();
     } finally {
       vi.useRealTimers();
@@ -190,6 +273,10 @@ describe("subscribeToQueue", () => {
     }
   });
 
+  // Note this one throws on the *first* frame, so by the mockClear the
+  // subscription is already dead and the rest only exercises the `!live`
+  // short-circuits. The test below covers the shape a real client actually
+  // fails in: connected fine, then went away mid-stream.
   it("stops writing once the write callback throws", () => {
     vi.useFakeTimers();
     try {
@@ -208,6 +295,111 @@ describe("subscribeToQueue", () => {
       expect(write).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("tears itself down when a write fails mid-stream", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      let connected = true;
+      const write = vi.fn(() => {
+        if (!connected) throw new Error("socket closed");
+      });
+      subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+      expect(write).toHaveBeenCalledTimes(1);
+      connected = false;
+      write.mockClear();
+
+      queue.emit("update");
+      expect(() => vi.advanceTimersByTime(300)).not.toThrow();
+
+      // The failing write itself happened; nothing after it may.
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(queue.listenerCount("update")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+
+      queue.emit("update");
+      vi.advanceTimersByTime(300);
+      expect(write).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // `flushTimer` is released at the top of `flush`, before the write, so an
+  // update emitted synchronously from inside `write` is neither lost (it arms a
+  // new timer) nor folded into the frame being written (it gets its own).
+  it("gives an update emitted during a write its own later frame", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      let reentered = false;
+      const write = vi.fn(() => {
+        if (write.mock.calls.length === 2 && !reentered) {
+          reentered = true;
+          queue.emit("update");
+        }
+      });
+      const stop = subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+
+      queue.emit("update");
+      vi.advanceTimersByTime(250);
+      expect(write).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(249);
+      expect(write).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(1);
+      expect(write).toHaveBeenCalledTimes(3);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears a timer armed during the write that then fails", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new DownloadQueue();
+      let connected = true;
+      const write = vi.fn(() => {
+        if (!connected) {
+          // Arm a fresh flush timer, then die — `stop` must clear the new timer,
+          // not the one `flush` already released.
+          queue.emit("update");
+          throw new Error("socket closed");
+        }
+      });
+      subscribeToQueue(queue, write, () => ({ downloads: [], seeds: [] }));
+      connected = false;
+
+      queue.emit("update");
+      expect(() => vi.advanceTimersByTime(300)).not.toThrow();
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(queue.listenerCount("update")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Real timers on purpose. An SSE subscription must never be the reason the
+  // process stays alive, and `process.getActiveResourcesInfo()` is the public
+  // API that sees it: an unref'd Timeout is simply absent from the list. This
+  // is a different guarantee from `stop()` clearing the timers — it covers the
+  // client nobody remembered to stop.
+  it("does not keep the process alive", () => {
+    const queue = new DownloadQueue();
+    const timeouts = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    const before = timeouts();
+    const stop = subscribeToQueue(queue, vi.fn(), () => ({ downloads: [], seeds: [] }));
+    try {
+      queue.emit("update");
+
+      expect(timeouts()).toBe(before);
+    } finally {
+      stop();
     }
   });
 });
