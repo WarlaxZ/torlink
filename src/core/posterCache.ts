@@ -58,11 +58,16 @@ function posterUrlAllowed(url: string): boolean {
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
   if (!POSTER_HOSTS.has(parsed.hostname.toLowerCase())) {
-    // An unlisted CDN is now a hard failure, not a degraded one: the caller sees
-    // null and falls back to its placeholder. That's invisible without this line —
-    // if OMDb starts serving posters from a host we haven't listed, this is the
-    // only trace of why every poster suddenly stopped rendering.
-    log.debug(`poster cache: refusing url outside the host allowlist: ${parsed.hostname}`);
+    // warn, not debug: an unlisted CDN is a hard failure, so every poster silently
+    // becomes a placeholder, and debug lines are gated behind TORLINK_DEBUG — a
+    // normal install would have no trace at all. This never fires in normal
+    // operation (poster URLs come from OMDb, which serves the listed CDNs), so
+    // there's nothing to spam: a refusal means either OMDb moved hosts or someone
+    // is aiming the fetcher elsewhere, and both are worth an operator's attention.
+    log.warn(
+      `poster not fetched: host "${parsed.hostname}" is not in the allowed poster CDN list ` +
+        `(POSTER_HOSTS in core/posterCache.ts). The poster will fall back to a placeholder.`,
+    );
     return false;
   }
   return true;
@@ -94,7 +99,11 @@ function redirectTarget(res: Response, currentUrl: string): string | null {
   // "evil.example". Scheme is re-checked so a hop can't leave http(s).
   if (resolved.protocol !== "https:" && resolved.protocol !== "http:") return null;
   if (!POSTER_HOSTS.has(resolved.hostname.toLowerCase())) {
-    log.debug(`poster cache: refusing redirect to host outside the allowlist: ${resolved.hostname}`);
+    log.warn(
+      `poster not fetched: redirected to host "${resolved.hostname}", which is not in the ` +
+        `allowed poster CDN list (POSTER_HOSTS in core/posterCache.ts). The redirect was not ` +
+        `followed and the poster will fall back to a placeholder.`,
+    );
     return null;
   }
   return resolved.href;
