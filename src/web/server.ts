@@ -12,7 +12,7 @@
 import http from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { handleWebApi, type WebResponse } from "./routes";
+import { handleWebApi, isApiPath, type WebResponse } from "./routes";
 import { subscribeToQueue } from "./sse";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
@@ -36,6 +36,14 @@ export interface WebServerOptions {
   log?: WebLog;
   /** Override the built asset directory. Injected for tests and odd installs. */
   staticDir?: string;
+  /**
+   * Override the asset-directory lookup. Injected so a test can exercise the
+   * "no build output" branch for real, rather than approximating it with a
+   * falsy `staticDir` — a sentinel that would break silently if this ever
+   * validated its input, and would then fall through to the real lookup, which
+   * finds `dist/web` on some machines and not others.
+   */
+  findStaticDirImpl?: () => string | null;
 }
 
 export interface WebServerHandle {
@@ -64,12 +72,24 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown): voi
  * carrying none of the three is a router bug, not a valid empty 200: answering
  * it with a bare `res.end()` would ship a browser a blank page and leave no
  * trace, so it is logged and answered 500.
+ *
+ * Returns the status *actually written*, which is not always `out.status`: this
+ * function answers its own 404 for a missing or non-file path and its own 500
+ * for a body-less response. Callers must log the return value, or every one of
+ * those failures reads as a success in the log.
+ *
+ * INVARIANT for `filePath`: it is streamed as given, with no containment check
+ * of its own. Every caller must have proven the path safe first — the asset
+ * branch via `resolveAssetPath`, the poster route via a `sha1(url).jpg` name it
+ * constructs itself inside `postersDir`. A future route that puts a
+ * user-influenced path here without that proof gets arbitrary file read, and
+ * nothing below will stop it.
  */
 export async function writeWebResponse(
   res: http.ServerResponse,
   out: WebResponse,
   log: WebLog,
-): Promise<void> {
+): Promise<number> {
   const headers = { ...(out.headers ?? {}) };
 
   if (out.filePath !== undefined) {
@@ -89,12 +109,12 @@ export async function writeWebResponse(
       if (!info.isFile()) {
         log(`not a file: ${out.filePath}`);
         writeJson(res, 404, { error: "not found" });
-        return;
+        return 404;
       }
       size = info.size;
     } catch {
       writeJson(res, 404, { error: "not found" });
-      return;
+      return 404;
     }
     headers["Content-Length"] = String(size);
     res.writeHead(out.status, headers);
@@ -107,7 +127,7 @@ export async function writeWebResponse(
       res.destroy();
     });
     stream.pipe(res);
-    return;
+    return out.status;
   }
 
   if (out.text !== undefined) {
@@ -117,7 +137,7 @@ export async function writeWebResponse(
       "Content-Length": String(Buffer.byteLength(out.text)),
     });
     res.end(out.text);
-    return;
+    return out.status;
   }
 
   if (out.json !== undefined) {
@@ -128,20 +148,12 @@ export async function writeWebResponse(
       "Content-Length": String(Buffer.byteLength(payload)),
     });
     res.end(payload);
-    return;
+    return out.status;
   }
 
   log(`response with no body for status ${out.status}`);
   writeJson(res, 500, { error: "internal error" });
-}
-
-// Legacy scripting paths that predate the /api/ prefix. Anything not in here and
-// not under /api/ is an asset request, so this set is what keeps `/app.js` from
-// being answered by the JSON router.
-const API_PATHS = new Set(["/health", "/status", "/downloads", "/add", "/control"]);
-
-function isApiPath(urlPath: string): boolean {
-  return urlPath.startsWith("/api/") || API_PATHS.has(urlPath);
+  return 500;
 }
 
 /**
@@ -168,7 +180,7 @@ export async function startWebServer(
     );
   }
 
-  const staticRoot = options.staticDir ?? findStaticDir();
+  const staticRoot = options.staticDir ?? (options.findStaticDirImpl ?? findStaticDir)();
   if (!staticRoot) {
     // The only signal a user will get. Without it the API answers fine while
     // every asset 404s, so the browser shows a blank page and the cause — no
@@ -193,6 +205,7 @@ export async function startWebServer(
     const authHeader = req.headers.authorization ?? (k ? `Bearer ${k}` : undefined);
     if (!isAuthorized(token, authHeader)) {
       writeJson(res, 401, { error: "unauthorized" });
+      log(`GET /api/events -> 401`);
       return;
     }
     res.writeHead(200, {
@@ -206,6 +219,13 @@ export async function startWebServer(
     const entry = { res, stop: (): void => {} };
     entry.stop = subscribeToQueue(
       runtime.queue,
+      // DEFERRED: no backpressure handling. res.write returns false once the
+      // socket's buffer is full and we ignore it, so a client that stops reading
+      // (a phone that slept, a slow link) accumulates frames in this process's
+      // memory until it disconnects. Doing it properly means pausing the
+      // subscription on a false return and resuming on the socket's "drain" —
+      // real per-connection state, not worth it for a loopback/LAN tool with a
+      // handful of clients. Start here if this ever sits behind a slow link.
       (chunk) => res.write(chunk),
       () => statusPayload(runtime),
     );
@@ -263,7 +283,12 @@ export async function startWebServer(
         try {
           out = await handleWebApi(
             { runtime, token },
-            method,
+            // HEAD is routed as GET. Supervisors liveness-poll with it, and the
+            // router only knows GET, so without this HEAD /health is a 404 —
+            // silently, since /health is excluded from the log below. Node drops
+            // the body for a HEAD response itself (res._hasBody), so the handler
+            // needs no HEAD awareness and the Content-Length stays correct.
+            method === "HEAD" ? "GET" : method,
             urlPath,
             url.searchParams,
             req.headers.authorization,
@@ -273,10 +298,13 @@ export async function startWebServer(
           log(`${method} ${urlPath} threw: ${String(err)}`);
           out = { status: 500, json: { error: "internal error" } };
         }
-        await writeWebResponse(res, out, log);
+        // The status writeWebResponse *wrote*, not the one the router intended:
+        // it answers its own 404 and 500, and logging out.status would report
+        // those as whatever they were before it overrode them.
+        const wrote = await writeWebResponse(res, out, log);
         // /health is a supervisor's liveness poll — logging it would drown
         // everything else in a long-running process.
-        if (urlPath !== "/health") log(`${method} ${urlPath} -> ${out.status}`);
+        if (urlPath !== "/health") log(`${method} ${urlPath} -> ${wrote}`);
         return;
       }
 
@@ -299,12 +327,16 @@ export async function startWebServer(
         log(`${method} ${urlPath} -> 400 (bad path)`);
         return;
       }
-      await writeWebResponse(
+      // Again the written status, not a hardcoded 200: a missing file or a
+      // directory is answered 404 in there, and logging 200 regardless made
+      // every asset failure read as a success — which defeats the point of
+      // warning about missing assets at all.
+      const wrote = await writeWebResponse(
         res,
         { status: 200, filePath: file, headers: { "Content-Type": contentTypeFor(file) } },
         log,
       );
-      log(`${method} ${urlPath} -> 200`);
+      log(`${method} ${urlPath} -> ${wrote}`);
     })();
   });
 
@@ -342,11 +374,19 @@ export async function startWebServer(
         entry.res.end();
       }
       streams.clear();
-      // No closeIdleConnections() call: since Node 19 close() already drops
-      // idle keep-alive sockets itself, so adding one is dead code (verified by
-      // mutation — removing it changed nothing). package.json requires >=22.
-      // Only a stream, which is never idle, needed the handling above.
       server.close(() => resolve());
+      // Ending the streams above closes one door; this closes the class. Any
+      // socket that is connected but has no *complete* request in flight — a
+      // browser's speculative preconnect, a TCP health probe, a port scan, a
+      // client that sent half its headers — is neither idle nor finishable, so
+      // close() waits on it forever. Reproduced with a bare net.connect.
+      //
+      // Note this is NOT the closeIdleConnections() removed earlier: that one
+      // really was dead (close() has dropped idle sockets itself since Node 19).
+      // "That call did nothing" was true and still didn't mean nothing needed
+      // doing. The cost is that a response genuinely mid-flight is cut off, which
+      // is the right trade here: quitting the TUI must never block on a browser.
+      server.closeAllConnections();
     });
     return closed;
   };

@@ -46,6 +46,20 @@ function posterResponse(hit: CachedPoster): WebResponse {
   };
 }
 
+// The legacy scripting paths this router forwards to `handleApi`, which is the
+// module that actually implements them. It lives here rather than in the HTTP
+// server because the server's only question is "router or static asset?", and
+// answering that from its own copy of the table is how drift starts: a path
+// added to `handleApi` but not to the server's copy silently becomes an asset
+// request answered 400/404, with nothing in the log to say why. Same failure
+// mode as the hand-copied `statusPayload` that dropped `uploadSpeed`.
+const LEGACY_API_PATHS = new Set(["/health", "/status", "/downloads", "/add", "/control"]);
+
+/** True when `handleWebApi` owns this path; false means it is a static asset. */
+export function isApiPath(urlPath: string): boolean {
+  return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
+}
+
 /**
  * Pure router for the web layer. Shared routes delegate to the daemon's
  * existing `handleApi` rather than reimplementing them, so `/status` and

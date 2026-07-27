@@ -1,4 +1,5 @@
 import http from "node:http";
+import net from "node:net";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -151,14 +152,50 @@ describe("startWebServer", () => {
     expect(status).toBe(200);
   });
 
+  // Any console method corrupts an Ink frame, not just log, so all three are
+  // spied — a stray console.warn is exactly as damaging and easier to leave in.
   it("never writes to the console", async () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const spies = (["log", "warn", "error"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
     try {
       const base = await start();
       await fetch(`${base}/api/status`);
-      expect(spy).not.toHaveBeenCalled();
+      await fetch(`${base}/nope.js`);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
     } finally {
-      spy.mockRestore();
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  // Supervisors liveness-poll with HEAD as often as GET, and /health is excluded
+  // from the log, so a 404 here would be an invisible monitoring failure.
+  it("answers HEAD on an API path like GET", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/health`, { method: "HEAD" });
+    expect(res.status).toBe(200);
+    // Node drops the body for HEAD but keeps the length, so the header is the
+    // only evidence the handler actually ran rather than short-circuiting.
+    expect(Number(res.headers.get("content-length"))).toBeGreaterThan(0);
+    await expect(res.text()).resolves.toBe("");
+    expect((await fetch(`${base}/api/status`, { method: "HEAD" })).status).toBe(200);
+  });
+
+  // The server's "is this the router's or an asset's?" test must agree with what
+  // handleApi actually implements. Asserting each legacy path is *not* treated as
+  // an asset is what catches a path added to one table and not the other.
+  it("routes every legacy API path to the router, not the asset handler", async () => {
+    const base = await start({ staticDir: assets() });
+    for (const p of ["/health", "/status", "/downloads"]) {
+      const res = await fetch(`${base}${p}`);
+      expect(res.status, p).toBe(200);
+      expect(res.headers.get("content-type"), p).toBe("application/json; charset=utf-8");
+    }
+    for (const p of ["/add", "/control"]) {
+      // A GET on a POST-only route is the router's 404, not the asset 404 — the
+      // point is only that the asset branch never saw it.
+      const res = await fetch(`${base}${p}`);
+      expect(res.headers.get("content-type"), p).toBe("application/json; charset=utf-8");
     }
   });
 
@@ -176,6 +213,47 @@ describe("startWebServer", () => {
     handle = null;
     await expect(fetch(`${base}/health`)).rejects.toThrow();
     await expect(closed!.close()).resolves.toBeUndefined();
+  });
+
+  // The other class of connection that blocks http.Server.close(): connected,
+  // but with no complete request in flight, so it is neither idle nor
+  // finishable. Browsers open speculative preconnect sockets like this, and any
+  // TCP health probe or port scan leaves one — so without closeAllConnections()
+  // a TUI quit blocks forever on something the user never asked for.
+  it("does not hang on close() with a connected socket that never sends a request", async () => {
+    await start();
+    const sock = net.connect(handle!.port, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      sock.once("connect", () => resolve());
+      sock.once("error", reject);
+    });
+    const raced = await Promise.race([
+      handle!.close().then(() => "closed"),
+      new Promise((r) => setTimeout(() => r("hung"), 2000).unref()),
+    ]);
+    expect(raced).toBe("closed");
+    sock.destroy();
+    handle = null;
+  });
+
+  it("does not hang on close() with half-sent request headers", async () => {
+    await start();
+    const sock = net.connect(handle!.port, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      sock.once("connect", () => resolve());
+      sock.once("error", reject);
+    });
+    // A request line with no terminating blank line: the server is still waiting
+    // for the rest, so this connection can never complete on its own.
+    sock.write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n");
+    await new Promise((r) => setTimeout(r, 50));
+    const raced = await Promise.race([
+      handle!.close().then(() => "closed"),
+      new Promise((r) => setTimeout(() => r("hung"), 2000).unref()),
+    ]);
+    expect(raced).toBe("closed");
+    sock.destroy();
+    handle = null;
   });
 
   it("caps the request body at 64KB with a 413", async () => {
@@ -240,10 +318,35 @@ describe("startWebServer", () => {
 
     it("warns through the log when no assets are found", async () => {
       const log = vi.fn();
-      handle = await startWebServer(runtime(), { port: 0, host: "127.0.0.1", log, staticDir: "" });
+      handle = await startWebServer(runtime(), {
+        port: 0,
+        host: "127.0.0.1",
+        log,
+        // The real null branch, injected. Not a falsy staticDir: that sentinel
+        // would fall through to the real findStaticDir() the moment this
+        // validated its input, and that finds dist/web on a built checkout and
+        // not on a fresh one — a test that passes or fails by machine.
+        findStaticDirImpl: () => null,
+      });
       expect(log.mock.calls.flat().join("\n")).toMatch(/no built web assets/i);
       // API still works; only the browser half is missing.
       expect((await fetch(`http://127.0.0.1:${handle.port}/api/status`)).status).toBe(200);
+    });
+
+    // The log must report what the client received. Logging a hardcoded 200 here
+    // made every per-request asset failure read as a success, which is precisely
+    // what the missing-assets warning exists to prevent.
+    it("logs the status the client actually got, not the one intended", async () => {
+      const log = vi.fn();
+      const dir = assets();
+      handle = await startWebServer(runtime(), { port: 0, host: "127.0.0.1", log, staticDir: dir });
+      const base = `http://127.0.0.1:${handle.port}`;
+      expect((await fetch(`${base}/nope.js`)).status).toBe(404);
+      expect((await fetch(`${base}/sub`)).status).toBe(404);
+      const lines = log.mock.calls.flat().join("\n");
+      expect(lines).toContain("GET /nope.js -> 404");
+      expect(lines).toContain("GET /sub -> 404");
+      expect(lines).not.toContain("-> 200");
     });
   });
 
@@ -288,6 +391,13 @@ describe("startWebServer", () => {
     // http.Server.close() waits for open connections, and an event stream never
     // ends on its own: without close() ending the streams first, quitting the
     // TUI would block until the browser tab was shut.
+    it("logs a rejected stream", async () => {
+      const log = vi.fn();
+      handle = await startWebServer(runtime(), { port: 0, host: "127.0.0.1", log, token: "s" });
+      await fetch(`http://127.0.0.1:${handle.port}/api/events`);
+      expect(log.mock.calls.flat().join("\n")).toContain("/api/events -> 401");
+    });
+
     it("does not hang on close() with a stream open", async () => {
       const base = await start();
       const res = await fetch(`${base}/api/events`);
@@ -338,9 +448,11 @@ describe("writeWebResponse", () => {
 
   it("serialises json when there is no text", async () => {
     const r = fakeRes();
-    await writeWebResponse(r.res, { status: 201, json: { a: 1 } }, () => {});
+    const wrote = await writeWebResponse(r.res, { status: 201, json: { a: 1 } }, () => {});
     expect(r.status).toBe(201);
     expect(r.body).toBe('{"a":1}');
+    // The return value is what the caller logs, so it must track what was sent.
+    expect(wrote).toBe(201);
   });
 
   it("lets a response override the default Content-Type", async () => {
@@ -358,9 +470,23 @@ describe("writeWebResponse", () => {
   it("turns a body-less response into a logged 500", async () => {
     const r = fakeRes();
     const log = vi.fn();
-    await writeWebResponse(r.res, { status: 200 }, log);
+    const wrote = await writeWebResponse(r.res, { status: 200 }, log);
     expect(r.status).toBe(500);
     expect(r.body).toBe('{"error":"internal error"}');
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/no body/i));
+    // Not 200: the caller logs this, and reporting the intended status would
+    // record an internal error as a success.
+    expect(wrote).toBe(500);
+  });
+
+  it("reports 404 rather than the intended status for a missing file", async () => {
+    const r = fakeRes();
+    const wrote = await writeWebResponse(
+      r.res,
+      { status: 200, filePath: path.join(tmpdir(), "torlnk-definitely-absent-file") },
+      () => {},
+    );
+    expect(r.status).toBe(404);
+    expect(wrote).toBe(404);
   });
 });
