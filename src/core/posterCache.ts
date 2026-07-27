@@ -6,6 +6,21 @@ import { renderPosterFile } from "../util/poster";
 import type { FetchImpl } from "../util/net";
 import { log } from "../util/logger";
 
+// Hosts we are willing to fetch poster images from. The daemon fetching an
+// arbitrary caller-supplied URL is server-side request forgery: on a cloud box
+// that reaches the instance metadata service. OMDb only ever hands back these
+// CDNs, so an allowlist costs nothing.
+//
+// This lives in core rather than the web layer because every front-end fetches
+// posters through getPoster, and the redirect hop below has to be checked here —
+// the layer that actually issues the request. An exact-Set membership test (not
+// a suffix match) is what makes `m.media-amazon.com.evil.example` fail closed.
+export const POSTER_HOSTS = new Set([
+  "m.media-amazon.com",
+  "ia.media-imdb.com",
+  "img.omdbapi.com",
+]);
+
 // Cap the cache rather than letting it grow forever. Posters are ~50-200KB, so
 // this holds a few thousand — far more than a session browses.
 export const MAX_POSTER_CACHE_BYTES = 200 * 1024 * 1024;
@@ -16,6 +31,43 @@ export const MAX_POSTER_CACHE_BYTES = 200 * 1024 * 1024;
 export const MAX_POSTER_BYTES = 8 * 1024 * 1024;
 
 const DEFAULT_TIMEOUT_MS = 8000;
+
+// Statuses that carry a Location we're willing to act on.
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+
+// A CDN-to-CDN bounce (img.omdbapi.com handing off to Amazon's CDN) is the only
+// legitimate redirect here, so one hop is the entire budget. Anything longer is
+// either broken or someone walking us somewhere.
+const MAX_POSTER_REDIRECTS = 1;
+
+/**
+ * The URL a redirect response points at, or null if we won't follow it.
+ *
+ * We fetch with `redirect: "manual"` and resolve the hop ourselves because the
+ * allowlist otherwise only guards the *first* request: an allowlisted CDN with
+ * an open redirect could walk us to the cloud instance metadata service. The
+ * response body is checked later, but a request that fires at all is already a
+ * problem — a GET that mutates state on some internal service succeeds whether
+ * or not we ever read what it returns.
+ */
+function redirectTarget(res: Response, currentUrl: string): string | null {
+  const location = res.headers.get("location");
+  if (!location) return null;
+  let resolved: URL;
+  try {
+    // Relative Locations are legal and common, so resolve against the URL we
+    // actually requested rather than assuming an absolute target.
+    resolved = new URL(location, currentUrl);
+  } catch {
+    return null;
+  }
+  // `hostname` (not `host`, not a prefix test) is what defeats a userinfo
+  // bypass: new URL("https://m.media-amazon.com@evil.example/").hostname is
+  // "evil.example". Scheme is re-checked so a hop can't leave http(s).
+  if (resolved.protocol !== "https:" && resolved.protocol !== "http:") return null;
+  if (!POSTER_HOSTS.has(resolved.hostname.toLowerCase())) return null;
+  return resolved.href;
+}
 
 // Pruning walks and stats the whole directory, and during a browse session
 // almost every lookup is a miss — so prune periodically rather than on every
@@ -110,10 +162,21 @@ export async function getPoster(
 
   let buf: Buffer;
   try {
-    const res = await fetchImpl(url, {
-      method: "GET",
-      signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-    });
+    // One deadline for the whole exchange, shared across the hop, so following a
+    // redirect can't double the time a caller waits.
+    const signal = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    let target = url;
+    let res: Response;
+    for (let hop = 0; ; hop++) {
+      res = await fetchImpl(target, { method: "GET", redirect: "manual", signal });
+      if (!REDIRECT_STATUS.has(res.status)) break;
+      if (hop >= MAX_POSTER_REDIRECTS) return null;
+      const next = redirectTarget(res, target);
+      if (!next) return null;
+      target = next;
+    }
+    // Every check below now runs against the final response, redirect or not: a
+    // hop is a path through the guards, never around them.
     if (!res.ok) return null;
     // Trust content-length only to bail out early; the real check is the
     // buffer length below, since the header is optional and can lie.

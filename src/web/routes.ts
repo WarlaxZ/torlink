@@ -1,17 +1,11 @@
 import { handleApi } from "../daemon/serve";
 import { isAuthorized } from "../daemon/auth";
-import { getPoster, type CachedPoster } from "../core/posterCache";
+import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
 import type { Runtime } from "../daemon/runtime";
 
-// Hosts we are willing to fetch poster images from. The daemon fetching an
-// arbitrary caller-supplied URL is server-side request forgery: on a cloud box
-// that reaches the instance metadata service. OMDb only ever hands back these
-// CDNs, so an allowlist costs nothing.
-export const POSTER_HOSTS = new Set([
-  "m.media-amazon.com",
-  "ia.media-imdb.com",
-  "img.omdbapi.com",
-]);
+// The allowlist lives in core/posterCache, next to the fetch that has to honour
+// it on redirects too. Re-exported so the server unit can reach it from here.
+export { POSTER_HOSTS };
 
 export interface WebDeps {
   runtime: Runtime;

@@ -23,6 +23,10 @@ function okResponse(body: Buffer): Response {
   return new Response(body, { status: 200 });
 }
 
+function redirectResponse(location: string): Response {
+  return new Response(null, { status: 302, headers: { location } });
+}
+
 let dir: string;
 
 beforeEach(async () => {
@@ -103,6 +107,79 @@ describe("getPoster", () => {
     expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
     expect(arrayBuffer).not.toHaveBeenCalled();
     await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+});
+
+// The allowlist only ever validated the URL a caller handed us, and fetch
+// follows redirects by default — so an allowlisted CDN with an open redirect
+// could bounce us anywhere, and the outbound request fires whether or not we
+// ever look at the response. These pin the hop itself.
+describe("getPoster redirects", () => {
+  it("follows one hop to another allowlisted CDN", async () => {
+    const fetchImpl = vi.fn(async (u: string) =>
+      u.includes("omdbapi")
+        ? redirectResponse("https://m.media-amazon.com/real.jpg")
+        : okResponse(JPEG),
+    );
+    const hit = await getPoster("https://img.omdbapi.com/?i=tt1", { dir, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(hit).not.toBeNull();
+    expect(hit?.bytes).toBe(JPEG.length);
+  });
+
+  // Without redirect: "manual" the real fetch follows hops internally and every
+  // check in redirectTarget becomes unreachable dead code. Injected fakes ignore
+  // init, so asserting on it is the only way to pin the guard that makes the
+  // rest of this describe block mean anything in production.
+  it("asks fetch not to follow redirects itself", async () => {
+    const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://m.media-amazon.com/a.jpg",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+  });
+
+  it("refuses a redirect off the allowlist without following it", async () => {
+    const fetchImpl = vi.fn(async () =>
+      redirectResponse("http://169.254.169.254/latest/meta-data"),
+    );
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+
+    // Exactly one call: the metadata service is never contacted at all.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("refuses an endless redirect chain", async () => {
+    const fetchImpl = vi.fn(async () => redirectResponse("https://m.media-amazon.com/next.jpg"));
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+
+    // One hop is the whole budget: the original request plus a single follow.
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  // A redirect target must clear the same bar as a directly-supplied URL, or the
+  // hop becomes a way around the body checks rather than a path through them.
+  it("holds the redirect target to the magic-byte check", async () => {
+    const fetchImpl = vi.fn(async (u: string) =>
+      u.endsWith("/a.jpg")
+        ? redirectResponse("https://ia.media-imdb.com/evil.jpg")
+        : okResponse(Buffer.from("<html>not an image</html>")),
+    );
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("returns null when a redirect has no location header", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302 }));
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 
