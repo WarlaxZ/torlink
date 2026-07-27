@@ -127,6 +127,16 @@ export class StreamSessionRegistry {
         });
       } else {
         const handle = await this.streamTorrentImpl(input.magnet, { signal: abort.signal });
+        // A stop() that landed while we were joining the swarm has already
+        // removed this session, but a backend that ignored its signal still
+        // handed us a live client. Assigning it would strand a swarm and its
+        // temp directory past shutdown with nothing holding a reference, so
+        // discard it instead — this is what makes stopAll's guarantee hold for
+        // any backend, not just the ones that honour cancellation.
+        if (!this.sessions.has(session.id)) {
+          await handle.stop({ keep: false }).catch(() => {});
+          throw new Error("Stream stopped before it was ready.");
+        }
         session.backendHandle = handle;
         session.files = handle.files;
         session.name = handle.name || input.name;

@@ -184,6 +184,35 @@ describe("StreamSessionRegistry — torrent route", () => {
     expect(session.error).toBe("Stream cancelled.");
   });
 
+  it("stops a handle that arrives after the session was already stopped", async () => {
+    // A backend that ignores its signal still hands back a live WebTorrent
+    // client. Nothing references it any more, so if the registry kept it the
+    // swarm and its /tmp directory would survive shutdown.
+    const stop = vi.fn(async () => {});
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => {
+        await gate;
+        return fakeTorrentSession(stop);
+      },
+      idFactory: () => "sess1",
+    });
+
+    const starting = registry.start({ ...INPUT, route: { kind: "torrent-auto" } });
+    await registry.stop("sess1");
+    release();
+    const session = await starting;
+
+    expect(stop).toHaveBeenCalledWith({ keep: false });
+    expect(session.state).toBe("error");
+    expect(session.backendHandle).toBeNull();
+    expect(registry.get("sess1")).toBeNull();
+    expect(registry.list()).toEqual([]);
+  });
+
   it("stopping an unknown id is a no-op", async () => {
     const registry = new StreamSessionRegistry({});
     await expect(registry.stop("nope")).resolves.toBeUndefined();
@@ -294,6 +323,10 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     expect(seen?.aborted).toBe(true);
     release();
     await starting;
+    // Nothing to stop on this route — the files are RD's HTTPS links — but the
+    // late resolve must not resurrect the session it already forgot.
+    expect(registry.list()).toEqual([]);
+    expect(registry.get("sess1")).toBeNull();
   });
 });
 
