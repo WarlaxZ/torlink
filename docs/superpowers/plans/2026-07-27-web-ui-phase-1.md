@@ -2967,6 +2967,11 @@ export default defineConfig([
   // The web UI's browser bundle. Separate build because it targets a browser,
   // not node22 — and `clean` must stay off here so it doesn't wipe the CLI
   // output built above.
+  //
+  // This build is also the enforcement point for `src/web/static/` being
+  // browser-safe: `platform: "browser"` fails loudly on any Node builtin, and
+  // unlike a source-text grep it follows transitive imports. That is why there
+  // is no test asserting those files import nothing.
   {
     entry: { app: "src/web/static/app.ts" },
     outDir: "dist/web",
