@@ -3956,6 +3956,105 @@ git commit -m "docs: document the web UI, LAN access and poster caching"
 
 ---
 
+## Task 13b: Validate the poster redirect hop
+
+**Files:**
+- Modify: `src/core/posterCache.ts`, `src/core/posterCache.test.ts`
+- Modify: `src/web/routes.ts`, `src/web/routes.test.ts`
+
+`getPoster` fetches with the default `redirect: "follow"`, so the host allowlist
+in `src/web/routes.ts` validates only the *first* hop. An allowlisted CDN with an
+open redirect — or one compromised or MITM'd — bounces the daemon to an internal
+address such as `169.254.169.254`.
+
+The magic-byte check means nothing can be read back: a non-JPEG body is rejected
+and never cached, and the route answers a flat 404 either way. But the outbound
+GET still *fires*, and an internal endpoint that mutates state on GET would fire
+successfully. A body check cannot address that; only validating the hop can.
+
+The allowlist also belongs in `core/` rather than `web/`: the TUI fetches posters
+from the same OMDb-supplied URLs through the same function, so today it has the
+same first-hop exposure with no guard at all.
+
+- [ ] **Step 1: Move the allowlist into the cache and write the failing tests**
+
+Move `POSTER_HOSTS` from `src/web/routes.ts` to `src/core/posterCache.ts`,
+exporting it from there, and re-import it in `routes.ts` so its 400-response
+behaviour is unchanged. Then add to `src/core/posterCache.test.ts`:
+
+```ts
+describe("getPoster — redirect validation", () => {
+  it("follows a redirect to another allowlisted CDN", async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      url.includes("omdbapi")
+        ? new Response(null, { status: 302, headers: { location: "https://m.media-amazon.com/b.jpg" } })
+        : okResponse(JPEG),
+    );
+    const hit = await getPoster("https://img.omdbapi.com/a.jpg", { dir, fetchImpl });
+    expect(hit).not.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a redirect off the allowlist and writes nothing", async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      url.includes("amazon")
+        ? new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } })
+        : okResponse(JPEG),
+    );
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(fs.readdir(dir)).resolves.toEqual([]);
+  });
+
+  it("refuses an endless redirect chain", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: "https://m.media-amazon.com/loop.jpg" } }),
+    );
+    expect(await getPoster("https://m.media-amazon.com/a.jpg", { dir, fetchImpl })).toBeNull();
+    expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+});
+```
+
+Run: `npx vitest run src/core/posterCache.test.ts`
+Expected: the three new tests FAIL — `fetchImpl` is called once and the redirect
+is never inspected, because `fetch` is currently following it internally.
+
+- [ ] **Step 2: Implement manual redirect handling**
+
+In `getPoster`, pass `redirect: "manual"` and handle 3xx yourself: read
+`location`, resolve it against the current URL, reject if its host is not in
+`POSTER_HOSTS`, and follow at most **one** hop (a CDN-to-CDN bounce is the only
+legitimate case; anything longer is refused). Return null on a missing or
+unparseable `location`.
+
+Keep every existing guard applied to the final response — scheme, `content-length`
+ceiling, buffer length, and magic bytes — since a redirect target must be held to
+the same standard as a direct URL.
+
+- [ ] **Step 3: Verify**
+
+Run: `npx vitest run src/core/posterCache.test.ts src/web/routes.test.ts`
+Expected: PASS, including the three new tests.
+
+Run: `npm test && npm run typecheck`
+Expected: no failures, no type errors. The TUI now benefits from the same guard.
+
+- [ ] **Step 4: Mutation-check the new guard**
+
+Delete the host re-validation on the redirect target and confirm
+`refuses a redirect off the allowlist and writes nothing` fails. Restore. Quote
+the output.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/posterCache.ts src/core/posterCache.test.ts src/web/routes.ts src/web/routes.test.ts
+git commit -m "fix: validate the poster redirect hop against the CDN allowlist"
+```
+
+---
+
 ## Task 28b: Remove the superseded poster fetcher
 
 **Files:**
@@ -4032,24 +4131,6 @@ Confirm that no `/stream`, `.m3u`, or player route exists yet — those are phas
 ---
 
 ## Known limitations, recorded deliberately
-
-**Poster fetching follows redirects, so the host allowlist validates only the
-first hop.** `core/posterCache.ts` calls `fetch` with the default
-`redirect: "follow"`. An allowlisted CDN with an open redirect — or one that is
-compromised or MITM'd — can bounce the daemon to an internal address such as
-`169.254.169.254`.
-
-Why it is not closed here: the magic-byte check in `getPoster` rejects any body
-that is not a JPEG and never caches it, so metadata cannot be exfiltrated through
-the poster route. What remains is blind SSRF (timing and error-shape probing),
-which additionally requires the caller to already hold the token or loopback
-access. Against that, `redirect: "manual"` risks breaking legitimate posters —
-`img.omdbapi.com` plausibly redirects to Amazon's CDN — and closing it properly
-means threading a host validator from `src/web/` into `src/core/`, which is a
-layering decision rather than a one-line change.
-
-If it is closed later: `redirect: "manual"` in `posterCache.ts`, re-validate the
-`Location` host against the same allowlist, follow once. Its own unit.
 
 **`Content-Length` on a poster response comes from the `stat` inside
 `getPoster`.** A poster rewritten between the cache lookup and the response being
