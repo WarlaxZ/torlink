@@ -19,8 +19,11 @@ const REAL_JPEG = Buffer.from(
   jpeg.encode({ data: Buffer.alloc(2 * 2 * 4, 0x40), width: 2, height: 2 }, 80).data,
 );
 
+// The copy into a plain Uint8Array is for the type checker, not for the test:
+// with "DOM" in tsconfig's `lib` (the browser dashboard needs it) `BodyInit`
+// comes from lib.dom, whose BufferSource does not admit Buffer<ArrayBufferLike>.
 function okResponse(body: Buffer): Response {
-  return new Response(body, { status: 200 });
+  return new Response(new Uint8Array(body), { status: 200 });
 }
 
 function redirectResponse(location: string): Response {
