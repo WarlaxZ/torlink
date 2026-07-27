@@ -104,6 +104,12 @@ export interface RunSearchOptions {
  * further snapshots are emitted — the caller is no longer interested, and
  * recording failures for work we cancelled ourselves would wrongly bench
  * healthy sources.
+ *
+ * Note that an aborted search resolves rather than rejecting, and does so with
+ * whatever the snapshot held when the abort landed — typically empty, with
+ * every source still marked `loading: true` and `done` short of `total`.
+ * Callers that surface progress must treat an abort as a discard, not as a
+ * finished search.
  */
 export async function runSearch(
   query: string,
@@ -136,6 +142,11 @@ export async function runSearch(
       const sc = new AbortController();
       const onAbort = (): void => sc.abort();
       signal?.addEventListener("abort", onAbort);
+      // A signal that already fired will never call the listener, so a caller
+      // reusing one request signal across searches would otherwise leave every
+      // source running to completion (or to its full timeout) before we throw
+      // the results away.
+      if (signal?.aborted) sc.abort();
       const abortTimer = setTimeout(() => sc.abort(), timeoutMs);
       try {
         const res = await searchImpl(source, query, { signal: sc.signal });

@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { enabledSources } from "../../sources/registry";
 import { blankPerSource, runSearch, type SearchSnapshot, type SourceState } from "../../core/search";
-import type { Source, SourceId } from "../../sources/types";
-import type { TorrentResult } from "../../sources/types";
-
-// Re-exported so existing importers (and their tests) keep their entry points
-// while the logic itself lives in core/search.ts.
-export { mergeDuplicateResults, shouldBench } from "../../core/search";
-export type { SourceState } from "../../core/search";
+import type { Source, SourceId, TorrentResult } from "../../sources/types";
 
 export interface ConcurrentSearchState {
   results: TorrentResult[];
@@ -60,13 +54,11 @@ export function useConcurrentSearch(
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pending: SearchSnapshot | null = null;
-    let flushed = false;
 
     const flush = (): void => {
       if (!alive || !pending) return;
       setState(toState(pending));
       pending = null;
-      flushed = true;
     };
 
     // Push the accumulated snapshot to the UI, but no more than once per
@@ -98,17 +90,12 @@ export function useConcurrentSearch(
       total: sources.length,
     });
 
-    // The last source to settle flushes synchronously via onUpdate, so by the
-    // time this resolves the UI is normally already up to date and setting it
-    // again would only cost a render. This exists for the case where onUpdate
-    // never fires at all — every source benched, so there is nothing to await
-    // and nothing would ever clear the initial loading:true.
+    // Only the all-benched case reaches the body here: with any active source
+    // at all, the last one to settle already flushed synchronously via
+    // onUpdate. With none, onUpdate never fires and nothing else would clear
+    // the initial loading:true.
     void runSearch(query, sources, { signal: ctrl.signal, onUpdate }).then((snap) => {
-      if (!alive || flushed) return;
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      if (!alive || snap.total > 0) return;
       setState(toState(snap));
     });
 
