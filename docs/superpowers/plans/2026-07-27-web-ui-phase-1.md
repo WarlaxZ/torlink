@@ -3976,6 +3976,21 @@ The allowlist also belongs in `core/` rather than `web/`: the TUI fetches poster
 from the same OMDb-supplied URLs through the same function, so today it has the
 same first-hop exposure with no guard at all.
 
+> Relocating the constant does NOT by itself fix that — the check below is scoped
+> to the redirect hop, so `getPoster` still fetches any `https?://` URL a caller
+> supplies. Gating the initial URL is Task 13c. Two claims that sound equivalent
+> and are not: "the allowlist lives in core" and "core enforces the allowlist".
+
+**A note on testing this, learned the hard way.** With `fetchImpl` fully injected,
+no test can observe the real `fetch`'s own default behaviour. A test asserting
+"refuses a redirect off the allowlist" *passes against the unfixed code*, because
+the fake hands the 302 straight back, `res.ok` is false, and `getPoster` returns
+null after one call — exactly what the assertion wants. The red-then-green
+transition is therefore not evidence here. Two things are required instead: a
+test that asserts `redirect: "manual"` is present in the `init` argument (without
+it the whole fix is dead code under real `fetch` while the suite stays green), and
+a mutation check on each guard.
+
 - [ ] **Step 1: Move the allowlist into the cache and write the failing tests**
 
 Move `POSTER_HOSTS` from `src/web/routes.ts` to `src/core/posterCache.ts`,
