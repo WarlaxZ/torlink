@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { StreamSessionRegistry } from "./streamSession";
+import { NO_DEBRID_TOKEN, StreamSessionRegistry } from "./streamSession";
 import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 
@@ -34,7 +34,7 @@ describe("StreamSessionRegistry — torrent route", () => {
     expect(session).toMatchObject({
       id: "sess1",
       capability: "cap1",
-      route: "torrent",
+      backend: "torrent",
       state: "ready",
       name: "Some Release",
       createdAt: 5000,
@@ -134,6 +134,56 @@ describe("StreamSessionRegistry — torrent route", () => {
     expect(registry.list()).toEqual([]);
   });
 
+  it("hands the backend the magnet, not the bare info hash", async () => {
+    const streamTorrentImpl = vi.fn(async () => fakeTorrentSession());
+    const registry = new StreamSessionRegistry({ streamTorrentImpl });
+
+    await registry.start({ ...INPUT, route: { kind: "torrent-auto" } });
+
+    expect(streamTorrentImpl).toHaveBeenCalledWith(INPUT.magnet, expect.anything());
+  });
+
+  it("discards the download by default so temp data isn't left on disk", async () => {
+    const stop = vi.fn(async () => {});
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => fakeTorrentSession(stop),
+      idFactory: () => "sess1",
+    });
+
+    await registry.start({ ...INPUT, route: { kind: "torrent-auto" } });
+    await registry.stop("sess1");
+
+    expect(stop).toHaveBeenCalledWith({ keep: false });
+  });
+
+  it("aborts a backend that is still resolving when the session is stopped", async () => {
+    // The handle doesn't exist yet, so stopping can only take effect through the
+    // signal. Without it the swarm would keep running after shutdown.
+    let seen: AbortSignal | undefined;
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async (_magnet, opts) => {
+        seen = opts.signal;
+        await gate;
+        throw new Error("Stream cancelled.");
+      },
+      idFactory: () => "sess1",
+    });
+
+    const starting = registry.start({ ...INPUT, route: { kind: "torrent-auto" } });
+    await Promise.resolve();
+    await registry.stop("sess1");
+
+    expect(seen?.aborted).toBe(true);
+    release();
+    const session = await starting;
+    expect(session.state).toBe("error");
+    expect(session.error).toBe("Stream cancelled.");
+  });
+
   it("stopping an unknown id is a no-op", async () => {
     const registry = new StreamSessionRegistry({});
     await expect(registry.stop("nope")).resolves.toBeUndefined();
@@ -167,7 +217,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
       debridToken: "tok",
     });
 
-    expect(session.route).toBe("realdebrid");
+    expect(session.backend).toBe("realdebrid");
     expect(session.state).toBe("ready");
     expect(session.files).toEqual(RD_FILES);
     expect(progressDuringResolve).toBe(50);
@@ -194,9 +244,56 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     const session = await registry.start({ ...INPUT, route: { kind: "realdebrid" } });
 
     expect(session.state).toBe("error");
-    expect(session.error).toMatch(/Real-Debrid token/i);
+    // By identity, not by shape: the constant is exported so the web layer can
+    // recognise this specific failure and prompt for a token.
+    expect(session.error).toBe(NO_DEBRID_TOKEN);
     expect(resolveDebridImpl).not.toHaveBeenCalled();
     expect(streamTorrentImpl).not.toHaveBeenCalled();
+  });
+
+  it("forgets a ready RD session without a backend handle to stop", async () => {
+    // Nothing local to tear down on this route — the files are RD's HTTPS links
+    // — so stopping is just forgetting, and must not trip over the null handle.
+    const registry = new StreamSessionRegistry({
+      resolveDebridImpl: async () => RD_FILES,
+      idFactory: () => "sess1",
+    });
+
+    await registry.start({ ...INPUT, route: { kind: "realdebrid" }, debridToken: "tok" });
+    await expect(registry.stop("sess1")).resolves.toBeUndefined();
+
+    expect(registry.get("sess1")).toBeNull();
+    expect(registry.list()).toEqual([]);
+  });
+
+  it("aborts an in-flight Real-Debrid poll when the session is stopped", async () => {
+    // RD polling can sit in a stall window for minutes; a stop has to cut it
+    // short rather than let it run on against the user's account.
+    let seen: AbortSignal | undefined;
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const registry = new StreamSessionRegistry({
+      resolveDebridImpl: async (_token, _magnet, opts) => {
+        seen = opts.signal;
+        await gate;
+        return RD_FILES;
+      },
+      idFactory: () => "sess1",
+    });
+
+    const starting = registry.start({
+      ...INPUT,
+      route: { kind: "realdebrid" },
+      debridToken: "tok",
+    });
+    await Promise.resolve();
+    await registry.stop("sess1");
+
+    expect(seen?.aborted).toBe(true);
+    release();
+    await starting;
   });
 });
 
