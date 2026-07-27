@@ -3207,24 +3207,17 @@ export interface WebServerHandle {
 
 export const DEFAULT_WEB_PORT = 9162;
 
-function statusPayloadFor(runtime: Runtime): unknown {
-  const downloads = runtime.queue.getItems().map((it) => ({
-    id: it.id,
-    name: it.name,
-    status: it.status,
-    progress: it.progress,
-    peers: it.peers,
-    speed: it.speed,
-  }));
-  const seeds = runtime.queue.getSeeds().map((s) => ({
-    id: s.id,
-    name: s.name,
-    status: s.status,
-    peers: s.peers,
-    uploaded: s.uploaded,
-  }));
-  return { downloads, seeds };
-}
+// Do NOT reimplement the status payload here. An earlier draft of this plan
+// duplicated it and the copy silently omitted `uploadSpeed`, so every seed's
+// rate rendered as an em dash over SSE while the same seed showed a real rate
+// on the initial /api/status fetch. Export `statusPayload` from
+// `src/daemon/serve.ts` and import it, for the same reason `/api/status`
+// delegates to `handleApi` rather than rebuilding it: one implementation
+// cannot drift from itself.
+//
+// In src/daemon/serve.ts, change `function statusPayload` to
+// `export function statusPayload`.
+import { handleApi, statusPayload } from "../daemon/serve";
 
 function readBody(req: http.IncomingMessage): Promise<{ text: string; tooLarge: boolean }> {
   return new Promise((resolve) => {
@@ -3319,7 +3312,7 @@ export async function startWebServer(
           "X-Accel-Buffering": "no",
         });
         const stop = subscribeToQueue(runtime.queue, (chunk) => res.write(chunk), () =>
-          statusPayloadFor(runtime),
+          statusPayload(runtime),
         );
         req.on("close", stop);
         log(`${method} ${urlPath} -> 200 (sse)`);
