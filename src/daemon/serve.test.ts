@@ -4,6 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { handleApi, isAuthorized, extractMagnet, parseControl, applyControl } from "./serve";
 import type { Runtime } from "./runtime";
+import { StreamSessionRegistry } from "../core/streamSession";
 
 const HASH = "abcdef0123456789abcdef0123456789abcdef01";
 const MAGNET = `magnet:?xt=urn:btih:${HASH}&dn=Example`;
@@ -55,6 +56,7 @@ describe("handleApi", () => {
         getSeeds: () => [],
       } as unknown as Runtime["queue"],
       downloadDir: dir,
+      sessions: new StreamSessionRegistry(),
     };
   });
   afterEach(async () => {
@@ -151,7 +153,7 @@ describe("parseControl", () => {
 
 describe("applyControl", () => {
   const mkRuntime = (queue: Partial<Record<string, unknown>>): Runtime =>
-    ({ queue: queue as unknown as Runtime["queue"], downloadDir: "/tmp" });
+    ({ queue: queue as unknown as Runtime["queue"], downloadDir: "/tmp", sessions: new StreamSessionRegistry() });
 
   it("resumes a paused download", async () => {
     const resume = vi.fn();

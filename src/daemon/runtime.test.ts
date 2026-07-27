@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { addInput, type Runtime } from "./runtime";
+import { addInput, startRuntime, type Runtime } from "./runtime";
+import { StreamSessionRegistry } from "../core/streamSession";
 
 const HASH = "abcdef0123456789abcdef0123456789abcdef01";
 const MAGNET = `magnet:?xt=urn:btih:${HASH}&dn=Example`;
@@ -13,6 +14,7 @@ function fakeRuntime(dir: string, has = false): { runtime: Runtime; add: ReturnT
   const runtime = {
     queue: { has: () => has, add } as unknown as Runtime["queue"],
     downloadDir: dir,
+    sessions: new StreamSessionRegistry(),
   };
   return { runtime, add };
 }
@@ -60,5 +62,13 @@ describe("addInput", () => {
     expect(add).not.toHaveBeenCalled();
     // Opted in (the watch folder), a bad file still fails soft as invalid.
     expect(await addInput(runtime, file, { allowTorrentPath: true })).toBe("invalid");
+  });
+});
+
+describe("startRuntime — stream sessions", () => {
+  it("exposes an empty session registry", async () => {
+    const runtime = await startRuntime();
+    expect(runtime.sessions.list()).toEqual([]);
+    runtime.queue.suspend();
   });
 });

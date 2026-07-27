@@ -19,10 +19,14 @@ import {
 } from "../download/bootguard";
 import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
+import { StreamSessionRegistry } from "../core/streamSession";
 
 export interface Runtime {
   queue: DownloadQueue;
   downloadDir: string;
+  // Live stream sessions, shared by every front-end in this process: a stream
+  // started in the TUI is playable from the browser and vice versa.
+  sessions: StreamSessionRegistry;
   // True when the previous run died mid-restore and this boot came up in safe
   // mode: everything paused, no engines started (see download/bootguard.ts).
   recovered?: boolean;
@@ -47,7 +51,7 @@ export async function startRuntime(overrideDir?: string): Promise<Runtime> {
     console.error("[torlnk] recovered from a crashed start: restored downloads are paused");
   }
   const downloadDir = overrideDir && overrideDir.trim() ? overrideDir.trim() : cfg.downloadDir;
-  return { queue, downloadDir, recovered: safe };
+  return { queue, downloadDir, sessions: new StreamSessionRegistry(), recovered: safe };
 }
 
 export type AddOutcome = "added" | "duplicate" | "invalid";
