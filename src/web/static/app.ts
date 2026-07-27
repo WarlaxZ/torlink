@@ -87,6 +87,35 @@ function showNotice(message: string): void {
 const DOWNLOAD_ACTIONS = ["pause", "resume", "remove"] as const;
 const SEED_ACTIONS = ["stop-seed", "delete"] as const;
 
+// A confirm() dialog on a phone has to stay readable, and a torrent name can be
+// several hundred characters of release tags. Clip it for the prompt only — the
+// row itself still shows the full name in its title attribute.
+function shortName(name: string): string {
+  return name.length > 80 ? `${name.slice(0, 79)}…` : name;
+}
+
+// Gate the irreversible actions. pause, resume and stop-seed are all undone by
+// the button next to them, so they fire immediately; remove discards a torrent
+// and delete erases files from disk, and this dashboard is meant to be used from
+// a phone where those buttons sit a few millimetres from `pause`.
+//
+// Native confirm() deliberately: synchronous, unmissable, and no markup of its
+// own. Both of those are virtues when the next step cannot be undone.
+function confirmAction(action: string, name: string): boolean {
+  const label = shortName(name);
+  if (action === "delete") {
+    return confirm(
+      `Delete “${label}” and erase its downloaded files from disk?\n\nThis cannot be undone.`,
+    );
+  }
+  if (action === "remove") {
+    return confirm(
+      `Remove “${label}” from the queue?\n\nFiles already downloaded are kept on disk.`,
+    );
+  }
+  return true;
+}
+
 function metaLine(row: DashRow): string {
   if (row.kind === "seed") {
     return `${row.status} · ${row.peers} peers · ${formatBytes(row.uploaded)} up · ${formatRate(row.rate)}`;
@@ -132,7 +161,10 @@ function renderRow(row: DashRow): HTMLLIElement {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action;
-    button.addEventListener("click", () => void control(row.id, action));
+    button.addEventListener("click", () => {
+      if (!confirmAction(action, row.name)) return;
+      void control(row.id, action);
+    });
     actions.append(button);
   }
 
