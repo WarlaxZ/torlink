@@ -9,6 +9,7 @@
 
 import http from "node:http";
 import { startRuntime, addInput, type Runtime } from "./runtime";
+import { disarmBootMarker } from "../download/bootguard";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk } from "./auth";
 import { startWebServer, type WebServerHandle } from "../web/server";
@@ -245,6 +246,36 @@ function log(message: string): void {
   console.log(`[torlnk serve] ${new Date().toISOString()} ${message}`);
 }
 
+/**
+ * Bail out of a startup that has already called `startRuntime()`.
+ *
+ * `startRuntime` arms the crash-boot marker (download/bootguard.ts) just before
+ * it hands persisted state to the engine, and only two things disarm it: a
+ * 4-second **unref'd** timer, and `queue.suspend()` on a clean quit. A bind
+ * failure lands in milliseconds, so `process.exit(1)` here used to leave the
+ * marker on disk — and the *next* launch of any mode (TUI included) came up in
+ * safe mode with every restored download and seed paused, announcing "recovered
+ * from a crashed start". `torlnk serve --web` against a port a TUI is already
+ * hosting on is an easy way to trigger it.
+ *
+ * `disarmBootMarker()`, not `queue.suspend()`: the marker file is the only thing
+ * that outlives this process, and it is exactly what needs clearing. `suspend()`
+ * would clear it too (via persistSync) but would also write the whole restored
+ * queue, history and seed set back to disk from a run that never started — a
+ * state write with nothing to add and a mid-write window to lose. Everything
+ * else `suspend()` tears down (the poll interval, the webtorrent engine) dies
+ * with the process on the next line.
+ *
+ * The web server does need closing: it binds a real socket and, on the API
+ * failure path, is already listening.
+ */
+async function failStartup(message: string, web: WebServerHandle | null): Promise<void> {
+  console.error(message);
+  await web?.close();
+  disarmBootMarker();
+  process.exit(1);
+}
+
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const port = options.port ?? DEFAULT_API_PORT;
   const host = options.host ?? "127.0.0.1";
@@ -303,11 +334,11 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     } catch (e) {
       // A startup failure, not a degraded mode: coming up with the API live and
       // the dashboard silently missing is worse than not coming up at all.
-      console.error(
+      await failStartup(
         `error: could not start the web ui on port ${webPort}: ` +
           `${e instanceof Error ? e.message : String(e)}`,
+        null,
       );
-      process.exit(1);
       return;
     }
   }
@@ -364,9 +395,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     });
   });
   if (listenErr) {
-    console.error(`error: could not start the api on port ${port}: ${listenErr.message}`);
-    await web?.close();
-    process.exit(1);
+    await failStartup(`error: could not start the api on port ${port}: ${listenErr.message}`, web);
     return;
   }
 

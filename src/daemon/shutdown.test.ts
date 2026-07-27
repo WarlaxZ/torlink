@@ -23,6 +23,9 @@ vi.mock("./runtime", async (importOriginal) => ({
 
 const { runServe } = await import("./serve");
 const { runWatch } = await import("./watch");
+const { armBootMarker, disarmBootMarker, wasBootInterrupted } = await import(
+  "../download/bootguard"
+);
 
 interface Fake {
   runtime: Runtime;
@@ -117,6 +120,9 @@ describe("runServe web mount", () => {
       if (!sigint.has(l)) process.off("SIGINT", l as never);
     }
     vi.restoreAllMocks();
+    // The marker lives in this worker's TORLINK_STATE_DIR (see test-setup.ts);
+    // clear it either way so a test that arms it cannot leak into the next one.
+    disarmBootMarker();
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -182,6 +188,42 @@ describe("runServe web mount", () => {
     // Bailed before anything was started, so nothing is left listening.
     expect(startRuntime).not.toHaveBeenCalled();
     expect(await isListening(port)).toBe(false);
+  });
+
+  // The failure mode this pair of tests guards, beyond the exit code: the real
+  // startRuntime() arms the crash-boot marker just before restoring state, and
+  // only a 4s *unref'd* timer or queue.suspend() disarms it. An EADDRINUSE lands
+  // in milliseconds, so a startup that exits here used to leave the marker on
+  // disk — and the next launch of *any* mode came up in safe mode with every
+  // download and seed paused, claiming it recovered from a crash. startRuntime is
+  // stubbed in this file, so the marker is armed by hand to stand in for it.
+  it("leaves no boot marker armed when the web port is taken", async () => {
+    const port = await freePortPair();
+    const squatter = net.createServer();
+    await new Promise<void>((r) => squatter.listen(port + 1, "127.0.0.1", r));
+    try {
+      armBootMarker();
+      expect(wasBootInterrupted()).toBe(true);
+      await runServe({ port, web: true, downloadDir: dir });
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(wasBootInterrupted()).toBe(false);
+    } finally {
+      await new Promise<void>((r) => squatter.close(() => r()));
+    }
+  });
+
+  it("leaves no boot marker armed when the api port is taken", async () => {
+    const port = await freePortPair();
+    const squatter = net.createServer();
+    await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", r));
+    try {
+      armBootMarker();
+      await runServe({ port, web: true, downloadDir: dir });
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(wasBootInterrupted()).toBe(false);
+    } finally {
+      await new Promise<void>((r) => squatter.close(() => r()));
+    }
   });
 
   it("exits non-zero with the port in the message when the web port is taken", async () => {
