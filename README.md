@@ -177,6 +177,57 @@ Prefer an environment variable? Set `TORLINK_DNS` before launching (it takes pre
 TORLINK_DNS=cloudflare npm start
 ```
 
+## In your browser (optional)
+
+Add `--web` and torlink also serves a small dashboard — the queue, active downloads, and what's seeding — over the same queue as the process hosting it. Handy for checking on a seedbox from your phone, or just for keeping an eye on progress without a terminal open.
+
+```sh
+torlnk --web          # the TUI hosts it; quitting the TUI stops it
+torlnk serve --web    # headless: the add API plus the browser UI
+```
+
+Either way it lands on **`http://127.0.0.1:9162`**, and `torlnk --web` prints the address on the splash. Change it with `--web-port`. Under `serve`, the UI port is derived from the API port + 1 (so `serve --port 8080 --web` puts the API on 8080 and the UI on 8081) unless you pass `--web-port` yourself.
+
+### Reaching it from another device
+
+Binding anything other than loopback **requires** a token — torlink refuses to start rather than leave your queue open to the network:
+
+```sh
+torlnk --web --web-host 0.0.0.0 --web-token "$(openssl rand -hex 16)"
+```
+
+Under `serve` the UI binds serve's own `--host` and reuses its `--token`, so one process makes one exposure decision; only the port is separate, since two servers can't share one.
+
+You enter the token once in the browser. It's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
+
+### From outside your network
+
+**Don't port-forward this to the internet.** Two reasonable options:
+
+- **[Tailscale](https://tailscale.com)** — simpler, and what I'd recommend. Bind your tailnet address and reach it from any of your devices with nothing exposed publicly.
+- **A reverse proxy** terminating TLS in front of it, if you already run one.
+
+The dashboard works behind a proxy today because every URL it uses is relative. Streaming doesn't, since it generates absolute URLs; a `--trust-proxy` flag for that is coming in a later phase.
+
+### Posters
+
+Posters are fetched once and cached on disk. The browser gets the full-quality image; the TUI half-blocks that same cached file, so turning the web UI on makes terminal browsing slightly faster too. The cache is capped, pruned oldest-first, and safe to delete at any time.
+
+Poster fetches are restricted to a small allowlist of known image CDNs, re-checked on every redirect hop — a refusal is logged at `warn` level.
+
+### What it doesn't do yet
+
+This is deliberately a monitoring dashboard, not the whole app:
+
+- **No searching in the browser.** Find things in the TUI, or `POST /api/add` a magnet directly.
+- **No streaming or playback.**
+- **No For You feed.**
+- **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
+
+### Working on the web UI
+
+The dashboard is served from `dist/web`, **not** `src`. Edit anything under `src/web/static/`, reload, and you'll get silently stale assets — it reads exactly like a browser cache bug, so it's easy to lose twenty minutes in devtools before suspecting the build. Rerun `npm run build` after any change there. `npm run dev` only re-executes the server's TypeScript; it does not rebuild the browser bundle.
+
 ## Headless
 
 torlink also runs without the TUI, for servers and seedboxes:
@@ -188,7 +239,7 @@ torlink also runs without the TUI, for servers and seedboxes:
     torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
     torlnk import-trakt           connect Trakt and import your history into reccd
 
-Add `--daemon` to keep watch, serve, or files running after you log out; `torlnk --help` has the full list of modes and flags.
+Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) alongside the add API; `torlnk --help` has the full list of modes and flags.
 
 ## Contributing
 
