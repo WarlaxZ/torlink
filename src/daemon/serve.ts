@@ -128,7 +128,11 @@ export async function applyControl(
   }
 }
 
-function statusPayload(runtime: Runtime): Record<string, unknown> {
+// Exported because the web layer's SSE stream pushes exactly this payload. It
+// must stay one implementation: a hand-copied version of this in an earlier
+// draft silently dropped `uploadSpeed`, so a seed showed a real rate on the
+// first fetch and an em dash on every frame after it.
+export function statusPayload(runtime: Runtime): Record<string, unknown> {
   const downloads = runtime.queue.getItems().map((it) => ({
     id: it.id,
     name: it.name,
@@ -189,7 +193,7 @@ export async function handleApi(
 // Read the body up to the size cap. On overflow resolve tooLarge immediately
 // (further chunks are ignored) so the caller can answer 413 on a live socket
 // and close the connection afterwards, instead of writing to a destroyed one.
-function readBody(req: http.IncomingMessage): Promise<{ text: string; tooLarge: boolean }> {
+export function readBody(req: http.IncomingMessage): Promise<{ text: string; tooLarge: boolean }> {
   return new Promise((resolve) => {
     let size = 0;
     let settled = false;

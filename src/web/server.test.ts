@@ -1,6 +1,9 @@
 import http from "node:http";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startWebServer, type WebServerHandle } from "./server";
+import { startWebServer, writeWebResponse, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
 import type { Runtime } from "../daemon/runtime";
@@ -14,6 +17,9 @@ function runtime(): Runtime {
 }
 
 let handle: WebServerHandle | null = null;
+// The runtime the current server is running against, so a test can inspect the
+// queue's listeners while a stream is open.
+let live: Runtime;
 
 afterEach(async () => {
   await handle?.close();
@@ -21,8 +27,36 @@ afterEach(async () => {
 });
 
 async function start(over: Parameters<typeof startWebServer>[1] = {}): Promise<string> {
-  handle = await startWebServer(runtime(), { port: 0, host: "127.0.0.1", log: () => {}, ...over });
+  live = runtime();
+  handle = await startWebServer(live, { port: 0, host: "127.0.0.1", log: () => {}, ...over });
   return `http://127.0.0.1:${handle.port}`;
+}
+
+// A minimal built-assets directory, plus a subdirectory so the isFile() guard
+// has something to trip over.
+function assets(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "torlnk-web-"));
+  writeFileSync(path.join(dir, "index.html"), "<!doctype html><title>dash</title>");
+  writeFileSync(path.join(dir, "app.js"), "export const x = 1;\n");
+  writeFileSync(path.join(dir, "app.js.map"), '{"version":3}');
+  mkdirSync(path.join(dir, "sub"));
+  return dir;
+}
+
+// Read SSE frames until `want` of them have arrived, then hang up.
+async function readFrames(url: string, want: number, init?: RequestInit): Promise<string> {
+  const res = await fetch(url, init);
+  expect(res.status).toBe(200);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while ((text.match(/\n\n/g)?.length ?? 0) < want) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+  return text;
 }
 
 describe("startWebServer", () => {
@@ -104,5 +138,191 @@ describe("startWebServer", () => {
     handle = null;
     await expect(fetch(`${base}/health`)).rejects.toThrow();
     await expect(closed!.close()).resolves.toBeUndefined();
+  });
+
+  it("caps the request body at 64KB with a 413", async () => {
+    const base = await start();
+    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(64 * 1024 + 1) });
+    expect(res.status).toBe(413);
+    await expect(res.json()).resolves.toMatchObject({ error: "body too large" });
+  });
+
+  it("accepts a body just under the cap", async () => {
+    const base = await start();
+    // Not a magnet, so 400 — the point is that it was read rather than refused.
+    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(64 * 1024) });
+    expect(res.status).toBe(400);
+  });
+
+  describe("static assets", () => {
+    it("serves index.html at /", async () => {
+      const base = await start({ staticDir: assets() });
+      const res = await fetch(`${base}/`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      await expect(res.text()).resolves.toContain("<title>dash</title>");
+    });
+
+    it("serves a sourcemap as JSON", async () => {
+      const base = await start({ staticDir: assets() });
+      const res = await fetch(`${base}/app.js.map`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    });
+
+    it("sets Content-Length from a stat at send time", async () => {
+      const base = await start({ staticDir: assets() });
+      const res = await fetch(`${base}/app.js`);
+      const body = await res.text();
+      expect(res.headers.get("content-length")).toBe(String(Buffer.byteLength(body)));
+    });
+
+    // resolveAssetPath proves containment but not that the target is a file, so
+    // without the isFile() check this streams a directory and dies with EISDIR
+    // *after* the 200 header is out — a hang or a truncated body, not a 404.
+    it("404s a path that resolves to a directory", async () => {
+      const base = await start({ staticDir: assets() });
+      const res = await fetch(`${base}/sub`);
+      expect(res.status).toBe(404);
+    });
+
+    it("404s a missing file", async () => {
+      const base = await start({ staticDir: assets() });
+      expect((await fetch(`${base}/nope.js`)).status).toBe(404);
+    });
+
+    // A null from resolveAssetPath is an escape attempt or a malformed path —
+    // the client's error, so 400, not the 404 a missing file gets.
+    it("400s a traversal attempt", async () => {
+      const base = await start({ staticDir: assets() });
+      const res = await fetch(`${base}/%2e%2e%2fsecret`);
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ error: "bad path" });
+    });
+
+    it("warns through the log when no assets are found", async () => {
+      const log = vi.fn();
+      handle = await startWebServer(runtime(), { port: 0, host: "127.0.0.1", log, staticDir: "" });
+      expect(log.mock.calls.flat().join("\n")).toMatch(/no built web assets/i);
+      // API still works; only the browser half is missing.
+      expect((await fetch(`http://127.0.0.1:${handle.port}/api/status`)).status).toBe(200);
+    });
+  });
+
+  describe("/api/events", () => {
+    it("streams an initial status frame", async () => {
+      const base = await start();
+      const text = await readFrames(`${base}/api/events`, 1);
+      expect(text).toContain("event: status");
+      expect(text).toContain('"downloads":[]');
+    });
+
+    it("requires the token via the Authorization header", async () => {
+      const base = await start({ token: "secret" });
+      expect((await fetch(`${base}/api/events`)).status).toBe(401);
+      const text = await readFrames(`${base}/api/events`, 1, {
+        headers: { Authorization: "Bearer secret" },
+      });
+      expect(text).toContain("event: status");
+    });
+
+    it("requires the token and accepts it via ?k= (EventSource cannot send headers)", async () => {
+      const base = await start({ token: "secret" });
+      expect((await fetch(`${base}/api/events?k=wrong`)).status).toBe(401);
+      const text = await readFrames(`${base}/api/events?k=secret`, 1);
+      expect(text).toContain("event: status");
+    });
+
+    // The teardown proof: subscribeToQueue registers one `update` listener per
+    // client, so a disconnect that does not fire its stop() leaks one per
+    // reconnect on a daemon that runs for weeks.
+    it("removes its queue listener when the client disconnects", async () => {
+      const base = await start();
+      const before = live.queue.listenerCount("update");
+      const res = await fetch(`${base}/api/events`);
+      const reader = res.body!.getReader();
+      await reader.read();
+      expect(live.queue.listenerCount("update")).toBe(before + 1);
+      await reader.cancel();
+      await vi.waitFor(() => expect(live.queue.listenerCount("update")).toBe(before));
+    });
+
+    // http.Server.close() waits for open connections, and an event stream never
+    // ends on its own: without close() ending the streams first, quitting the
+    // TUI would block until the browser tab was shut.
+    it("does not hang on close() with a stream open", async () => {
+      const base = await start();
+      const res = await fetch(`${base}/api/events`);
+      const reader = res.body!.getReader();
+      await reader.read();
+      const closed = handle!.close();
+      const raced = await Promise.race([
+        closed.then(() => "closed"),
+        new Promise((r) => setTimeout(() => r("hung"), 2000).unref()),
+      ]);
+      expect(raced).toBe("closed");
+      expect(live.queue.listenerCount("update")).toBe(0);
+      await reader.cancel().catch(() => {});
+      handle = null;
+    });
+  });
+});
+
+describe("writeWebResponse", () => {
+  // A stand-in for ServerResponse: only writeHead/end are reached on these paths.
+  interface Rec {
+    status: number | null;
+    headers: Record<string, string>;
+    body: string | null;
+    res: http.ServerResponse;
+  }
+  function fakeRes(): Rec {
+    const rec: Rec = { status: null, headers: {}, body: null, res: null as never };
+    rec.res = {
+      writeHead(status: number, headers?: Record<string, string>) {
+        rec.status = status;
+        rec.headers = headers ?? {};
+        return this;
+      },
+      end(body?: string) {
+        rec.body = body ?? "";
+      },
+    } as unknown as http.ServerResponse;
+    return rec;
+  }
+
+  it("prefers text over json when both are present", async () => {
+    const r = fakeRes();
+    await writeWebResponse(r.res, { status: 200, text: "plain", json: { a: 1 } }, () => {});
+    expect(r.body).toBe("plain");
+    expect(r.headers["Content-Type"]).toBe("text/plain; charset=utf-8");
+  });
+
+  it("serialises json when there is no text", async () => {
+    const r = fakeRes();
+    await writeWebResponse(r.res, { status: 201, json: { a: 1 } }, () => {});
+    expect(r.status).toBe(201);
+    expect(r.body).toBe('{"a":1}');
+  });
+
+  it("lets a response override the default Content-Type", async () => {
+    const r = fakeRes();
+    await writeWebResponse(
+      r.res,
+      { status: 200, text: "x", headers: { "Content-Type": "text/csv" } },
+      () => {},
+    );
+    expect(r.headers["Content-Type"]).toBe("text/csv");
+  });
+
+  // A body-less response is a router bug. Answering it with an empty 200 would
+  // hand a browser a blank page with nothing in the log to explain it.
+  it("turns a body-less response into a logged 500", async () => {
+    const r = fakeRes();
+    const log = vi.fn();
+    await writeWebResponse(r.res, { status: 200 }, log);
+    expect(r.status).toBe(500);
+    expect(r.body).toBe('{"error":"internal error"}');
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/no body/i));
   });
 });

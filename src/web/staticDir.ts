@@ -7,6 +7,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  // The browser bundle ships app.js.map. Without this entry it falls through to
+  // octet-stream, which devtools tolerates but does not reliably parse, so the
+  // sourcemap the web build deliberately generates would be dead weight.
+  ".map": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
