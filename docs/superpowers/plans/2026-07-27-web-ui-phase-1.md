@@ -3276,6 +3276,8 @@ export async function startWebServer(
     );
   }
 
+  // Must warn, not fail silently: a null here means every asset request 404s
+  // and the browser shows nothing, with no clue why. This is the only signal.
   const staticDir = options.staticDir === undefined ? findStaticDir() : options.staticDir;
   if (!staticDir) {
     log("web assets not found — API only. Run `npm run build` to generate dist/web.");
@@ -3378,6 +3380,8 @@ export async function startWebServer(
         return;
       }
       try {
+        // isFile() is required, not defensive: resolveAssetPath can hand back a
+        // directory, and streaming one yields EISDIR rather than a clean 404.
         const stat = await fs.stat(file);
         if (!stat.isFile()) throw new Error("not a file");
         res.writeHead(200, {
