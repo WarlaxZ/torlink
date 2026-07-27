@@ -99,6 +99,32 @@ export interface AddInputOptions {
   // the watch folder opts in; a network caller (the HTTP add API) must never
   // be able to point the daemon at the local filesystem.
   allowTorrentPath?: boolean;
+  /**
+   * Display name for the queue row, overriding whatever the magnet carried.
+   *
+   * THIS IS WHAT MAKES A HASH-ONLY ADD USABLE. `parseInput` takes the name from
+   * the magnet's `dn` parameter, and a bare info hash has none — so it falls
+   * back to the hash itself and the queue shows a row called
+   * "1f9c3a…". The browser's search results deliberately carry no magnet (see
+   * `PublicSearchResult` in src/web/wire.ts: it is ~6MB per search), only a
+   * hash and a name, so without this every add from the browser would be
+   * hash-named. Blank/whitespace falls back to the parsed name rather than
+   * clearing it.
+   */
+  name?: string;
+  /**
+   * Fetch through Real-Debrid with this token instead of joining the swarm.
+   *
+   * Mirrors the TUI's `startDebridDownload`: same `queue.addDebrid`, same
+   * fire-and-forget drive. The token is passed in rather than read from config
+   * here so the decision of *whether* to use Real-Debrid stays with the caller
+   * — the TUI asks the user, and the web layer requires an explicit `via`. An
+   * add that silently chose the network for you is the one outcome both
+   * front-ends are built to avoid.
+   */
+  debridToken?: string;
+  /** Total size in bytes when the caller knows it; seeds the row's progress total. */
+  sizeBytes?: number;
 }
 
 export async function addInput(
@@ -117,9 +143,19 @@ export async function addInput(
   if (!parsed) return "invalid";
   if (runtime.queue.has(parsed.infoHash)) return "duplicate";
   await fs.mkdir(runtime.downloadDir, { recursive: true }).catch(() => {});
-  runtime.queue.add(
-    { id: parsed.infoHash, name: parsed.name, magnet: parsed.magnet },
-    runtime.downloadDir,
-  );
+  const item = {
+    id: parsed.infoHash,
+    name: options.name?.trim() || parsed.name,
+    magnet: parsed.magnet,
+    ...(options.sizeBytes !== undefined ? { sizeBytes: options.sizeBytes } : {}),
+  };
+  if (options.debridToken) {
+    // Not awaited, exactly as the TUI does it: addDebrid's promise resolves
+    // when the whole download finishes (or fails), which is minutes away. The
+    // queue row exists synchronously, which is what "added" means here.
+    void runtime.queue.addDebrid(item, runtime.downloadDir, options.debridToken);
+    return "added";
+  }
+  runtime.queue.add(item, runtime.downloadDir);
   return "added";
 }

@@ -25,6 +25,34 @@ import {
   type StartStreamResponse,
   type StreamConfirmResponse,
 } from "./streamFlow";
+import {
+  addBody,
+  addPlan,
+  ALL_TAB,
+  categoryTabs,
+  emptyView,
+  parseSort,
+  previewApplies,
+  reportsHealthLookup,
+  resultMeta,
+  rowForPlay,
+  searchStatus,
+  searchUrl,
+  sourceLabel,
+  visibleResults,
+  type AddVia,
+  type PublicSearchResult,
+  type PublicSearchSnapshot,
+  type SearchView,
+  type SourcesResponse,
+} from "./searchModel";
+import {
+  createPreviewController,
+  posterPath,
+  previewCopy,
+  type PreviewState,
+  type PublicTitleMeta,
+} from "./previewModel";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -55,6 +83,30 @@ const picker = el<HTMLDivElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
+
+const viewsNav = el<HTMLElement>("views");
+const viewSearchTab = el<HTMLButtonElement>("view-search");
+const viewQueueTab = el<HTMLButtonElement>("view-queue");
+const queueCount = el<HTMLSpanElement>("queue-count");
+const paneSearch = el<HTMLElement>("pane-search");
+const paneQueue = el<HTMLElement>("pane-queue");
+
+const searchForm = el<HTMLFormElement>("search");
+const queryInput = el<HTMLInputElement>("query");
+const tabsBar = el<HTMLDivElement>("tabs");
+const sortSelect = el<HTMLSelectElement>("sort");
+const filterInput = el<HTMLInputElement>("filter");
+const aliveCheck = el<HTMLInputElement>("alive");
+const searchProgress = el<HTMLSpanElement>("search-progress");
+const searchStatusLine = el<HTMLParagraphElement>("search-status");
+const resultsList = el<HTMLUListElement>("results");
+
+const previewPane = el<HTMLElement>("preview");
+const previewPoster = el<HTMLDivElement>("preview-poster");
+const previewTitle = el<HTMLParagraphElement>("preview-title");
+const previewSub = el<HTMLParagraphElement>("preview-sub");
+const previewBody = el<HTMLParagraphElement>("preview-body");
+const previewImdb = el<HTMLAnchorElement>("preview-imdb");
 
 // sessionStorage throws, rather than returning null, when storage is blocked
 // (Safari private mode, a hardened profile). Losing the remembered token is a
@@ -202,6 +254,10 @@ function render(): void {
   emptyNote.textContent = EMPTY_TEXT;
   emptyNote.hidden = rows.length > 0;
   rowsList.replaceChildren(...rows.map(renderRow));
+  // The queue tab carries its own count so a search that added something shows
+  // it without switching panes — otherwise "did that work?" needs a click.
+  queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
+  queueCount.hidden = rows.length === 0;
 }
 
 // The server's error envelope. Read defensively: a proxy or a crash can return
@@ -426,6 +482,404 @@ async function play(row: DashRow): Promise<void> {
   }
 }
 
+// ---- search ---------------------------------------------------------------
+// Everything to the next banner is the search pane. As with Play, the decisions
+// live in pure modules — searchModel.ts and previewModel.ts — and what is here
+// is EventSource, fetch and DOM.
+
+// Search opens first. This app is a torrent finder; a queue monitor is what it
+// looks like when it opens on the queue. The Queue tab carries a count so
+// nothing in flight is out of sight.
+type ViewName = "search" | "queue";
+let view: ViewName = "search";
+
+let searchView: SearchView = emptyView();
+let sources: SourcesResponse | null = null;
+let searchStream: EventSource | null = null;
+// The info hash of the row whose preview is showing, so a re-render can restore
+// the selection: the results list is rebuilt on every snapshot frame, and up to
+// 23 of those arrive during one search.
+let selectedHash: string | null = null;
+
+function showView(next: ViewName): void {
+  view = next;
+  paneSearch.hidden = next !== "search";
+  paneQueue.hidden = next !== "queue";
+  viewSearchTab.setAttribute("aria-pressed", String(next === "search"));
+  viewQueueTab.setAttribute("aria-pressed", String(next === "queue"));
+}
+
+viewSearchTab.addEventListener("click", () => showView("search"));
+viewQueueTab.addEventListener("click", () => showView("queue"));
+
+// The tab strip, from GET /api/sources. The adult category is absent from that
+// response when it is off, so a "Porn" tab cannot be built here — the server's
+// `sourcesByGroup(adultEnabled)` is the single place that decision is made, and
+// a second check in the browser would be a second place for it to be wrong.
+function renderTabs(): void {
+  tabsBar.replaceChildren(
+    ...categoryTabs(sources).map((group) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tab";
+      button.textContent = group;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(group === searchView.group));
+      button.addEventListener("click", () => {
+        if (searchView.group === group) return;
+        searchView = { ...searchView, group };
+        renderTabs();
+        // Switching category re-runs the search rather than filtering what is
+        // already here: the server searches only that group's sources, so the
+        // other tabs' hits were never fetched. Matches the TUI, where each tab
+        // is its own slice of one fan-out.
+        if (searchView.query) startSearch(searchView.query);
+        else renderResults();
+      });
+      return button;
+    }),
+  );
+}
+
+async function loadSources(): Promise<void> {
+  try {
+    const res = await fetch("/api/sources", { headers: authHeaders() });
+    if (!res.ok) return;
+    const body = (await res.json()) as unknown;
+    if (!body || typeof body !== "object") return;
+    sources = body as SourcesResponse;
+  } catch {
+    // A tab strip we cannot build is survivable — "All" still searches
+    // everything, and the source badges fall back to raw ids. Failing the whole
+    // page for it would not be.
+    return;
+  }
+  renderTabs();
+  renderResults();
+}
+
+function stopSearch(): void {
+  searchStream?.close();
+  searchStream = null;
+}
+
+function startSearch(query: string): void {
+  stopSearch();
+  searchView = { ...searchView, query, snapshot: null, running: true };
+  selectedHash = null;
+  preview.select(null, searchView.group);
+  renderResults();
+
+  const source = new EventSource(searchUrl(query, searchView.group, token));
+  searchStream = source;
+
+  const frame = (event: Event): PublicSearchSnapshot | null => {
+    try {
+      return JSON.parse((event as MessageEvent<string>).data) as PublicSearchSnapshot;
+    } catch {
+      return null;
+    }
+  };
+
+  source.addEventListener("results", (event) => {
+    if (source !== searchStream) return;
+    const snapshot = frame(event);
+    if (!snapshot) return;
+    searchView = { ...searchView, snapshot };
+    renderResults();
+  });
+  source.addEventListener("done", (event) => {
+    if (source !== searchStream) return;
+    const snapshot = frame(event);
+    searchView = { ...searchView, running: false, ...(snapshot ? { snapshot } : {}) };
+    // The server ends the connection after `done`; closing here as well stops
+    // EventSource treating that end as a drop and reconnecting — which would
+    // silently re-run the whole 23-source fan-out.
+    stopSearch();
+    renderResults();
+  });
+  source.addEventListener("error", (event) => {
+    if (source !== searchStream) return;
+    // `error` is a frame the server sends (config unreadable) as well as
+    // EventSource's own transport event, which carries no data. Both mean this
+    // search is over — but they mean different things to the user, and the
+    // server's version already says what went wrong, so say it rather than
+    // replacing it with a generic line.
+    const body = frame(event) as { error?: unknown } | null;
+    stopSearch();
+    searchView = { ...searchView, running: false };
+    if (body === null) showNotice("The search connection dropped.");
+    else if (typeof body.error === "string" && body.error.trim()) showNotice(body.error);
+    renderResults();
+  });
+}
+
+searchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = queryInput.value.trim();
+  if (!query) return;
+  startSearch(query);
+});
+
+sortSelect.addEventListener("change", () => {
+  // parseSort is the TUI's own parser, so "seeders:desc" means the same thing
+  // in both places and anything unrecognised falls back to the server's order.
+  searchView = { ...searchView, sort: parseSort(sortSelect.value) };
+  renderResults();
+});
+
+filterInput.addEventListener("input", () => {
+  searchView = { ...searchView, textFilter: filterInput.value };
+  renderResults();
+});
+
+aliveCheck.addEventListener("change", () => {
+  searchView = { ...searchView, hideDead: aliveCheck.checked };
+  renderResults();
+});
+
+// Every node below is createElement + textContent. A release name is written by
+// whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
+// stranger on a public tracker.
+function renderResult(result: PublicSearchResult): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+  li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "result-name";
+  name.textContent = result.name;
+  name.title = result.name;
+  name.addEventListener("click", () => selectResult(result));
+
+  const badge = document.createElement("span");
+  badge.className = "result-source";
+  badge.textContent = sourceLabel(sources, result.source);
+  head.append(name, badge);
+
+  const meta = document.createElement("span");
+  meta.className = "result-meta";
+  meta.textContent = resultMeta(result, sources);
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void play(rowForPlay(result)));
+  actions.append(playButton);
+
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.textContent = "add";
+  addButton.addEventListener("click", () => void addResult(result, "p2p"));
+  actions.append(addButton);
+
+  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
+  // configured. A button that always answered "set a token first" is noise.
+  if (sources?.debridConfigured) {
+    const debridButton = document.createElement("button");
+    debridButton.type = "button";
+    debridButton.textContent = "add via RD";
+    debridButton.addEventListener("click", () => void addResult(result, "debrid"));
+    actions.append(debridButton);
+  }
+
+  li.append(head, meta, actions);
+  return li;
+}
+
+function renderResults(): void {
+  const shown = visibleResults(searchView, reportsHealthLookup(sources));
+  resultsList.replaceChildren(...shown.map(renderResult));
+
+  const status = searchStatus(searchView, shown.length);
+  searchStatusLine.textContent = status.text;
+  searchStatusLine.classList.toggle("error", status.tone === "error");
+  searchStatusLine.hidden = shown.length > 0 && !searchView.running;
+  searchProgress.textContent = searchView.snapshot
+    ? `${searchView.snapshot.done}/${searchView.snapshot.total} sources`
+    : "";
+
+  // A selected row that the filters just removed keeps neither its highlight
+  // nor its preview.
+  if (selectedHash !== null && !shown.some((r) => r.infoHash === selectedHash)) {
+    selectedHash = null;
+    preview.select(null, searchView.group);
+  }
+}
+
+function selectResult(result: PublicSearchResult): void {
+  selectedHash = result.infoHash;
+  renderResults();
+  preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
+}
+
+// ---- add from a result ----
+
+async function addResult(result: PublicSearchResult, via: AddVia): Promise<void> {
+  // The prompt-or-go decision is addPlan's, not this function's: it is a
+  // decision about whether the user's IP is about to enter a public swarm, and
+  // it belongs somewhere a test can reach.
+  const plan = addPlan(via, sources?.debridConfigured === true, result.name);
+  if (plan.kind === "confirm" && !confirm(plan.message)) {
+    showNotice("Nothing was added.");
+    return;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch("/api/add", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      // addBody carries the NAME as well as the hash. Search results have no
+      // magnet on the wire (deliberately — it is ~6MB a search), and the server
+      // takes a hash-only add's name from the magnet's `dn`, which there isn't
+      // one of: without the name every add here is a queue row called
+      // "3f2a1c…".
+      body: JSON.stringify(addBody(result, plan.via)),
+    });
+  } catch {
+    showNotice("Add failed — the server is not responding.");
+    setConn("lost");
+    return;
+  }
+  const body = await readEnvelope(res);
+  if (!res.ok) {
+    showNotice(body.error ?? `Add failed (HTTP ${res.status}).`);
+    return;
+  }
+  if (body.outcome === "duplicate") {
+    showNotice("Already in the queue.");
+    return;
+  }
+  showNotice(plan.via === "debrid" ? "Added via Real-Debrid." : "Added to the queue.");
+}
+
+// ---- preview ----
+
+// The object URL of the poster currently in the pane. Revoked before the next
+// one is created: each holds its blob in memory until it is, and a session of
+// arrowing through results would otherwise accumulate every poster it loaded.
+let posterObjectUrl: string | null = null;
+
+function releasePoster(): void {
+  if (posterObjectUrl !== null) {
+    URL.revokeObjectURL(posterObjectUrl);
+    posterObjectUrl = null;
+  }
+}
+
+function posterPlaceholder(note: string): void {
+  releasePoster();
+  const span = document.createElement("span");
+  span.className = "poster-note";
+  span.textContent = note;
+  previewPoster.replaceChildren(span);
+}
+
+/**
+ * Load a poster through `/api/poster` and show it.
+ *
+ * Fetched into a blob rather than set as an `<img src>`, for one reason:
+ * `/api/poster` is behind the bearer token and an `<img>` cannot send an
+ * Authorization header. The alternative was accepting `?k=` on that route the
+ * way EventSource forced on `/api/events` — which would put the token in the
+ * URL of every poster, i.e. in the server's access log and the browser's
+ * history. A fetch keeps it in a header.
+ *
+ * Every failure ends at the placeholder. A 404 (OMDb named a poster the cache
+ * couldn't fetch), a 400 (a host off the allowlist), an offline tab: none of
+ * them leave a broken image or a frame that never resolves.
+ */
+async function loadPoster(url: string, generation: number): Promise<void> {
+  try {
+    const res = await fetch(posterPath(url), { headers: authHeaders() });
+    if (!res.ok) {
+      if (generation === previewGeneration) posterPlaceholder("No poster");
+      return;
+    }
+    const blob = await res.blob();
+    // The pane moved on while this was in flight; drop it rather than paint a
+    // poster over the title the user is now looking at.
+    if (generation !== previewGeneration) return;
+    releasePoster();
+    posterObjectUrl = URL.createObjectURL(blob);
+    const img = document.createElement("img");
+    img.src = posterObjectUrl;
+    img.alt = "";
+    previewPoster.replaceChildren(img);
+  } catch {
+    if (generation === previewGeneration) posterPlaceholder("No poster");
+  }
+}
+
+// Bumped on every state the pane renders, so an in-flight poster can tell it is
+// stale. Separate from previewModel's own staleness check because the poster is
+// a second round trip that starts after the metadata has already landed.
+let previewGeneration = 0;
+
+function renderPreview(state: PreviewState): void {
+  previewGeneration++;
+  if (state.kind === "hidden") {
+    previewPane.hidden = true;
+    posterPlaceholder("");
+    return;
+  }
+  previewPane.hidden = false;
+  if (state.kind === "loading") {
+    previewTitle.textContent = state.release;
+    previewSub.textContent = "";
+    previewBody.textContent = "Looking this up…";
+    previewImdb.hidden = true;
+    posterPlaceholder("Loading");
+    return;
+  }
+
+  const copy = previewCopy(state.release, state.meta);
+  previewTitle.textContent = copy.heading;
+  previewSub.textContent = copy.sub;
+  previewBody.textContent = copy.body;
+  if (copy.imdbUrl) {
+    previewImdb.href = copy.imdbUrl;
+    previewImdb.hidden = false;
+  } else {
+    previewImdb.hidden = true;
+  }
+  if (copy.posterUrl) {
+    posterPlaceholder("Loading");
+    void loadPoster(copy.posterUrl, previewGeneration);
+  } else {
+    posterPlaceholder(copy.posterNote);
+  }
+}
+
+const preview = createPreviewController({
+  async fetch(release, group): Promise<PublicTitleMeta | null> {
+    const params = new URLSearchParams({ release });
+    // The group, not a parsed hint: the server maps it (hintForGroup) so the
+    // browser never has to know that "TV" means OMDb's "series".
+    if (group && group !== ALL_TAB) params.set("group", group);
+    try {
+      const res = await fetch(`/api/title?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return null;
+      const body = (await res.json()) as unknown;
+      return body && typeof body === "object" ? (body as PublicTitleMeta) : null;
+    } catch {
+      return null;
+    }
+  },
+  schedule: (fn, ms) => setTimeout(fn, ms) as unknown as number,
+  cancel: (handle) => clearTimeout(handle),
+  render: renderPreview,
+});
+
 // ---- connection -----------------------------------------------------------
 
 // One probe of the JSON API, which — unlike EventSource — reports why it failed.
@@ -456,6 +910,9 @@ async function probe(): Promise<Probe> {
 
 function showAuth(message?: string): void {
   app.hidden = true;
+  // The pane switch is meaningless with nothing behind it, and leaving it up
+  // over the token form invites a click that does nothing visible.
+  viewsNav.hidden = true;
   authForm.hidden = false;
   if (message === undefined) {
     authError.hidden = true;
@@ -473,6 +930,10 @@ function showUnreachable(detail: string): void {
   setConn("lost");
   authForm.hidden = true;
   app.hidden = false;
+  viewsNav.hidden = false;
+  // On the queue pane, because that is where the explanation goes — a search
+  // box over an unreachable server is an invitation to a second failure.
+  showView("queue");
   rows = [];
   render();
   emptyNote.textContent = `Can't reach torlnk (${detail}). Check it is still running, then reload.`;
@@ -484,9 +945,17 @@ function openApp(payload: StatusPayload): void {
   authForm.hidden = true;
   authError.hidden = true;
   app.hidden = false;
+  viewsNav.hidden = false;
+  showView(view);
+  renderTabs();
+  renderResults();
   rows = mergeRows(rows, rowsFromStatus(payload));
   render();
   connect();
+  // After the panes are on screen: the tab strip and the source badges improve
+  // when it lands, and nothing waits on it.
+  void loadSources();
+  queryInput.focus();
 }
 
 function connect(): void {

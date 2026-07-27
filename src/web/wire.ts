@@ -282,6 +282,80 @@ export interface SourcesResponse {
   sources: PublicSource[];
   /** Whether the adult category is on; when false no adult source appears above. */
   adultEnabled: boolean;
+  /**
+   * Whether a Real-Debrid token is configured (file or `REALDEBRID_API_TOKEN`).
+   *
+   * A capability flag, not a credential — the token itself never crosses this
+   * wire. It is here rather than on its own route because this response is the
+   * one thing the search UI fetches before it can render anything, and the
+   * decision it drives is a search-result decision: the TUI offers `r`
+   * (Real-Debrid) on a result only when `debridConfigured`, and warns about the
+   * swarm before a P2P add only when it is true. The browser has to make the
+   * same two choices and cannot read the user's config.
+   *
+   * It is NOT a health verdict. A configured-but-lapsed account still reports
+   * true here and fails at the add, with Real-Debrid's own message — the same
+   * thing the TUI does, and deliberately not a silent downgrade to P2P.
+   */
+  debridConfigured: boolean;
+}
+
+/**
+ * The body of `POST /api/add`.
+ *
+ * This route existed before the search UI as a thin alias for the legacy
+ * `POST /add`, which takes a magnet (or bare hash) and nothing else. Both extra
+ * fields here are additive and both are optional, so a request that sends
+ * neither is handled by the legacy path unchanged — scripted callers of
+ * `/api/add` and of `/add` see exactly what they saw before.
+ *
+ * WHY `name` HAD TO EXIST. `PublicSearchResult` deliberately carries no magnet
+ * (see above), so a browser adding a search hit can only send its info hash —
+ * and the legacy path derives the queue item's name from the magnet's `dn`,
+ * which a hash-only magnet does not have. Every add from the browser would have
+ * been a queue row named after 40 hex characters. The fix is this field, not
+ * putting the magnet back on the wire: that was a ~6MB-per-search decision.
+ *
+ * `via` mirrors the TUI's two download keys — `d` (peer-to-peer, which prompts
+ * about swarm exposure when Real-Debrid is configured) and `r` (Real-Debrid).
+ * It is required to be explicit rather than inferred from config, because
+ * "which network did my IP just go out over" is not a question a server should
+ * answer on the user's behalf. Absent means the legacy behaviour: P2P.
+ */
+export interface AddRequest {
+  magnet?: string;
+  infoHash?: string;
+  /** Display name for the queue row. Without it a hash-only add is named after its hash. */
+  name?: string;
+  /** Total size in bytes, when known; seeds the Real-Debrid row's progress total. */
+  sizeBytes?: number;
+  /** `"p2p"` (default) or `"debrid"`. Never inferred from whether a token exists. */
+  via?: "p2p" | "debrid";
+}
+
+/** The 200 body of `POST /api/add`, unchanged from the legacy route. */
+export interface AddResponse {
+  ok: true;
+  outcome: "added" | "duplicate";
+}
+
+/**
+ * What a release name parsed to, when `GET /api/title` was asked with `?release=`.
+ *
+ * PARSING HAPPENS ON THE SERVER, and this field is why the browser can live
+ * without it. The TUI reads a title and year out of a release name with
+ * `parse-torrent-title` (via `src/util/release.ts`), and a second parser in the
+ * browser would mean the two surfaces disagreed about what "Sintel.2010.1080p"
+ * is — a divergence with no test that could catch it, since neither side would
+ * be wrong on its own. So the browser posts the raw release name and gets the
+ * TUI's answer back, alongside the OMDb lookup that answer produced.
+ */
+export interface PublicTitleParse {
+  title: string;
+  /** Four-digit year, or null when the name carried none. */
+  year: number | null;
+  /** What OMDb was asked for: a film, a series, or null for "let OMDb decide". */
+  type: "movie" | "series" | null;
 }
 
 /**
@@ -304,8 +378,20 @@ export interface SourcesResponse {
  *
  * `posterUrl` is guaranteed to be either null or a URL on the poster CDN
  * allowlist, so it can be handed straight to `/api/poster?url=`.
+ *
+ * `parsed` is present exactly when the request used `?release=` — the caller
+ * handed over a raw release name and the server parsed it. It is optional
+ * rather than always-present so an `?imdb=` or `?name=` request (which parsed
+ * nothing) answers with the same body it always did, and so a client cannot
+ * mistake "you didn't ask me to parse" for "that name has no title in it".
  */
 export type PublicTitleMeta =
-  | { status: "ok"; imdbId: string | null; plot: string | null; posterUrl: string | null }
-  | { status: "no-key" }
-  | { status: "error"; error: string };
+  | {
+      status: "ok";
+      imdbId: string | null;
+      plot: string | null;
+      posterUrl: string | null;
+      parsed?: PublicTitleParse;
+    }
+  | { status: "no-key"; parsed?: PublicTitleParse }
+  | { status: "error"; error: string; parsed?: PublicTitleParse };

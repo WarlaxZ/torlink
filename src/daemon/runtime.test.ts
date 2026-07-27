@@ -69,6 +69,46 @@ describe("addInput", () => {
     // Opted in (the watch folder), a bad file still fails soft as invalid.
     expect(await addInput(runtime, file, { allowTorrentPath: true })).toBe("invalid");
   });
+
+  it("names the queue item from `name` rather than the magnet", async () => {
+    // MUTATION GUARD (the add path losing the name). A browser adding a search
+    // hit has only its info hash — search results deliberately carry no magnet
+    // — and a hash-only magnet has no `dn`, so parseInput names the item after
+    // the hash. Drop `options.name` and this row is called
+    // "abcdef0123456789abcdef0123456789abcdef01".
+    const { runtime, add } = fakeRuntime(dir);
+    expect(await addInput(runtime, HASH, { name: "Sintel 2010" })).toBe("added");
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Sintel 2010" }), dir);
+    expect(add.mock.calls[0]![0].name).not.toBe(HASH);
+  });
+
+  it("falls back to the magnet's name when the override is blank", async () => {
+    const { runtime, add } = fakeRuntime(dir);
+    await addInput(runtime, MAGNET, { name: "   " });
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ name: "Example" }), dir);
+  });
+
+  it("passes a known size through so the row has a total", async () => {
+    const { runtime, add } = fakeRuntime(dir);
+    await addInput(runtime, HASH, { name: "Sintel", sizeBytes: 4096 });
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ sizeBytes: 4096 }), dir);
+  });
+
+  it("routes through Real-Debrid when a token is supplied, like the TUI", async () => {
+    const add = vi.fn();
+    const addDebrid = vi.fn(() => new Promise<void>(() => {}));
+    const runtime = {
+      queue: { has: () => false, add, addDebrid } as unknown as Runtime["queue"],
+      downloadDir: dir,
+      sessions: new StreamSessionRegistry(),
+    };
+    expect(await addInput(runtime, HASH, { name: "Sintel", debridToken: "rd-tok" })).toBe("added");
+    // Not awaited: addDebrid's promise resolves when the whole download does,
+    // which is minutes away. The queue row exists synchronously, which is what
+    // "added" claims.
+    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Sintel" }), dir, "rd-tok");
+    expect(add).not.toHaveBeenCalled();
+  });
 });
 
 describe("startRuntime — stream sessions", () => {

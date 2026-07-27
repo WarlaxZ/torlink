@@ -139,6 +139,13 @@ button:hover {
   margin: 0;
   padding: 0;
   display: grid;
+  /* An explicit single track, because a grid's implicit column is `auto` — it
+     sizes to its widest item, and a search result's meta line ("1.36 GB · 15
+     seeders · 3 leechers · BitTorrented") is wider than a phone. That pushed
+     the whole list past the viewport and put a horizontal scrollbar under the
+     page. minmax(0, 1fr) is the track that is allowed to be narrower than its
+     content, which is what lets the ellipsis and the wrapping below happen. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -279,6 +286,257 @@ button:hover {
    honest failure message reads as an error rather than as "queue is empty". */
 .empty.error {
   color: var(--error);
+}
+
+/* ---------------------------------------------------------------------------
+   Search. Same palette, same card, same button as the queue — the two panes are
+   one app and a second visual language is how they stop looking like it. */
+
+/* The Search / Queue switch. Sits in the header between the wordmark and the
+   connection badge, so the two views read as peers rather than one being
+   nested in the other. */
+.views {
+  display: flex;
+  gap: 0.35rem;
+  margin-right: auto;
+  margin-left: 1rem;
+}
+
+.view-tab {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  color: var(--dim);
+}
+
+/* aria-pressed is the selected state, not a class: the attribute has to be
+   right for a screen reader anyway, so styling from it means the two can't
+   disagree. */
+.view-tab[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge {
+  margin-left: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Category tabs. A wrapped strip rather than a scroller: there are at most
+   seven and they must all be visible at once — a tab you have to scroll to find
+   is one you never use. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.tab {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  color: var(--dim);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.control input[type="text"] {
+  min-width: 9rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.45rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.control-check {
+  cursor: pointer;
+}
+
+.control-check input {
+  flex: 0 0 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+select {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+select:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The "12/23 sources" line. Tabular figures so a count ticking up doesn't
+   shuffle the text either side of it. */
+.progress {
+  margin-left: auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Results beside the preview. The preview is dropped below the list — not
+   hidden — under the width where a two-column split would squeeze the release
+   names to nothing, which is the same trade the TUI makes at 74 columns. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 46rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.result-head {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* Full-width, left-aligned and unstyled-looking: the name is the row's primary
+   target (selecting it loads the preview), and a release name is long. */
+.result-name {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-name:hover {
+  color: var(--accent);
+}
+
+.row[aria-selected="true"] {
+  border-color: var(--accent);
+}
+
+.result-source {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.result-meta {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Overrides .card's row layout: the preview is a stack, not a form. */
+.preview {
+  display: block;
+  padding: 0.75rem;
+  margin-bottom: 0;
+}
+
+/* A fixed 2:3 frame whether or not a poster loads, so the pane doesn't jump
+   between a placeholder and an image — and so a poster that 404s leaves a
+   labelled box rather than a broken-image glyph. */
+/* Capped and centred rather than filling its container. Below the split
+   breakpoint the preview becomes a full-width block, and a 2:3 frame at phone
+   width is a 600x900 poster you have to scroll past to reach the plot. */
+.poster {
+  max-width: 12rem;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.poster-note {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.preview-title {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.preview-sub {
+  margin: 0.1rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-body {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.preview-imdb {
+  display: block;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
 }
 
 /* ---------------------------------------------------------------------------

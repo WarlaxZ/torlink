@@ -24,9 +24,12 @@ import {
 } from "../recc/omdb";
 import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
-import type { Runtime } from "../daemon/runtime";
+import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
+import { hintForGroup, parseRelease } from "../util/release";
 import type {
+  AddResponse,
   PublicSearchResult,
+  PublicTitleParse,
   PublicSearchSnapshot,
   PublicSource,
   PublicStreamFile,
@@ -585,7 +588,88 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     })),
     sources,
     adultEnabled,
+    // A boolean, never the token. resolveRealDebridToken, not
+    // `config.realDebridToken`, so REALDEBRID_API_TOKEN counts — the browser
+    // must agree with the TUI about whether Real-Debrid is on, and the TUI
+    // resolves it the same way.
+    debridConfigured: resolveRealDebridToken(config) !== "",
   };
+}
+
+// ---- add ---------------------------------------------------------------
+
+/**
+ * `POST /api/add`.
+ *
+ * Two shapes go through here and only one of them is new:
+ *
+ * - A body with neither `name` nor `via` is forwarded to the legacy `/add`
+ *   handler byte for byte. That is not laziness — `/api/add` is a documented
+ *   alias that scripts already call, and the legacy handler owns the details
+ *   (a bare non-JSON magnet in the body, the `infohash`/`hash` key aliases, the
+ *   exact error strings). Reimplementing them here to "unify" would be the
+ *   third copy of an API contract in this codebase.
+ * - A body carrying either is the browser's: a search hit, identified by info
+ *   hash, with the name the tracker gave it and an explicit network choice.
+ *
+ * `via: "debrid"` with no token configured is a 400 with the TUI's own wording,
+ * not a silent fall back to peer-to-peer. Falling back would put the user's IP
+ * in a public swarm after they asked for the thing that keeps it out of one.
+ */
+async function addToQueue(
+  deps: WebDeps,
+  authHeader: string | undefined,
+  bodyText: string,
+): Promise<WebResponse> {
+  let body: Record<string, unknown> = {};
+  const raw = bodyText.trim();
+  if (raw.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Left as {}, so this falls through to the legacy handler, which answers
+      // unparseable JSON exactly the way it always has.
+    }
+  }
+
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const rawVia = typeof body.via === "string" ? body.via.trim() : "";
+  if (!name && !rawVia) {
+    return fromApi(await handleApi(deps.runtime, deps.token, "POST", "/add", authHeader, bodyText));
+  }
+  if (rawVia && rawVia !== "p2p" && rawVia !== "debrid") {
+    return { status: 400, json: { error: "via must be \"p2p\" or \"debrid\"" } };
+  }
+
+  // Same precedence as POST /api/stream: a magnet wins, a bare hash is the
+  // fallback, and `parseInput` (not this route) decides what is acceptable.
+  const magnet = typeof body.magnet === "string" ? body.magnet.trim() : "";
+  const infoHash = typeof body.infoHash === "string" ? body.infoHash.trim() : "";
+  const input = magnet || infoHash;
+  if (!input) return { status: 400, json: { error: "missing magnet or info hash" } };
+
+  const options: AddInputOptions = {};
+  if (name) options.name = name;
+  if (typeof body.sizeBytes === "number" && Number.isFinite(body.sizeBytes) && body.sizeBytes > 0) {
+    options.sizeBytes = body.sizeBytes;
+  }
+
+  if (rawVia === "debrid") {
+    const config = await (deps.loadConfigImpl ?? loadConfig)();
+    const debridToken = resolveRealDebridToken(config);
+    if (!debridToken) {
+      return { status: 400, json: { error: "Set a Real-Debrid token first — open the Accounts tab." } };
+    }
+    options.debridToken = debridToken;
+  }
+
+  const outcome = await addInput(deps.runtime, input, options);
+  if (outcome === "invalid") return { status: 400, json: { error: "invalid magnet or info hash" } };
+  const out: AddResponse = { ok: true, outcome };
+  return { status: 200, json: out };
 }
 
 // ---- title metadata ----------------------------------------------------
@@ -636,20 +720,38 @@ interface TitleLookup {
   name?: string;
   year?: number;
   type?: OmdbType;
+  /**
+   * What `?release=` parsed to, echoed back to the caller. Present only on that
+   * path — the caller of `?name=` did its own parsing and needs nothing back.
+   */
+  parsed?: PublicTitleParse;
 }
 
 /**
- * Turn `?imdb=` / `?name=&year=&type=` into a lookup, or say why not.
+ * Turn `?imdb=` / `?release=&group=` / `?name=&year=&type=` into a lookup, or
+ * say why not.
  *
- * `imdb` wins when both are given — it is the exact identifier and the name is
- * then only a hint. The cache key is built here so it cannot drift from the
- * request it stands for: it carries every parameter that changes the answer,
- * and lowercases the name so "Sintel" and "sintel" share an entry (OMDb's title
- * match is case-insensitive, so they genuinely do have the same answer).
+ * `imdb` wins over everything — it is the exact identifier and the rest is then
+ * only a hint. `release` is the browser's form: a raw torrent release name,
+ * parsed HERE with the TUI's own `parseRelease` rather than in the browser.
+ * That placement is the point. `parse-torrent-title` is a Node dependency, and
+ * the alternative to a round trip is a second release-name parser in the
+ * browser bundle — at which point "Sintel.2010.1080p.BluRay.x264-GROUP" could
+ * mean one thing in the terminal and another in the tab, with no test able to
+ * call either side wrong. One parser, server-side, and the parse comes back
+ * with the answer so the UI can show the title it actually looked up.
+ *
+ * The cache key is built here so it cannot drift from the request it stands
+ * for: it carries every parameter that changes the answer, and lowercases the
+ * name so "Sintel" and "sintel" share an entry (OMDb's title match is
+ * case-insensitive, so they genuinely do have the same answer). A `?release=`
+ * lookup shares that key space deliberately — fifty releases of one film parse
+ * to one title and cost one OMDb call between them, which is the whole reason
+ * the TUI caches on `parsed.key` too.
  */
 export function parseTitleLookup(
   query: URLSearchParams,
-): { ok: true; lookup: TitleLookup } | { ok: false; error: string } {
+): { ok: true; lookup: TitleLookup } | { ok: false; error: string; soft?: true } {
   const imdb = (query.get("imdb") ?? "").trim();
   if (imdb) {
     // Anchored: this is interpolated into an OMDb query string, and an id shape
@@ -657,6 +759,30 @@ export function parseTitleLookup(
     // issued and everything it plausibly will.
     if (!/^tt\d{7,}$/.test(imdb)) return { ok: false, error: "invalid imdb id" };
     return { ok: true, lookup: { cacheKey: `i:${imdb}`, imdbId: imdb } };
+  }
+
+  // NOT trimmed before the emptiness test, unlike `name` below. A caller that
+  // sent `?release=` at all asked the release question, and answering a
+  // whitespace-only release with "missing name or imdb" would send the preview
+  // pane looking for a parameter it did deliberately supply. Non-empty means
+  // "parse this"; what parsing makes of it is the next line's problem.
+  const release = query.get("release") ?? "";
+  if (release !== "") {
+    const parsed = parseRelease(release, hintForGroup(query.get("group")));
+    // A name that is only quality/codec noise ("1080p.WEB-DL.x265") parses to
+    // nothing. That is a miss, not a bad request: the caller asked a reasonable
+    // question about a real search hit and the honest answer is "no title in
+    // there", which the UI renders as its placeholder. A 400 would make the
+    // preview pane look broken for a perfectly ordinary torrent.
+    if (!parsed) return { ok: false, error: "no title in that release name", soft: true };
+    const lookup: TitleLookup = {
+      cacheKey: `n:${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}`,
+      name: parsed.title,
+      parsed: { title: parsed.title, year: parsed.year ?? null, type: parsed.type ?? null },
+    };
+    if (parsed.year !== undefined) lookup.year = parsed.year;
+    if (parsed.type !== undefined) lookup.type = parsed.type;
+    return { ok: true, lookup };
   }
 
   const name = (query.get("name") ?? "").trim();
@@ -717,13 +843,45 @@ export function allowedPosterUrl(raw: string | null): string | null {
   }
 }
 
+/**
+ * Attach the release parse (when there was one) to a cached-or-fresh answer.
+ *
+ * A copy, never a mutation: `meta` may be the object living in `titleCache`,
+ * and writing `parsed` onto it would pin one caller's release name to every
+ * later caller's cache hit — including the `?name=` callers who never asked for
+ * a parse and whose response shape would silently grow a field.
+ */
+function withParse(meta: PublicTitleMeta, parsed: PublicTitleParse | undefined): PublicTitleMeta {
+  if (!parsed) return meta;
+  if (meta.status === "ok") {
+    return {
+      status: "ok",
+      imdbId: meta.imdbId,
+      plot: meta.plot,
+      posterUrl: meta.posterUrl,
+      parsed,
+    };
+  }
+  if (meta.status === "no-key") return { status: "no-key", parsed };
+  return { status: "error", error: meta.error, parsed };
+}
+
 async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
-  const parsed = parseTitleLookup(query);
-  if (!parsed.ok) return { status: 400, json: { error: parsed.error } };
-  const { lookup } = parsed;
+  const parsedQuery = parseTitleLookup(query);
+  if (!parsedQuery.ok) {
+    // `soft` means the request was well-formed and simply has no answer — a
+    // release name with no title in it. That is a 200 miss the preview pane
+    // renders as its placeholder, not a 400 that makes it look broken.
+    if (parsedQuery.soft) {
+      const out: PublicTitleMeta = { status: "error", error: parsedQuery.error };
+      return { status: 200, json: out };
+    }
+    return { status: 400, json: { error: parsedQuery.error } };
+  }
+  const { lookup } = parsedQuery;
 
   const cached = cacheGet(lookup.cacheKey);
-  if (cached) return { status: 200, json: cached };
+  if (cached) return { status: 200, json: withParse(cached, lookup.parsed) };
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const apiKey = resolveOmdbApiKey(config);
@@ -734,7 +892,7 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
     // this server runs inside the TUI, where a key can be pasted into the
     // Accounts tab at any moment, and a cached "no-key" would outlast it.
     const out: PublicTitleMeta = { status: "no-key" };
-    return { status: 200, json: out };
+    return { status: 200, json: withParse(out, lookup.parsed) };
   }
 
   const result =
@@ -753,7 +911,7 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
     // is that a genuinely unknown title is re-asked on every hover; the debounce
     // in front of this route is what keeps that bounded.
     const out: PublicTitleMeta = { status: "error", error: result.error };
-    return { status: 200, json: out };
+    return { status: 200, json: withParse(out, lookup.parsed) };
   }
 
   const out: PublicTitleMeta = {
@@ -763,7 +921,7 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
     posterUrl: allowedPosterUrl(result.posterUrl),
   };
   cacheSet(lookup.cacheKey, out);
-  return { status: 200, json: out };
+  return { status: 200, json: withParse(out, lookup.parsed) };
 }
 
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
@@ -832,6 +990,12 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/title") {
     return titleMeta(deps, query);
+  }
+
+  // Ahead of the legacy passthrough below, which still owns `POST /add` and the
+  // no-name/no-via shape this delegates back to.
+  if (method === "POST" && urlPath === "/api/add") {
+    return addToQueue(deps, authHeader, bodyText);
   }
 
   // ---- streaming -------------------------------------------------------

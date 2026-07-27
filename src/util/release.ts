@@ -19,6 +19,15 @@ export function hintForSection(section: string): SectionHint {
   return undefined; // "all" and everything else: let OMDb decide
 }
 
+// The same question asked with a source *group* name rather than a TUI section
+// key. The web UI's category tabs come from `sourcesByGroup` ("Movies", "TV",
+// "Anime", …) while the TUI's sidebar uses lowercase section keys, and this is
+// the seam where those two vocabularies meet — written down once here rather
+// than left as a `.toLowerCase()` at the call site that happens to line up.
+export function hintForGroup(group: string | null | undefined): SectionHint {
+  return hintForSection((group ?? "").toLowerCase());
+}
+
 // Extract a clean title (+ year, + medium) from a raw torrent release name so
 // it can be looked up on OMDb. Returns null when no usable title survives
 // (e.g. the name was only quality/codec noise). A parsed season/episode always

@@ -1071,6 +1071,23 @@ describe("GET /api/sources", () => {
     expect(body.groups.find((g) => g.group === "Movies")!.sourceIds).toContain("yts");
   });
 
+  // A capability flag the browser needs to offer the TUI's `r` (Real-Debrid)
+  // action on a result, and to know whether a plain add should warn about the
+  // swarm first. Never the token itself.
+  it("reports whether Real-Debrid is configured, without leaking the token", async () => {
+    expect((await get()).debridConfigured).toBe(false);
+    const withToken = await get({
+      loadConfigImpl: async () => searchConfig({ realDebridToken: "rd-tok" }),
+    });
+    expect(withToken.debridConfigured).toBe(true);
+    expect(JSON.stringify(withToken)).not.toContain("rd-tok");
+  });
+
+  it("counts REALDEBRID_API_TOKEN, so the browser agrees with the TUI", async () => {
+    vi.stubEnv("REALDEBRID_API_TOKEN", "env-tok");
+    expect((await get()).debridConfigured).toBe(true);
+  });
+
   it("hides adult sources and the Porn tab while the adult category is off", async () => {
     const body = await get();
     expect(body.adultEnabled).toBe(false);
@@ -1335,5 +1352,245 @@ describe("GET /api/title", () => {
       expect(res.json).toEqual({ error });
       expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("GET /api/title?release= — server-side release parsing", () => {
+  const OK_META: FetchTitleMetaResult = {
+    ok: true,
+    imdbId: "tt1727587",
+    plot: "A lone girl.",
+    posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+  };
+
+  function releaseDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", omdbApiKey: "key" }),
+      fetchTitleMetaImpl: async () => OK_META,
+      fetchTitleMetaByNameImpl: async () => OK_META,
+      ...over,
+    });
+  }
+
+  const title = (d: WebDeps, qs: string): Promise<WebResponse> =>
+    handleWebApi(d, "GET", "/api/title", new URLSearchParams(qs), AUTH, "");
+
+  beforeEach(() => clearTitleCache());
+
+  // THE POINT OF THE ROUTE. parse-torrent-title is a Node dependency and
+  // src/web/static/ is a browser bundle, so the alternative to this round trip
+  // is a second release-name parser in the browser — at which point the tab and
+  // the terminal can disagree about what a release is, with no test able to
+  // call either side wrong.
+  it("parses a release name with the TUI's own parser", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    const res = await title(
+      releaseDeps({ fetchTitleMetaByNameImpl }),
+      "release=Sintel.2010.1080p.BluRay.x264-GROUP&group=Movies",
+    );
+    expect(res.status).toBe(200);
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Sintel", "key", {
+      year: 2010,
+      type: "movie",
+    });
+    expect(res.json).toMatchObject({
+      status: "ok",
+      parsed: { title: "Sintel", year: 2010, type: "movie" },
+    });
+  });
+
+  it("lets a parsed season override the tab's hint", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    await title(
+      releaseDeps({ fetchTitleMetaByNameImpl }),
+      "release=Some.Show.S01E02.1080p.WEB&group=Movies",
+    );
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Some Show", "key", { type: "series" });
+  });
+
+  it("maps the TV tab onto OMDb's series type", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    await title(releaseDeps({ fetchTitleMetaByNameImpl }), "release=Some.Show.1080p&group=TV");
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Some Show", "key", { type: "series" });
+  });
+
+  it("answers a nameless release with a 200 miss, not a 400", async () => {
+    // The preview pane renders this as its placeholder. A 400 would make an
+    // ordinary torrent look like a broken app.
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    const res = await title(releaseDeps({ fetchTitleMetaByNameImpl }), "release=%20%20%20");
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ status: "error" });
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  it("shares one OMDb call across every release of the same title", async () => {
+    // Fifty releases of one film parse to one title. Without the shared cache
+    // key this is fifty lookups against a 1,000/day free key.
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    const d = releaseDeps({ fetchTitleMetaByNameImpl });
+    await title(d, "release=Sintel.2010.1080p.BluRay.x264-GROUP&group=Movies");
+    await title(d, "release=Sintel.2010.2160p.WEB-DL.HDR-OTHER&group=Movies");
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledOnce();
+  });
+
+  it("still echoes the parse on a cache hit", async () => {
+    const d = releaseDeps();
+    await title(d, "release=Sintel.2010.1080p&group=Movies");
+    const second = await title(d, "release=Sintel.2010.2160p&group=Movies");
+    expect(second.json).toMatchObject({ parsed: { title: "Sintel", year: 2010 } });
+  });
+
+  it("does not leak one caller's parse into another's cached answer", async () => {
+    const d = releaseDeps();
+    await title(d, "release=Sintel.2010.1080p&group=Movies");
+    // A plain ?name= caller shares the cache key but asked for no parse, and
+    // must get back exactly the body that route has always returned.
+    const byName = await title(d, "name=Sintel&year=2010&type=movie");
+    expect(byName.json).toEqual({
+      status: "ok",
+      imdbId: "tt1727587",
+      plot: "A lone girl.",
+      posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+    });
+  });
+
+  it("carries the parse through the no-key answer so the pane still has a heading", async () => {
+    const res = await title(
+      releaseDeps({ loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }) }),
+      "release=Sintel.2010.1080p&group=Movies",
+    );
+    expect(res.json).toEqual({ status: "no-key", parsed: { title: "Sintel", year: 2010, type: "movie" } });
+  });
+
+  it("prefers an explicit imdb id over a release name", async () => {
+    const fetchTitleMetaImpl = vi.fn(async () => OK_META);
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
+    await title(
+      releaseDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }),
+      "imdb=tt1727587&release=Sintel.2010.1080p",
+    );
+    expect(fetchTitleMetaImpl).toHaveBeenCalledOnce();
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/add — adding a search hit by hash and name", () => {
+  const HASH = "abcdef0123456789abcdef0123456789abcdef01";
+
+  function addRuntime(): { runtime: Runtime; add: ReturnType<typeof vi.fn>; addDebrid: ReturnType<typeof vi.fn> } {
+    const add = vi.fn();
+    const addDebrid = vi.fn(() => new Promise<void>(() => {}));
+    return {
+      runtime: {
+        queue: { has: () => false, add, addDebrid } as unknown as Runtime["queue"],
+        downloadDir: "/tmp/dl",
+        sessions: new StreamSessionRegistry(),
+      },
+      add,
+      addDebrid,
+    };
+  }
+
+  const post = (d: WebDeps, body: unknown): Promise<WebResponse> =>
+    handleWebApi(d, "POST", "/api/add", new URLSearchParams(), AUTH, JSON.stringify(body));
+
+  it("names the queue item from the request, not from the hash", async () => {
+    // MUTATION GUARD (the add path losing the name). Search results carry no
+    // magnet on the wire, so this add is by bare hash; without `name` the
+    // server takes the name from the magnet's `dn`, which a hash-only magnet
+    // has none of, and the queue row is called "abcdef01…".
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel 2010", via: "p2p" });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, outcome: "added" });
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Sintel 2010" }), "/tmp/dl");
+    expect(add.mock.calls[0]![0].name).not.toBe(HASH);
+  });
+
+  it("routes an explicit debrid add through Real-Debrid, like the TUI's `r`", async () => {
+    const { runtime: rt, add, addDebrid } = addRuntime();
+    const res = await post(
+      deps({
+        runtime: rt,
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", realDebridToken: "rd-tok" }),
+      }),
+      { infoHash: HASH, name: "Sintel", via: "debrid" },
+    );
+    expect(res.status).toBe(200);
+    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Sintel" }), "/tmp/dl", "rd-tok");
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("refuses a debrid add with no token rather than falling back to the swarm", async () => {
+    // A silent P2P fallback would put the user's IP in a public swarm right
+    // after they asked for the thing that keeps it out of one.
+    const { runtime: rt, add, addDebrid } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "debrid" });
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ error: expect.stringContaining("Real-Debrid token") });
+    expect(add).not.toHaveBeenCalled();
+    expect(addDebrid).not.toHaveBeenCalled();
+  });
+
+  it("passes a known size through", async () => {
+    const { runtime: rt, add } = addRuntime();
+    await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "p2p", sizeBytes: 4096 });
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ sizeBytes: 4096 }), "/tmp/dl");
+  });
+
+  it("rejects an unknown `via` instead of guessing a network", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "carrier-pigeon" });
+    expect(res.status).toBe(400);
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unresolvable hash", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { infoHash: "nope", name: "Sintel", via: "p2p" });
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ error: "invalid magnet or info hash" });
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request with a name but nothing to add", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { name: "Sintel", via: "p2p" });
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ error: "missing magnet or info hash" });
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  // The legacy shape is a documented API other scripts already call. Nothing
+  // about it changes: no `name`, no `via`, straight through to the handler that
+  // has always answered it.
+  it("leaves a plain magnet body on the legacy path, unchanged", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { magnet: `magnet:?xt=urn:btih:${HASH}&dn=Example` });
+    expect(res.status).toBe(200);
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ name: "Example" }), "/tmp/dl");
+  });
+
+  it("still answers a non-JSON body the way the legacy route always has", async () => {
+    const res = await handleWebApi(deps(), "POST", "/api/add", new URLSearchParams(), AUTH, "not-a-magnet");
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ error: "invalid magnet or info hash" });
+  });
+
+  it("does not answer POST /add through the extended path", async () => {
+    // The legacy route keeps its own handler: a `name` posted there is ignored,
+    // exactly as it was before this route grew one.
+    const { runtime: rt, add } = addRuntime();
+    const res = await handleWebApi(
+      deps({ runtime: rt }),
+      "POST",
+      "/add",
+      new URLSearchParams(),
+      AUTH,
+      JSON.stringify({ magnet: `magnet:?xt=urn:btih:${HASH}&dn=Example`, name: "Renamed" }),
+    );
+    expect(res.status).toBe(200);
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ name: "Example" }), "/tmp/dl");
   });
 });
