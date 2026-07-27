@@ -13,7 +13,9 @@ const PAYLOAD: StatusPayload = {
     { id: "a", name: "A Release", status: "downloading", progress: 0.5, peers: 4, speed: 1024 },
     { id: "b", name: "B Release", status: "queued", progress: 0, peers: 0, speed: 0 },
   ],
-  seeds: [{ id: "c", name: "C Release", status: "seeding", peers: 2, uploaded: 2048 }],
+  seeds: [
+    { id: "c", name: "C Release", status: "seeding", peers: 2, uploaded: 2048, uploadSpeed: 0 },
+  ],
 };
 
 describe("rowsFromStatus", () => {
@@ -112,14 +114,34 @@ describe("rowsFromStatus edge cases", () => {
     expect(rows[1]!.percent).toBe(0);
   });
 
-  it("rounds a fractional percent to nearest rather than truncating", () => {
+  it("floors a fractional percent rather than rounding it", () => {
     const rows = rowsFromStatus({
       downloads: [
         { id: "a", name: "A", status: "downloading", progress: 0.567, peers: 0, speed: 0 },
       ],
       seeds: [],
     });
-    expect(rows[0]!.percent).toBe(57);
+    expect(rows[0]!.percent).toBe(56);
+  });
+
+  it("never shows 100% for a download that is not finished", () => {
+    const rows = rowsFromStatus({
+      downloads: [
+        { id: "a", name: "A", status: "downloading", progress: 0.999, peers: 0, speed: 0 },
+      ],
+      seeds: [],
+    });
+    expect(rows[0]!.percent).toBe(99);
+  });
+
+  it("takes a seed's rate from uploadSpeed", () => {
+    const rows = rowsFromStatus({
+      downloads: [],
+      seeds: [
+        { id: "c", name: "C", status: "seeding", peers: 1, uploaded: 4096, uploadSpeed: 2048 },
+      ],
+    });
+    expect(rows[0]!.rate).toBe(2048);
   });
 
   it("defaults missing numeric fields to 0", () => {
@@ -141,27 +163,43 @@ describe("formatBytes", () => {
 
   it("steps up to the next unit at exactly 1024", () => {
     expect(formatBytes(1023)).toBe("1023 B");
-    expect(formatBytes(1024)).toBe("1.0 KB");
+    expect(formatBytes(1024)).toBe("1.00 KB");
   });
 
-  it("shows one decimal below 10 and whole numbers above it", () => {
-    expect(formatBytes(1536)).toBe("1.5 KB");
-    expect(formatBytes(10 * 1024 * 1024)).toBe("10 MB");
+  it("shows two decimals above bytes, matching util/format.ts", () => {
+    expect(formatBytes(1536)).toBe("1.50 KB");
+    expect(formatBytes(10 * 1024 * 1024)).toBe("10.00 MB");
+  });
+
+  // The case that exposed the divergence: one decimal would render this as
+  // "1.3 MB" while the TUI says "1.25 MB".
+  it("keeps the precision the TUI shows for 1.25 MB", () => {
+    expect(formatBytes(1310720)).toBe("1.25 MB");
   });
 
   it("stops at the largest known unit instead of running off the table", () => {
-    expect(formatBytes(1024 ** 4)).toBe("1.0 TB");
-    expect(formatBytes(1024 ** 5)).toBe("1024 TB");
+    expect(formatBytes(1024 ** 4)).toBe("1.00 TB");
+    expect(formatBytes(1024 ** 5)).toBe("1024.00 TB");
   });
 });
 
 describe("formatRate", () => {
-  it("suffixes a positive rate with /s", () => {
+  // Mirrors formatBytesPerSec in util/format.ts, not formatBytes: one decimal
+  // below 10, whole numbers above, and a unit table capped at GB/s.
+  it("matches the TUI's rate precision", () => {
+    expect(formatRate(900)).toBe("900 B/s");
     expect(formatRate(1024)).toBe("1.0 KB/s");
+    expect(formatRate(1536)).toBe("1.5 KB/s");
+    expect(formatRate(10 * 1024 * 1024)).toBe("10 MB/s");
+  });
+
+  it("caps at GB/s like the TUI rather than reaching TB/s", () => {
+    expect(formatRate(1024 ** 4)).toBe("1024 GB/s");
   });
 
   it("renders a dash for an idle rate", () => {
     expect(formatRate(0)).toBe("—");
     expect(formatRate(-1)).toBe("—");
+    expect(formatRate(Number.NaN)).toBe("—");
   });
 });

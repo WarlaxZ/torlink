@@ -143,6 +143,7 @@ function statusPayload(runtime: Runtime): Record<string, unknown> {
     status: s.status,
     peers: s.peers,
     uploaded: s.uploaded,
+    uploadSpeed: s.uploadSpeed,
   }));
   return { downloads, seeds };
 }

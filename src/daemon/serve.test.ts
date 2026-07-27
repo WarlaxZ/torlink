@@ -100,6 +100,25 @@ describe("handleApi", () => {
     expect(res.body).toMatchObject({ downloads: [], seeds: [] });
   });
 
+  it("maps download and seed fields, including a seed's uploadSpeed", async () => {
+    runtime.queue = {
+      has: () => false,
+      add,
+      getItems: () => [
+        { id: "d1", name: "D", status: "downloading", progress: 0.5, peers: 3, speed: 512, x: 1 },
+      ],
+      getSeeds: () => [
+        { id: "s1", name: "S", status: "seeding", peers: 2, uploaded: 2048, uploadSpeed: 128, x: 1 },
+      ],
+    } as unknown as Runtime["queue"];
+    const res = await handleApi(runtime, null, "GET", "/status", undefined, "");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      downloads: [{ id: "d1", name: "D", status: "downloading", progress: 0.5, peers: 3, speed: 512 }],
+      seeds: [{ id: "s1", name: "S", status: "seeding", peers: 2, uploaded: 2048, uploadSpeed: 128 }],
+    });
+  });
+
   it("404s an unknown route", async () => {
     const res = await handleApi(runtime, null, "GET", "/nope", undefined, "");
     expect(res.status).toBe(404);
