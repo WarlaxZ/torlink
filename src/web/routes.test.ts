@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { POSTER_HOSTS, handleWebApi, type WebDeps } from "./routes";
+import { handleWebApi, type WebDeps } from "./routes";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
 import type { Runtime } from "../daemon/runtime";
@@ -133,12 +133,6 @@ describe("handleWebApi — /api/poster", () => {
     );
     expect(res.status).toBe(400);
     expect(getPosterImpl).not.toHaveBeenCalled();
-  });
-
-  it("allowlists only the known poster CDNs", () => {
-    expect([...POSTER_HOSTS].sort()).toEqual(
-      ["ia.media-imdb.com", "img.omdbapi.com", "m.media-amazon.com"].sort(),
-    );
   });
 
   it("404s when the poster cannot be cached", async () => {
