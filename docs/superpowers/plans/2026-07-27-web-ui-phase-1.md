@@ -1451,6 +1451,37 @@ git add src/core/streamSession.ts
 git commit -m "feat: stream session registry over the RD and WebTorrent backends"
 ```
 
+### Amendments found during review
+
+Three corrections to the code block above, applied during implementation:
+
+1. **Cancellation must be wired.** The block declares `StreamTorrentImpl` with an
+   `opts: { signal?: AbortSignal }` seam but never passes one, so `stop()` and
+   `stopAll()` cannot stop a session still in `resolving` — the in-flight backend
+   runs on and its handle is never stopped, leaving a live WebTorrent client and
+   a temp directory past shutdown. It also silently drops the abort capability
+   the TUI has today (`src/ui/App.tsx`, `prepareAbort`). Hold a per-session
+   `AbortController` in a **private side map keyed by id** — not a field on
+   `StreamSession`, which is a data shape destined for serialisation — pass its
+   signal to both backends, and abort it in `stop()`.
+2. **`StreamSession.route` is named `backend`.** `StartStreamInput.route` is a
+   three-way `StreamRoute` decision; the session's is a two-way `StreamBackend`
+   identity. Same name, different type, different meaning, adjacent call sites.
+3. **`deps.streamTorrentImpl ?? streamTorrent`** — the arrow wrapper was
+   redundant and its asymmetry with `resolveDebridImpl` invited a hunt for a
+   reason that didn't exist.
+
+### Deferred, deliberately
+
+- **No dedupe by `infoHash`.** Two `start()` calls for the same torrent produce
+  two sessions, two swarms, or two RD adds. This becomes likely once a TUI and a
+  browser share one list, but the fix needs a product decision (reuse? refuse?
+  prompt?) rather than a default, so it belongs with the phase that adds the
+  second front-end.
+- **Nothing reaps errored sessions.** They stay in the map on purpose, so a
+  caller can read the error after the fact, and accumulate for the process
+  lifetime. The web layer should expire them.
+
 ---
 
 ## Task 11: Widen the runtime to own sessions
@@ -1728,6 +1759,12 @@ export interface WebDeps {
   token: string | null;
   getPosterImpl?: (url: string) => Promise<CachedPoster | null>;
 }
+
+// NOTE for whoever serialises a StreamSession to a client (phase 2): build the
+// payload by picking fields explicitly, never by omitting them from the whole
+// object. `capability` and every `files[].url` must not reach a browser, and
+// `JSON.stringify(session)` is the obvious wrong thing to reach for. Picking
+// means a field added later defaults to private instead of leaking.
 
 // One response shape for every route. `filePath` streams a file from disk
 // (posters); `json` and `text` are written inline. Keeping this a plain value
