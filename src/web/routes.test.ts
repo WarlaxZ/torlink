@@ -35,6 +35,25 @@ describe("handleWebApi — auth", () => {
     expect(res.status).toBe(401);
   });
 
+  // /api/poster is the one route that does NOT delegate to the daemon's
+  // handleApi, so it is the only place the router's own token gate is the sole
+  // thing standing between an anonymous caller and a server-side fetch. The
+  // /api/status case above passes even with the gate deleted, because handleApi
+  // re-checks; this one does not.
+  it("rejects /api/poster with no credentials when a token is set", async () => {
+    const getPosterImpl = vi.fn(async () => ({ path: "/tmp/x.jpg", bytes: 1 }));
+    const res = await handleWebApi(
+      deps({ token: "secret", getPosterImpl }),
+      "GET",
+      "/api/poster",
+      new URLSearchParams({ url: "https://m.media-amazon.com/a.jpg" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+    expect(getPosterImpl).not.toHaveBeenCalled();
+  });
+
   it("accepts a bearer token", async () => {
     const res = await handleWebApi(deps({ token: "secret" }), "GET", "/api/status", new URLSearchParams(), AUTH, "");
     expect(res.status).toBe(200);
@@ -93,6 +112,22 @@ describe("handleWebApi — /api/poster", () => {
       "GET",
       "/api/poster",
       new URLSearchParams({ url: "http://169.254.169.254/latest/meta-data" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(400);
+    expect(getPosterImpl).not.toHaveBeenCalled();
+  });
+
+  // An allowlisted hostname under a non-http scheme (ftp:, gopher:) clears the
+  // host check, so the scheme check is what stops it reaching the fetcher.
+  it("refuses a non-http scheme even on an allowed host", async () => {
+    const getPosterImpl = vi.fn(async () => ({ path: "/tmp/x.jpg", bytes: 1 }));
+    const res = await handleWebApi(
+      deps({ getPosterImpl }),
+      "GET",
+      "/api/poster",
+      new URLSearchParams({ url: "ftp://m.media-amazon.com/a.jpg" }),
       undefined,
       "",
     );
