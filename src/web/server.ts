@@ -12,7 +12,14 @@
 import http from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { handleWebApi, isApiPath, type WebResponse } from "./routes";
+import {
+  handleWebApi,
+  isApiPath,
+  parseSearchParams,
+  startSearchStream,
+  type WebDeps,
+  type WebResponse,
+} from "./routes";
 import { subscribeToQueue } from "./sse";
 import { handleStreamRequest, isPlayPath, isStreamPath, parsePlayPath } from "./stream";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
@@ -55,6 +62,20 @@ export interface WebServerOptions {
    * something upstream overwrites (not appends to) them.
    */
   trustProxy?: boolean;
+  /**
+   * Overrides for the router's injectable seams — config loading, the poster
+   * fetch, the per-source search, the OMDb lookups. `runtime` and `token` are
+   * owned by this server and cannot be overridden.
+   *
+   * It exists because without it no test can drive `/api/search` over a real
+   * socket: the route's default per-source search is `cachedSearch`, which
+   * fans out to 23 public trackers, and the default config loader reads the
+   * developer's own `config.json`. A socket-level test of the disconnect
+   * teardown is exactly the test worth having here, so the alternative was
+   * either not having it or having it hit the network. Production passes
+   * nothing and gets every default.
+   */
+  webDeps?: Omit<Partial<WebDeps>, "runtime" | "token">;
 }
 
 export interface WebServerHandle {
@@ -199,26 +220,43 @@ export async function startWebServer(
     log("warning: no built web assets found (dist/web); run `npm run build`. API only.");
   }
 
+  // One deps object for every route, built once. `runtime` and `token` come
+  // last so an override cannot swap the queue or weaken the gate.
+  const routeDeps: WebDeps = { ...options.webDeps, runtime, token };
+
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
   const streams = new Set<{ res: http.ServerResponse; stop: () => void }>();
 
-  const serveEvents = (
+  /**
+   * The bearer token as an SSE client can send it. `EventSource` cannot set
+   * request headers, so the token is also accepted as `?k=`. Same check either
+   * way — the query form is a transport detail, not a weaker door. (It does mean
+   * the token can land in a server access log; the alternative is no browser
+   * stream at all without a cookie layer.)
+   *
+   * This is NOT the `/stream/:sid` capability, which is a different, per-session
+   * secret that satisfies no `/api/*` route.
+   */
+  const sseAuthorized = (req: http.IncomingMessage, query: URLSearchParams): boolean => {
+    const k = query.get("k");
+    return isAuthorized(token, req.headers.authorization ?? (k ? `Bearer ${k}` : undefined));
+  };
+
+  /**
+   * Write the event-stream headers, start a producer, and bind its teardown to
+   * the connection closing. Shared by every SSE route so the framing, the
+   * header set and — the part that actually matters — the disconnect teardown
+   * cannot differ between them.
+   *
+   * `start` gets the write function and returns its own stop; that stop runs on
+   * client disconnect, on `res.end()` from `close()` below, and never twice.
+   */
+  const serveStream = (
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    query: URLSearchParams,
+    start: (write: (chunk: string) => void) => () => void,
   ): void => {
-    // EventSource cannot set request headers, so the token is also accepted as
-    // ?k=. Same check either way — the query form is a transport detail, not a
-    // weaker door. (It does mean the token can land in a server access log; the
-    // alternative is no browser stream at all without a cookie layer.)
-    const k = query.get("k");
-    const authHeader = req.headers.authorization ?? (k ? `Bearer ${k}` : undefined);
-    if (!isAuthorized(token, authHeader)) {
-      writeJson(res, 401, { error: "unauthorized" });
-      log(`GET /api/events -> 401`);
-      return;
-    }
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-store",
@@ -227,28 +265,81 @@ export async function startWebServer(
       // frames back until the buffer fills — i.e. forever, for this traffic.
       "X-Accel-Buffering": "no",
     });
+    // Push the headers out now rather than letting Node hold them until the
+    // first write. A producer whose first frame waits on something slow (the
+    // search route reads config before it knows its source list) would
+    // otherwise leave the client's `fetch`/`EventSource` unresolved until then,
+    // which reads as "the server never answered".
+    res.flushHeaders();
     const entry = { res, stop: (): void => {} };
-    entry.stop = subscribeToQueue(
-      runtime.queue,
-      // DEFERRED: no backpressure handling. res.write returns false once the
-      // socket's buffer is full and we ignore it, so a client that stops reading
-      // (a phone that slept, a slow link) accumulates frames in this process's
-      // memory until it disconnects. Doing it properly means pausing the
-      // subscription on a false return and resuming on the socket's "drain" —
-      // real per-connection state, not worth it for a loopback/LAN tool with a
-      // handful of clients. Start here if this ever sits behind a slow link.
-      (chunk) => res.write(chunk),
-      () => statusPayload(runtime),
-    );
+    // DEFERRED: no backpressure handling. res.write returns false once the
+    // socket's buffer is full and we ignore it, so a client that stops reading
+    // (a phone that slept, a slow link) accumulates frames in this process's
+    // memory until it disconnects. Doing it properly means pausing the producer
+    // on a false return and resuming on the socket's "drain" — real
+    // per-connection state, not worth it for a loopback/LAN tool with a handful
+    // of clients. Start here if this ever sits behind a slow link.
+    entry.stop = start((chunk) => res.write(chunk));
     streams.add(entry);
     // "close" fires for a client disconnect and for our own res.end(), which is
-    // what makes the teardown single-pathed: whoever ends the stream, the queue
-    // listener and both timers go with it.
+    // what makes the teardown single-pathed: whoever ends the stream, the
+    // producer's listeners, timers and in-flight requests go with it.
     req.on("close", () => {
       entry.stop();
       streams.delete(entry);
     });
+  };
+
+  const serveEvents = (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    query: URLSearchParams,
+  ): void => {
+    if (!sseAuthorized(req, query)) {
+      writeJson(res, 401, { error: "unauthorized" });
+      log(`GET /api/events -> 401`);
+      return;
+    }
+    serveStream(req, res, (write) =>
+      subscribeToQueue(runtime.queue, write, () => statusPayload(runtime)),
+    );
     log(`GET /api/events -> 200 (stream, ${streams.size} open)`);
+  };
+
+  /**
+   * `GET /api/search?q=…&group=…`. Token-gated exactly like `/api/events`, and
+   * for the same reason it has to be: this route spends the user's bandwidth on
+   * up to 23 outbound requests to public trackers, so an anonymous caller with
+   * a loop is a traffic amplifier pointed at third parties.
+   *
+   * Parameters are validated before the headers go out, so a bad request is a
+   * real 400 rather than an error frame inside a 200 stream.
+   */
+  const serveSearch = (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    query: URLSearchParams,
+  ): void => {
+    if (!sseAuthorized(req, query)) {
+      writeJson(res, 401, { error: "unauthorized" });
+      log(`GET /api/search -> 401`);
+      return;
+    }
+    const parsed = parseSearchParams(query);
+    if (!parsed.ok) {
+      writeJson(res, 400, { error: parsed.error });
+      log(`GET /api/search -> 400 (${parsed.error})`);
+      return;
+    }
+    serveStream(req, res, (write) =>
+      // res.end() on teardown, so a finished search closes its connection
+      // instead of holding a socket open forever like /api/events does. It is
+      // reached from the same stop the disconnect path uses, so ending here
+      // cannot race with the client having already gone.
+      startSearchStream(routeDeps, parsed.params, write, () => res.end()),
+    );
+    // The query itself is not logged: it is the user's search terms.
+    log(`GET /api/search -> 200 (stream, ${streams.size} open)`);
   };
 
   const server = http.createServer((req, res) => {
@@ -289,6 +380,11 @@ export async function startWebServer(
       // one request in, one complete response out, which a stream is not.
       if (method === "GET" && urlPath === "/api/events") {
         serveEvents(req, res, url.searchParams);
+        return;
+      }
+
+      if (method === "GET" && urlPath === "/api/search") {
+        serveSearch(req, res, url.searchParams);
         return;
       }
 
@@ -353,7 +449,7 @@ export async function startWebServer(
         let out: WebResponse;
         try {
           out = await handleWebApi(
-            { runtime, token },
+            routeDeps,
             // HEAD is routed as GET. Supervisors liveness-poll with it, and the
             // router only knows GET, so without this HEAD /health is a 404 —
             // silently, since /health is excluded from the log below. Node drops

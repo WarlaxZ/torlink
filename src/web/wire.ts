@@ -161,3 +161,151 @@ export interface StreamConfirmResponse {
   /** Human-readable, e.g. "your Real-Debrid premium isn't active". */
   reason: string;
 }
+
+/**
+ * One search hit as a browser is allowed to see it — the payload of every
+ * `event: results` frame on `GET /api/search`.
+ *
+ * BUILT BY PICKING FIELDS (`toPublicResult` in routes.ts). `TorrentResult` is a
+ * source-layer type that any of 23 scrapers may grow a field on; picking means
+ * a new one is private until a human adds a line here.
+ *
+ * `magnet` IS DELIBERATELY ABSENT, and this is the one field worth arguing
+ * about, so the reasoning is written down:
+ *
+ * - Nothing in the browser needs it. `POST /api/stream` takes `{infoHash,
+ *   name}` and rebuilds the magnet server-side with `parseInput`, which for a
+ *   bare hash wraps it in the same eleven public trackers `buildMagnet` gives
+ *   every other add. Playing and adding both work from the hash alone.
+ * - It is by far the largest field — 800–1500 bytes of percent-encoded tracker
+ *   list against ~150 bytes for everything else here — and every one of the up
+ *   to 23 snapshot frames repeats the *whole* result list. On a 200-hit search
+ *   that is the difference between ~700KB and ~6MB over one connection.
+ * - It is the only field that is a handle to *act* rather than a fact to show.
+ *   Keeping it server-side means a browser can only reach the swarm through a
+ *   route that validated the hash first.
+ *
+ * The cost, recorded so it is not rediscovered: the legacy `POST /add` takes
+ * only a magnet or hash and derives the queue item's name from the magnet's
+ * `dn`, so adding by bare hash names the download after its info hash. A
+ * browser "add to queue" needs a name-carrying add path (or `/api/stream`'s
+ * shape) — it must NOT be fixed by putting the magnet back on the wire.
+ *
+ * `sources` is always present here (possibly a single-element array), unlike
+ * `TorrentResult.sources` which is optional until `mergeDuplicateResults` runs.
+ * `sizeBytes` is bytes; `added` is epoch ms, absent when the source gave none.
+ */
+export interface PublicSearchResult {
+  infoHash: string;
+  name: string;
+  /** Total size in bytes. */
+  sizeBytes: number;
+  seeders: number;
+  leechers: number;
+  numFiles?: number;
+  /** The healthiest source id this hit came from. */
+  source: string;
+  /** Every source that returned this info hash; never empty. */
+  sources: string[];
+  /** Epoch ms the source published it, when it reports one. */
+  added?: number;
+}
+
+/**
+ * One source's state within a search, mirroring `SourceState` in core/search.
+ *
+ * `error` is the human message and `code` the short form ("timed out", "HTTP
+ * 503", "no response"). Both are non-null exactly when that source failed, and
+ * they are on the wire on purpose: a search where eight trackers quietly
+ * returned nothing must not look the same to a browser as one where they
+ * returned no matches.
+ */
+export interface PublicSourceState {
+  loading: boolean;
+  error: string | null;
+  code: string | null;
+  count: number;
+}
+
+/**
+ * The payload of an `event: results` frame, and of the final `event: done`.
+ *
+ * `perSource` is keyed by source id and contains only the sources actually
+ * being searched — benched ones are dropped by `runSearch` before it starts, so
+ * `total` is that count and not the size of the registry. `done`/`total` is the
+ * browser's "12/23 sources" line.
+ */
+export interface PublicSearchSnapshot {
+  results: PublicSearchResult[];
+  perSource: Record<string, PublicSourceState>;
+  done: number;
+  total: number;
+}
+
+/**
+ * One entry of `GET /api/sources`.
+ *
+ * Source ids and group names are typed `string` rather than the real unions
+ * because this module imports nothing (see the header); the producer assigns
+ * them from `SourceId`/`SourceGroup`, so a divergence fails to compile there.
+ *
+ * - `enabled` is the user's `disabledSources` choice, not a health verdict. The
+ *   browser shows disabled sources greyed rather than hiding them, so the list
+ *   matches the TUI's; adult sources are omitted from the response entirely
+ *   when the adult category is off.
+ * - `benchedUntil` is epoch ms, or null when the source is not benched. `fails`
+ *   is the consecutive-failure count behind that.
+ */
+export interface PublicSource {
+  id: string;
+  label: string;
+  groups: string[];
+  adult: boolean;
+  homepage: string;
+  /** False when the source's feed carries no swarm counts, so `seeders: 0` means unknown. */
+  reportsHealth: boolean;
+  enabled: boolean;
+  fails: number;
+  /** Epoch ms until which this source is skipped, or null. */
+  benchedUntil: number | null;
+}
+
+/** The category tabs, in the TUI's order, each listing its source ids. */
+export interface PublicSourceGroup {
+  group: string;
+  sourceIds: string[];
+}
+
+/** The body of `GET /api/sources`. */
+export interface SourcesResponse {
+  groups: PublicSourceGroup[];
+  sources: PublicSource[];
+  /** Whether the adult category is on; when false no adult source appears above. */
+  adultEnabled: boolean;
+}
+
+/**
+ * The body of `GET /api/title` — always 200, always one of these three.
+ *
+ * The three-way split is the point. "The server has no OMDb key" and "OMDb was
+ * asked and had nothing" are different things to a user: the first is fixable
+ * by pasting a key and the UI should say so, the second is just a title OMDb
+ * doesn't know. A shape that answered both with nulls would make the setup hint
+ * impossible to render, and a 500 for the no-key case would make a perfectly
+ * healthy install look broken.
+ *
+ * - `"ok"` means OMDb answered. Any of the three fields may still be null —
+ *   that is "looked up, found nothing for this field", and is distinct from
+ *   both other statuses.
+ * - `"no-key"` means no `omdbApiKey` (and no `TORLINK_OMDB_KEY`) is configured.
+ *   Nothing was requested.
+ * - `"error"` means the lookup was attempted and failed: not found, a rejected
+ *   key, OMDb down, a timeout. `error` is OMDb's own message where it has one.
+ *
+ * `posterUrl` is guaranteed to be either null or a URL on the poster CDN
+ * allowlist, so it can be handed straight to `/api/poster?url=`.
+ */
+export type PublicTitleMeta =
+  | { status: "ok"; imdbId: string | null; plot: string | null; posterUrl: string | null }
+  | { status: "no-key" }
+  | { status: "error"; error: string };

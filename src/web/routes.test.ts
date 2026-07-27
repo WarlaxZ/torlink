@@ -1,8 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleWebApi, streamHandle, toPublicSession, type WebDeps } from "./routes";
+import {
+  MAX_TITLE_CACHE,
+  clearTitleCache,
+  handleWebApi,
+  parseSearchParams,
+  searchSources,
+  startSearchStream,
+  streamHandle,
+  toPublicResult,
+  toPublicSession,
+  type WebDeps,
+  type WebResponse,
+} from "./routes";
 import { DownloadQueue } from "../download/queue";
-import { defaultConfig } from "../config/config";
+import { defaultConfig, type Config } from "../config/config";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
+import { SOURCES } from "../sources/registry";
+import { HttpError } from "../util/net";
+import type { Health } from "../sources/sourceHealth";
+import type { FetchTitleMetaResult } from "../recc/omdb";
+import type { Source, SourceId, TorrentResult } from "../sources/types";
+import type { PublicSearchSnapshot, SourcesResponse } from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -610,5 +628,712 @@ describe("stream routes — path matching", () => {
     await post(d, { magnet: MAGNET });
     const res = await handleWebApi(d, method, path, new URLSearchParams(), undefined, JSON.stringify({ magnet: MAGNET }));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+// Every source id except the ones named, i.e. the `disabledSources` that leaves
+// exactly those enabled. Written as a subtraction from the real registry rather
+// than a hand-listed array so adding a 24th source cannot silently widen a test.
+function onlySources(...ids: SourceId[]): string[] {
+  return SOURCES.filter((s) => !ids.includes(s.id)).map((s) => s.id);
+}
+
+function searchConfig(over: Partial<Config> = {}): Config {
+  return { ...defaultConfig, downloadDir: "/tmp/dl", ...over };
+}
+
+interface Frame {
+  event: string;
+  data: Record<string, unknown>;
+}
+
+// Parse what the route actually wrote, rather than trusting a mock's arguments:
+// the frame format IS the contract with EventSource, so a test that never looks
+// at the bytes cannot catch a broken one.
+function parseFrames(chunks: string[]): Frame[] {
+  return chunks
+    .join("")
+    .split("\n\n")
+    .filter((f) => f.length > 0)
+    .map((f) => {
+      const m = /^event: ([^\n]*)\ndata: ([\s\S]*)$/.exec(f);
+      if (!m) throw new Error(`unparseable SSE frame: ${JSON.stringify(f)}`);
+      return { event: m[1]!, data: JSON.parse(m[2]!) as Record<string, unknown> };
+    });
+}
+
+function hit(over: Partial<TorrentResult> = {}): TorrentResult {
+  return {
+    infoHash: "aa".repeat(20),
+    name: "Big Buck Bunny 2008 1080p",
+    sizeBytes: 1024,
+    seeders: 10,
+    leechers: 1,
+    source: "yts",
+    magnet: `magnet:?xt=urn:btih:${"aa".repeat(20)}&dn=Big+Buck+Bunny`,
+    ...over,
+  };
+}
+
+function searchDeps(over: Partial<WebDeps> = {}): WebDeps {
+  return deps({
+    sourceHealthImpl: new Map(),
+    loadConfigImpl: async () => searchConfig(),
+    ...over,
+  });
+}
+
+// Drive the stream to completion. `done` is the last frame on every non-aborted
+// path, so waiting for it is waiting for the search.
+async function collectSearch(d: WebDeps, params: Parameters<typeof startSearchStream>[1]): Promise<Frame[]> {
+  const chunks: string[] = [];
+  const stop = startSearchStream(d, params, (c) => chunks.push(c));
+  try {
+    await vi.waitFor(() => {
+      expect(parseFrames(chunks).some((f) => f.event === "done" || f.event === "error")).toBe(true);
+    });
+  } finally {
+    stop();
+  }
+  return parseFrames(chunks);
+}
+
+describe("toPublicResult", () => {
+  // The whole reason this function exists rather than a spread. If it ever
+  // ships a magnet, every snapshot frame grows by ~1KB per result and the
+  // browser gains a way to reach a swarm without a route validating the hash.
+  it("never puts the magnet on the wire", () => {
+    const out = toPublicResult(hit());
+    expect(out).not.toHaveProperty("magnet");
+    expect(JSON.stringify(out)).not.toContain("magnet:");
+  });
+
+  it("picks the display fields and normalises sources to an array", () => {
+    expect(toPublicResult(hit({ seeders: 7, leechers: 2, sizeBytes: 99 }))).toEqual({
+      infoHash: "aa".repeat(20),
+      name: "Big Buck Bunny 2008 1080p",
+      sizeBytes: 99,
+      seeders: 7,
+      leechers: 2,
+      source: "yts",
+      sources: ["yts"],
+    });
+  });
+
+  it("keeps a merged source list and the optional fields when present", () => {
+    const out = toPublicResult(hit({ sources: ["yts", "tpb-movies"], added: 1700000000000, numFiles: 3 }));
+    expect(out.sources).toEqual(["yts", "tpb-movies"]);
+    expect(out.added).toBe(1700000000000);
+    expect(out.numFiles).toBe(3);
+  });
+
+  // An explicit `undefined` key survives into any in-process consumer even
+  // though JSON.stringify drops it, and the wire type marks these optional.
+  it("omits the optional keys entirely when the source gave none", () => {
+    expect(Object.keys(toPublicResult(hit())).sort()).toEqual([
+      "infoHash",
+      "leechers",
+      "name",
+      "seeders",
+      "sizeBytes",
+      "source",
+      "sources",
+    ]);
+  });
+});
+
+describe("parseSearchParams", () => {
+  it("accepts a query with no group as the All tab", () => {
+    expect(parseSearchParams(new URLSearchParams("q=sintel"))).toEqual({
+      ok: true,
+      params: { query: "sintel", group: null },
+    });
+  });
+
+  it("trims the query and treats an explicit All as no group", () => {
+    expect(parseSearchParams(new URLSearchParams("q=%20sintel%20&group=All"))).toEqual({
+      ok: true,
+      params: { query: "sintel", group: null },
+    });
+  });
+
+  it("accepts a real group", () => {
+    expect(parseSearchParams(new URLSearchParams("q=x&group=Movies"))).toEqual({
+      ok: true,
+      params: { query: "x", group: "Movies" },
+    });
+  });
+
+  it.each(["", "q=", "q=%20%20"])("rejects a missing or blank query (%s)", (qs) => {
+    expect(parseSearchParams(new URLSearchParams(qs))).toEqual({ ok: false, error: "missing query" });
+  });
+
+  // A typo'd tab that quietly searches everything is worse than one that says
+  // no: the user would see results they did not ask for and never learn why.
+  it.each(["movies", "MOVIES", "Films", "__proto__"])("rejects the unknown group %s", (group) => {
+    expect(parseSearchParams(new URLSearchParams(`q=x&group=${group}`))).toEqual({
+      ok: false,
+      error: "unknown group",
+    });
+  });
+});
+
+describe("searchSources", () => {
+  it("searches every non-adult source by default", () => {
+    const ids = searchSources(searchConfig(), null).map((s) => s.id);
+    expect(ids).toContain("yts");
+    expect(ids).not.toContain("tpb-porn");
+    expect(ids).not.toContain("x1337-porn");
+  });
+
+  it("omits sources the user disabled", () => {
+    const ids = searchSources(searchConfig({ disabledSources: ["yts", "eztv"] }), null).map((s) => s.id);
+    expect(ids).not.toContain("yts");
+    expect(ids).not.toContain("eztv");
+    expect(ids).toContain("tpb-movies");
+  });
+
+  it("includes adult sources only once the adult category is on", () => {
+    expect(searchSources(searchConfig({ adultContent: true }), null).map((s) => s.id)).toContain("tpb-porn");
+  });
+
+  it("narrows to one group's sources", () => {
+    for (const s of searchSources(searchConfig(), "Anime")) {
+      expect(s.groups).toContain("Anime");
+    }
+    expect(searchSources(searchConfig(), "Anime").map((s) => s.id)).toContain("nyaa");
+  });
+});
+
+describe("startSearchStream", () => {
+  it("streams a results frame per settled source, then exactly one done", async () => {
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts", "eztv") }),
+      searchImpl: async (source) => [hit({ source: source.id, infoHash: source.id.padEnd(40, "0") })],
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+
+    // One opening frame with both sources loading, then one per settled source.
+    expect(out.filter((f) => f.event === "results")).toHaveLength(3);
+    expect((out[0]!.data as unknown as PublicSearchSnapshot).perSource["yts"]).toEqual({
+      loading: true,
+      error: null,
+      code: null,
+      count: 0,
+    });
+    expect(out.filter((f) => f.event === "done")).toHaveLength(1);
+    expect(out[out.length - 1]!.event).toBe("done");
+
+    const final = out[out.length - 1]!.data as unknown as PublicSearchSnapshot;
+    expect(final.total).toBe(2);
+    expect(final.done).toBe(2);
+    expect(final.results).toHaveLength(2);
+    expect(Object.keys(final.perSource).sort()).toEqual(["eztv", "yts"]);
+  });
+
+  // The spinner stops on `done`. A path that ends without one leaves a browser
+  // claiming a search is still running for as long as the tab is open.
+  it("emits done even when every source fails", async () => {
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts") }),
+      searchImpl: async () => {
+        throw new HttpError(503, "boom");
+      },
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+    expect(out.filter((f) => f.event === "done")).toHaveLength(1);
+  });
+
+  it("emits done for a search with no sources at all", async () => {
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources() }),
+      searchImpl: async () => [],
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+    expect(out.map((f) => f.event)).toEqual(["results", "done"]);
+    expect((out[0]!.data as unknown as PublicSearchSnapshot).total).toBe(0);
+  });
+
+  // "Eight trackers errored" and "eight trackers found nothing" are different
+  // searches. Dropping the error slots makes them identical on the wire.
+  it("reports a per-source failure rather than swallowing it", async () => {
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts", "eztv") }),
+      searchImpl: async (source) => {
+        if (source.id === "eztv") throw new HttpError(503, "nope");
+        return [hit({ source: "yts" })];
+      },
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+    const final = out[out.length - 1]!.data as unknown as PublicSearchSnapshot;
+    expect(final.perSource["eztv"]).toEqual({ loading: false, error: "nope", code: "HTTP 503", count: 0 });
+    expect(final.perSource["yts"]).toEqual({ loading: false, error: null, code: null, count: 1 });
+  });
+
+  it("does not search a source the user disabled", async () => {
+    const searchImpl = vi.fn(async (_source: Source): Promise<TorrentResult[]> => []);
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts") }),
+      searchImpl,
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+    const final = out[out.length - 1]!.data as unknown as PublicSearchSnapshot;
+    expect(Object.keys(final.perSource)).toEqual(["yts"]);
+    expect(searchImpl.mock.calls.map((c) => c[0].id)).toEqual(["yts"]);
+  });
+
+  // The adult category is off by default and this route must not be the way
+  // round it: a browser asking for the Porn tab on a default install gets a
+  // search with nothing in it, not the adult trackers.
+  it("never searches an adult source while the adult category is off", async () => {
+    const searchImpl = vi.fn(async (_source: Source): Promise<TorrentResult[]> => []);
+    const d = searchDeps({
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("tpb-porn", "x1337-porn") }),
+      searchImpl,
+    });
+    const out = await collectSearch(d, { query: "bunny", group: "Porn" });
+    expect((out[out.length - 1]!.data as unknown as PublicSearchSnapshot).total).toBe(0);
+    expect(searchImpl).not.toHaveBeenCalled();
+  });
+
+  it("searches adult sources once the adult category is on", async () => {
+    const searchImpl = vi.fn(async (_source: Source): Promise<TorrentResult[]> => []);
+    const d = searchDeps({
+      loadConfigImpl: async () =>
+        searchConfig({ adultContent: true, disabledSources: onlySources("tpb-porn") }),
+      searchImpl,
+    });
+    const out = await collectSearch(d, { query: "bunny", group: "Porn" });
+    expect((out[out.length - 1]!.data as unknown as PublicSearchSnapshot).total).toBe(1);
+    expect(searchImpl.mock.calls.map((c) => c[0].id)).toEqual(["tpb-porn"]);
+  });
+
+  // A browser that opened on "0/23" and then saw "1/20" would read three
+  // sources as having vanished mid-search. Benched ones are never counted.
+  it("counts benched sources out of the opening frame, not just the later ones", async () => {
+    const health = new Map<SourceId, Health>([["eztv", { fails: 3, skipUntil: Date.now() + 60_000 }]]);
+    const d = searchDeps({
+      sourceHealthImpl: health,
+      loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts", "eztv") }),
+      searchImpl: async (source) => [hit({ source: source.id, infoHash: source.id.padEnd(40, "0") })],
+    });
+    const out = await collectSearch(d, { query: "bunny", group: null });
+    const totals = out.map((f) => (f.data as unknown as PublicSearchSnapshot).total);
+    expect(totals).toEqual(totals.map(() => 1));
+    expect(Object.keys((out[0]!.data as unknown as PublicSearchSnapshot).perSource)).toEqual(["yts"]);
+  });
+
+  it("reports a config read failure as an error frame and no done", async () => {
+    const chunks: string[] = [];
+    const d = searchDeps({
+      loadConfigImpl: async () => {
+        throw new Error("config unreadable");
+      },
+    });
+    const stop = startSearchStream(d, { query: "bunny", group: null }, (c) => chunks.push(c));
+    await vi.waitFor(() => expect(chunks.length).toBeGreaterThan(0));
+    stop();
+    const out = parseFrames(chunks);
+    expect(out.map((f) => f.event)).toEqual(["error"]);
+    expect(out[0]!.data).toEqual({ error: "config unreadable" });
+  });
+
+  /**
+   * THE DISCONNECT ABORT.
+   *
+   * Output assertions structurally cannot see this: a stopped channel drops
+   * every frame, so a stream that leaves 23 HTTP requests running against
+   * trackers looks *identical* from the outside to one that cancelled them.
+   * This project has been bitten by exactly that, so what is asserted here is
+   * the abort signals each source was handed, the timer count, and the fact
+   * that no failure was recorded — never the bytes written.
+   */
+  describe("client disconnect", () => {
+    it("aborts every in-flight source request and clears every timer", async () => {
+      vi.useFakeTimers();
+      try {
+        const signals: AbortSignal[] = [];
+        const health = new Map<SourceId, Health>();
+        const chunks: string[] = [];
+        const timersBefore = vi.getTimerCount();
+        const d = searchDeps({
+          sourceHealthImpl: health,
+          loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts", "eztv") }),
+          // Never resolves on its own: the only way out is the abort.
+          searchImpl: async (_source, _query, opts) =>
+            new Promise<TorrentResult[]>((_resolve, reject) => {
+              signals.push(opts.signal!);
+              opts.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+            }),
+        });
+
+        const stop = startSearchStream(d, { query: "bunny", group: null }, (c) => chunks.push(c));
+        // Let the config read and the fan-out happen.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(signals).toHaveLength(2);
+        expect(signals.every((s) => s.aborted)).toBe(false);
+        // One 25s per-source timeout each, plus the channel's heartbeat.
+        expect(vi.getTimerCount()).toBe(timersBefore + 3);
+
+        stop();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(signals.map((s) => s.aborted)).toEqual([true, true]);
+        expect(vi.getTimerCount()).toBe(timersBefore);
+        // Cancelling our own work must not bench a healthy tracker.
+        expect(health.size).toBe(0);
+        expect(parseFrames(chunks).some((f) => f.event === "done")).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("stops the heartbeat, so a dead client leaves no timer behind", async () => {
+      vi.useFakeTimers();
+      try {
+        const timersBefore = vi.getTimerCount();
+        const chunks: string[] = [];
+        const d = searchDeps({
+          loadConfigImpl: async () => searchConfig({ disabledSources: onlySources() }),
+          searchImpl: async () => [],
+        });
+        const stop = startSearchStream(d, { query: "bunny", group: null }, (c) => chunks.push(c));
+        await vi.advanceTimersByTimeAsync(0);
+        stop();
+        expect(vi.getTimerCount()).toBe(timersBefore);
+        const after = chunks.length;
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(chunks).toHaveLength(after);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes nothing more once the client has gone", async () => {
+      const chunks: string[] = [];
+      let release: (() => void) | null = null;
+      const d = searchDeps({
+        loadConfigImpl: async () => searchConfig({ disabledSources: onlySources("yts") }),
+        searchImpl: async () =>
+          new Promise<TorrentResult[]>((resolve) => {
+            release = (): void => resolve([hit()]);
+          }),
+      });
+      const stop = startSearchStream(d, { query: "bunny", group: null }, (c) => chunks.push(c));
+      await vi.waitFor(() => expect(release).not.toBeNull());
+      // The opening "all loading" frame is already out; nothing after it is.
+      const atDisconnect = chunks.length;
+      stop();
+      release!();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(chunks).toHaveLength(atDisconnect);
+    });
+  });
+});
+
+describe("GET /api/sources", () => {
+  const health = (): Map<SourceId, Health> => new Map();
+
+  async function get(over: Partial<WebDeps> = {}): Promise<SourcesResponse> {
+    const res = await handleWebApi(
+      deps({ sourceHealthImpl: health(), loadConfigImpl: async () => searchConfig(), ...over }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      AUTH,
+      "",
+    );
+    expect(res.status).toBe(200);
+    return res.json as SourcesResponse;
+  }
+
+  // Nothing under /api/ delegates to handleApi here, so this router's gate is
+  // the only door. With it deleted this call would answer 200.
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("lists the TUI's groups in order with their source ids", async () => {
+    const body = await get();
+    expect(body.groups.map((g) => g.group)).toEqual(["Games", "Movies", "TV", "Anime", "Music", "Books"]);
+    expect(body.groups.find((g) => g.group === "Movies")!.sourceIds).toContain("yts");
+  });
+
+  it("hides adult sources and the Porn tab while the adult category is off", async () => {
+    const body = await get();
+    expect(body.adultEnabled).toBe(false);
+    expect(body.groups.map((g) => g.group)).not.toContain("Porn");
+    expect(body.sources.map((s) => s.id)).not.toContain("tpb-porn");
+  });
+
+  it("surfaces adult sources and the Porn tab once it is on", async () => {
+    const body = await get({ loadConfigImpl: async () => searchConfig({ adultContent: true }) });
+    expect(body.adultEnabled).toBe(true);
+    expect(body.groups.map((g) => g.group)).toContain("Porn");
+    expect(body.sources.find((s) => s.id === "tpb-porn")).toMatchObject({ adult: true });
+  });
+
+  // Disabled is a user choice, not a health verdict: the TUI greys them rather
+  // than hiding them, and the browser's tab bar has to be able to do the same.
+  it("keeps a disabled source listed but marked disabled", async () => {
+    const body = await get({ loadConfigImpl: async () => searchConfig({ disabledSources: ["yts"] }) });
+    expect(body.sources.find((s) => s.id === "yts")).toMatchObject({ enabled: false });
+    expect(body.sources.find((s) => s.id === "eztv")).toMatchObject({ enabled: true });
+  });
+
+  it("reports a benched source and its failure count", async () => {
+    const map = health();
+    const now = Date.now();
+    map.set("eztv", { fails: 3, skipUntil: now + 60_000 });
+    const body = await get({ sourceHealthImpl: map });
+    const eztv = body.sources.find((s) => s.id === "eztv")!;
+    expect(eztv.fails).toBe(3);
+    expect(eztv.benchedUntil).toBe(now + 60_000);
+  });
+
+  // A lapsed cooldown leaves skipUntil in the past; reporting it raw would have
+  // the browser call a recovered source benched.
+  it("reports a lapsed bench as not benched", async () => {
+    const map = health();
+    map.set("eztv", { fails: 3, skipUntil: Date.now() - 1000 });
+    const body = await get({ sourceHealthImpl: map });
+    expect(body.sources.find((s) => s.id === "eztv")!.benchedUntil).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Title metadata
+// ---------------------------------------------------------------------------
+
+describe("GET /api/title", () => {
+  const OK: FetchTitleMetaResult = {
+    ok: true,
+    imdbId: "tt1727587",
+    plot: "A lone girl.",
+    posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+  };
+
+  beforeEach(() => {
+    clearTitleCache();
+    // TORLINK_OMDB_KEY overrides config inside resolveOmdbApiKey, so a
+    // developer with one exported would never see the no-key path.
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+  });
+
+  function titleDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => searchConfig({ omdbApiKey: "key" }),
+      fetchTitleMetaImpl: async () => OK,
+      fetchTitleMetaByNameImpl: async () => OK,
+      ...over,
+    });
+  }
+
+  async function title(d: WebDeps, qs: string): Promise<WebResponse> {
+    return handleWebApi(d, "GET", "/api/title", new URLSearchParams(qs), AUTH, "");
+  }
+
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+    const res = await handleWebApi(
+      titleDeps({ token: "secret", fetchTitleMetaByNameImpl }),
+      "GET",
+      "/api/title",
+      new URLSearchParams("name=Sintel"),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  it("looks a title up by name, year and type", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+    const res = await title(titleDeps({ fetchTitleMetaByNameImpl }), "name=Sintel&year=2010&type=movie");
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({
+      status: "ok",
+      imdbId: "tt1727587",
+      plot: "A lone girl.",
+      posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+    });
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Sintel", "key", { year: 2010, type: "movie" });
+  });
+
+  it("looks a title up by imdb id, and prefers it over a name", async () => {
+    const fetchTitleMetaImpl = vi.fn(async () => OK);
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+    await title(titleDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }), "imdb=tt1727587&name=Wrong");
+    expect(fetchTitleMetaImpl).toHaveBeenCalledWith("tt1727587", "key");
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE NO-KEY PATH. A 500 here — or an empty `ok` — makes a perfectly healthy
+   * install look broken, when all the UI needs to say is "add an OMDb key".
+   */
+  it("answers no-key with a 200 and its own status, never a 500", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+    const res = await title(
+      titleDeps({ loadConfigImpl: async () => searchConfig(), fetchTitleMetaByNameImpl }),
+      "name=Sintel",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "no-key" });
+    // Nothing was asked of OMDb.
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  // The one confusion the shape exists to prevent: a lookup that happened and
+  // found nothing must not read the same as a server with no key.
+  it("distinguishes no-key from a lookup that found nothing", async () => {
+    const found = await title(
+      titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: null, plot: null, posterUrl: null }) }),
+      "name=Sintel",
+    );
+    expect(found.json).toEqual({ status: "ok", imdbId: null, plot: null, posterUrl: null });
+    expect(found.json).not.toEqual({ status: "no-key" });
+  });
+
+  it("reports an OMDb failure as an error status carrying the message", async () => {
+    const res = await title(
+      titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: false, error: "Movie not found!" }) }),
+      "name=Nope",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "error", error: "Movie not found!" });
+  });
+
+  it("does not cache a no-key answer, so pasting a key takes effect at once", async () => {
+    let key = "";
+    const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+    const d = titleDeps({
+      loadConfigImpl: async () => searchConfig({ omdbApiKey: key }),
+      fetchTitleMetaByNameImpl,
+    });
+    expect((await title(d, "name=Sintel")).json).toEqual({ status: "no-key" });
+    key = "key";
+    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "ok" });
+  });
+
+  it("does not cache a failure, so a transient OMDb outage is retried", async () => {
+    let answer: FetchTitleMetaResult = { ok: false, error: "couldn't reach OMDb" };
+    const fetchTitleMetaByNameImpl = vi.fn(async () => answer);
+    const d = titleDeps({ fetchTitleMetaByNameImpl });
+    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "error" });
+    answer = OK;
+    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "ok" });
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(2);
+  });
+
+  describe("cache", () => {
+    // Scrolling a result list must not become one OMDb request per row.
+    it("serves a repeat lookup without touching OMDb", async () => {
+      const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+      const d = titleDeps({ fetchTitleMetaByNameImpl });
+      const first = await title(d, "name=Sintel&year=2010");
+      const second = await title(d, "name=Sintel&year=2010");
+      expect(second.json).toEqual(first.json);
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("matches a repeat lookup case-insensitively, as OMDb itself does", async () => {
+      const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+      const d = titleDeps({ fetchTitleMetaByNameImpl });
+      await title(d, "name=Sintel");
+      await title(d, "name=sintel");
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("keys on every parameter that changes the answer", async () => {
+      const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+      const d = titleDeps({ fetchTitleMetaByNameImpl });
+      await title(d, "name=Sintel");
+      await title(d, "name=Sintel&year=2010");
+      await title(d, "name=Sintel&year=2010&type=movie");
+      await title(d, "imdb=tt1727587");
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(3);
+    });
+
+    // The bound is the point: the key space is every release name a search
+    // turns up, so an unbounded map is a slow leak on a process that runs for
+    // weeks. The oldest entry goes, and the entries still in the cache still hit.
+    it("evicts the oldest entry past the bound rather than growing forever", async () => {
+      const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+      const d = titleDeps({ fetchTitleMetaByNameImpl });
+      for (let i = 0; i < MAX_TITLE_CACHE + 1; i++) await title(d, `name=title-${i}`);
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(MAX_TITLE_CACHE + 1);
+
+      // The newest is still cached...
+      await title(d, `name=title-${MAX_TITLE_CACHE}`);
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(MAX_TITLE_CACHE + 1);
+      // ...and the very first was evicted.
+      await title(d, "name=title-0");
+      expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(MAX_TITLE_CACHE + 2);
+    });
+  });
+
+  describe("poster URL", () => {
+    // This route is the only one that takes a third party's string and hands a
+    // browser back a *URL*. A preview pane that puts it straight in an <img src>
+    // would fetch it directly, leaking the user's IP to whatever host OMDb named.
+    it.each([
+      "http://evil.example/track.gif",
+      "https://evil.example/poster.jpg",
+      "javascript:alert(1)",
+      "data:image/png;base64,AAAA",
+      "//m.media-amazon.com/x.jpg",
+      "not a url",
+    ])("nulls a poster URL off the CDN allowlist (%s)", async (posterUrl) => {
+      const res = await title(
+        titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: "tt1", plot: "p", posterUrl }) }),
+        "name=Sintel",
+      );
+      expect(res.json).toMatchObject({ status: "ok", posterUrl: null });
+    });
+
+    it.each([
+      "https://m.media-amazon.com/images/M/x.jpg",
+      "https://ia.media-imdb.com/images/M/x.jpg",
+      "https://img.omdbapi.com/?apikey=k&i=tt1",
+    ])("keeps a poster URL the /api/poster allowlist accepts (%s)", async (posterUrl) => {
+      const res = await title(
+        titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: "tt1", plot: "p", posterUrl }) }),
+        "name=Sintel",
+      );
+      expect(res.json).toMatchObject({ posterUrl });
+    });
+  });
+
+  describe("parameters", () => {
+    it.each([
+      ["", "missing name or imdb"],
+      ["name=%20", "missing name or imdb"],
+      ["imdb=tt12", "invalid imdb id"],
+      ["imdb=nope1234567", "invalid imdb id"],
+      ["imdb=tt1727587%26apikey%3Dx", "invalid imdb id"],
+      ["name=Sintel&year=20x0", "invalid year"],
+      ["name=Sintel&year=2010abc", "invalid year"],
+      ["name=Sintel&year=1200", "invalid year"],
+      ["name=Sintel&type=film", "invalid type"],
+    ])("400s %s", async (qs, error) => {
+      const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
+      const res = await title(titleDeps({ fetchTitleMetaByNameImpl }), qs);
+      expect(res.status).toBe(400);
+      expect(res.json).toEqual({ error });
+      expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+    });
   });
 });

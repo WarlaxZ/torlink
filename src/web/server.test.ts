@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startWebServer, writeWebResponse, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { SOURCES } from "../sources/registry";
+import { defaultConfig, type Config } from "../config/config";
+import type { TorrentResult } from "../sources/types";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(): Runtime {
@@ -583,5 +586,197 @@ describe("writeWebResponse", () => {
     );
     expect(r.status).toBe(404);
     expect(wrote).toBe(404);
+  });
+});
+
+describe("/api/search", () => {
+  const cfg = (over: Partial<Config> = {}): Config => ({
+    ...defaultConfig,
+    downloadDir: "/tmp/dl",
+    ...over,
+  });
+
+  // Everything except the two named, i.e. the disabledSources that leaves those
+  // two enabled. Keeps these socket-level tests to a two-source fan-out.
+  const onlyTwo = SOURCES.filter((s) => s.id !== "yts" && s.id !== "eztv").map((s) => s.id);
+
+  function hit(source: string): TorrentResult {
+    return {
+      infoHash: source.padEnd(40, "0"),
+      name: `${source} result`,
+      sizeBytes: 10,
+      seeders: 1,
+      leechers: 0,
+      source: source as TorrentResult["source"],
+      magnet: `magnet:?xt=urn:btih:${source.padEnd(40, "0")}`,
+    };
+  }
+
+  function searchServer(over: Parameters<typeof startWebServer>[1] = {}): Promise<string> {
+    return start({
+      webDeps: {
+        loadConfigImpl: async () => cfg({ disabledSources: onlyTwo }),
+        sourceHealthImpl: new Map(),
+        searchImpl: async (source) => [hit(source.id)],
+      },
+      ...over,
+    });
+  }
+
+  it("streams a frame per source and then done", async () => {
+    const base = await searchServer();
+    const res = await fetch(`${base}/api/search?q=bunny`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+    const text = await res.text();
+    // The opening "all loading" frame, then one per settled source.
+    expect(text.match(/event: results/g)).toHaveLength(3);
+    expect(text).toContain("event: done");
+    expect(text).toContain("yts result");
+    // The magnet must not be on the wire. See PublicSearchResult in wire.ts.
+    expect(text).not.toContain("magnet:");
+  });
+
+  it("narrows to a group", async () => {
+    const base = await searchServer({
+      webDeps: {
+        loadConfigImpl: async () => cfg({ disabledSources: onlyTwo }),
+        sourceHealthImpl: new Map(),
+        searchImpl: async (source) => [hit(source.id)],
+      },
+    });
+    const text = await (await fetch(`${base}/api/search?q=bunny&group=TV`)).text();
+    expect(text).toContain("eztv result");
+    expect(text).not.toContain("yts result");
+  });
+
+  // A search spends the user's bandwidth on up to 23 requests to public
+  // trackers, so an anonymous caller with a loop is a traffic amplifier.
+  it("401s without credentials when a token is set", async () => {
+    const base = await searchServer({ token: "secret" });
+    const res = await fetch(`${base}/api/search?q=bunny`);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("401s on a wrong ?k= and accepts the right one", async () => {
+    const base = await searchServer({ token: "secret" });
+    expect((await fetch(`${base}/api/search?q=bunny&k=wrong`)).status).toBe(401);
+    const ok = await fetch(`${base}/api/search?q=bunny&k=secret`);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toContain("event: done");
+  });
+
+  it("accepts a bearer header too", async () => {
+    const base = await searchServer({ token: "secret" });
+    const res = await fetch(`${base}/api/search?q=bunny`, {
+      headers: { authorization: "Bearer secret" },
+    });
+    expect(res.status).toBe(200);
+    await res.text();
+  });
+
+  // Validated before the headers go out: once a 200 text/event-stream is on the
+  // socket, "you asked wrong" can only be a frame the client has to parse.
+  it.each([
+    ["/api/search", "missing query"],
+    ["/api/search?q=", "missing query"],
+    ["/api/search?q=x&group=Films", "unknown group"],
+  ])("400s %s as a real status, not an error frame", async (path, error) => {
+    const base = await searchServer();
+    const res = await fetch(`${base}${path}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error });
+  });
+
+  it("does not log the user's search terms", async () => {
+    const log = vi.fn();
+    const base = await searchServer({ log });
+    await (await fetch(`${base}/api/search?q=something%20private`)).text();
+    const logged = log.mock.calls.flat().join("\n");
+    expect(logged).toContain("/api/search -> 200");
+    expect(logged).not.toContain("private");
+  });
+
+  /**
+   * THE DISCONNECT ABORT, over a real socket.
+   *
+   * The frames prove nothing here — a stopped channel writes nothing whether or
+   * not the sources were cancelled — so this asserts the abort signals the
+   * sources were actually handed. Without the teardown, a closed tab leaves two
+   * (in production, 23) tracker requests running to their 25s timeouts.
+   */
+  it("aborts every in-flight source request when the client hangs up", async () => {
+    const signals: AbortSignal[] = [];
+    const base = await start({
+      webDeps: {
+        loadConfigImpl: async () => cfg({ disabledSources: onlyTwo }),
+        sourceHealthImpl: new Map(),
+        searchImpl: async (_source, _query, opts) =>
+          new Promise<TorrentResult[]>((_resolve, reject) => {
+            signals.push(opts.signal!);
+            opts.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      },
+    });
+
+    const controller = new AbortController();
+    const res = await fetch(`${base}/api/search?q=bunny`, { signal: controller.signal });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals.some((s) => s.aborted)).toBe(false);
+
+    controller.abort();
+    await vi.waitFor(() => expect(signals.every((s) => s.aborted)).toBe(true));
+  });
+
+  it("aborts the search when the server closes rather than blocking on it", async () => {
+    const signals: AbortSignal[] = [];
+    const base = await start({
+      webDeps: {
+        loadConfigImpl: async () => cfg({ disabledSources: onlyTwo }),
+        sourceHealthImpl: new Map(),
+        searchImpl: async (_source, _query, opts) =>
+          new Promise<TorrentResult[]>((_resolve, reject) => {
+            signals.push(opts.signal!);
+            opts.signal!.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      },
+    });
+    const controller = new AbortController();
+    void fetch(`${base}/api/search?q=bunny`, { signal: controller.signal }).catch(() => {});
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+
+    await handle!.close();
+    handle = null;
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    controller.abort();
+  });
+});
+
+describe("/api/sources and /api/title over HTTP", () => {
+  it("serves the source list", async () => {
+    const base = await start({
+      webDeps: { loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }) },
+    });
+    const res = await fetch(`${base}/api/sources`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { groups: { group: string }[]; adultEnabled: boolean };
+    expect(body.adultEnabled).toBe(false);
+    expect(body.groups.map((g) => g.group)).toContain("Movies");
+  });
+
+  it("answers the no-key title lookup with a 200, not a 500", async () => {
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+    try {
+      const base = await start({
+        webDeps: { loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }) },
+      });
+      const res = await fetch(`${base}/api/title?name=Sintel&year=2010`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: "no-key" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

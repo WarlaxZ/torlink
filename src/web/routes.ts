@@ -3,14 +3,36 @@ import { isAuthorized } from "../daemon/auth";
 import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
-import { type Config, loadConfig, resolveRealDebridToken } from "../config/config";
+import {
+  type Config,
+  loadConfig,
+  resolveAdultContent,
+  resolveOmdbApiKey,
+  resolveRealDebridToken,
+} from "../config/config";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { validateToken } from "../integrations/realdebrid";
 import { parseInput } from "../sources/magnet";
+import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
+import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
+import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
+import {
+  fetchTitleMeta,
+  fetchTitleMetaByName,
+  type FetchTitleMetaResult,
+  type OmdbType,
+} from "../recc/omdb";
+import { openSseChannel, type SseWrite } from "./sse";
+import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import type { Runtime } from "../daemon/runtime";
 import type {
+  PublicSearchResult,
+  PublicSearchSnapshot,
+  PublicSource,
   PublicStreamFile,
   PublicStreamSession,
+  PublicTitleMeta,
+  SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
 } from "./wire";
@@ -47,6 +69,28 @@ export interface WebDeps {
    * downgrading to a swarm because a status probe timed out.
    */
   rdStatusImpl?: (token: string) => Promise<RdStatus | null>;
+  /**
+   * How one source is queried during `/api/search`. Passed straight through to
+   * `runSearch`, so the default (`cachedSearch`) and every behaviour around it —
+   * per-source timeout, benching, abort propagation — are the real ones; only
+   * the outbound HTTP is swappable. Injected rather than stubbing `runSearch`
+   * itself precisely so a test still exercises that machinery.
+   */
+  searchImpl?: SearchImpl;
+  /**
+   * The source-health map searches read and write. Defaults to the process-wide
+   * one shared with the TUI — a browser search benching a dead tracker should
+   * spare the TUI the same timeout. Injected so tests do not mutate global state.
+   */
+  sourceHealthImpl?: Map<SourceId, Health>;
+  /** OMDb lookup by IMDb id, for `/api/title?imdb=`. Injected to keep tests offline. */
+  fetchTitleMetaImpl?: (imdbId: string, apiKey: string) => Promise<FetchTitleMetaResult>;
+  /** OMDb lookup by name, for `/api/title?name=`. Injected to keep tests offline. */
+  fetchTitleMetaByNameImpl?: (
+    title: string,
+    apiKey: string,
+    opts: { year?: number; type?: OmdbType },
+  ) => Promise<FetchTitleMetaResult>;
 }
 
 /** The path a client fetches to read one file of a session: `/stream/:sid/:idx`. */
@@ -293,6 +337,435 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
   return { status: 200, json: out };
 }
 
+// ---- search ------------------------------------------------------------
+
+/**
+ * A `TorrentResult` narrowed to what a browser gets. Picked field by field —
+ * see `PublicSearchResult` in wire.ts for why, and in particular for why
+ * `magnet` is not here and must not be added.
+ */
+export function toPublicResult(r: TorrentResult): PublicSearchResult {
+  const out: PublicSearchResult = {
+    infoHash: r.infoHash,
+    name: r.name,
+    sizeBytes: r.sizeBytes,
+    seeders: r.seeders,
+    leechers: r.leechers,
+    source: r.source,
+    // Normalised to always-present here: `mergeDuplicateResults` sets it on
+    // everything it returns, but the fallback means a snapshot that ever came
+    // from somewhere else still gives the browser one shape to render.
+    sources: r.sources ?? [r.source],
+  };
+  // Conditional, not `numFiles: r.numFiles`: an explicit `undefined` key is
+  // dropped by JSON.stringify but visible to any in-process consumer, and the
+  // wire type marks both of these optional.
+  if (r.numFiles !== undefined) out.numFiles = r.numFiles;
+  if (r.added !== undefined) out.added = r.added;
+  return out;
+}
+
+/** A whole `SearchSnapshot` in its public shape. Ordering is preserved as given. */
+export function toPublicSnapshot(snap: SearchSnapshot): PublicSearchSnapshot {
+  const perSource: Record<string, PublicSearchSnapshot["perSource"][string]> = {};
+  for (const [id, state] of Object.entries(snap.perSource)) {
+    // Picked, not spread: SourceState is core's type and free to grow.
+    perSource[id] = {
+      loading: state.loading,
+      error: state.error,
+      code: state.code,
+      count: state.count,
+    };
+  }
+  return {
+    results: snap.results.map(toPublicResult),
+    perSource,
+    done: snap.done,
+    total: snap.total,
+  };
+}
+
+/** The category tabs, exactly the TUI's set. "Porn" is only ever reachable when enabled. */
+const SOURCE_GROUPS: readonly SourceGroup[] = [
+  "Games",
+  "Movies",
+  "TV",
+  "Anime",
+  "Music",
+  "Books",
+  "Porn",
+];
+
+export interface SearchParams {
+  query: string;
+  /** null means the "All" tab: every enabled source. */
+  group: SourceGroup | null;
+}
+
+/**
+ * Validate `?q=` and `?group=` before a single byte of the stream is written.
+ *
+ * Separate from the streaming itself because SSE gives up its status code the
+ * moment the headers go out: once we have written `200 text/event-stream`,
+ * "you forgot the query" can only be an error *frame*, which a client has to
+ * parse to discover it asked wrong. So the decidable part is a pure function
+ * the socket layer runs first and answers 400 from.
+ *
+ * An unknown group is rejected rather than silently searched as "All": a typo'd
+ * tab that quietly returns everything is worse than one that says no. A group
+ * that exists but is entirely adult-sourced is NOT rejected here — that depends
+ * on config, and it comes out as a search with zero sources and an immediate
+ * `done`, which is the honest answer.
+ */
+export function parseSearchParams(
+  query: URLSearchParams,
+): { ok: true; params: SearchParams } | { ok: false; error: string } {
+  const q = (query.get("q") ?? "").trim();
+  if (!q) return { ok: false, error: "missing query" };
+  const rawGroup = (query.get("group") ?? "").trim();
+  if (!rawGroup || rawGroup === "All") return { ok: true, params: { query: q, group: null } };
+  const group = SOURCE_GROUPS.find((g) => g === rawGroup);
+  if (!group) return { ok: false, error: "unknown group" };
+  return { ok: true, params: { query: q, group } };
+}
+
+/** The sources one search will actually query, given the user's config and tab. */
+export function searchSources(config: Config, group: SourceGroup | null): Source[] {
+  // enabledSources is the single choke-point that keeps adult sources out of
+  // both the "All" aggregate and per-source searching. Going around it — say by
+  // filtering SOURCES here — is how the browser would end up searching a
+  // tracker the user switched off.
+  const adult = resolveAdultContent(config);
+  const sources = enabledSources((config.disabledSources ?? []) as SourceId[], adult);
+  if (!group) return sources;
+  return sources.filter((s) => s.groups?.includes(group));
+}
+
+/**
+ * `GET /api/search` — run one search and stream a snapshot per source that
+ * settles, then a final `done`.
+ *
+ * Returns a stop function. THE CALLER MUST CALL IT WHEN THE CLIENT
+ * DISCONNECTS. That is not tidiness: `runSearch` has up to 23 HTTP requests in
+ * flight, each with a 25-second timeout, and a closed browser tab that left
+ * them running would keep hammering trackers on behalf of nobody — and worse,
+ * would record their timeouts as failures and bench sources that were fine.
+ * Stopping aborts the signal `runSearch` is watching, which cancels the
+ * in-flight fetches and suppresses both further snapshots and the failure
+ * bookkeeping.
+ *
+ * Frames:
+ * - `results` — a `PublicSearchSnapshot`: one immediately, carrying the source
+ *   list with everything still loading, then one per settled source.
+ * - `done` — the final snapshot, exactly once, on every non-aborted path
+ *   including "every source failed" and "no sources at all". A client waits on
+ *   this to stop its spinner, so a path that ends without it hangs the UI.
+ * - `error` — config could not be read; followed by no `done`, and the channel
+ *   closes. `runSearch` itself never rejects: a source failure is reported in
+ *   that source's `perSource` slot and the search carries on.
+ * - `ping` — the heartbeat, from the channel.
+ */
+export function startSearchStream(
+  deps: WebDeps,
+  params: SearchParams,
+  write: SseWrite,
+  onClose?: () => void,
+): () => void {
+  const controller = new AbortController();
+  // Created before the channel because the channel's teardown fires it, and
+  // that teardown can run synchronously from the very first heartbeat write.
+  //
+  // `onClose` runs on the same single teardown path, so the socket layer can
+  // end the response when the search finishes without a second notion of
+  // "finished" that could disagree with this one. Unlike /api/events, this
+  // stream is finite: leaving the connection open after `done` would hold a
+  // socket per completed search until the browser noticed.
+  const channel = openSseChannel(write, () => {
+    controller.abort();
+    onClose?.();
+  });
+
+  void (async (): Promise<void> => {
+    try {
+      const config = await (deps.loadConfigImpl ?? loadConfig)();
+      // Reading config was async, so the client may already be gone.
+      if (!channel.alive) return;
+
+      const health = deps.sourceHealthImpl ?? sourceHealth;
+      // Benched sources are dropped HERE rather than left for runSearch to drop
+      // itself, so the opening frame's `total` is the same number every later
+      // frame reports. Filtered in both places, a browser that started with 23
+      // would watch the count drop to 20 on the first update and have no way to
+      // tell that from three sources vanishing mid-search.
+      const now = Date.now();
+      const sources = searchSources(config, params.group).filter(
+        (s) => !isSkipped(health, s.id, now),
+      );
+
+      // An opening frame before any source has answered, carrying the full
+      // source list all marked loading. The TUI does the same thing (see
+      // useConcurrentSearch), and for the same reason: the browser can render
+      // "0/23 sources" and the per-source list at once instead of showing
+      // nothing until the first tracker replies, which can be seconds.
+      channel.send("results", () =>
+        toPublicSnapshot({
+          results: [],
+          perSource: blankPerSource(sources, true),
+          done: 0,
+          total: sources.length,
+        }),
+      );
+
+      const snapshot = await runSearch(params.query, sources, {
+        signal: controller.signal,
+        onUpdate: (snap) => channel.send("results", () => toPublicSnapshot(snap)),
+        searchImpl: deps.searchImpl,
+        health,
+      });
+      // An aborted runSearch resolves (it does not reject) with whatever the
+      // snapshot held when the abort landed — typically empty, with sources
+      // still marked loading. Emitting `done` for that would tell a client that
+      // a discarded search finished. `channel.alive` is false on that path
+      // anyway, since abort only ever comes from the teardown; the explicit
+      // check is here so a future second abort path cannot make this lie.
+      if (!channel.alive || controller.signal.aborted) return;
+      channel.send("done", () => toPublicSnapshot(snapshot));
+    } catch (err) {
+      // Reaching here means config could not be read, or `runSearch` broke its
+      // own contract (it reports a source failure in that source's slot and
+      // never rejects). Either way this runs detached from any caller, so an
+      // escaping rejection would be a process-level unhandledRejection — one
+      // unreadable config file taking down a daemon serving a dozen downloads.
+      channel.send("error", () => ({
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      // The single exit. Every path above — done, error, and the two aborted
+      // early returns — ends the channel here, so the socket layer's `onClose`
+      // fires exactly once and no connection is left open after its search.
+      channel.stop();
+    }
+  })();
+
+  return channel.stop;
+}
+
+/**
+ * `GET /api/sources` — the category tabs and per-source health, so the browser
+ * can offer the same navigation the TUI does.
+ *
+ * Adult sources are absent entirely (not merely flagged) unless the adult
+ * category is enabled: this response is what the browser renders a tab bar
+ * from, and "hidden" has to mean hidden. Disabled sources ARE present, marked
+ * `enabled: false`, because the TUI shows them greyed and the browser should
+ * match — configuring them stays in the TUI.
+ */
+export function sourcesResponse(config: Config, health: Map<SourceId, Health>, now: number): SourcesResponse {
+  const adultEnabled = resolveAdultContent(config);
+  const disabled = new Set(config.disabledSources ?? []);
+  const visible = SOURCES.filter((s) => adultEnabled || !s.adult);
+  const sources: PublicSource[] = visible.map((s) => ({
+    id: s.id,
+    label: s.label,
+    groups: [...(s.groups ?? [])],
+    adult: s.adult === true,
+    homepage: s.homepage,
+    reportsHealth: s.reportsHealth,
+    enabled: !disabled.has(s.id),
+    fails: health.get(s.id)?.fails ?? 0,
+    // Reported as "benched or not" at this instant rather than raw skipUntil:
+    // a lapsed cooldown leaves skipUntil in the past, and a browser comparing
+    // it against its own clock would call a recovered source benched.
+    benchedUntil: isSkipped(health, s.id, now) ? (health.get(s.id)?.skipUntil ?? null) : null,
+  }));
+  return {
+    groups: sourcesByGroup(adultEnabled).map((g) => ({
+      group: g.group,
+      sourceIds: g.sources.map((s) => s.id),
+    })),
+    sources,
+    adultEnabled,
+  };
+}
+
+// ---- title metadata ----------------------------------------------------
+
+/**
+ * How many OMDb answers to keep. Each is three short strings, so this is tens
+ * of KB; the bound exists because the key space is caller-supplied (any release
+ * name a search turned up) and an unbounded map on a process that runs for
+ * weeks is a slow leak, not because the memory matters at normal sizes.
+ */
+export const MAX_TITLE_CACHE = 256;
+
+// Insertion-ordered, used as an LRU: a hit is deleted and re-set so it moves to
+// the back, and eviction takes from the front. Module-level and per process,
+// shared by every browser talking to this server — which is the point, since
+// two tabs scrolling the same result list should cost one OMDb call.
+const titleCache = new Map<string, PublicTitleMeta>();
+
+/** Test seam: drop everything cached. Nothing in the app calls this. */
+export function clearTitleCache(): void {
+  titleCache.clear();
+}
+
+function cacheGet(key: string): PublicTitleMeta | undefined {
+  const hit = titleCache.get(key);
+  if (hit === undefined) return undefined;
+  titleCache.delete(key);
+  titleCache.set(key, hit);
+  return hit;
+}
+
+function cacheSet(key: string, value: PublicTitleMeta): void {
+  titleCache.delete(key);
+  titleCache.set(key, value);
+  while (titleCache.size > MAX_TITLE_CACHE) {
+    // Map iteration is insertion order, so the first key is the least recently
+    // used. `.next().value` is undefined only for an empty map, which the loop
+    // condition already excludes.
+    const oldest = titleCache.keys().next().value;
+    if (oldest === undefined) break;
+    titleCache.delete(oldest);
+  }
+}
+
+interface TitleLookup {
+  cacheKey: string;
+  imdbId?: string;
+  name?: string;
+  year?: number;
+  type?: OmdbType;
+}
+
+/**
+ * Turn `?imdb=` / `?name=&year=&type=` into a lookup, or say why not.
+ *
+ * `imdb` wins when both are given — it is the exact identifier and the name is
+ * then only a hint. The cache key is built here so it cannot drift from the
+ * request it stands for: it carries every parameter that changes the answer,
+ * and lowercases the name so "Sintel" and "sintel" share an entry (OMDb's title
+ * match is case-insensitive, so they genuinely do have the same answer).
+ */
+export function parseTitleLookup(
+  query: URLSearchParams,
+): { ok: true; lookup: TitleLookup } | { ok: false; error: string } {
+  const imdb = (query.get("imdb") ?? "").trim();
+  if (imdb) {
+    // Anchored: this is interpolated into an OMDb query string, and an id shape
+    // is cheap to insist on. tt + 7 or more digits covers everything IMDb has
+    // issued and everything it plausibly will.
+    if (!/^tt\d{7,}$/.test(imdb)) return { ok: false, error: "invalid imdb id" };
+    return { ok: true, lookup: { cacheKey: `i:${imdb}`, imdbId: imdb } };
+  }
+
+  const name = (query.get("name") ?? "").trim();
+  if (!name) return { ok: false, error: "missing name or imdb" };
+
+  const rawYear = (query.get("year") ?? "").trim();
+  let year: number | undefined;
+  if (rawYear) {
+    // Strict rather than parseInt: "2010abc" must not silently become 2010, and
+    // a year outside this range is a caller bug, not a title from the future.
+    if (!/^\d{4}$/.test(rawYear)) return { ok: false, error: "invalid year" };
+    year = Number(rawYear);
+    if (year < 1870 || year > 2200) return { ok: false, error: "invalid year" };
+  }
+
+  const rawType = (query.get("type") ?? "").trim();
+  let type: OmdbType | undefined;
+  if (rawType) {
+    if (rawType !== "movie" && rawType !== "series") return { ok: false, error: "invalid type" };
+    type = rawType;
+  }
+
+  const lookup: TitleLookup = {
+    cacheKey: `n:${name.toLowerCase()}|${year ?? ""}|${type ?? ""}`,
+    name,
+  };
+  if (year !== undefined) lookup.year = year;
+  if (type !== undefined) lookup.type = type;
+  return { ok: true, lookup };
+}
+
+/**
+ * A poster URL we are willing to hand a browser, or null.
+ *
+ * The allowlist in `getPoster` is the authoritative one and this does not
+ * replace it — but downstream enforcement alone is not enough here, for two
+ * reasons that only apply at this end. First, the URL crosses into the browser:
+ * `/api/title` is the one route that takes a third party's string and returns
+ * it as a *URL*, and a page that puts it in an `<img src>` — the obvious thing
+ * to write, and what the preview pane will be tempted into — fetches it
+ * directly, leaking the user's IP and referer to whatever host OMDb named.
+ * Second, an unlisted host degrades far better as a null (the UI shows its
+ * placeholder) than as a URL that 400s from `/api/poster` and renders a broken
+ * image with no way to tell why.
+ *
+ * OMDb serves `m.media-amazon.com` today and `ia.media-imdb.com` historically,
+ * both listed, so in normal operation this nulls nothing.
+ */
+export function allowedPosterUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    if (!POSTER_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
+  const parsed = parseTitleLookup(query);
+  if (!parsed.ok) return { status: 400, json: { error: parsed.error } };
+  const { lookup } = parsed;
+
+  const cached = cacheGet(lookup.cacheKey);
+  if (cached) return { status: 200, json: cached };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const apiKey = resolveOmdbApiKey(config);
+  if (!apiKey) {
+    // 200 with its own status, NOT a 500 and not an empty "ok". Nothing is
+    // broken — the user simply has no key — and the UI needs to tell them that
+    // rather than showing a failure or an empty plot. Deliberately not cached:
+    // this server runs inside the TUI, where a key can be pasted into the
+    // Accounts tab at any moment, and a cached "no-key" would outlast it.
+    const out: PublicTitleMeta = { status: "no-key" };
+    return { status: 200, json: out };
+  }
+
+  const result =
+    lookup.imdbId !== undefined
+      ? await (deps.fetchTitleMetaImpl ?? fetchTitleMeta)(lookup.imdbId, apiKey)
+      : await (deps.fetchTitleMetaByNameImpl ?? fetchTitleMetaByName)(lookup.name ?? "", apiKey, {
+          ...(lookup.year !== undefined ? { year: lookup.year } : {}),
+          ...(lookup.type !== undefined ? { type: lookup.type } : {}),
+        });
+
+  if (!result.ok) {
+    // Not cached either, and this is the deliberate half of the caching policy:
+    // `fetchTitleMeta` flattens "OMDb has never heard of this" and "the request
+    // timed out" into the same `{ok: false}`, so caching a failure would pin a
+    // transient network blip to a title for the life of the process. The cost
+    // is that a genuinely unknown title is re-asked on every hover; the debounce
+    // in front of this route is what keeps that bounded.
+    const out: PublicTitleMeta = { status: "error", error: result.error };
+    return { status: 200, json: out };
+  }
+
+  const out: PublicTitleMeta = {
+    status: "ok",
+    imdbId: result.imdbId,
+    plot: result.plot,
+    posterUrl: allowedPosterUrl(result.posterUrl),
+  };
+  cacheSet(lookup.cacheKey, out);
+  return { status: 200, json: out };
+}
+
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
 export function isApiPath(urlPath: string): boolean {
   return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
@@ -347,6 +820,18 @@ export async function handleWebApi(
     const hit = await (deps.getPosterImpl ?? getPoster)(url);
     if (!hit) return { status: 404, json: { error: "poster unavailable" } };
     return posterResponse(hit);
+  }
+
+  if (method === "GET" && urlPath === "/api/sources") {
+    const config = await (deps.loadConfigImpl ?? loadConfig)();
+    return {
+      status: 200,
+      json: sourcesResponse(config, deps.sourceHealthImpl ?? sourceHealth, Date.now()),
+    };
+  }
+
+  if (method === "GET" && urlPath === "/api/title") {
+    return titleMeta(deps, query);
   }
 
   // ---- streaming -------------------------------------------------------
