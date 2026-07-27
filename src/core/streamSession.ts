@@ -99,6 +99,25 @@ export class StreamSessionRegistry {
    * have shown, not a thrown exception — both front-ends render it the same way.
    */
   async start(input: StartStreamInput): Promise<StreamSession> {
+    return this.begin(input).done;
+  }
+
+  /**
+   * Register a session and resolve it in the background, returning as soon as
+   * the session object exists.
+   *
+   * This is the split `start()` needs for an HTTP caller. The TUI can sit on a
+   * promise for as long as Real-Debrid takes to cache a torrent (minutes, with
+   * a progress bar); a `POST /api/stream` cannot — a browser, and anything
+   * proxying for it, will have given up long before, and the user would be left
+   * with a session running server-side that they never got an id for. So the
+   * route answers immediately with a `resolving` session and polls
+   * `GET /api/stream/:sid`, which sees the same object being mutated in place.
+   *
+   * `done` settles when the session reaches `ready` or `error` and never
+   * rejects, so a caller that drops it cannot produce an unhandled rejection.
+   */
+  begin(input: StartStreamInput): { session: StreamSession; done: Promise<StreamSession> } {
     const viaDebrid = input.route.kind === "realdebrid";
     const session: StreamSession = {
       id: this.idFactory(),
@@ -114,7 +133,18 @@ export class StreamSessionRegistry {
     this.sessions.set(session.id, session);
     const abort = new AbortController();
     this.aborts.set(session.id, abort);
+    return { session, done: this.resolveInto(session, input, abort) };
+  }
 
+  // The body of a session's resolve. Separate from begin() only so begin() can
+  // return before this runs; every state transition still happens in here, on
+  // the object already in the registry.
+  private async resolveInto(
+    session: StreamSession,
+    input: StartStreamInput,
+    abort: AbortController,
+  ): Promise<StreamSession> {
+    const viaDebrid = input.route.kind === "realdebrid";
     try {
       if (viaDebrid) {
         if (!input.debridToken) throw new Error(NO_DEBRID_TOKEN);

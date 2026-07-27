@@ -289,6 +289,36 @@ describe("startWebServer", () => {
       }
     });
 
+    // The stream routes are mutating and unauthenticated in the default
+    // (tokenless, loopback) setup, exactly like /api/control: a POST starts a
+    // swarm or spends the user's Real-Debrid account, a DELETE can delete
+    // downloaded files. They were added on the assumption that living under
+    // /api/* means the gate above already covers them — asserted here rather
+    // than assumed, because the gate is in server.ts and the routes are not.
+    // A 403 also proves nothing reached the router: the session registry is
+    // untouched and no config was read.
+    it("rejects a cross-site POST /api/stream before it reaches the router", async () => {
+      const base = await start();
+      const res = await fetch(`${base}/api/stream`, {
+        method: "POST",
+        headers: { origin: "https://evil.example" },
+        body: JSON.stringify({ magnet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567" }),
+      });
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: "cross-site request blocked" });
+      expect(live.sessions.list()).toEqual([]);
+    });
+
+    it("rejects a cross-site DELETE /api/stream/:sid", async () => {
+      const base = await start();
+      const res = await fetch(`${base}/api/stream/sess1?keep=1`, {
+        method: "DELETE",
+        headers: { "sec-fetch-site": "cross-site" },
+      });
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: "cross-site request blocked" });
+    });
+
     it("allows the dashboard's own same-origin POST", async () => {
       const base = await start();
       const res = await fetch(`${base}/api/control`, {

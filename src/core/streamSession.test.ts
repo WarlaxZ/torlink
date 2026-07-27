@@ -330,6 +330,51 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
   });
 });
 
+describe("StreamSessionRegistry — begin", () => {
+  it("returns a resolving session before the backend has answered", async () => {
+    // What makes POST /api/stream answerable: a Real-Debrid cache can take
+    // minutes, so the id and capability have to be available immediately.
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => {
+        await gate;
+        return fakeTorrentSession();
+      },
+      idFactory: () => "sess1",
+      capabilityFactory: () => "cap1",
+    });
+
+    const { session, done } = registry.begin({ ...INPUT, route: { kind: "torrent-auto" } });
+
+    expect(session).toMatchObject({ id: "sess1", capability: "cap1", state: "resolving" });
+    expect(registry.get("sess1")).toBe(session);
+    release();
+    await done;
+    // Same object, mutated in place — which is why polling get() works.
+    expect(registry.get("sess1")).toBe(session);
+    expect(session.state).toBe("ready");
+  });
+
+  it("reports a backend failure on the session rather than rejecting done", async () => {
+    // A dropped `done` must not become an unhandled rejection: the HTTP route
+    // deliberately doesn't await it.
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: async () => {
+        throw new Error("No peers found");
+      },
+      idFactory: () => "sess1",
+    });
+
+    const { session, done } = registry.begin({ ...INPUT, route: { kind: "torrent-auto" } });
+    await expect(done).resolves.toBe(session);
+    expect(session.state).toBe("error");
+    expect(session.error).toBe("No peers found");
+  });
+});
+
 describe("StreamSessionRegistry — stopAll", () => {
   it("stops every live session", async () => {
     const stopA = vi.fn(async () => {});
