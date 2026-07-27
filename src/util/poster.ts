@@ -1,4 +1,5 @@
 import jpeg from "jpeg-js";
+import { readFile } from "node:fs/promises";
 import type { FetchImpl } from "./net";
 import { log } from "./logger";
 
@@ -116,6 +117,23 @@ export async function fetchPosterRows(
     return renderJpegPoster(buf, cols, maxRows);
   } catch (err) {
     log.debug(`poster fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+// Render an already-downloaded poster from disk. Split from fetchPosterRows so
+// the cache layer owns the network and this module stays pure pixel work.
+// Returns null if the file is unreadable or not a decodable JPEG.
+export async function renderPosterFile(
+  file: string,
+  cols: number,
+  maxRows: number,
+): Promise<string[] | null> {
+  try {
+    const buf = await readFile(file);
+    return renderJpegPoster(buf, cols, maxRows);
+  } catch (err) {
+    log.debug(`poster render failed for ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
