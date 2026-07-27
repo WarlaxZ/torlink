@@ -172,11 +172,16 @@ describe("runServe web mount", () => {
 
   it("does not mount the web ui without --web", async () => {
     const port = await freePortPair();
+    // A probed port, never the literal 9162. That is torlink's own default web
+    // port, so asserting it is free failed for anyone running `torlnk --web`
+    // while testing — the single most likely process on a torlink dev machine.
+    // --web-port without --web must start nothing, which is the same claim.
+    const unusedWebPort = await freePortPair();
     const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, downloadDir: dir });
+    const done = runServe({ port, webPort: unusedWebPort, downloadDir: dir });
     expect(await waitUntil(() => isListening(port))).toBe(true);
     expect(await isListening(port + 1)).toBe(false);
-    expect(await isListening(9162)).toBe(false); // nor the default web port
+    expect(await isListening(unusedWebPort)).toBe(false);
     newSignalHandler(before)();
     await done;
   });

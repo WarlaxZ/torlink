@@ -14,5 +14,12 @@ import path from "node:path";
 // VITEST_WORKER_ID is stable for a worker's lifetime and distinct across
 // concurrent workers; the pid disambiguates the forks pool, where a fresh
 // process can reuse a worker id.
+//
+// The parent directory comes from globalSetup (src/test-globalSetup.ts), which
+// creates one per run and removes it when every worker has finished — these
+// directories used to be left behind on every run. The fallback keeps this file
+// working if it is ever loaded without that globalSetup (a bare
+// `vitest --config` invocation, a future config split).
 const workerTag = `${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}`;
-process.env.TORLINK_STATE_DIR = path.join(os.tmpdir(), "torlink-test-state", workerTag);
+const root = process.env.TORLINK_TEST_STATE_ROOT ?? path.join(os.tmpdir(), "torlink-test-state");
+process.env.TORLINK_STATE_DIR = path.join(root, workerTag);

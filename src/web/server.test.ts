@@ -1,6 +1,6 @@
 import http from "node:http";
 import net from "node:net";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,9 +22,16 @@ let handle: WebServerHandle | null = null;
 // queue's listeners while a stream is open.
 let live: Runtime;
 
+// Every directory assets() has handed out, so afterEach can remove them. The
+// factory records them itself rather than each test remembering to: there are
+// nine call sites and closing the server handle alone left 484 stray
+// /tmp/torlnk-web-* trees on one dev machine.
+const assetDirs: string[] = [];
+
 afterEach(async () => {
   await handle?.close();
   handle = null;
+  while (assetDirs.length) rmSync(assetDirs.pop()!, { recursive: true, force: true });
 });
 
 async function start(over: Parameters<typeof startWebServer>[1] = {}): Promise<string> {
@@ -37,6 +44,7 @@ async function start(over: Parameters<typeof startWebServer>[1] = {}): Promise<s
 // has something to trip over.
 function assets(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "torlnk-web-"));
+  assetDirs.push(dir);
   writeFileSync(path.join(dir, "index.html"), "<!doctype html><title>dash</title>");
   writeFileSync(path.join(dir, "app.js"), "export const x = 1;\n");
   writeFileSync(path.join(dir, "app.js.map"), '{"version":3}');

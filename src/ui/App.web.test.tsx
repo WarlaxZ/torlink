@@ -107,7 +107,16 @@ let stdoutWrites: string[];
 let stdoutSpy: ReturnType<typeof vi.spyOn>;
 let consoleSpies: ReturnType<typeof vi.spyOn>[];
 
+// Saved and restored, not just set: this var gates a real outbound fetch (see
+// App.tsx's update check). Leaking it set would silently disable that check for
+// every later file in the same worker; leaking it *unset* after a file that had
+// it set legitimately would give a second file rendering <App> network access
+// depending on load order. Either way the suite's behaviour would hinge on file
+// order, which is the one thing a test must not do.
+let noUpdateCheck: string | undefined;
+
 beforeEach(() => {
+  noUpdateCheck = process.env.TORLINK_NO_UPDATE_CHECK;
   process.env.TORLINK_NO_UPDATE_CHECK = "1";
   logSpies.info.mockClear();
   logSpies.warn.mockClear();
@@ -128,6 +137,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (noUpdateCheck === undefined) delete process.env.TORLINK_NO_UPDATE_CHECK;
+  else process.env.TORLINK_NO_UPDATE_CHECK = noUpdateCheck;
   stdoutSpy.mockRestore();
   for (const s of consoleSpies) s.mockRestore();
   vi.restoreAllMocks();
