@@ -400,19 +400,49 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   }
 
   await new Promise<void>((resolve) => {
+    let shuttingDown = false;
     const shutdown = (): void => {
-      // Order matters. The API server first, so nothing new arrives. Then the web
-      // server, which ends its event streams and cuts any half-open browser
-      // socket — a request genuinely mid-flight is sacrificed, deliberately, so a
-      // quit can never block on a browser. Then the stream sessions, which can
-      // only shrink once no new one can be started. The queue last: it is what
-      // the streams and requests were reading, so suspending it first would tear
-      // state out from under work still unwinding.
-      server.close();
-      void web?.close();
-      void runtime.sessions.stopAll();
-      runtime.queue.suspend();
-      resolve();
+      // Re-entry guard, and the handlers come off immediately: SIGINT and SIGTERM
+      // can both arrive (a supervisor signalling while the user hits Ctrl-C), and
+      // a second pass would call suspend() again mid-teardown. It also means the
+      // *third* Ctrl-C reaches Node's default handler and kills the process,
+      // which is the escape hatch a hung shutdown needs to leave open.
+      if (shuttingDown) return;
+      shuttingDown = true;
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
+      void (async () => {
+        // Order matters. The API server first, so nothing new arrives. Then the web
+        // server, which ends its event streams and cuts any half-open browser
+        // socket — a request genuinely mid-flight is sacrificed, deliberately, so a
+        // quit can never block on a browser. Then the stream sessions, which can
+        // only shrink once no new one can be started. The queue last: it is what
+        // the streams and requests were reading, so suspending it first would tear
+        // state out from under work still unwinding.
+        await new Promise<void>((done) => {
+          server.close(() => done());
+          // The same fix web/server.ts documents for the web server, and for the
+          // same reason: close() stops accepting and then waits for open
+          // connections to end, and a socket that is connected with no *complete*
+          // request in flight — a browser preconnect, a TCP health probe, a port
+          // scan, half-sent headers — never ends. One bare `net.connect` used to
+          // make Ctrl-C hang here forever, which is also what made
+          // `daemon/restart.ts` give up after 10s and report stillRunning: true,
+          // leaving `torlnk update` with the old daemon still alive.
+          server.closeAllConnections();
+        });
+        // Both are awaited so the order above is real, and both swallow a
+        // rejection: a failure to tear one thing down must not skip suspend()
+        // (which is what flushes state and disarms the boot marker) or leave this
+        // promise unsettled, i.e. hang the very quit it was meant to unblock.
+        await web?.close().catch(() => {});
+        await runtime.sessions.stopAll().catch(() => {});
+        runtime.queue.suspend();
+        // Resolved only once everything above is actually down, so a caller that
+        // awaits runServe (the tests, and any future in-process host) is waiting
+        // on a finished shutdown rather than on a started one.
+        resolve();
+      })();
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);

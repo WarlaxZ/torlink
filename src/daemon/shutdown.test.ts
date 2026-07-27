@@ -61,6 +61,17 @@ function isListening(port: number): Promise<boolean> {
   });
 }
 
+// Fail with "timed out waiting for X" instead of vitest's bare test timeout: the
+// hang these tests exist for is indistinguishable from a slow machine otherwise.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), ms).unref();
+    }),
+  ]);
+}
+
 async function waitUntil(fn: () => Promise<boolean>, ms = 5000): Promise<boolean> {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -273,9 +284,60 @@ describe("runServe web mount", () => {
 
     expect(fake.stopAll).toHaveBeenCalled();
     expect(fake.suspend).toHaveBeenCalled();
-    expect(await waitUntil(async () => !(await isListening(port + 1)))).toBe(true);
-    expect(await waitUntil(async () => !(await isListening(port)))).toBe(true);
+    // Asserted directly, not through waitUntil: runServe now resolves only after
+    // both servers' close() have called back, so anything still listening here is
+    // a real failure rather than a race worth retrying.
+    expect(await isListening(port + 1)).toBe(false);
+    expect(await isListening(port)).toBe(false);
     await events.body?.cancel().catch(() => {});
+  });
+
+  it("finishes shutting down with a connected socket that never sends a request", async () => {
+    const port = await freePortPair();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+
+    // A bare TCP connection that never sends a byte — a browser's speculative
+    // preconnect, a TCP health probe, a port scan. `server.close()` stops
+    // accepting and then waits for open connections to end, and this one never
+    // ends, so without `closeAllConnections()` on the API server the shutdown
+    // below hangs forever (and `daemon/restart.ts` then reports stillRunning
+    // after 10s, which is how `torlnk update` left the old daemon running).
+    //
+    // Note what this test can assert that the older ones could not: `isListening`
+    // flips false the instant close() stops accepting, so a permanently hung
+    // process passed those. The claim here is that the shutdown *finishes*.
+    const idle = net.connect({ port, host: "127.0.0.1" });
+    await new Promise<void>((resolve, reject) => {
+      idle.once("connect", () => resolve());
+      idle.once("error", reject);
+    });
+
+    newSignalHandler(before)();
+    await expect(withTimeout(done, 3000, "runServe to finish shutting down")).resolves.toBeUndefined();
+    expect(fake.suspend).toHaveBeenCalled();
+    expect(await isListening(port)).toBe(false);
+    idle.destroy();
+  });
+
+  it("ignores a second signal instead of tearing down twice", async () => {
+    const port = await freePortPair();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+
+    const handler = newSignalHandler(before);
+    handler();
+    handler(); // a supervisor's SIGTERM racing the user's Ctrl-C
+    await withTimeout(done, 3000, "runServe to finish shutting down");
+    // suspend() flushes state and disarms the boot marker; running it twice
+    // mid-teardown is exactly what the re-entry guard is there to prevent.
+    expect(fake.suspend).toHaveBeenCalledTimes(1);
+    // Both handlers were removed by the first pass, so a third signal reaches
+    // Node's default handler — the escape hatch from a shutdown that does hang.
+    expect(process.listeners("SIGTERM").some((l) => !before.has(l))).toBe(false);
+    expect(process.listeners("SIGINT").some((l) => !sigint.has(l))).toBe(false);
   });
 });
 
