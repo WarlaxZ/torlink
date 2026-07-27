@@ -12,10 +12,23 @@ const categoryLine = (adultEnabled: boolean): string =>
     .map((g) => g.group.toLowerCase())
     .join(`  ${ICON.dot}  `);
 
+/**
+ * The in-process web server's state, for the status line below. `null` means
+ * `--web` was never passed (say nothing at all); a url means it is really
+ * listening on that url; `failed` means the bind failed and the reason is in the
+ * notice and the log.
+ */
+export type SplashWebStatus = { url: string } | { failed: true };
+
 export function Splash({
   updateVersion,
   recovered,
-}: { updateVersion?: string | null; recovered?: boolean } = {}) {
+  webStatus,
+}: {
+  updateVersion?: string | null;
+  recovered?: boolean;
+  webStatus?: SplashWebStatus | null;
+} = {}) {
   const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion, adultEnabled } = useStore();
   const { isRawModeSupported } = useStdin();
   const categories = categoryLine(adultEnabled);
@@ -72,6 +85,21 @@ export function Splash({
           <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid for instant, private streaming.</Text>
         )}
       </Box>
+
+      {/* The browser UI's address, for as long as the splash is up: the notice
+          that also carries it expires after four seconds, which left `torlnk
+          --web`'s headline feature discoverable only from the log file. A status
+          line in the same dim treatment as the tip above it, never a banner —
+          and never a url unless the server really bound one. */}
+      {webStatus ? (
+        <Box>
+          <Text dimColor>
+            {"url" in webStatus
+              ? `web ui · ${webStatus.url}`
+              : "web ui · failed to start (see the log)"}
+          </Text>
+        </Box>
+      ) : null}
 
       <Box marginTop={1} width={barWidth}>
         <SearchBar

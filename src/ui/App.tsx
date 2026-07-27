@@ -74,7 +74,7 @@ import { Downloads } from "./components/Downloads";
 import { Seeding } from "./components/Seeding";
 import { Spinner } from "./components/Spinner";
 import { TabTitle } from "./components/TabTitle";
-import { Splash } from "./views/Splash";
+import { Splash, type SplashWebStatus } from "./views/Splash";
 import { FolderPrompt } from "./components/FolderPrompt";
 import { TokenPrompt } from "./components/TokenPrompt";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
@@ -454,6 +454,11 @@ export function App({
   const downloadDirRef = useRef("");
   if (config) downloadDirRef.current = config.downloadDir;
 
+  // The web server's state for the splash's status line. Stays null unless
+  // --web was passed, so a plain launch says nothing; only ever holds a url the
+  // server reported back as bound.
+  const [webStatus, setWebStatus] = useState<SplashWebStatus | null>(null);
+
   // Host the browser UI inside the TUI process, over this component's own queue.
   //
   // Deps are deliberately narrow: `queue` flips null -> queue exactly once, and
@@ -498,7 +503,12 @@ export function App({
           return;
         }
         handle = started;
-        setNotice(`${ICON.done} Web UI on http://${host}:${started.port}`);
+        // The port comes from the handle, not from webPort: the handle reports
+        // what was actually bound, which is the only correct answer once
+        // `port: 0` is in play (the daemon reads it back the same way).
+        const url = `http://${host}:${started.port}`;
+        setNotice(`${ICON.done} Web UI on ${url}`);
+        setWebStatus({ url });
       } catch (e) {
         // Every failure mode lands here, including startWebServer's refusal to
         // bind a non-loopback host without a token. The TUI keeps running: a
@@ -506,7 +516,12 @@ export function App({
         // straight through the frame.
         const message = e instanceof Error ? e.message : String(e);
         log.error(`[web] could not start on ${host}:${webPort ?? "default"}: ${message}`);
-        if (!cancelled) setNotice(`Web UI failed: ${message}`);
+        if (cancelled) return;
+        setNotice(`Web UI failed: ${message}`);
+        // Said on the splash too, briefly: staying silent after a failed bind
+        // sends the user to the log file to find out why, once the notice has
+        // expired — which is the gap this line exists to close.
+        setWebStatus({ failed: true });
       }
     })();
     return () => {
@@ -1946,7 +1961,7 @@ export function App({
     return (
       <StoreContext.Provider value={store}>
         <TabTitle />
-        <Splash updateVersion={updateVersion} recovered={recovered} />
+        <Splash updateVersion={updateVersion} recovered={recovered} webStatus={webStatus} />
       </StoreContext.Provider>
     );
   }

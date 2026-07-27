@@ -66,6 +66,11 @@ vi.mock("../config/config", async (importOriginal) => {
   };
 });
 
+// What can and cannot be mocked here, learned the hard way. Everything below is
+// safe. `../util/dns` is NOT: mocking it stalls App's boot with no error at all —
+// the frame sits on "Starting torlink" forever and nothing is thrown or logged —
+// because other modules in the graph import more than setDnsServers from it. The
+// real one is harmless in a test (setDnsServers([]) just clears the dispatcher).
 vi.mock("../download/queue", () => ({ DownloadQueue: FakeQueue }));
 vi.mock("../download/persist", () => ({ loadQueue: async () => [], loadSeeds: async () => [] }));
 vi.mock("../download/history", () => ({ loadHistory: async () => [] }));
@@ -287,6 +292,47 @@ describe("App --web mount", () => {
       await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
       ui.press(TAB);
       await vi.waitFor(() => expect(ui.frame()).toContain("--web-port ignored without --web"));
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("shows the bound url on the splash, from the handle's own port", async () => {
+    // The requested port and the bound port differ deliberately: the status line
+    // must report what the server actually bound, not what was asked for.
+    const start = vi.fn(async () => makeHandle(24242));
+    const ui = renderUI(<App web webPort={19001} startWebServerImpl={start} />);
+    try {
+      // No tab: this asserts the splash itself, which is where a `torlnk --web`
+      // user is sitting, and it outlives the notice's four-second expiry.
+      await vi.waitFor(() => expect(ui.frame()).toContain("web ui · http://127.0.0.1:24242"));
+      expect(ui.frame()).not.toContain("19001");
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("shows no web line on the splash without --web", async () => {
+    const ui = renderUI(<App startWebServerImpl={vi.fn(async () => makeHandle())} />);
+    try {
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      expect(ui.frame()).not.toContain("web ui ·");
+      expect(ui.frame()).not.toContain("http://");
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("says so on the splash when the bind failed, and shows no url", async () => {
+    const start = vi.fn(async () => {
+      throw new Error("listen EADDRINUSE: address already in use 127.0.0.1:19162");
+    });
+    const ui = renderUI(<App web webPort={19162} startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(ui.frame()).toContain("web ui · failed to start"));
+      expect(ui.frame()).not.toContain("http://");
       expectNothingOnStdout();
     } finally {
       ui.unmount();
