@@ -265,9 +265,8 @@ export async function getPoster(
 }
 
 /**
- * Terminal half-block rows for a poster, via the cache. Same signature shape as
- * `fetchPosterRows` so the TUI hook swaps one call for the other, but the bytes
- * are fetched at most once per URL across the whole app.
+ * Terminal half-block rows for a poster, via the cache. The bytes are fetched
+ * at most once per URL across the whole app.
  */
 export async function cachedPosterRows(
   url: string,
