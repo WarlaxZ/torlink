@@ -185,23 +185,44 @@ Add `--web` and torlink also serves a browser interface — search every source 
 
 ```sh
 torlnk --web          # the TUI hosts it; quitting the TUI stops it
-torlnk serve --web    # headless: the add API plus the browser UI
+torlnk serve --web    # no TUI: the add API plus the browser UI
 ```
 
-`torlnk --web` lands on **`http://127.0.0.1:9162`** and prints the address on the splash; `torlnk serve --web` lands on serve's own port, **`http://127.0.0.1:9161`**. Change either with `--port`. Under `serve` there's one server, not two: the same port answers the dashboard *and* `/add`, `/downloads` and `/control`, so there's one address to remember and one thing to firewall.
+`torlnk serve --web` lands on serve's own port, **`http://127.0.0.1:9161`**, and **opens your browser there for you**. `torlnk --web` lands on **`http://127.0.0.1:9162`** and prints the address on the splash — it doesn't steal focus, because you asked for a terminal UI; press **shift+w** (anywhere but the splash's search box) to open it. Change either port with `--port`. Under `serve` there's one server, not two: the same port answers the dashboard *and* `/add`, `/downloads` and `/control`, so there's one address to remember and one thing to firewall.
+
+Pass `--headless` to `serve --web` if you'd rather it just printed the link. It also opens nothing under `--daemon`, or when stdout isn't a terminal — a browser window on a machine nobody is sitting at is not a feature.
 
 **Turning it off is just leaving `--web` off** — there's no setting to forget about, and nothing listens until you ask for it. If the port is already taken, the TUI says so and carries on without the dashboard (the terminal is the product; a missing web UI shouldn't kill your session), while `serve --web` treats it as a startup failure and exits, because a daemon that came up half-configured is worse than one that didn't come up.
 
 ### Reaching it from another device
 
-Binding anything other than loopback **requires** a token — torlink refuses to start rather than leave your queue open to the network:
+Binding anything other than loopback **requires** a token — torlink will not leave your queue open to the network. `serve --web` mints one for you, because it has a link to hand it to:
+
+```sh
+torlnk serve --web --host 0.0.0.0
+# web ui bound to 0.0.0.0:9161 (token required)
+# open on this machine:  http://127.0.0.1:9161/#k=8f3c…
+# open from your LAN:    http://192.168.1.24:9161/#k=8f3c…
+# api + web ui on one port, downloads -> ~/Downloads/torlink
+# token 8f3c…  (pass --token to pin it across restarts)
+```
+
+The token rides in the link's `#fragment`, which never reaches the server — so it stays out of the access log and out of any `Referer`. The page adopts it and strips it from the address bar, so a screenshot or a shoulder-surfer doesn't get the secret; the token itself keeps working until the daemon restarts.
+
+Only `serve --web` mints. `torlnk --web` — the TUI-hosted dashboard — still refuses a non-loopback bind without a token, and says so on the splash rather than exiting: minting a fresh secret every time you open your terminal UI would be a surprise, not a convenience.
+
+A minted token is new on every start, and it's printed to stdout — which under `--daemon` is a log file, so that file is created `0600`. Pass your own token when something else talks to the API, or when you want a link that survives a restart:
 
 ```sh
 torlnk --web --host 0.0.0.0 --token "$(openssl rand -hex 16)"
 torlnk serve --web --host 0.0.0.0 --token "$(openssl rand -hex 16)"
 ```
 
+Without `--web` there's no link to hand back, so `serve --host 0.0.0.0` still refuses to start without a token: a script needs a secret it chose, not a fresh one every boot.
+
 Both commands read the same three flags — `--host`, `--port`, `--token` — because both are one process making one exposure decision.
+
+> On WSL2 without mirrored networking, the LAN address printed above is your WSL VM's, and it isn't reachable from other machines until you add a `netsh interface portproxy` rule and a firewall opening on the Windows host. torlink prints the address it really bound; it can't punch through the VM's NAT for you.
 
 #### Setting the token
 
@@ -216,7 +237,7 @@ The flag beats the environment variable. The environment variable is only consul
 
 There's no token in the config file on purpose: `config.json` is world-readable in your home directory, and a shared secret doesn't belong there.
 
-You enter the token once in the browser. It's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
+You enter the token once in the browser, or follow a link that carries it. Either way it's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
 
 On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
 
