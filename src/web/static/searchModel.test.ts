@@ -46,7 +46,12 @@ function snapshot(results: PublicSearchResult[], over: Partial<PublicSearchSnaps
 }
 
 function view(over: Partial<SearchView> = {}): SearchView {
-  return { ...emptyView(), query: "sintel", ...over };
+  return { ...emptyView(), query: "sintel", mode: "search", ...over };
+}
+
+/** A view mid-browse: the blank query the TUI sends on an empty submit. */
+function browsing(over: Partial<SearchView> = {}): SearchView {
+  return { ...emptyView(), query: "", mode: "browse", ...over };
 }
 
 const ALWAYS_HEALTHY = (): boolean => true;
@@ -226,6 +231,46 @@ describe("searchStatus", () => {
     });
     expect(searchStatus(v, 4).text).toBe("4 results · 1 source down");
   });
+
+  it("counts sources while browsing, without calling it a search", () => {
+    const v = browsing({ running: true, snapshot: snapshot([], { done: 12, total: 23 }) });
+    expect(searchStatus(v, 0).text).toBe("Loading 12/23 sources");
+    expect(searchStatus(v, 5).text).toBe("loading… 12/23 sources");
+  });
+
+  it("says nothing is new rather than quoting an empty query", () => {
+    const v = browsing({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("Nothing new right now.");
+    expect(searchStatus(v, 0).tone).toBe("dim");
+  });
+
+  it("labels browse results as the newest across all sources", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(searchStatus(v, 4).text).toBe("4 results · newest across all sources");
+  });
+
+  // The mode-independent branches must keep winning over the browse lines:
+  // "every source is down" and "your filters did this" are still the truth.
+  it("keeps the outage and filter branches while browsing", () => {
+    const down = {
+      perSource: {
+        a: { loading: false, error: "timed out", code: "timed out", count: 0 },
+        b: { loading: false, error: "HTTP 503", code: "HTTP 503", count: 0 },
+      },
+      total: 2,
+      done: 2,
+    };
+    const failed = searchStatus(browsing({ snapshot: snapshot([], down) }), 0);
+    expect(failed.text).toBe("Couldn't reach any source. They may be down.");
+    expect(failed.tone).toBe("error");
+
+    const filtered = browsing({ snapshot: snapshot([result()], { total: 2, done: 2 }), textFilter: "zzz" });
+    expect(searchStatus(filtered, 0).text).toBe("Nothing matches those filters.");
+  });
+
+  it("still shows the idle line before anything is submitted", () => {
+    expect(searchStatus(emptyView(), 0).text).toBe("Search across every enabled source.");
+  });
 });
 
 describe("progressLabel / erroredSources", () => {
@@ -254,6 +299,10 @@ describe("searchUrl", () => {
 
   it("omits ?k= entirely on a tokenless server", () => {
     expect(searchUrl("x", "All", "")).toBe("/api/search?q=x&group=All");
+  });
+
+  it("sends q= for a browse, so the server can tell blank from absent", () => {
+    expect(searchUrl("", "All", "")).toBe("/api/search?q=&group=All");
   });
 });
 

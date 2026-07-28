@@ -83,8 +83,15 @@ export function sourceLabel(sources: SourcesResponse | null, id: string): string
 
 /** Everything the results list is rendered from. */
 export interface SearchView {
-  /** The submitted query. Empty before the first search. */
+  /** The submitted query. Empty in `browse` mode and before the first submit. */
   query: string;
+  /**
+   * Which of three states the pane is in. This is NOT derivable from `query`:
+   * browse mode submits the empty string, so `!query` alone cannot tell "the
+   * user asked for the top lists" from "nothing has been submitted yet", and
+   * conflating them makes a browse render as a fresh page.
+   */
+  mode: "idle" | "search" | "browse";
   /** `ALL_TAB` or one of the server's group names. */
   group: string;
   /** The latest frame, or null before one arrives. */
@@ -99,6 +106,7 @@ export interface SearchView {
 export function emptyView(): SearchView {
   return {
     query: "",
+    mode: "idle",
     group: ALL_TAB,
     snapshot: null,
     running: false,
@@ -150,10 +158,18 @@ export interface SearchStatus {
 }
 
 export function searchStatus(view: SearchView, shown: number): SearchStatus {
-  if (!view.query) return { text: "Search across every enabled source.", tone: "dim" };
+  if (view.mode === "idle") return { text: "Search across every enabled source.", tone: "dim" };
+  const browse = view.mode === "browse";
   const progress = progressLabel(view.snapshot);
   if (view.running) {
-    const head = shown > 0 ? `searching… ${progress}` : `Searching ${progress}`;
+    // "Loading" not "Searching" while browsing: nothing was searched for. Same
+    // word the TUI's spinner uses for the same state. Both casings are spelled
+    // out rather than derived — `noUncheckedIndexedAccess` makes `verb[0]`
+    // possibly-undefined, and a two-word table is clearer than appeasing it.
+    const head =
+      shown > 0
+        ? `${browse ? "loading" : "searching"}… ${progress}`
+        : `${browse ? "Loading" : "Searching"} ${progress}`;
     return { text: head, tone: "dim" };
   }
   const down = erroredSources(view.snapshot);
@@ -161,17 +177,23 @@ export function searchStatus(view: SearchView, shown: number): SearchStatus {
   if (shown === 0) {
     // Every source failing and every source finding nothing look identical in a
     // results list, so they must not read the same. This is the whole reason
-    // `perSource.error` is on the wire.
+    // `perSource.error` is on the wire. Both of these outrank the mode: they are
+    // true whether or not the user typed anything.
     if (total > 0 && down.length >= total) {
       return { text: "Couldn't reach any source. They may be down.", tone: "error" };
     }
     if (view.hideDead || view.textFilter.trim()) {
       return { text: "Nothing matches those filters.", tone: "dim" };
     }
+    if (browse) return { text: "Nothing new right now.", tone: "dim" };
     return { text: `No results for “${view.query}”.`, tone: "dim" };
   }
   const note = down.length > 0 ? ` · ${down.length} source${down.length === 1 ? "" : "s"} down` : "";
-  return { text: `${shown} result${shown === 1 ? "" : "s"}${note}`, tone: "dim" };
+  // The TUI drops the count while browsing because its panel title already says
+  // "latest". The web has no such title, so keep the count and append the
+  // phrase rather than replacing one true thing with another.
+  const tail = browse ? " · newest across all sources" : "";
+  return { text: `${shown} result${shown === 1 ? "" : "s"}${note}${tail}`, tone: "dim" };
 }
 
 /** The `GET /api/search` URL for a query. `token` empty means a tokenless server. */
