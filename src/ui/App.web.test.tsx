@@ -297,12 +297,12 @@ describe("App --web mount", () => {
     const ui = renderUI(<App webPort={19002} startWebServerImpl={start} />);
     try {
       await vi.waitFor(() =>
-        expect(logSpies.warn).toHaveBeenCalledWith("[web] --web-port ignored without --web"),
+        expect(logSpies.warn).toHaveBeenCalledWith("[web] --port ignored without --web"),
       );
       expect(start).not.toHaveBeenCalled();
       await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
       ui.press(TAB);
-      await vi.waitFor(() => expect(ui.frame()).toContain("--web-port ignored without --web"));
+      await vi.waitFor(() => expect(ui.frame()).toContain("--port ignored without --web"));
       expectNothingOnStdout();
     } finally {
       ui.unmount();
