@@ -1,6 +1,6 @@
 {
   "name": "torlnk-rd",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Search, stream and download torrents — in your terminal or your browser. Zero setup, optional Real-Debrid.",
   "type": "module",
   "bin": {
