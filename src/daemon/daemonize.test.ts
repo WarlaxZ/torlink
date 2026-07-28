@@ -11,7 +11,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnDaemon, logPathFor } from "./daemonize";
+import { spawnDaemon, logPathFor, runPathFor, pidPathFor } from "./daemonize";
 
 const NAME = "test-daemonize";
 
@@ -19,7 +19,9 @@ function cleanup(): void {
   // Every path spawnDaemon writes lives under this worker's own
   // TORLINK_STATE_DIR (see src/test-setup.ts), so removing them cannot touch a
   // developer's real daemon state.
-  for (const p of [logPathFor(NAME)]) fs.rmSync(p, { force: true });
+  for (const p of [logPathFor(NAME), runPathFor(NAME), pidPathFor(NAME)]) {
+    fs.rmSync(p, { force: true });
+  }
 }
 
 describe("spawnDaemon", () => {
@@ -35,6 +37,33 @@ describe("spawnDaemon", () => {
 
     const mode = fs.statSync(logPathFor(NAME)).mode & 0o777;
     expect(mode).toBe(0o600);
+  });
+
+  it("keeps the run descriptor owner-only, because it stores the argv", () => {
+    // `torlnk update` relaunches a daemon from this file, so it holds the whole
+    // command line — and `--token <secret>` is in there verbatim. World-readable
+    // was survivable when nothing pushed people toward tokens; `serve --web`
+    // telling you to "pass --token to pin it across restarts" changes that.
+    cleanup();
+    const pid = spawnDaemon(NAME, ["-e", ""], process.cwd());
+    expect(pid).toBeGreaterThan(0);
+
+    expect(fs.statSync(runPathFor(NAME)).mode & 0o777).toBe(0o600);
+    // The argv really is in there — otherwise this test would pass for the
+    // wrong reason if the descriptor's shape ever changed.
+    const desc = JSON.parse(fs.readFileSync(runPathFor(NAME), "utf8")) as { argv: string[] };
+    expect(desc.argv).toContain("-e");
+  });
+
+  it("tightens a run descriptor that already exists at a looser mode", () => {
+    cleanup();
+    fs.mkdirSync(path.dirname(runPathFor(NAME)), { recursive: true });
+    fs.writeFileSync(runPathFor(NAME), "{}\n", { mode: 0o644 });
+    fs.chmodSync(runPathFor(NAME), 0o644);
+
+    spawnDaemon(NAME, ["-e", ""], process.cwd());
+
+    expect(fs.statSync(runPathFor(NAME)).mode & 0o777).toBe(0o600);
   });
 
   it("tightens a log file that already exists at a looser mode", () => {

@@ -61,9 +61,16 @@ export function spawnDaemon(name: string, argv: string[], cwd: string): number {
   child.unref();
   const pid = child.pid ?? 0;
   if (pid) {
+    // The pid is not a secret, so it keeps the default mode.
     fs.writeFileSync(pidPathFor(name), `${pid}\n`);
+    // The run descriptor is, though: it stores the whole argv so `torlnk update`
+    // can relaunch this daemon, and a `--token <secret>` lives in there verbatim.
+    // 0600, and chmod'd unconditionally because writeFileSync's mode only
+    // applies when it creates the file — an install that has been restarting a
+    // daemon since before this would otherwise keep its world-readable copy.
     const desc: RunDescriptor = { name, pid, argv, cwd, startedAt: Date.now() };
-    fs.writeFileSync(runPathFor(name), `${JSON.stringify(desc, null, 2)}\n`);
+    fs.writeFileSync(runPathFor(name), `${JSON.stringify(desc, null, 2)}\n`, { mode: 0o600 });
+    fs.chmodSync(runPathFor(name), 0o600);
   }
   return pid;
 }
