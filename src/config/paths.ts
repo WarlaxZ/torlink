@@ -12,6 +12,7 @@ const base = envPaths(APP_NAME, { suffix: "" });
 const override = process.env.TORLINK_STATE_DIR;
 const dataDir = override ? path.join(override, "data") : base.data;
 const configDir = override ? path.join(override, "config") : base.config;
+const cacheDir = override ? path.join(override, "cache") : base.cache;
 
 export const defaultDownloadDir = path.join(os.homedir(), "Downloads", APP_NAME);
 
@@ -30,6 +31,11 @@ export const logFile = path.join(dataDir, "torlink.log");
 // Per-torrent .torrent metadata, captured during download so a re-seed can
 // verify the on-disk file locally instead of re-fetching it from the swarm.
 export const torrentsDir = path.join(dataDir, "torrents");
+
+// Cached poster originals, keyed by a hash of the source URL. The browser is
+// served these bytes as-is (full quality); the TUI half-blocks the same file
+// rather than re-fetching it. Safe to delete at any time — it is a cache.
+export const postersDir = path.join(cacheDir, "posters");
 
 // Armed just before boot hands saved state to the torrent engine, disarmed
 // once the boot settles; see download/bootguard.ts.

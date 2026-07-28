@@ -1,7 +1,10 @@
 import { fetch as undiciFetch } from "undici";
 import { getDnsDispatcher } from "./dns";
 
-export const USER_AGENT = "torlink (+https://www.npmjs.com/package/torlnk)";
+// The URL is this fork's own package. `torlnk` (no -rd) is the upstream project
+// this forked from, so pointing there identified us to every tracker as somebody
+// else's software.
+export const USER_AGENT = "torlink (+https://www.npmjs.com/package/torlnk-rd)";
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 

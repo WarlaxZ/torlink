@@ -64,6 +64,8 @@ if (cmd.kind === "update") {
     downloadDir: cmd.downloadDir,
     seedTimeMs: cmd.seedTimeMs,
     deleteFiles: cmd.deleteFiles,
+    web: cmd.web,
+    webPort: cmd.webPort,
   };
   void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
 } else if (cmd.kind === "files") {
@@ -127,6 +129,18 @@ const app = render(
     initialMagnet={cmd.initialMagnet}
     initialTorrent={cmd.initialTorrent}
     onQuit={() => forceExit(0)}
+    web={cmd.web}
+    webPort={cmd.webPort}
+    webHost={cmd.webHost}
+    // parseCliArgs is pure and never reads the environment, so the env fallback
+    // the daemon paths apply above has to be applied here too — otherwise
+    // `torlnk --web --web-host 0.0.0.0` with only TORLINK_API_TOKEN set is
+    // refused for a missing token the user did supply.
+    //
+    // Only on the --web path: merging it unconditionally would turn a
+    // TORLINK_API_TOKEN exported for the daemon into a phantom --web-token and
+    // make App warn about a flag nobody passed.
+    webToken={cmd.web ? (cmd.webToken ?? process.env.TORLINK_API_TOKEN) : cmd.webToken}
   />,
   { exitOnCtrlC: false },
 );

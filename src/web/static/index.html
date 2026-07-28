@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>torlnk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>torlnk</h1>
+      <!-- Search / For You / Queue, the three things this app is. Buttons
+           rather than links or a router: it is one page with three panes, and a
+           URL that could be bookmarked mid-search would promise a restored
+           search it cannot deliver (the stream is not replayable). -->
+      <nav id="views" class="views" hidden>
+        <button id="view-search" type="button" class="view-tab" aria-pressed="true">search</button>
+        <button id="view-recc" type="button" class="view-tab" aria-pressed="false">for you</button>
+        <button id="view-queue" type="button" class="view-tab" aria-pressed="false">
+          queue<span id="queue-count" class="badge" hidden></span>
+        </button>
+      </nav>
+      <span id="conn" class="conn" data-state="connecting">connecting</span>
+    </header>
+
+    <form id="auth" class="card" hidden>
+      <label for="token">Access token</label>
+      <input id="token" type="password" autocomplete="current-password" />
+      <button type="submit">Unlock</button>
+      <p id="auth-error" class="error" hidden></p>
+    </form>
+
+    <p id="notice" class="notice" hidden></p>
+
+    <main id="app" hidden>
+      <!-- The stream file picker. Shown only when a session resolves to more
+           than one playable file; every child below the heading is built by
+           app.js with createElement, because the filenames come out of a
+           torrent. It sits above both panes because Play is offered on a search
+           result and on a queue row, and it is replaced wholesale by neither
+           list's re-render (the queue's happens four times a second). -->
+      <div id="picker" class="card picker" hidden>
+        <p id="picker-title" class="picker-title"></p>
+        <ul id="picker-files" class="picker-files"></ul>
+        <button id="picker-cancel" type="button">Cancel</button>
+      </div>
+
+      <!-- ---- search ------------------------------------------------------ -->
+      <section id="pane-search">
+        <form id="search" class="card">
+          <label for="query">Search every source</label>
+          <input id="query" type="search" placeholder="the matrix 1999" autocomplete="off" />
+          <button type="submit">Search</button>
+        </form>
+
+        <!-- Category tabs, built by app.js from GET /api/sources. Empty in the
+             markup on purpose: the group list depends on config (the adult
+             category is absent from the response when it is off), so a
+             hardcoded tab here could show a category the server will not
+             search. -->
+        <div id="tabs" class="tabs" role="tablist"></div>
+
+        <div class="controls">
+          <label class="control" for="sort">
+            <span>sort</span>
+            <select id="sort">
+              <!-- "default" is the server's own order (seeders, then recency).
+                   It is the initial selection and must stay that way: the TUI
+                   shows that order for the same query. -->
+              <option value="none" selected>default</option>
+              <option value="seeders:desc">seeders ▾</option>
+              <option value="seeders:asc">seeders ▴</option>
+              <option value="size:desc">size ▾</option>
+              <option value="size:asc">size ▴</option>
+              <option value="added:desc">added ▾</option>
+              <option value="added:asc">added ▴</option>
+              <option value="source:asc">source ▴</option>
+              <option value="source:desc">source ▾</option>
+            </select>
+          </label>
+          <label class="control" for="filter">
+            <span>filter</span>
+            <input id="filter" type="text" placeholder="narrow these results" autocomplete="off" />
+          </label>
+          <label class="control control-check" for="alive">
+            <input id="alive" type="checkbox" />
+            <span>alive only</span>
+          </label>
+          <span id="search-progress" class="progress"></span>
+        </div>
+
+        <p id="search-status" class="empty">Search across every enabled source.</p>
+
+        <div class="split">
+          <ul id="results" class="rows"></ul>
+
+          <!-- The poster/plot preview. Every child is built with createElement:
+               the plot comes from OMDb and the heading from a torrent's release
+               name, both of them strangers' strings. -->
+          <aside id="preview" class="preview card" hidden>
+            <div id="preview-poster" class="poster"></div>
+            <p id="preview-title" class="preview-title"></p>
+            <p id="preview-sub" class="preview-sub"></p>
+            <p id="preview-body" class="preview-body"></p>
+            <a id="preview-imdb" class="button-link preview-imdb" target="_blank" rel="noreferrer noopener">IMDb</a>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ---- for you ----------------------------------------------------- -->
+      <!-- The feed itself is built by app.js with createElement: titles and
+           "because you liked …" reasons come out of reccd, a remote service,
+           and are as much a stranger's strings as a release name is. The
+           filters are markup because they are fixed — the type list is reccd's
+           own, not a config-dependent one like the category tabs. -->
+      <section id="pane-recc" hidden>
+        <div class="controls">
+          <label class="control" for="recc-type">
+            <span>type</span>
+            <select id="recc-type">
+              <option value="all" selected>all</option>
+              <option value="movie">movies</option>
+              <option value="tv">tv</option>
+            </select>
+          </label>
+          <label class="control" for="recc-genre">
+            <span>genre</span>
+            <!-- A search input, and read on change rather than on input: each
+                 edit is a request to reccd, so the box commits on Enter or
+                 blur the way the TUI's genre prompt commits on submit. -->
+            <input id="recc-genre" type="search" placeholder="horror" autocomplete="off" />
+          </label>
+          <label class="control control-check" for="recc-explore">
+            <input id="recc-explore" type="checkbox" />
+            <span>explore</span>
+          </label>
+          <button id="recc-refresh" type="button">refresh</button>
+        </div>
+
+        <p id="recc-status" class="empty">Picks based on what you've watched.</p>
+        <!-- Shown once, not per card, when the poster lookups come back saying
+             there is no OMDb key: twenty copies of one fix-it sentence are worse
+             than the twenty blank frames they explain. Filled in by app.ts from
+             the same constant the search preview uses. -->
+        <p id="recc-hint" class="empty" hidden></p>
+        <ul id="recc-list" class="recc-grid"></ul>
+      </section>
+
+      <!-- ---- queue ------------------------------------------------------- -->
+      <section id="pane-queue" hidden>
+        <form id="add" class="card">
+          <label for="magnet">Add a magnet or info hash</label>
+          <input id="magnet" type="text" placeholder="magnet:?xt=urn:btih:…" />
+          <button type="submit">Add</button>
+        </form>
+
+        <ul id="rows" class="rows"></ul>
+        <p id="empty" class="empty">Nothing in the queue.</p>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

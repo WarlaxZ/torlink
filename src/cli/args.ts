@@ -5,7 +5,16 @@ import { parseDuration } from "../util/duration";
 export type CliCommand =
   | { kind: "version" }
   | { kind: "help" }
-  | { kind: "run"; initialMagnet?: string; initialTorrent?: string }
+  | {
+      kind: "run";
+      initialMagnet?: string;
+      initialTorrent?: string;
+      /** Host the browser dashboard in-process, sharing the TUI's queue. */
+      web?: boolean;
+      webPort?: number;
+      webHost?: string;
+      webToken?: string;
+    }
   | {
       kind: "watch";
       dir: string;
@@ -23,6 +32,13 @@ export type CliCommand =
       seedTimeMs?: number;
       deleteFiles?: boolean;
       daemon?: boolean;
+      /**
+       * Also mount the browser dashboard. It binds `host` — the same interface
+       * as the add API — so one process makes one exposure decision; only the
+       * port is separately configurable, because two servers cannot share one.
+       */
+      web?: boolean;
+      webPort?: number;
     }
   | { kind: "files"; port?: number; host?: string; token?: string; dir?: string; daemon?: boolean }
   | { kind: "attach" }
@@ -33,7 +49,7 @@ export type CliCommand =
 
 // Valueless boolean flags for the headless subcommands (everything else is a
 // `--flag value` pair).
-const BOOL_FLAGS = new Set(["delete-files", "daemon"]);
+const BOOL_FLAGS = new Set(["delete-files", "daemon", "web"]);
 
 function splitBooleans(args: string[]): { bools: Set<string>; rest: string[] } {
   const bools = new Set<string>();
@@ -74,7 +90,11 @@ function seedTimeFrom(raw: string | undefined): number | undefined {
 
 export function parseCliArgs(argv: string[]): CliCommand {
   const args = argv.filter((a) => a.trim() !== "");
-  if (args.length === 0) return { kind: "run" };
+  // No arguments: the plain TUI. Routed through parseRun so the "run" shape has
+  // exactly one producer — a hand-written `{ kind: "run" }` here would drift
+  // from it the moment another field is added, leaving `web` undefined on the
+  // commonest invocation of all.
+  if (args.length === 0) return parseRun([]);
   const a = args[0]!;
   if (a === "--version" || a === "-v") return { kind: "version" };
   if (a === "--help" || a === "-h") return { kind: "help" };
@@ -112,6 +132,8 @@ export function parseCliArgs(argv: string[]): CliCommand {
       seedTimeMs: seedTimeFrom(flags["seed-time"]),
       deleteFiles: bools.has("delete-files"),
       daemon: bools.has("daemon"),
+      web: bools.has("web"),
+      webPort: parsePort(flags["web-port"]),
     };
   }
   if (a === "files") {
@@ -126,10 +148,59 @@ export function parseCliArgs(argv: string[]): CliCommand {
       daemon: bools.has("daemon"),
     };
   }
-  if (/^magnet:\?/i.test(a)) return { kind: "run", initialMagnet: a };
-  if (isInfoHash(a)) return { kind: "run", initialMagnet: a };
-  if (/\.torrent$/i.test(a)) return { kind: "run", initialTorrent: a };
-  return { kind: "invalid", arg: a };
+  return parseRun(args);
+}
+
+// The interactive command's `--flag value` pairs. Kept as an explicit set — and
+// scanned by hand rather than through readFlags — because this is the one branch
+// with no subcommand word to vouch for it: an unrecognised token here must stay
+// `invalid`, not be quietly eaten as some flag's value. `--web` itself is
+// valueless and handled separately.
+const RUN_VALUE_FLAGS = new Set(["web-port", "web-host", "web-token", "token"]);
+
+/**
+ * The bare invocation: an optional magnet / info hash / .torrent path, plus the
+ * web-UI flags, in any order. Order-independence is deliberate — `torlnk
+ * "magnet:?..." --web` and `torlnk --web "magnet:?..."` both read naturally, and
+ * accepting only one of them would mean silently dropping either the flag or the
+ * download in the other.
+ */
+function parseRun(args: string[]): CliCommand {
+  let target: string | undefined;
+  let web = false;
+  const flags: Record<string, string> = {};
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--web") {
+      web = true;
+    } else if (arg.startsWith("--") && RUN_VALUE_FLAGS.has(arg.slice(2))) {
+      const value = args[++i];
+      if (value === undefined) return { kind: "invalid", arg: `${arg} (missing value)` };
+      flags[arg.slice(2)] = value;
+    } else if (target === undefined && isRunTarget(arg)) {
+      target = arg;
+    } else {
+      return { kind: "invalid", arg };
+    }
+  }
+
+  const isTorrent = target !== undefined && /\.torrent$/i.test(target);
+  return {
+    kind: "run",
+    initialMagnet: isTorrent ? undefined : target,
+    initialTorrent: isTorrent ? target : undefined,
+    web,
+    webPort: parsePort(flags["web-port"]),
+    webHost: flags["web-host"],
+    // The more specific spelling wins. `--token` is the muscle memory from
+    // serve/files; `--web-token` says which server it is for.
+    webToken: flags["web-token"] ?? flags.token,
+  };
+}
+
+function isRunTarget(arg: string): boolean {
+  return /^magnet:\?/i.test(arg) || isInfoHash(arg) || /\.torrent$/i.test(arg);
 }
 
 export const HELP_TEXT = `torlink, terminal-native torrent search
@@ -138,8 +209,10 @@ usage
   torlnk                      open the search TUI
   torlnk "magnet:?xt=..."     start a download on launch
   torlnk path/to/file.torrent open a .torrent file on launch
+  torlnk --web                open the TUI and serve the browser UI on :9162
   torlnk watch <dir>          headless: download torrents dropped into <dir>
   torlnk serve                headless: HTTP add API (POST /add) on :9161
+  torlnk serve --web          headless: add API plus the browser UI on :9162
   torlnk files                headless: serve downloads over HTTP on :9160
   torlnk attach               open/reattach the TUI in a persistent tmux session
   torlnk update [--force]     update to the latest release and restart any daemon
@@ -174,6 +247,17 @@ serve mode (no TUI): a small HTTP API for handing torlink a magnet.
 flags: --port <n> (default 9161), --host <addr> (default 127.0.0.1),
 --token <secret> (required to bind a public --host; or TORLINK_API_TOKEN),
 --to <dir> (where files land).
+
+web ui (--web): search, posters, streaming, the queue and For You in a
+browser, over the same queue as the process hosting it.
+  torlnk --web             the TUI hosts it; quitting the TUI stops it
+  torlnk serve --web       the daemon hosts it, next to the add API
+flags: --web-port <n> (default 9162; under serve, the api port + 1),
+--web-host <addr> (default 127.0.0.1, TUI only), --token <secret> (also
+spelled --web-token for the TUI, or set TORLINK_API_TOKEN).
+A non-loopback host is refused without a token. Under serve the UI binds
+serve's own --host and reuses its --token, so one process makes one exposure
+decision; only the port is separate, since two servers cannot share one.
 
 files mode (no TUI): a read-only, range-aware HTTP server over the downloads
 folder, so finished files stream to a browser or media player.

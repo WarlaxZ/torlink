@@ -9,5 +9,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     setupFiles: ["./src/test-setup.ts"],
+    // Creates the parent directory those per-worker dirs live in and removes it
+    // once every worker is done. setupFiles cannot clean up after themselves:
+    // they run per test file, and several files share a worker's directory.
+    globalSetup: ["./src/test-globalSetup.ts"],
   },
 });

@@ -2,11 +2,11 @@
   <img src="preview/splash.svg" alt="torlink, curated torrents straight from your terminal" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
-> A fork of [baairon/torlink](https://github.com/baairon/torlink), headlined by optional [Real-Debrid](#real-debrid-optional) support — download and stream through Real-Debrid's servers for full speed without seeders, and keep your IP off the swarm. Plus a handful of quality-of-life touches: remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
+> A fork of [baairon/torlink](https://github.com/baairon/torlink), headlined by optional [Real-Debrid](#real-debrid-optional) support — download and stream through Real-Debrid's servers for full speed without seeders, and keep your IP off the swarm — and an optional [browser interface](#in-your-browser-optional) with the same search, streaming and recommendations as the terminal, so a seedbox or a phone works as well as a laptop. Plus a handful of quality-of-life touches: remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
 
 Finding a torrent these days sucks. One site is a minefield of fake download buttons. Another hides the real link under a popup that spawns two more tabs. And after all that, half the results are dead, zero seeders.
 
-torlink is a torrent finder that lives in your terminal, with zero setup and nothing to configure. One search checks a short, curated list of reputable sources at once, and whatever you pick downloads straight to your computer. The files are yours, saved to your downloads folder.
+torlink is a torrent finder that lives in your terminal — or, if you'd rather, in your browser — with zero setup and nothing to configure. One search checks a short, curated list of reputable sources at once, and whatever you pick downloads straight to your computer. The files are yours, saved to your downloads folder.
 
 ## Get started
 
@@ -28,6 +28,8 @@ Or run it once, without installing anything:
 ```sh
 npx torlnk-rd
 ```
+
+On the names, since there are three: the project is **torlink** — and so is your config directory and every `TORLINK_*` variable — but the command is `torlnk` and the npm package is `torlnk-rd`. Plain `torlnk` on npm is the upstream project this forked from, and npm rejects `torlink` as too similar to it, so the short spellings are the ones that were actually available.
 
 Globally-installed copies keep themselves current: `torlnk update` pulls the latest release (and `torlnk` quietly points it out when one is available).
 
@@ -177,6 +179,97 @@ Prefer an environment variable? Set `TORLINK_DNS` before launching (it takes pre
 TORLINK_DNS=cloudflare npm start
 ```
 
+## In your browser (optional)
+
+Add `--web` and torlink also serves a browser interface — search every source, posters and plots, play something, the queue, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
+
+```sh
+torlnk --web          # the TUI hosts it; quitting the TUI stops it
+torlnk serve --web    # headless: the add API plus the browser UI
+```
+
+Either way it lands on **`http://127.0.0.1:9162`**, and `torlnk --web` prints the address on the splash. Change it with `--web-port`. Under `serve`, the UI port is derived from the API port + 1 (so `serve --port 8080 --web` puts the API on 8080 and the UI on 8081) unless you pass `--web-port` yourself.
+
+**Turning it off is just leaving `--web` off** — there's no setting to forget about, and nothing listens until you ask for it. If the port is already taken, the TUI says so and carries on without the dashboard (the terminal is the product; a missing web UI shouldn't kill your session), while `serve --web` treats it as a startup failure and exits, because a daemon that came up half-configured is worse than one that didn't come up.
+
+### Reaching it from another device
+
+Binding anything other than loopback **requires** a token — torlink refuses to start rather than leave your queue open to the network:
+
+```sh
+torlnk --web --web-host 0.0.0.0 --web-token "$(openssl rand -hex 16)"
+```
+
+Under `serve` the UI binds serve's own `--host` and reuses its `--token`, so one process makes one exposure decision; only the port is separate, since two servers can't share one.
+
+#### Setting the token
+
+Three ways, in the order torlink prefers them:
+
+| | |
+|---|---|
+| `--web-token <secret>` | Most specific. TUI only. |
+| `--token <secret>` | Works for both — this is `serve`'s own flag, and the TUI accepts it too so the muscle memory carries over. |
+| `TORLINK_API_TOKEN` | Environment. Keeps the secret out of your shell history and out of `ps`, which is what you want on a shared box. Used by `serve` and by `torlnk --web`. |
+
+A flag beats the environment variable, and `--web-token` beats `--token`. The environment variable is only consulted when you actually pass `--web`, so a `TORLINK_API_TOKEN` you exported for the daemon doesn't quietly become a password on your interactive session.
+
+There's no token in the config file on purpose: `config.json` is world-readable in your home directory, and a shared secret doesn't belong there.
+
+You enter the token once in the browser. It's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
+
+On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
+
+### From outside your network
+
+**Don't port-forward this to the internet.** Two reasonable options:
+
+- **[Tailscale](https://tailscale.com)** — simpler, and what I'd recommend. Bind your tailnet address and reach it from any of your devices with nothing exposed publicly.
+- **A reverse proxy** terminating TLS in front of it, if you already run one.
+
+The dashboard itself is fine behind a proxy — every URL it uses is relative. The one thing to watch is the **Download .m3u** button, which has to write an absolute URL into the playlist file. It builds that from the `Host` header, so it's correct as long as your proxy passes `Host` through (Caddy does by default; nginx needs `proxy_set_header Host $host`). `X-Forwarded-Host` and `X-Forwarded-Proto` are deliberately ignored — trusting them unconditionally would let any client poison the generated URL — so a proxy that rewrites `Host` instead will produce a playlist pointing at the wrong address until a `--trust-proxy` flag exists.
+
+### Posters
+
+Posters are fetched once and cached on disk. The browser gets the full-quality image; the TUI half-blocks that same cached file, so turning the web UI on makes terminal browsing slightly faster too. The cache is capped, pruned oldest-first, and safe to delete at any time.
+
+Poster fetches are restricted to a small allowlist of known image CDNs, re-checked on every redirect hop — a refusal is logged at `warn` level.
+
+### Searching
+
+The browser searches every source the TUI does, and results stream in as each one answers — you'll see `12/23 sources` climb rather than staring at a spinner. Category tabs, sort orders and the alive-only filter are the same code the terminal uses, so the two never disagree about what a result is or how the list is ordered.
+
+Selecting a result shows its poster, plot and IMDb link, if you've added a free [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers the terminal's preview pane. Without one everything still works; you just get the release names.
+
+From a result you can **add** it to the queue, **add via RD** where Real-Debrid is configured, or **play** it straight away.
+
+### Playing something
+
+Hit **play** on any row. torlnk resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
+
+What happens next depends on the release, and it's worth knowing why:
+
+- **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because the server honours range requests.
+- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox. No browser ships those codecs. Rather than showing you a black rectangle, the page says so and offers a **Download .m3u** button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get a direct VLC link.
+
+There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
+
+With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
+
+### For You
+
+If you've connected [reccd](#recommendations-optional), the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Paradise"). Rate a pick watched, liked or disliked, add it to your watchlist, or hand it straight to the search pane. Ratings feed back into reccd exactly as they do from the terminal.
+
+### What it doesn't do yet
+
+- **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
+- **No subtitles, no resume position, no next-episode queue.**
+- **No configuration.** Tokens, sources, limits and folders are set in the TUI; the browser reads that config but never writes it.
+
+### Working on the web UI
+
+The dashboard is served from `dist/web`, **not** `src`. Edit anything under `src/web/static/`, reload, and you'll get silently stale assets — it reads exactly like a browser cache bug, so it's easy to lose twenty minutes in devtools before suspecting the build. Rerun `npm run build` after any change there. `npm run dev` only re-executes the server's TypeScript; it does not rebuild the browser bundle.
+
 ## Headless
 
 torlink also runs without the TUI, for servers and seedboxes:
@@ -188,7 +281,7 @@ torlink also runs without the TUI, for servers and seedboxes:
     torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
     torlnk import-trakt           connect Trakt and import your history into reccd
 
-Add `--daemon` to keep watch, serve, or files running after you log out; `torlnk --help` has the full list of modes and flags.
+Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) alongside the add API; `torlnk --help` has the full list of modes and flags.
 
 ## Contributing
 

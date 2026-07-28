@@ -47,6 +47,51 @@ export default tseslint.config(
     },
   },
   {
+    // The layering rule the src/core/ extraction exists for, enforced. Nothing
+    // checked it before: adding `import { COLOR } from "../ui/theme"` to
+    // src/core/search.ts passed lint, typecheck, build and the whole test suite.
+    // core/ is the front-end-agnostic middle — the TUI and the web UI both sit on
+    // it — so an import in the other direction quietly makes it depend on one of
+    // them, and the next front-end inherits Ink.
+    files: ["src/core/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/**", "**/web/**"],
+              message:
+                "src/core must not import from src/ui or src/web: it is the front-end-agnostic layer both of them sit on. Move the shared piece down into core (or into util), or pass it in.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Same rule one layer out, and for the same reason: the web UI is a second
+    // front-end over core, not a consumer of the first one. src/ui is Ink and
+    // React — importing it from src/web would pull a terminal renderer toward a
+    // browser bundle. (The reverse is allowed and real: src/ui/App.tsx hosts
+    // src/web's server in-process.)
+    files: ["src/web/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/**"],
+              message:
+                "src/web must not import from src/ui: they are two front-ends over src/core, and src/ui pulls in Ink and React. Share through src/core or src/util instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Tests lean on `any` for fixtures and deliberately-malformed input casts.
     files: ["**/*.test.{ts,tsx}"],
     rules: {

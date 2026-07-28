@@ -1,0 +1,709 @@
+/* Dashboard styling. Deliberately plain CSS with no build step beyond a copy:
+   the file is served as-is, so what you read here is what the browser gets.
+   The palette mirrors the TUI's so the two surfaces read as one tool. */
+
+:root {
+  color-scheme: dark light;
+  --bg: #12131a;
+  --fg: #e6e6ea;
+  --dim: #8b8d9b;
+  --line: #262838;
+  --accent: #7aa2f7;
+  --error: #f7768e;
+  --sunken: #0c0d13;
+  --raised: #1b1d29;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The `hidden` attribute is only `display: none` in the user-agent stylesheet,
+   so ANY author rule that sets `display` silently defeats it — author styles
+   beat UA styles. `.card { display: flex }` did exactly that, leaving the
+   access-token form on screen even after the app had unlocked. Every element
+   app.ts hides is styled, so this needs to win outright. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  margin-inline: auto;
+  padding: 1.5rem;
+  max-width: 60rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+/* Connection state. The dot is a text glyph rather than a pseudo-element shape
+   so it inherits the state colour without a second rule per state. */
+.conn {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.conn::before {
+  content: "\25CF\00A0";
+}
+
+.conn[data-state="live"] {
+  color: var(--accent);
+}
+
+.conn[data-state="lost"] {
+  color: var(--error);
+}
+
+.card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.card label {
+  flex: 1 0 100%;
+  font-size: 0.75rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card > .error {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  color: inherit;
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* An explicit single track, because a grid's implicit column is `auto` — it
+     sizes to its widest item, and a search result's meta line ("1.36 GB · 15
+     seeders · 3 leechers · BitTorrented") is wider than a phone. That pushed
+     the whole list past the viewport and put a horizontal scrollbar under the
+     page. minmax(0, 1fr) is the track that is allowed to be narrower than its
+     content, which is what lets the ellipsis and the wrapping below happen. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.row {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.row-head {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* min-width: 0 is what actually lets the ellipsis happen — a flex item's
+   default min-width: auto refuses to shrink below its content. */
+.row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* On a phone the meta line is nearly as wide as the viewport, which squeezes
+   the name to a few characters — and the name is what you check before tapping
+   `delete`. Stack them so the name gets the full width. */
+@media (max-width: 34rem) {
+  .row-head {
+    display: block;
+  }
+
+  .row-meta {
+    display: block;
+    margin-top: 0.2rem;
+  }
+}
+
+.bar {
+  height: 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--line);
+  margin-top: 0.6rem;
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.row-actions button {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.55rem;
+  color: var(--dim);
+}
+
+.row-actions button:hover {
+  color: var(--accent);
+}
+
+/* Play is the one control in a row that isn't queue housekeeping, so it carries
+   the accent at rest while pause/remove/delete stay dim until hovered. That is
+   also the safety argument: the destructive buttons sit millimetres away on a
+   phone and should not compete for the thumb. */
+.row-actions button.play {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The stream file picker. Overrides .card's row layout — it is a heading above
+   a list, not a form — in the same way .fallback does on the player page. */
+.picker {
+  display: block;
+}
+
+.picker-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+}
+
+.picker-files {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+/* Full-width rows rather than a wrapped strip of buttons: these are filenames,
+   which are long, and a target you tap on a phone. */
+.picker-file {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+
+.empty,
+.notice,
+.error {
+  color: var(--dim);
+  font-size: 0.8rem;
+}
+
+.notice {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+}
+
+.error {
+  color: var(--error);
+}
+
+/* Reused by the empty-state paragraph when the server is unreachable, so the
+   honest failure message reads as an error rather than as "queue is empty". */
+.empty.error {
+  color: var(--error);
+}
+
+/* ---------------------------------------------------------------------------
+   Search. Same palette, same card, same button as the queue — the two panes are
+   one app and a second visual language is how they stop looking like it. */
+
+/* The Search / Queue switch. Sits in the header between the wordmark and the
+   connection badge, so the two views read as peers rather than one being
+   nested in the other. */
+.views {
+  display: flex;
+  gap: 0.35rem;
+  margin-right: auto;
+  margin-left: 1rem;
+}
+
+.view-tab {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  color: var(--dim);
+}
+
+/* aria-pressed is the selected state, not a class: the attribute has to be
+   right for a screen reader anyway, so styling from it means the two can't
+   disagree. */
+.view-tab[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge {
+  margin-left: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Category tabs. A wrapped strip rather than a scroller: there are at most
+   seven and they must all be visible at once — a tab you have to scroll to find
+   is one you never use. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.tab {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  color: var(--dim);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.control input[type="text"] {
+  min-width: 9rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.45rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.control-check {
+  cursor: pointer;
+}
+
+.control-check input {
+  flex: 0 0 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+select {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+select:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The "12/23 sources" line. Tabular figures so a count ticking up doesn't
+   shuffle the text either side of it. */
+.progress {
+  margin-left: auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Results beside the preview. The preview is dropped below the list — not
+   hidden — under the width where a two-column split would squeeze the release
+   names to nothing, which is the same trade the TUI makes at 74 columns. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 46rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.result-head {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* Full-width, left-aligned and unstyled-looking: the name is the row's primary
+   target (selecting it loads the preview), and a release name is long. */
+.result-name {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-name:hover {
+  color: var(--accent);
+}
+
+.row[aria-selected="true"] {
+  border-color: var(--accent);
+}
+
+.result-source {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.result-meta {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Overrides .card's row layout: the preview is a stack, not a form. */
+.preview {
+  display: block;
+  padding: 0.75rem;
+  margin-bottom: 0;
+}
+
+/* A fixed 2:3 frame whether or not a poster loads, so the pane doesn't jump
+   between a placeholder and an image — and so a poster that 404s leaves a
+   labelled box rather than a broken-image glyph. */
+/* Capped and centred rather than filling its container. Below the split
+   breakpoint the preview becomes a full-width block, and a 2:3 frame at phone
+   width is a 600x900 poster you have to scroll past to reach the plot. */
+.poster {
+  max-width: 12rem;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.poster-note {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.preview-title {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.preview-sub {
+  margin: 0.1rem 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-body {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.preview-imdb {
+  display: block;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+}
+
+/* ---------------------------------------------------------------------------
+   The For You feed. Cards rather than the search pane's rows because a pick is
+   a poster first — the same .poster frame the preview uses, so a card with no
+   artwork is a labelled box and not a hole in the grid. Everything else here is
+   .row, .row-actions and the palette the rest of the page already uses. */
+.recc-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* auto-fill, not auto-fit: with three picks the cards stay poster-width
+     instead of stretching to a third of the page each. minmax(0, …) for the
+     same reason .rows uses it — a long title must be allowed to ellipsis
+     rather than widen the track past the viewport. */
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.recc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem;
+}
+
+/* The poster is the card's primary target (it selects the pick and offers the
+   search), so it has to look like one without becoming a second button style. */
+.recc-poster {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.recc-poster .poster {
+  max-width: none;
+  margin-bottom: 0;
+}
+
+.recc-title {
+  margin: 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.recc-sub {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* reccd's "because you liked …". Dim and small: it explains the pick, it is not
+   the pick. Clamped to two lines so one verbose reason cannot make its card
+   twice the height of its neighbours and tear the grid. */
+.recc-reason {
+  margin: 0.3rem 0 0;
+  font-size: 0.7rem;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Pushed to the bottom edge so every card's buttons line up across a row,
+   whatever its title and reason did to the space above them. */
+.recc-card .row-actions {
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   The player page (/play/:sid/:idx). Same file as the dashboard on purpose:
+   one palette, one button, one card. The two surfaces are the same app and a
+   second stylesheet is how they stop looking like it. */
+
+.back {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+.file-name {
+  margin: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+
+.stage {
+  margin-bottom: 1rem;
+}
+
+/* A letterboxed frame rather than a bare element: a <video> with no source
+   sized to its intrinsic 300x150 default, which looked like a broken image
+   sitting above the buttons. */
+.player {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--sunken);
+}
+
+/* Overrides .card's row layout: the fallback is a heading above a paragraph,
+   not a form. */
+.fallback {
+  display: block;
+  margin-bottom: 0;
+}
+
+.fallback h2 {
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+
+.fallback-body {
+  margin: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* An <a> that has to sit next to a <button> and be indistinguishable from it.
+   The properties are duplicated from `button` rather than shared through a
+   selector list because an anchor needs three of its own (display, text
+   decoration, the centring) and a combined rule that only half applies to each
+   element is harder to read than this. */
+.button-link {
+  display: inline-block;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.button-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}

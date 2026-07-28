@@ -1,7 +1,7 @@
 {
   "name": "torlnk-rd",
   "version": "1.8.0",
-  "description": "A sleek, zero-setup torrent finder and downloader that lives right in your terminal.",
+  "description": "Search, stream and download torrents — in your terminal or your browser. Zero setup, optional Real-Debrid.",
   "type": "module",
   "bin": {
     "torlnk": "dist/cli.cjs"
@@ -16,7 +16,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.tsx",
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.web.config.ts",
     "postbuild": "node scripts/postbuild.cjs",
     "build:win": "bash scripts/build-win.sh",
     "start": "node dist/index.js",
@@ -39,6 +39,15 @@
     "p2p",
     "webtorrent",
     "seeding",
+    "streaming",
+    "torrent-streaming",
+    "real-debrid",
+    "debrid",
+    "web-ui",
+    "dashboard",
+    "remote",
+    "seedbox",
+    "self-hosted",
     "tui",
     "terminal",
     "cli",

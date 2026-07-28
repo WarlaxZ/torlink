@@ -1,6 +1,6 @@
 'use strict';
 
-const { chmodSync, copyFileSync } = require('node:fs');
+const { chmodSync, copyFileSync, mkdirSync } = require('node:fs');
 const { resolve } = require('node:path');
 
 const root = resolve(__dirname, '..');
@@ -12,6 +12,16 @@ copyFileSync(src, dest);
 // __dirname when the node-datachannel binary is unavailable.
 copyFileSync(resolve(root, 'scripts/webrtc-stub.mjs'), resolve(root, 'dist/webrtc-stub.mjs'));
 
+// The web UI's HTML and CSS aren't bundled by tsup (only the .ts entries are),
+// so copy them next to the generated dist/web/*.js. A page added to
+// tsup.web.config.ts needs its HTML added here too, or the bundle ships with
+// nothing loading it.
+const webOut = resolve(root, 'dist/web');
+mkdirSync(webOut, { recursive: true });
+for (const file of ['index.html', 'player.html', 'styles.css']) {
+  copyFileSync(resolve(root, 'src/web/static', file), resolve(webOut, file));
+}
+
 // On Windows chmod is effectively a no-op, and npm re-applies bin permissions on install anyway, so a failure
 // here shouldn't fail the build, but warn rather than swallow the error.
 try {
@@ -20,4 +30,4 @@ try {
   console.warn('postbuild: could not set executable bit on dist/cli.cjs:', err.message);
 }
 
-console.log('postbuild: wrote dist/cli.cjs and dist/webrtc-stub.mjs');
+console.log('postbuild: wrote dist/cli.cjs, dist/webrtc-stub.mjs and the web assets in dist/web');

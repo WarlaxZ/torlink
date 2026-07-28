@@ -20,7 +20,7 @@ import { Seeding } from "../src/ui/components/Seeding";
 import { PreviewPane } from "../src/ui/components/PreviewPane";
 import { footerHints } from "../src/ui/keymap";
 import { sourcesByGroup } from "../src/sources/registry";
-import { fetchPosterRows } from "../src/util/poster";
+import { renderJpegPoster } from "../src/util/poster";
 import { cleanText } from "../src/util/format";
 import { ansiToSvg, type AnsiToSvgOptions } from "./ansi-to-svg";
 import type { Config } from "../src/config/config";
@@ -226,12 +226,25 @@ const PREVIEW_W = Math.min(46, Math.max(30, Math.round(BROWSE_CW * 0.4)));
 const LIST_W = BROWSE_CW - PREVIEW_W - 1;
 
 // Fetch a real poster (OMDb's public sample) and render it as half-blocks, just
-// as the app does at runtime. Requires network access when regenerating.
-const browsePoster = await fetchPosterRows(
-  "https://www.omdbapi.com/src/poster.jpg",
-  Math.max(8, PREVIEW_W - 4),
-  Math.max(4, PANEL_H - 6),
-);
+// as the app does at runtime. Requires network access when regenerating. The app
+// itself goes through core/posterCache, which only permits OMDb's image CDNs;
+// this one-off sample lives on omdbapi.com, so the screenshot script does its
+// own fetch and reuses only the pure rendering half.
+const browsePoster = await (async () => {
+  try {
+    const res = await fetch("https://www.omdbapi.com/src/poster.jpg", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    return renderJpegPoster(
+      Buffer.from(await res.arrayBuffer()),
+      Math.max(8, PREVIEW_W - 4),
+      Math.max(4, PANEL_H - 6),
+    );
+  } catch {
+    return null;
+  }
+})();
 if (!browsePoster) {
   console.warn("browse: poster fetch failed — screenshot will show the empty state");
 }

@@ -1,0 +1,438 @@
+import { describe, expect, it } from "vitest";
+import {
+  POLL_MS,
+  RESOLVE_TIMEOUT_MS,
+  confirmFallbackMessage,
+  fileLabel,
+  isPlayable,
+  playerPath,
+  pollDecision,
+  runPlay,
+  streamOutcome,
+  type PlayEffects,
+  type PublicStreamFile,
+  type PublicStreamSession,
+  type StartResult,
+} from "./streamFlow";
+import { parsePlayerLocation } from "./playerModel";
+import type { DashRow } from "./dashboard";
+
+const file = (filename: string, index: number, bytes = 1024): PublicStreamFile => ({
+  filename,
+  bytes,
+  index,
+  handle: `/stream/s1/${index}`,
+});
+
+const session = (over: Partial<PublicStreamSession> = {}): PublicStreamSession => ({
+  id: "s1",
+  backend: "torrent",
+  name: "A Release",
+  state: "ready",
+  progress: 100,
+  files: [],
+  ...over,
+});
+
+const row = (over: Partial<DashRow> = {}): DashRow => ({
+  id: "abc",
+  name: "A Release",
+  kind: "download",
+  status: "downloading",
+  percent: 10,
+  peers: 3,
+  rate: 0,
+  uploaded: 0,
+  ...over,
+});
+
+describe("isPlayable", () => {
+  // Streaming starts its own session from the info hash, so it does not need
+  // the queue to have finished — or even started — fetching anything.
+  it("offers play while a download is in progress, paused or queued", () => {
+    for (const status of ["downloading", "queued", "paused", "selecting", "completed"]) {
+      expect(isPlayable(row({ status })), status).toBe(true);
+    }
+  });
+
+  it("offers play on a seeding torrent", () => {
+    expect(isPlayable(row({ kind: "seed", status: "seeding" }))).toBe(true);
+    expect(isPlayable(row({ kind: "seed", status: "paused" }))).toBe(true);
+  });
+
+  it("does not offer play on a failed download or a missing seed", () => {
+    expect(isPlayable(row({ status: "failed" }))).toBe(false);
+    expect(isPlayable(row({ kind: "seed", status: "missing" }))).toBe(false);
+  });
+});
+
+describe("playerPath", () => {
+  // MUTATION GUARD. Without ?k= the player page has no capability, so the
+  // <video> and the .m3u both 401 and the page shows "this link is incomplete".
+  it("carries the capability as ?k=", () => {
+    const url = playerPath("s1", file("a.mp4", 0), "cap-123");
+    expect(url).toContain("k=cap-123");
+    expect(parsePlayerLocation("/play/s1/0", url.slice(url.indexOf("?")))?.capability).toBe(
+      "cap-123",
+    );
+  });
+
+  // MUTATION GUARD. The player page cannot ask the API for the filename — a
+  // phone holding this link has the capability but not the bearer token — so
+  // ?n= is the only source. Dropping it shows "Unnamed file" and, because
+  // canDirectPlay("") is pessimistic, the fallback card for a playable mp4.
+  it("carries the filename as ?n=", () => {
+    const url = playerPath("s1", file("Big Buck Bunny.mp4", 3), "cap");
+    const parsed = parsePlayerLocation("/play/s1/3", url.slice(url.indexOf("?")));
+    expect(parsed?.filename).toBe("Big Buck Bunny.mp4");
+  });
+
+  it("addresses the file by its session index, not its position in a filtered list", () => {
+    const picked = streamOutcome(
+      session({ files: [file("readme.nfo", 0), file("movie.mkv", 1)] }),
+    );
+    expect(picked.kind).toBe("single");
+    if (picked.kind !== "single") return;
+    expect(playerPath("s1", picked.file, "cap")).toContain("/play/s1/1?");
+  });
+
+  it("round-trips through parsePlayerLocation, encoding and all", () => {
+    const url = playerPath("s 1", file("a b&c.mp4", 2), "k/1=+2");
+    expect(url.startsWith("/play/s%201/2?")).toBe(true);
+    const target = parsePlayerLocation("/play/s 1/2", url.slice(url.indexOf("?")));
+    // The path half of playerPath is not what parsePlayerLocation is given here
+    // (it reads location.pathname, already decoded by the browser), so this
+    // asserts the query half survives verbatim.
+    expect(target?.filename).toBe("a b&c.mp4");
+    expect(target?.capability).toBe("k/1=+2");
+  });
+});
+
+describe("streamOutcome", () => {
+  it("reports a single candidate for a one-video torrent", () => {
+    const out = streamOutcome(session({ files: [file("movie.mkv", 0)] }));
+    expect(out).toEqual({ kind: "single", file: file("movie.mkv", 0) });
+  });
+
+  // MUTATION GUARD for the picker: a scene release is a video plus junk, and a
+  // picker listing the junk makes the user do the filtering by hand.
+  it("hides non-video files from the picker when videos exist", () => {
+    const out = streamOutcome(
+      session({
+        files: [
+          file("sample.txt", 0),
+          file("S01E01.mkv", 1),
+          file("release.nfo", 2),
+          file("S01E02.mkv", 3),
+          file("cover.jpg", 4),
+        ],
+      }),
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.files.map((f) => f.filename)).toEqual(["S01E01.mkv", "S01E02.mkv"]);
+  });
+
+  it("falls back to every file when nothing looks like video", () => {
+    const out = streamOutcome(session({ files: [file("a.bin", 0), file("b.iso", 1)] }));
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.files).toHaveLength(2);
+  });
+
+  it("reports the session's own error message", () => {
+    const out = streamOutcome(session({ state: "error", error: "Real-Debrid said no." }));
+    expect(out).toEqual({ kind: "error", message: "Real-Debrid said no." });
+  });
+
+  it("still has something to say when an errored session carries no message", () => {
+    const out = streamOutcome(session({ state: "error" }));
+    expect(out.kind).toBe("error");
+    if (out.kind !== "error") return;
+    expect(out.message).not.toBe("");
+  });
+
+  it("reports empty for a ready session with no files", () => {
+    expect(streamOutcome(session({ files: [] }))).toEqual({ kind: "empty" });
+  });
+
+  it("does not treat a still-resolving session as playable", () => {
+    const out = streamOutcome(session({ state: "resolving", progress: 40 }));
+    expect(out.kind).toBe("error");
+  });
+});
+
+describe("pollDecision", () => {
+  // MUTATION GUARD. This is the one that keeps a Real-Debrid cache — which sits
+  // mid-percent for minutes — from being abandoned at the first tick.
+  it("keeps polling while the session is resolving", () => {
+    for (const elapsed of [0, POLL_MS, 30_000, RESOLVE_TIMEOUT_MS - 1]) {
+      const d = pollDecision(session({ state: "resolving", progress: 42 }), elapsed, "A Release");
+      expect(d.kind, `elapsed=${elapsed}`).toBe("poll");
+    }
+  });
+
+  it("shows the percent the session reports, so it doesn't look hung", () => {
+    const d = pollDecision(session({ state: "resolving", progress: 42 }), 0, "A Release");
+    expect(d.kind).toBe("poll");
+    if (d.kind !== "poll") return;
+    expect(d.label).toContain("42%");
+    expect(d.label).toContain("A Release");
+    expect(d.delayMs).toBe(POLL_MS);
+  });
+
+  it("clamps a nonsense percent rather than rendering it", () => {
+    const at = (progress: number): string => {
+      const d = pollDecision(session({ state: "resolving", progress }), 0, "n");
+      return d.kind === "poll" ? d.label : "";
+    };
+    expect(at(140)).toContain("100%");
+    expect(at(-3)).toContain("0%");
+    expect(at(Number.NaN)).toContain("0%");
+    expect(at(99.7)).toContain("99%");
+  });
+
+  it("stops once the session is ready or failed", () => {
+    expect(pollDecision(session({ state: "ready" }), 0, "n").kind).toBe("settled");
+    expect(pollDecision(session({ state: "error" }), 0, "n").kind).toBe("settled");
+  });
+
+  it("gives up eventually rather than polling a stuck session forever", () => {
+    const d = pollDecision(session({ state: "resolving" }), RESOLVE_TIMEOUT_MS, "A Release");
+    expect(d.kind).toBe("timeout");
+    if (d.kind !== "timeout") return;
+    expect(d.message).toContain("A Release");
+  });
+
+  it("clips a very long name for the notice", () => {
+    const long = "x".repeat(300);
+    const d = pollDecision(session({ state: "resolving" }), 0, long);
+    expect(d.kind).toBe("poll");
+    if (d.kind !== "poll") return;
+    expect(d.label).not.toContain(long);
+    expect(d.label).toContain("…");
+  });
+});
+
+describe("confirmFallbackMessage", () => {
+  it("names the reason and the consequence, not just 'continue?'", () => {
+    const msg = confirmFallbackMessage("your premium expired 3 days ago", "A Release");
+    expect(msg).toContain("your premium expired 3 days ago");
+    expect(msg).toContain("A Release");
+    // The whole point of the prompt: the user has to be told what proceeding
+    // costs them, which is their IP address in a public swarm.
+    expect(msg).toContain("IP address");
+  });
+});
+
+describe("fileLabel", () => {
+  it("shows the name and a human size", () => {
+    expect(fileLabel(file("movie.mkv", 0, 1536))).toBe("movie.mkv · 1.50 KB");
+  });
+});
+
+// A recording set of effects for runPlay. `sleep` and `now` are fake so the
+// polling loop runs at full speed and the ten-minute deadline is reachable in a
+// test; everything else records what the flow asked for.
+function harness(over: Partial<PlayEffects> = {}) {
+  const calls = {
+    starts: [] as boolean[],
+    confirms: [] as string[],
+    notices: [] as string[],
+    stopped: [] as string[],
+    opened: [] as string[],
+    chosen: [] as { sessionId: string; capability: string; files: PublicStreamFile[] }[],
+    polls: 0,
+  };
+  let clock = 0;
+  const fx: PlayEffects = {
+    start: async (_row, confirmed) => {
+      calls.starts.push(confirmed);
+      return { kind: "failed" };
+    },
+    poll: async () => {
+      calls.polls++;
+      return null;
+    },
+    stop: (id) => calls.stopped.push(id),
+    confirm: (message) => {
+      calls.confirms.push(message);
+      return false;
+    },
+    notice: (message) => calls.notices.push(message),
+    choose: (sessionId, capability, _name, files) =>
+      calls.chosen.push({ sessionId, capability, files }),
+    open: (path) => calls.opened.push(path),
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    now: () => clock,
+    ...over,
+  };
+  return { fx, calls };
+}
+
+const started = (over: Partial<PublicStreamSession> = {}): StartResult => ({
+  kind: "started",
+  sessionId: "s1",
+  capability: "cap",
+  session: session(over),
+});
+
+describe("runPlay", () => {
+  it("opens the player directly for a single ready file", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ files: [file("movie.mp4", 0)] }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.opened).toEqual(["/play/s1/0?k=cap&n=movie.mp4"]);
+    expect(calls.confirms).toEqual([]);
+    expect(calls.stopped).toEqual([]);
+  });
+
+  // MUTATION GUARD #1. Deleting the prompt — retrying with confirm: true as soon
+  // as the 409 arrives — puts the user's IP in a public swarm they were paying
+  // Real-Debrid to stay out of, with nothing on screen to say it happened.
+  it("prompts on a torrent-confirm refusal and does not retry when refused", async () => {
+    const { fx, calls } = harness({
+      start: async (_row, confirmed) => {
+        calls.starts.push(confirmed);
+        return { kind: "confirm", reason: "your premium expired" };
+      },
+    });
+    await runPlay(row(), fx);
+    expect(calls.starts).toEqual([false]);
+    expect(calls.confirms).toHaveLength(1);
+    expect(calls.confirms[0]).toContain("your premium expired");
+    expect(calls.opened).toEqual([]);
+    expect(calls.notices).toEqual(["Playback cancelled — nothing was streamed."]);
+  });
+
+  it("retries with confirm: true only after the user accepts", async () => {
+    const calls: boolean[] = [];
+    const { fx, calls: rec } = harness({
+      start: async (_row, confirmed) => {
+        calls.push(confirmed);
+        return confirmed
+          ? started({ files: [file("movie.mp4", 0)] })
+          : { kind: "confirm", reason: "no premium" };
+      },
+      confirm: () => true,
+    });
+    await runPlay(row(), fx);
+    expect(calls).toEqual([false, true]);
+    expect(rec.opened).toEqual(["/play/s1/0?k=cap&n=movie.mp4"]);
+  });
+
+  it("asks once per click, even if the server refuses the confirmation too", async () => {
+    let confirms = 0;
+    const { fx } = harness({
+      start: async () => ({ kind: "confirm", reason: "no premium" }),
+      confirm: () => {
+        confirms++;
+        return true;
+      },
+    });
+    await runPlay(row(), fx);
+    expect(confirms).toBe(1);
+  });
+
+  // MUTATION GUARD #2 and #3. The player page has no bearer token, so ?k= is
+  // the only credential it can present and ?n= is the only way it can learn the
+  // filename. Drop either and the page renders a fallback card instead of video.
+  it("carries the capability and the filename into the player URL", async () => {
+    const { fx, calls } = harness({
+      start: async () => ({
+        kind: "started",
+        sessionId: "sess-9",
+        capability: "secret-cap",
+        session: session({ id: "sess-9", files: [file("Big Buck Bunny.mp4", 2)] }),
+      }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.opened[0]).toBe("/play/sess-9/2?k=secret-cap&n=Big+Buck+Bunny.mp4");
+  });
+
+  // MUTATION GUARD #5. Real-Debrid caching reports a percent for minutes; a loop
+  // that stopped at the first tick would strand a session that was about to be
+  // ready and leave the user watching a frozen number.
+  it("keeps polling while the session is resolving, and shows the percent", async () => {
+    const states: PublicStreamSession[] = [
+      session({ state: "resolving", progress: 10 }),
+      session({ state: "resolving", progress: 55 }),
+      session({ state: "ready", files: [file("movie.mp4", 0)] }),
+    ];
+    let i = 0;
+    const { fx, calls } = harness({
+      start: async () => started({ state: "resolving", progress: 0 }),
+      poll: async () => {
+        calls.polls++;
+        return states[i++] ?? null;
+      },
+    });
+    await runPlay(row(), fx);
+    expect(calls.polls).toBe(3);
+    expect(calls.notices.some((n) => n.includes("55%"))).toBe(true);
+    expect(calls.opened).toEqual(["/play/s1/0?k=cap&n=movie.mp4"]);
+  });
+
+  it("gives up and stops the session once the resolve deadline passes", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ state: "resolving" }),
+      poll: async () => {
+        calls.polls++;
+        return session({ state: "resolving", progress: 5 });
+      },
+    });
+    await runPlay(row(), fx);
+    // The fake clock only advances through sleep(), so this is exactly the
+    // deadline divided by the poll interval.
+    expect(calls.polls).toBe(RESOLVE_TIMEOUT_MS / POLL_MS);
+    expect(calls.stopped).toEqual(["s1"]);
+    expect(calls.notices.at(-1)).toContain("Gave up waiting");
+  });
+
+  it("stops polling and says so when the session can't be read", async () => {
+    const { fx, calls } = harness({ start: async () => started({ state: "resolving" }) });
+    await runPlay(row(), fx);
+    expect(calls.polls).toBe(1);
+    expect(calls.notices.at(-1)).toContain("Lost track");
+  });
+
+  it("shows a picker instead of opening anything when there are several videos", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ files: [file("a.mkv", 0), file("b.mkv", 1), file("c.nfo", 2)] }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.opened).toEqual([]);
+    expect(calls.chosen).toHaveLength(1);
+    expect(calls.chosen[0]!.capability).toBe("cap");
+    expect(calls.chosen[0]!.files.map((f) => f.filename)).toEqual(["a.mkv", "b.mkv"]);
+    // The session is the picker's to stop now, not this flow's.
+    expect(calls.stopped).toEqual([]);
+  });
+
+  it("surfaces the session's error and releases the session", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ state: "error", error: "Couldn't reach the swarm." }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.notices).toEqual(["Couldn't reach the swarm."]);
+    expect(calls.stopped).toEqual(["s1"]);
+    expect(calls.opened).toEqual([]);
+  });
+
+  it("releases the session when a ready torrent has nothing in it", async () => {
+    const { fx, calls } = harness({ start: async () => started({ files: [] }) });
+    await runPlay(row(), fx);
+    expect(calls.stopped).toEqual(["s1"]);
+    expect(calls.opened).toEqual([]);
+  });
+
+  it("says nothing extra when the start itself already failed and reported why", async () => {
+    const { fx, calls } = harness();
+    await runPlay(row(), fx);
+    expect(calls.notices).toEqual([]);
+    expect(calls.opened).toEqual([]);
+  });
+});

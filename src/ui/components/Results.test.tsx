@@ -26,8 +26,8 @@ vi.mock("../../recc/omdb", () => ({
   fetchTitleMeta: omdb.byId,
   fetchTitleMetaByName: omdb.byName,
 }));
-vi.mock("../../util/poster", () => ({
-  fetchPosterRows: vi.fn(async () => ["\x1b[38;2;9;9;9m▀\x1b[0m"]),
+vi.mock("../../core/posterCache", () => ({
+  cachedPosterRows: vi.fn(async () => ["\x1b[38;2;9;9;9m▀\x1b[0m"]),
 }));
 
 const openUrl = vi.hoisted(() => vi.fn(async (_u: string) => true));

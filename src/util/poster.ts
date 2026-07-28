@@ -1,5 +1,5 @@
 import jpeg from "jpeg-js";
-import type { FetchImpl } from "./net";
+import { readFile } from "node:fs/promises";
 import { log } from "./logger";
 
 const UP = "▀"; // upper half block: fg paints the top pixel, bg the bottom one
@@ -99,23 +99,19 @@ export function renderJpegPoster(buf: Buffer, cols: number, maxRows: number): st
   return halfBlockRows(small);
 }
 
-// Fetch a poster image and render it. Never throws; returns null on any
-// failure (network, non-JPEG, decode error).
-export async function fetchPosterRows(
-  url: string,
+// Render an already-downloaded poster from disk. The cache layer
+// (`core/posterCache`) owns the network so this module stays pure pixel work.
+// Returns null if the file is unreadable or not a decodable JPEG.
+export async function renderPosterFile(
+  file: string,
   cols: number,
   maxRows: number,
-  opts: { fetchImpl?: FetchImpl; timeoutMs?: number } = {},
 ): Promise<string[] | null> {
-  if (!/^https?:\/\//i.test(url)) return null;
-  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
   try {
-    const res = await fetchImpl(url, { method: "GET", signal: AbortSignal.timeout(opts.timeoutMs ?? 8000) });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await readFile(file);
     return renderJpegPoster(buf, cols, maxRows);
   } catch (err) {
-    log.debug(`poster fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
+    log.debug(`poster render failed for ${file}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
