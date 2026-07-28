@@ -1,20 +1,24 @@
-// Headless HTTP add API: torlnk exposes a tiny local server so another program
-// (a seedbox web app, a script, curl) can hand it a torrent over HTTP instead of
-// a keypress. It complements the watch folder — same headless runtime, a
-// different doorway.
+// The HTTP add API (no terminal UI): torlnk exposes a tiny local server so
+// another program (a seedbox web app, a script, curl) can hand it a torrent
+// over HTTP instead of a keypress. It complements the watch folder — same
+// runtime, a different doorway.
 //
 // Default port 9161 sits next to Tor's control port (9051 / browser 9151); it's
 // deliberately non-standard and overridable with --port. Binds 127.0.0.1 by
 // default; exposing it on a public interface requires a token.
 
 import http from "node:http";
+import os from "node:os";
+import { randomBytes } from "node:crypto";
 import { startRuntime, addInput, type Runtime } from "./runtime";
+import { displayHosts, webUrl, type NetInterfaces } from "../web/links";
 import { disarmBootMarker } from "../download/bootguard";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } from "./auth";
 import { startWebServer, type WebServerHandle } from "../web/server";
 import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
+import { openUrl } from "../util/openUrl";
 
 export { isAuthorized } from "./auth";
 
@@ -43,6 +47,30 @@ export interface ServeOptions {
    * second copy of the same surface on a port nobody asked for.
    */
   web?: boolean;
+  /** Do not open a browser. Only meaningful with `web`. */
+  headless?: boolean;
+  /**
+   * This process was detached by `--daemon`. Used only to decide against
+   * opening a browser: the parent that had a user has already exited.
+   */
+  daemon?: boolean;
+  /**
+   * Whether stdout is a terminal. Read here only as the default (real
+   * `process.stdout.isTTY`) — injectable because vitest's stdout is never a
+   * TTY, and without this seam the browser-open path would be unreachable
+   * from a test, which is exactly the path worth pinning.
+   */
+  isTTY?: boolean;
+  /** The browser opener. Injected so a test does not spawn a real browser. */
+  openUrlImpl?: (url: string) => Promise<boolean>;
+  /**
+   * Override for `os.networkInterfaces()`, consulted only for a wildcard host
+   * to compute the LAN addresses printed alongside the local URL. Real callers
+   * never set this — it exists so a test can hand in a fixture NIC list
+   * instead of depending on the machine's actual network, the same reason
+   * `isTTY` and `openUrlImpl` above are injected rather than read live.
+   */
+  interfaces?: NetInterfaces;
 }
 
 // Pull a magnet / info hash out of a request body. Accepts JSON ({ magnet } or
@@ -63,7 +91,7 @@ export function extractMagnet(bodyText: string): string | null {
   return raw;
 }
 
-// Control actions the headless API accepts (POST /control). A seedbox web app
+// Control actions the add API accepts (POST /control). A seedbox web app
 // drives per-torrent buttons through these instead of the interactive keymap.
 export const CONTROL_ACTIONS = [
   "pause", // pause an active/queued download
@@ -279,19 +307,47 @@ async function failStartup(message: string, web: WebServerHandle | null): Promis
   process.exit(1);
 }
 
+/**
+ * Whether to open a browser on startup. Three ways to say no, and only the
+ * first is a preference: `--headless` is the user's, `--daemon` means the
+ * process that had a user has already exited, and a non-terminal stdout means
+ * nobody is watching (systemd, a pipe, CI) — spawning a browser there puts a
+ * window on a machine nobody is sitting at.
+ */
+export function shouldOpenBrowser(opts: {
+  headless?: boolean;
+  daemon?: boolean;
+  isTTY?: boolean;
+}): boolean {
+  if (opts.headless) return false;
+  if (opts.daemon) return false;
+  return opts.isTTY === true;
+}
+
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const port = options.port ?? DEFAULT_API_PORT;
   const host = options.host ?? "127.0.0.1";
-  const token = options.token && options.token.trim() ? options.token.trim() : null;
+  let token = options.token && options.token.trim() ? options.token.trim() : null;
+  let mintedToken = false;
 
   // Fail soft, not open: never expose a public interface without a token.
+  //
+  // With --web there is a browser to hand a working link to, so the secret can
+  // be minted rather than demanded — that is the whole difference between the
+  // two branches. Without --web there is nothing to hand it to: the caller is a
+  // script, and a fresh secret every boot is worse than the error it replaced,
+  // because the script would start failing 401 instead of failing to start.
   if (!LOOPBACK_HOSTS.has(host) && !token) {
-    console.error(
-      `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
-        `(or set TORLINK_API_TOKEN), or bind 127.0.0.1.`,
-    );
-    process.exit(1);
-    return;
+    if (!options.web) {
+      console.error(
+        `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
+          `(or set TORLINK_API_TOKEN), or bind 127.0.0.1.`,
+      );
+      process.exit(1);
+      return;
+    }
+    token = randomBytes(16).toString("hex");
+    mintedToken = true;
   }
 
   const runtime = await startRuntime(options.downloadDir);
@@ -303,6 +359,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // With --web there is one server, not two. It binds the port the user chose,
   // and answers both the dashboard and the add API — one process, one address,
   // one exposure decision.
+
   let web: WebServerHandle | null = null;
   if (options.web) {
     try {
@@ -322,8 +379,57 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       );
       return;
     }
-    log(`listening on http://${host}:${port}  (api + web ui, downloads -> ${runtime.downloadDir})`);
-    log(token ? "auth: token required" : "auth: none (loopback only)");
+    // The handle's port, not the requested one: it reports what was actually
+    // bound, which is the only correct answer once `port: 0` is in play.
+    const bound = web.port;
+    const { local, lan } = displayHosts(host, options.interfaces ?? os.networkInterfaces());
+    // One place for token + bound to reach every URL this block logs, so the
+    // browser-open target (`localUrl`) and every line below it are built the
+    // same way and cannot drift apart.
+    const link = (h: string): string => webUrl(h, bound, token ?? undefined);
+    // The URL a browser on this machine should open. A const inside this block,
+    // so the log lines and the browser-open below cannot disagree about it and
+    // there is no null state to guard against.
+    const localUrl = link(local);
+    // The marker comes before the URL, not after: it lines up in a column
+    // regardless of address width, and it leaves the pasteable URL last on the
+    // line, which is where an 80-column wrap does the least damage. The bind
+    // line above (web/server.ts) already states the auth mode, so it is not
+    // repeated here.
+    log(`open on this machine:  ${localUrl}`);
+    for (const address of lan) {
+      log(`open from your LAN:    ${link(address)}`);
+    }
+    log(`api + web ui on one port, downloads -> ${runtime.downloadDir}`);
+    // Unfragmented and on its own line: the link is for the human, this is for
+    // whatever script is reading the log.
+    if (mintedToken) log(`token ${token}  (pass --token to pin it across restarts)`);
+    if (
+      shouldOpenBrowser({
+        headless: options.headless,
+        daemon: options.daemon,
+        isTTY: options.isTTY ?? process.stdout.isTTY === true,
+      })
+    ) {
+      // Deliberately not awaited. `xdg-open`/`gio open` (util/openFolder.ts's
+      // `launch()`) can block for up to ~4s each — a `$BROWSER` handler or a
+      // desktop entry with Terminal=true both do it for real — and awaiting
+      // here would run that wait *before* the SIGINT/SIGTERM handlers below are
+      // registered, since --web skips the `if (server)` listen block that
+      // would otherwise occupy that time. A Ctrl-C in that window hits Node's
+      // default disposition (immediate death) instead of `shutdown()`, and
+      // because the boot marker is armed until `queue.suspend()` runs (see
+      // download/bootguard.ts) and BOOT_SETTLE_MS is 4000 — almost exactly
+      // this window — that death leaves the marker armed. The next launch then
+      // restores everything paused and starts no engines: a slow browser
+      // handler silently pausing the user's downloads on their next run.
+      // Firing and forgetting closes the gap to microseconds; openUrl never
+      // throws, and a log line arriving after shutdown has begun is harmless.
+      const opener = options.openUrlImpl ?? openUrl;
+      void opener(localUrl).then((ok) => {
+        if (!ok) log(`could not open a browser — open ${localUrl} yourself`);
+      });
+    }
   }
 
   // The bare JSON API, for a daemon running without the dashboard. A function

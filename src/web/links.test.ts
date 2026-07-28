@@ -1,0 +1,115 @@
+// The bug this module exists to kill: `--host 0.0.0.0` used to be printed
+// verbatim as `http://0.0.0.0:9161`, which is not an address a browser can
+// visit. Pure by construction — the interface list is a parameter — so every
+// case below is exercised without depending on the machine's NICs.
+import { describe, it, expect } from "vitest";
+import { displayHosts, webUrl, withoutToken, type NetInterfaces } from "./links";
+
+const IFACES: NetInterfaces = {
+  lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+  eth0: [
+    { family: "IPv4", address: "192.168.1.24", internal: false },
+    { family: "IPv6", address: "fe80::1", internal: false },
+  ],
+  // A docker bridge, and it is expected in the LAN list *on purpose* — not an
+  // oversight to tidy away. 172.16/12 is a legitimate private range, nothing in
+  // an address distinguishes a bridge from a real NIC, and printing one address
+  // a phone cannot reach costs the user a failed paste, while hiding one it
+  // could have reached costs them the feature.
+  docker0: [{ family: "IPv4", address: "172.17.0.1", internal: false }],
+};
+
+describe("displayHosts", () => {
+  it("maps an IPv4 wildcard to loopback plus every external IPv4", () => {
+    expect(displayHosts("0.0.0.0", IFACES)).toEqual({
+      local: "127.0.0.1",
+      lan: ["192.168.1.24", "172.17.0.1"],
+    });
+  });
+  it("maps an IPv6 wildcard the same way", () => {
+    expect(displayHosts("::", IFACES).local).toBe("127.0.0.1");
+  });
+  it("treats an empty host as a wildcard", () => {
+    expect(displayHosts("", IFACES).local).toBe("127.0.0.1");
+  });
+  it("passes an explicit host through with no LAN list", () => {
+    expect(displayHosts("192.168.1.24", IFACES)).toEqual({ local: "192.168.1.24", lan: [] });
+  });
+  it("brackets an IPv6 literal so it can be concatenated into a URL", () => {
+    expect(displayHosts("::1", IFACES)).toEqual({ local: "[::1]", lan: [] });
+  });
+  it("does not double-bracket an already-bracketed literal", () => {
+    expect(displayHosts("[::1]", IFACES).local).toBe("[::1]");
+  });
+  it("skips internal addresses and IPv6 in the LAN list", () => {
+    expect(displayHosts("0.0.0.0", IFACES).lan).not.toContain("127.0.0.1");
+    expect(displayHosts("0.0.0.0", IFACES).lan).not.toContain("fe80::1");
+  });
+  it("yields an empty LAN list on a machine with only loopback", () => {
+    expect(displayHosts("0.0.0.0", { lo: IFACES.lo }).lan).toEqual([]);
+  });
+  it("tolerates the numeric family node used to report", () => {
+    const numeric: NetInterfaces = { eth0: [{ family: 4, address: "10.0.0.2", internal: false }] };
+    expect(displayHosts("0.0.0.0", numeric).lan).toEqual(["10.0.0.2"]);
+  });
+  it("tolerates an undefined interface entry", () => {
+    expect(displayHosts("0.0.0.0", { eth0: undefined }).lan).toEqual([]);
+  });
+  it("trims surrounding whitespace before checking for a wildcard", () => {
+    expect(displayHosts("  0.0.0.0  ", IFACES).local).toBe("127.0.0.1");
+  });
+  it("treats a bare asterisk as a wildcard", () => {
+    expect(displayHosts("*", IFACES).local).toBe("127.0.0.1");
+  });
+  it("treats the ::0 and [::] spellings of the IPv6 wildcard as wildcards", () => {
+    expect(displayHosts("::0", IFACES).local).toBe("127.0.0.1");
+    expect(displayHosts("[::]", IFACES).local).toBe("127.0.0.1");
+  });
+  it("dedupes an address reported by more than one interface", () => {
+    const dup: NetInterfaces = {
+      eth0: [{ family: "IPv4", address: "192.168.1.24", internal: false }],
+      br0: [{ family: "IPv4", address: "192.168.1.24", internal: false }],
+    };
+    expect(displayHosts("0.0.0.0", dup).lan).toEqual(["192.168.1.24"]);
+  });
+});
+
+describe("webUrl", () => {
+  it("builds a bare URL with no token", () => {
+    expect(webUrl("127.0.0.1", 9161)).toBe("http://127.0.0.1:9161");
+  });
+  it("puts the token in the fragment, never the query", () => {
+    expect(webUrl("127.0.0.1", 9161, "abc")).toBe("http://127.0.0.1:9161/#k=abc");
+  });
+  it("encodes a token with URL-significant characters", () => {
+    expect(webUrl("127.0.0.1", 9161, "a b&c")).toBe("http://127.0.0.1:9161/#k=a%20b%26c");
+  });
+  it("treats an empty token as no token", () => {
+    expect(webUrl("127.0.0.1", 9161, "")).toBe("http://127.0.0.1:9161");
+  });
+  it("brackets a raw IPv6 host on its own, without going through displayHosts", () => {
+    expect(webUrl("::1", 9161)).toBe("http://[::1]:9161");
+  });
+  it("does not double-bracket a host already bracketed by displayHosts", () => {
+    const { local } = displayHosts("::1", IFACES);
+    expect(webUrl(local, 9161)).toBe("http://[::1]:9161");
+  });
+});
+
+describe("withoutToken", () => {
+  it("strips a token fragment, and the slash webUrl added with it", () => {
+    expect(withoutToken("http://127.0.0.1:9161/#k=abc")).toBe("http://127.0.0.1:9161");
+  });
+  it("leaves a tokenless URL alone", () => {
+    expect(withoutToken("http://127.0.0.1:9161")).toBe("http://127.0.0.1:9161");
+  });
+  it("strips an encoded token whole", () => {
+    expect(withoutToken("http://127.0.0.1:9161/#k=a%20b%26c")).toBe("http://127.0.0.1:9161");
+  });
+  it("round-trips whatever webUrl builds, for any token", () => {
+    // The pairing that matters: these two must not drift, or the splash would
+    // render half a secret.
+    expect(withoutToken(webUrl("127.0.0.1", 9161, "s3cret"))).toBe(webUrl("127.0.0.1", 9161));
+    expect(withoutToken(webUrl("[::1]", 9161, "s3cret"))).toBe(webUrl("[::1]", 9161));
+  });
+});

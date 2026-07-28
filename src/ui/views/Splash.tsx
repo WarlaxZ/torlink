@@ -5,6 +5,7 @@ import { SearchBar } from "../components/SearchBar";
 import { LOGO_WIDTH } from "../logo";
 import { useStore } from "../store";
 import { sourcesByGroup } from "../../sources/registry";
+import { withoutToken } from "../../web/links";
 import { COLOR, ICON } from "../theme";
 
 const categoryLine = (adultEnabled: boolean): string =>
@@ -95,7 +96,7 @@ export function Splash({
         <Box>
           <Text dimColor>
             {"url" in webStatus
-              ? `web ui · ${webStatus.url}`
+              ? `web ui · ${withoutToken(webStatus.url)}`
               : "web ui · failed to start (see the log)"}
           </Text>
         </Box>

@@ -39,6 +39,11 @@ export type CliCommand =
        * (web/routes.ts), so there is nothing for a second listener to add.
        */
       web?: boolean;
+      /**
+       * Do not open a browser on startup. Only meaningful with `--web`, which is
+       * the only thing that has a browser to open.
+       */
+      headless?: boolean;
     }
   | { kind: "files"; port?: number; host?: string; token?: string; dir?: string; daemon?: boolean }
   | { kind: "attach" }
@@ -112,7 +117,7 @@ const WATCH_FLAGS: FlagSpec = {
 };
 const SERVE_FLAGS: FlagSpec = {
   values: ["port", "host", "token", "to", "seed-time"],
-  bools: ["delete-files", "daemon", "web"],
+  bools: ["delete-files", "daemon", "web", "headless"],
 };
 const FILES_FLAGS: FlagSpec = { values: ["port", "host", "token"], bools: ["daemon"] };
 
@@ -166,6 +171,17 @@ export function parseCliArgs(argv: string[]): CliCommand {
     const scan = scanFlags(args.slice(1), SERVE_FLAGS);
     if (!scan.ok) return scan.error;
     if (scan.rest.length > 0) return { kind: "invalid", arg: scan.rest[0]! };
+    // Strict, like every other flag on this command: `--headless` with no --web
+    // turns nothing off, and accepting it silently is how `--web-host` came to
+    // be a flag that did nothing. (The TUI warns instead of erroring for its
+    // orphans, in App.tsx — a TUI cannot exit with a message anyone would read.)
+    if (scan.bools.has("headless") && !scan.bools.has("web")) {
+      return {
+        kind: "invalid",
+        arg: "--headless",
+        hint: "--headless only means something with --web: it stops torlink opening a browser",
+      };
+    }
     return {
       kind: "serve",
       port: parsePort(scan.flags.port),
@@ -176,6 +192,7 @@ export function parseCliArgs(argv: string[]): CliCommand {
       deleteFiles: scan.bools.has("delete-files"),
       daemon: scan.bools.has("daemon"),
       web: scan.bools.has("web"),
+      headless: scan.bools.has("headless"),
     };
   }
   if (a === "files") {
@@ -236,10 +253,10 @@ usage
   torlnk "magnet:?xt=..."     start a download on launch
   torlnk path/to/file.torrent open a .torrent file on launch
   torlnk --web                open the TUI and serve the browser UI on :9162
-  torlnk watch <dir>          headless: download torrents dropped into <dir>
-  torlnk serve                headless: HTTP add API (POST /add) on :9161
-  torlnk serve --web          headless: the add API plus the browser UI on :9161
-  torlnk files [dir]          headless: serve downloads over HTTP on :9160
+  torlnk watch <dir>          no TUI: download torrents dropped into <dir>
+  torlnk serve                no TUI: HTTP add API (POST /add) on :9161
+  torlnk serve --web          no TUI: the add API plus the browser UI on :9161
+  torlnk files [dir]          no TUI: serve downloads over HTTP on :9160
   torlnk attach               open/reattach the TUI in a persistent tmux session
   torlnk update [--force]     update to the latest release and restart any daemon
                               (--force rebuilds/restarts even if already current)
@@ -255,6 +272,7 @@ flags, one name per thing
   --host <addr>    the interface this process binds (default 127.0.0.1)
   --port <n>       the port it binds (serve 9161, files 9160, --web 9162)
   --token <secret> the shared secret; required to bind anything but loopback
+                   (serve --web mints one for you instead of refusing)
   --to <dir>       where downloads land (watch, serve)
 A bare directory argument is always the folder a command operates on
 (watch <dir>, files [dir]); --to is always where output goes.
@@ -287,7 +305,11 @@ browser, over the same queue as the process hosting it.
   torlnk serve --web       the daemon hosts it, on serve's own port
 It binds --host and --port like everything else — under serve there is one
 server, not two: the dashboard's port also answers /add, /downloads and
-/control. A non-loopback host is refused without a token.
+/control.
+serve --web opens your browser on the link it prints, and mints a token for
+you when --host is not loopback (pass --token to pin one across restarts).
+--headless prints the link and opens nothing; so does --daemon, and so does
+a stdout that is not a terminal. In the TUI, shift+w opens the dashboard.
 
 files mode (no TUI): a read-only, range-aware HTTP server over the downloads
 folder, so finished files stream to a browser or media player.

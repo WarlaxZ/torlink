@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout, useStdin } from "ink";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import {
   loadConfig,
   saveConfig,
@@ -40,6 +41,7 @@ import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { openFolder } from "../util/openFolder";
+import { openUrl } from "../util/openUrl";
 import { cleanText, formatBytes, truncate } from "../util/format";
 import { isCategory, parseSection } from "./store";
 import {
@@ -116,6 +118,7 @@ import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
 import { vpnRouteIsSafe } from "../util/vpn";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { displayHosts, webUrl, withoutToken } from "../web/links";
 import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
 import type { Runtime } from "../daemon/runtime";
 import { log } from "../util/logger";
@@ -485,12 +488,18 @@ export function App({
       },
       sessions,
     };
+    // One reading of the token for the whole mount: the server is given it and
+    // the displayed link embeds it, and those two must agree — a link carrying a
+    // token the server does not enforce (or vice versa) is a dashboard that
+    // won't open. Empty and whitespace-only both mean "no token", matching
+    // web/server.ts's own check.
+    const token = webToken?.trim() || undefined;
     void (async () => {
       try {
         const started = await startWebServerImpl(runtime, {
           ...(webPort !== undefined ? { port: webPort } : {}),
           host,
-          ...(webToken?.trim() ? { token: webToken.trim() } : {}),
+          ...(token ? { token } : {}),
           // THE constraint of this mount: Ink owns stdout and repaints by
           // tracking cursor position, so a stray write from a request handler
           // lands inside a rendered frame and corrupts it — and reads as a
@@ -506,8 +515,16 @@ export function App({
         // The port comes from the handle, not from webPort: the handle reports
         // what was actually bound, which is the only correct answer once
         // `port: 0` is in play (the daemon reads it back the same way).
-        const url = `http://${host}:${started.port}`;
-        setNotice(`${ICON.done} Web UI on ${url}`);
+        // Not `host`: a wildcard bind is not an address, and printing it here
+        // sent users to http://0.0.0.0:9162. The token rides in the fragment so
+        // the link works without typing it (web/links.ts).
+        const { local } = displayHosts(host, os.networkInterfaces());
+        const url = webUrl(local, started.port, token);
+        // The notice is shown without the token for the same reason the splash
+        // line is (web/links.ts): both land in terminal scrollback, which
+        // `torlnk attach` keeps alive in a tmux session. `webStatus` holds the
+        // real link, so shift+w still opens something that works.
+        setNotice(`${ICON.done} Web UI on ${withoutToken(url)}`);
         setWebStatus({ url });
       } catch (e) {
         // Every failure mode lands here, including startWebServer's refusal to
@@ -1899,6 +1916,25 @@ export function App({
       if (input === "V") {
         setShowHelp(false);
         setEditingVpn(true);
+        return;
+      }
+      if (input === "W") {
+        setShowHelp(false);
+        // Deliberately not stealing focus like the daemon's auto-open does:
+        // this is a terminal UI, so opening a browser only happens on request.
+        if (webStatus && "url" in webStatus) {
+          const target = webStatus.url;
+          void openUrl(target).then((ok) => {
+            if (!ok) setNotice(`Couldn't open a browser — open ${target} yourself`);
+          });
+        } else if (webStatus) {
+          // Three states, not two. A failed bind is not the same as no --web,
+          // and telling someone who passed the flag to pass the flag sends them
+          // in a circle — the reason is in the log (the splash says so too).
+          setNotice("The web UI failed to start — see the log");
+        } else {
+          setNotice("The web UI is not running — relaunch with --web");
+        }
         return;
       }
       if (input === "X") {

@@ -44,7 +44,20 @@ export interface RunDescriptor {
 // descriptor the same way.
 export function spawnDaemon(name: string, argv: string[], cwd: string): number {
   fs.mkdirSync(logsDir, { recursive: true });
-  const out = fs.openSync(logPathFor(name), "a");
+  // 0600, and tightened on every spawn rather than only at creation: since
+  // `serve --web` began minting a token for a non-loopback bind, this file can
+  // contain a live credential — the daemon's stdout is where that token is
+  // printed. It used to hold nothing worth reading, so it was created with the
+  // default 0644 and every existing install still has one at that mode.
+  // fchmod (not chmod) so the mode lands on the descriptor we just opened.
+  const out = fs.openSync(logPathFor(name), "a", 0o600);
+  // Best-effort, never fatal: this is hardening, and refusing to start a daemon
+  // because a mode could not be set would be a worse outcome than a loose mode.
+  // Windows models almost none of this (owner-only there is an ACL question),
+  // which is the main reason it is allowed to fail quietly.
+  try {
+    fs.fchmodSync(out, 0o600);
+  } catch {}
   const child = spawn(process.execPath, argv, {
     cwd,
     detached: true,
@@ -54,9 +67,18 @@ export function spawnDaemon(name: string, argv: string[], cwd: string): number {
   child.unref();
   const pid = child.pid ?? 0;
   if (pid) {
+    // The pid is not a secret, so it keeps the default mode.
     fs.writeFileSync(pidPathFor(name), `${pid}\n`);
+    // The run descriptor is, though: it stores the whole argv so `torlnk update`
+    // can relaunch this daemon, and a `--token <secret>` lives in there verbatim.
+    // 0600, and chmod'd unconditionally because writeFileSync's mode only
+    // applies when it creates the file — an install that has been restarting a
+    // daemon since before this would otherwise keep its world-readable copy.
     const desc: RunDescriptor = { name, pid, argv, cwd, startedAt: Date.now() };
-    fs.writeFileSync(runPathFor(name), `${JSON.stringify(desc, null, 2)}\n`);
+    fs.writeFileSync(runPathFor(name), `${JSON.stringify(desc, null, 2)}\n`, { mode: 0o600 });
+    try {
+      fs.chmodSync(runPathFor(name), 0o600);
+    } catch {}
   }
   return pid;
 }
@@ -72,6 +94,11 @@ export function daemonize(name: string): void {
 
   console.log(`torlink ${name} daemon started (pid ${pid}).`);
   console.log(`  logs: ${logPath}`);
+  // Said out loud because `--daemon` is the one launch that does not end with a
+  // dashboard on screen: the child's stdout is the log file, so the browsable
+  // link — and a minted token, when there is one — is in there and nowhere else.
+  // Without this the user gets a pid and has to guess where the address went.
+  if (process.argv.includes("--web")) console.log(`  web ui: the link is in that log`);
   console.log(`  stop: kill ${pid}   (or: kill $(cat ${pidPath}))`);
   process.exit(0);
 }

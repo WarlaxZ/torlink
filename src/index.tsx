@@ -30,7 +30,7 @@ if (cmd.kind === "invalid") {
 // An unhandled promise rejection must never take the whole app down: webtorrent
 // can produce one from inside its own async internals where no caller's
 // try/catch or error event can reach (see util/crashlog.ts). Contained and
-// logged for every mode; headless runs also echo one line to their log.
+// logged for every mode; no-TUI runs also echo one line to their log.
 containUnhandledRejections({
   echo: cmd.kind === "update" || cmd.kind === "watch" || cmd.kind === "serve" || cmd.kind === "files" || cmd.kind === "import-netflix" || cmd.kind === "import-trakt",
 });
@@ -40,10 +40,10 @@ if (cmd.kind === "attach") {
   runAttach();
 }
 
-// Headless subcommands: run the download queue with no terminal UI (for
-// seedboxes and servers). Kept above the alt-screen setup below — these paths
-// never touch the TUI. Each is dynamically imported so a plain `torlnk` launch
-// pays nothing for them.
+// Subcommands with no terminal UI: run the download queue for seedboxes and
+// servers. Kept above the alt-screen setup below — these paths never touch
+// the TUI. Each is dynamically imported so a plain `torlnk` launch pays
+// nothing for them.
 function failHeadless(err: unknown): never {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
@@ -67,6 +67,8 @@ if (cmd.kind === "update") {
     seedTimeMs: cmd.seedTimeMs,
     deleteFiles: cmd.deleteFiles,
     web: cmd.web,
+    headless: cmd.headless,
+    daemon: cmd.daemon,
   };
   void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
 } else if (cmd.kind === "files") {

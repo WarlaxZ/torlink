@@ -524,7 +524,11 @@ export async function startWebServer(
   // `port: 0` asks the OS to pick, so the caller can only learn the real port
   // from here. A string address means a unix socket, which this never binds.
   const bound = address && typeof address === "object" ? address.port : port;
-  log(`web ui on http://${host}:${bound}${token ? " (token required)" : " (loopback only)"}`);
+  // The bind, not a URL. This server knows where it is listening; it does not
+  // know what a browser should type — a wildcard bind has no single answer, and
+  // printing `http://0.0.0.0:9161` here is what sent users to a dead address.
+  // The browsable URLs are the caller's to log (see web/links.ts).
+  log(`web ui bound to ${host}:${bound}${token ? " (token required)" : " (loopback only)"}`);
 
   let closed: Promise<void> | null = null;
   const close = (): Promise<void> => {

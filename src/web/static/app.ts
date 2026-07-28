@@ -78,6 +78,7 @@ import {
   type ReccState,
   type ReccType,
 } from "./reccModel";
+import { tokenFromHash } from "./authLink";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -163,6 +164,30 @@ function storeToken(value: string): void {
 }
 
 let token = readStoredToken();
+
+// A magic link (`…/#k=<token>`) hands this page a working token so the user
+// never types one. Adopted into the same sessionStorage slot the unlock form
+// writes, then stripped from the address bar: a token that has since been
+// rotated must present as the unlock form, and a hash left in place would make
+// every reload retry the dead secret instead.
+// A link beats a stored token on purpose: it was minted against the server that
+// is running now, while sessionStorage may hold one from a previous boot.
+const linkToken = tokenFromHash(location.hash);
+if (linkToken) {
+  token = linkToken;
+  storeToken(token);
+  try {
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch {
+    // Same defence, and the same reason, as readStoredToken/storeToken above:
+    // an opaque origin (a sandboxed iframe without allow-same-origin) breaks
+    // the History API and sessionStorage together. This is a module script, so
+    // an uncaught throw here would abandon the rest of this file — no render,
+    // no listeners, a dead page — to avoid a visible `#k=` in the address bar.
+    // A visible fragment is a cosmetic loss; the page is not.
+  }
+}
+
 let rows: DashRow[] = [];
 let stream: EventSource | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
