@@ -157,6 +157,12 @@ describe("runServe --web startup output", () => {
 
     const lines = perHostLines(logs);
     expect(lines.some((l) => l.includes("0.0.0.0"))).toBe(false);
+    // The other half of this task lives in web/server.ts, and this is the only
+    // assertion covering it. Narrowing the check above to the per-host lines
+    // excluded that file's bind line by construction — reverting it to the
+    // original `web ui on http://0.0.0.0:9161` passed 701 tests. Pinned
+    // positively, on the new wording, so a third rewording is caught too.
+    expect(logs.join("\n")).toContain(`web ui bound to 0.0.0.0:${port}`);
     expect(logs.join("\n")).toContain(`open on this machine:  http://127.0.0.1:${port}/#k=s3cret`);
     expect(logs.join("\n")).toContain(`open from your LAN:    http://192.168.1.24:${port}/#k=s3cret`);
     expect(logs.join("\n")).toContain(`open from your LAN:    http://172.17.0.1:${port}/#k=s3cret`);

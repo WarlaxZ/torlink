@@ -9,8 +9,9 @@
 // arms the crash-boot marker — neither belongs in a test of a shutdown
 // closure or a startup log line).
 //
-// Split out once a second file needed the same shape: anything added here is
-// guaranteed to be exercised by both.
+// Split out once a second file needed the same shape. Everything here has at
+// least one consumer and most have two — but not all, so a lone caller is not
+// evidence that an export is dead.
 
 import net from "node:net";
 import { vi } from "vitest";
