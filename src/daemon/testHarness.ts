@@ -72,33 +72,41 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
   ]);
 }
 
-// Ask the OS for a port instead of guessing one.
+// Finding a port a test can bind, which is harder than it looks on three
+// platforms at once.
 //
-// These used to pick at random from 20000-40000 and accept the number if a
-// loopback connect was refused, which was wrong twice over and flaked for real:
-// `mints a token for a non-loopback bind` failed roughly one run in four,
-// timing out at 5s because the port it had been handed was taken by the time
-// runServe bound it, so no listener ever appeared.
+// Two earlier versions were both wrong. The first picked at random from
+// 20000-40000 and accepted the number if a *loopback connect* was refused: that
+// only asked 127.0.0.1 while several tests bind the wildcard, so a port busy on
+// another interface answered "free", and `mints a token for a non-loopback bind`
+// flaked about one run in four.
 //
-// Two bugs, one fix. The probe only asked 127.0.0.1, while several tests bind
-// the wildcard — a port busy on any other interface answered "free". And the
-// gap between probing and binding is a race every parallel vitest worker was
-// free to win. Binding port 0 closes both: the kernel only hands out a port
-// that is genuinely unused *everywhere*, and it will not hand the same one to a
-// concurrent asker while this socket is open. The window between our close and
-// the caller's bind is still technically a race, but the kernel does not reuse
-// a just-released ephemeral port that eagerly, which is the difference between
-// "flakes weekly" and "guesses and hopes".
-function askOsForPort(host: string): Promise<number> {
-  return new Promise((resolve, reject) => {
+// The second asked the kernel for an ephemeral port with `listen(0)`. That fixed
+// Linux and broke Windows outright: Windows hands out ephemeral ports more or
+// less sequentially, so with vitest workers probing in parallel `base + 1` was
+// almost always another worker's live probe socket, and `freePortPair` gave up
+// 40 times in a row.
+//
+// So: a random port in a range the OS does not hand out on its own, and the
+// probe is a *bind* rather than a connect. Binding is the same question the
+// caller is about to ask, on the same interface, and it has no loopback blind
+// spot. The gap between this close and the caller's bind is still a race — the
+// only true fix is handing over the listening socket itself, which node's http
+// server cannot take — but it is a small one, and nothing else contends for
+// this range.
+function canBind(port: number, host = "0.0.0.0"): Promise<boolean> {
+  return new Promise((resolve) => {
     const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, host, () => {
-      const address = probe.address();
-      const port = address && typeof address === "object" ? address.port : 0;
-      probe.close(() => (port ? resolve(port) : reject(new Error("no port from listen(0)"))));
-    });
+    probe.once("error", () => resolve(false));
+    probe.listen(port, host, () => probe.close(() => resolve(true)));
   });
+}
+
+// Above the registered-service range and below the ephemeral range every
+// platform draws from, so a number here is contended by nothing but another
+// worker in this same suite.
+function randomHighPort(): number {
+  return 20000 + Math.floor(Math.random() * 20000);
 }
 
 // A port whose successor is also free. serve binds one port now, but several
@@ -106,19 +114,21 @@ function askOsForPort(host: string): Promise<number> {
 // used to land, and "no second listener" is the claim worth pinning down.
 export async function freePortPair(): Promise<number> {
   for (let attempt = 0; attempt < 40; attempt++) {
-    const base = await askOsForPort("0.0.0.0");
-    // The successor still has to be checked by hand: listen(0) says nothing
-    // about base + 1, and that is the port these tests assert stays empty.
-    if (!(await isListening(base + 1))) return base;
+    const base = randomHighPort();
+    if ((await canBind(base)) && (await canBind(base + 1))) return base;
   }
   throw new Error("no free port pair");
 }
 
-// The wildcard is the default deliberately: a port free on 0.0.0.0 is free on
-// every interface, so it is safe for a loopback-binding caller too. The reverse
-// is not true, which is what the old loopback-only probe got wrong.
+// The wildcard is the default deliberately: a port bindable on 0.0.0.0 is
+// bindable on every interface, so it is safe for a loopback-binding caller too.
+// The reverse is not true, which is what the old loopback-only probe got wrong.
 export async function freePort(host = "0.0.0.0"): Promise<number> {
-  return askOsForPort(host);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const port = randomHighPort();
+    if (await canBind(port, host)) return port;
+  }
+  throw new Error("no free port");
 }
 
 // Signals are delivered by calling the handler runServe/runWatch just
