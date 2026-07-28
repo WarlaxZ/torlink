@@ -1370,6 +1370,40 @@ its marker could be deleted with a green suite. Same argument as Task 6's
 (following `src/ui/testHarness.ts`), which both `serve.launch.test.ts` and
 `shutdown.test.ts` now import.
 
+## Amendment: what later tasks changed
+
+**Task 3 (minting) forced two security fixes the plan never mentioned.** The
+minted token is printed to stdout, and under `--daemon` stdout is a file on
+disk: `src/daemon/daemonize.ts` now creates the log `0600` and `fchmod`s it on
+every spawn, because existing installs already have a world-readable one. The
+run descriptor beside it got the same treatment — `torlnk update` relaunches a
+daemon from it, so it stores the whole argv, and a `--token <secret>` is in
+there verbatim.
+
+**Task 6's browser-open is deliberately not awaited.** Awaiting it ran up to ~8s
+of `xdg-open`/`gio` (4s each in `util/openFolder.ts`) *before* the SIGINT/SIGTERM
+handlers were registered, because `--web` skips the `if (server)` block that
+would otherwise sit between them. A Ctrl-C in that window hit Node's default
+disposition, and since the boot marker stays armed until `queue.suspend()` and
+`BOOT_SETTLE_MS` is 4000 — almost exactly that window — the next launch restored
+everything paused. `shouldOpenBrowser` is also called with three named fields
+rather than `{ ...options }`: excess-property checking does not reach spread-in
+properties, so renaming `ServeOptions.headless` would have kept compiling while
+`--headless` silently stopped working.
+
+**Task 7's `shift+w` has three states, not two.** A failed bind is not the same
+as no `--web`, and telling someone who passed the flag to pass it sends them in
+a circle.
+
+**A test-harness lesson worth keeping.** Two Ink tests waited on strings that
+were *already on screen*, so the wait yielded nothing, the keystroke was still
+unread in the harness's stdin at unmount, and every assertion after it passed
+vacuously — one stayed green with the branch it guarded hoisted above its guard.
+In this harness a flush assertion must be one that was **false** before the
+press. `src/daemon/testHarness.ts` also asks the OS for ports now instead of
+guessing: the old probe checked only loopback while several tests bind the
+wildcard, and lost the race with parallel workers about one run in four.
+
 ## Out of scope
 
 WSL2 NAT reachability. The LAN address this now prints truthfully (e.g. `172.25.6.62` under WSL2 without mirrored networking) is still unreachable from other machines without a `netsh interface portproxy` rule and a firewall opening on the Windows host. Printing the real interface address is as far as this goes; a WSL-detection hint was considered and left out.
