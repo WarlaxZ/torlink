@@ -249,6 +249,17 @@ describe("searchStatus", () => {
     expect(searchStatus(v, 4).text).toBe("4 results · newest across all sources");
   });
 
+  it("composes the outage note and the browse tail, in that order", () => {
+    const v = browsing({
+      snapshot: snapshot([result()], {
+        total: 3,
+        done: 3,
+        perSource: { a: { loading: false, error: "timed out", code: "timed out", count: 0 } },
+      }),
+    });
+    expect(searchStatus(v, 4).text).toBe("4 results · 1 source down · newest across all sources");
+  });
+
   // The mode-independent branches must keep winning over the browse lines:
   // "every source is down" and "your filters did this" are still the truth.
   it("keeps the outage and filter branches while browsing", () => {

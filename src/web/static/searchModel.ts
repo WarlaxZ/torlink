@@ -83,7 +83,7 @@ export function sourceLabel(sources: SourcesResponse | null, id: string): string
 
 /** Everything the results list is rendered from. */
 export interface SearchView {
-  /** The submitted query. Empty in `browse` mode and before the first submit. */
+  /** The submitted query. Only meaningful in `"search"` mode. */
   query: string;
   /**
    * Which of three states the pane is in. This is NOT derivable from `query`:
@@ -162,10 +162,11 @@ export function searchStatus(view: SearchView, shown: number): SearchStatus {
   const browse = view.mode === "browse";
   const progress = progressLabel(view.snapshot);
   if (view.running) {
-    // "Loading" not "Searching" while browsing: nothing was searched for. Same
-    // word the TUI's spinner uses for the same state. Both casings are spelled
-    // out rather than derived — `noUncheckedIndexedAccess` makes `verb[0]`
-    // possibly-undefined, and a two-word table is clearer than appeasing it.
+    // "Loading" not "Searching" while browsing: nothing was searched for. Both
+    // casings are spelled out rather than capitalized at runtime — the literal
+    // strings are what you grep for when a status line looks wrong.
+    // The TUI's lowercase line (Results.tsx:510) says "searching…" even while
+    // browsing; that reads wrong and is not worth copying.
     const head =
       shown > 0
         ? `${browse ? "loading" : "searching"}… ${progress}`
