@@ -81,8 +81,9 @@ async function waitUntil(fn: () => Promise<boolean>, ms = 5000): Promise<boolean
   }
 }
 
-// A port whose successor is also free, because the default web port is `port + 1`
-// and a test that asserts that needs both ends of the pair.
+// A port whose successor is also free. serve binds one port now, but several
+// tests assert that the *next* one stays free — that is where the dashboard used
+// to land, and "no second listener" is the claim worth pinning down.
 async function freePortPair(): Promise<number> {
   for (let attempt = 0; attempt < 40; attempt++) {
     const base = 20000 + Math.floor(Math.random() * 20000);
@@ -137,73 +138,42 @@ describe("runServe web mount", () => {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("serves the api and mounts the web ui on the api port + 1", async () => {
+  it("serves the api and the web ui on one port", async () => {
     const port = await freePortPair();
     const before = new Set(process.listeners("SIGTERM"));
     const done = runServe({ port, web: true, downloadDir: dir });
     expect(await waitUntil(() => isListening(port))).toBe(true);
-    expect(await waitUntil(() => isListening(port + 1))).toBe(true);
 
+    // One port answers both surfaces: the daemon API's bare paths and the
+    // dashboard's /api/*. That is the whole point of dropping --web-port.
     const api = await fetch(`http://127.0.0.1:${port}/health`);
     expect(api.status).toBe(200);
-    const ui = await fetch(`http://127.0.0.1:${port + 1}/health`);
-    expect(ui.status).toBe(200);
-    const status = await fetch(`http://127.0.0.1:${port + 1}/api/status`);
+    const status = await fetch(`http://127.0.0.1:${port}/api/status`);
     expect(status.status).toBe(200);
     expect(await status.json()).toMatchObject({ downloads: [], seeds: [] });
+    const downloads = await fetch(`http://127.0.0.1:${port}/downloads`);
+    expect(downloads.status).toBe(200);
+
+    // Nothing on the port the old build derived for the dashboard.
+    expect(await isListening(port + 1)).toBe(false);
 
     newSignalHandler(before)();
     await done;
   });
 
-  it("uses --web-port when one is given", async () => {
+  it("serves only the api without --web", async () => {
     const port = await freePortPair();
-    const webPort = await freePortPair();
     const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, web: true, webPort, downloadDir: dir });
-    expect(await waitUntil(() => isListening(webPort))).toBe(true);
-    const ui = await fetch(`http://127.0.0.1:${webPort}/health`);
-    expect(ui.status).toBe(200);
-    // The derived port stays free: an explicit --web-port replaces it.
+    const done = runServe({ port, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    const api = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(api.status).toBe(200);
+    // The dashboard's own routes are not mounted, and no second port is bound.
+    const ui = await fetch(`http://127.0.0.1:${port}/api/status`);
+    expect(ui.status).toBe(404);
     expect(await isListening(port + 1)).toBe(false);
     newSignalHandler(before)();
     await done;
-  });
-
-  it("does not mount the web ui without --web", async () => {
-    const port = await freePortPair();
-    // A probed port, never the literal 9162. That is torlink's own default web
-    // port, so asserting it is free failed for anyone running `torlnk --web`
-    // while testing — the single most likely process on a torlink dev machine.
-    // --web-port without --web must start nothing, which is the same claim.
-    const unusedWebPort = await freePortPair();
-    const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, webPort: unusedWebPort, downloadDir: dir });
-    expect(await waitUntil(() => isListening(port))).toBe(true);
-    expect(await isListening(port + 1)).toBe(false);
-    expect(await isListening(unusedWebPort)).toBe(false);
-    newSignalHandler(before)();
-    await done;
-  });
-
-  it("warns when --web-port is set without --web", async () => {
-    const port = await freePortPair();
-    const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, webPort: 31999, downloadDir: dir });
-    expect(await waitUntil(() => isListening(port))).toBe(true);
-    expect(logs.join("\n")).toContain("warning: --web-port 31999 ignored without --web");
-    newSignalHandler(before)();
-    await done;
-  });
-
-  it("refuses to start when the web port equals the api port", async () => {
-    const port = await freePortPair();
-    await runServe({ port, web: true, webPort: port, downloadDir: dir });
-    expect(exit).toHaveBeenCalledWith(1);
-    expect(errors.join("\n")).toContain("must differ from the api port");
-    // Bailed before anything was started, so nothing is left listening.
-    expect(startRuntime).not.toHaveBeenCalled();
-    expect(await isListening(port)).toBe(false);
   });
 
   // The failure mode this pair of tests guards, beyond the exit code: the real
@@ -213,10 +183,10 @@ describe("runServe web mount", () => {
   // disk — and the next launch of *any* mode came up in safe mode with every
   // download and seed paused, claiming it recovered from a crash. startRuntime is
   // stubbed in this file, so the marker is armed by hand to stand in for it.
-  it("leaves no boot marker armed when the web port is taken", async () => {
+  it("leaves no boot marker armed when the port is taken with --web", async () => {
     const port = await freePortPair();
     const squatter = net.createServer();
-    await new Promise<void>((r) => squatter.listen(port + 1, "127.0.0.1", r));
+    await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", r));
     try {
       armBootMarker();
       expect(wasBootInterrupted()).toBe(true);
@@ -228,13 +198,13 @@ describe("runServe web mount", () => {
     }
   });
 
-  it("leaves no boot marker armed when the api port is taken", async () => {
+  it("leaves no boot marker armed when the port is taken without --web", async () => {
     const port = await freePortPair();
     const squatter = net.createServer();
     await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", r));
     try {
       armBootMarker();
-      await runServe({ port, web: true, downloadDir: dir });
+      await runServe({ port, downloadDir: dir });
       expect(exit).toHaveBeenCalledWith(1);
       expect(wasBootInterrupted()).toBe(false);
     } finally {
@@ -242,32 +212,31 @@ describe("runServe web mount", () => {
     }
   });
 
-  it("exits non-zero with the port in the message when the web port is taken", async () => {
-    const port = await freePortPair();
-    const squatter = net.createServer();
-    await new Promise<void>((r) => squatter.listen(port + 1, "127.0.0.1", r));
-    try {
-      await runServe({ port, web: true, downloadDir: dir });
-      expect(exit).toHaveBeenCalledWith(1);
-      expect(errors.join("\n")).toContain(`could not start the web ui on port ${port + 1}`);
-      expect(errors.join("\n")).toContain("EADDRINUSE");
-      // The API never came up: a half-configured daemon is worse than none.
-      expect(await isListening(port)).toBe(false);
-    } finally {
-      await new Promise<void>((r) => squatter.close(() => r()));
-    }
-  });
-
-  it("reports a taken api port as a refusal and releases the web port again", async () => {
+  it("exits non-zero with the port in the message when --web cannot bind", async () => {
     const port = await freePortPair();
     const squatter = net.createServer();
     await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", r));
     try {
       await runServe({ port, web: true, downloadDir: dir });
       expect(exit).toHaveBeenCalledWith(1);
-      expect(errors.join("\n")).toContain(`could not start the api on port ${port}`);
-      // The web server came up first; a refused API must not leave it orphaned.
+      expect(errors.join("\n")).toContain(`could not start the web ui on port ${port}`);
+      expect(errors.join("\n")).toContain("EADDRINUSE");
+      // Nothing was left half-started on the port next door, which is where the
+      // dashboard used to land: one --web daemon binds exactly one port.
       expect(await isListening(port + 1)).toBe(false);
+    } finally {
+      await new Promise<void>((r) => squatter.close(() => r()));
+    }
+  });
+
+  it("reports a taken api port as a refusal without --web", async () => {
+    const port = await freePortPair();
+    const squatter = net.createServer();
+    await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", r));
+    try {
+      await runServe({ port, downloadDir: dir });
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(errors.join("\n")).toContain(`could not start the api on port ${port}`);
     } finally {
       await new Promise<void>((r) => squatter.close(() => r()));
     }
@@ -296,15 +265,15 @@ describe("runServe web mount", () => {
     await done;
   });
 
-  it("releases the web port, stops stream sessions and suspends the queue on a signal", async () => {
+  it("releases the port, stops stream sessions and suspends the queue on a signal", async () => {
     const port = await freePortPair();
     const before = new Set(process.listeners("SIGTERM"));
     const done = runServe({ port, web: true, downloadDir: dir });
-    expect(await waitUntil(() => isListening(port + 1))).toBe(true);
+    expect(await waitUntil(() => isListening(port))).toBe(true);
 
     // Hold an event stream open, like a browser would. Without the handle's
     // close() this connection keeps the web server alive forever.
-    const events = await fetch(`http://127.0.0.1:${port + 1}/api/events`);
+    const events = await fetch(`http://127.0.0.1:${port}/api/events`);
     expect(events.status).toBe(200);
 
     newSignalHandler(before)();
@@ -312,10 +281,9 @@ describe("runServe web mount", () => {
 
     expect(fake.stopAll).toHaveBeenCalled();
     expect(fake.suspend).toHaveBeenCalled();
-    // Asserted directly, not through waitUntil: runServe now resolves only after
-    // both servers' close() have called back, so anything still listening here is
-    // a real failure rather than a race worth retrying.
-    expect(await isListening(port + 1)).toBe(false);
+    // Asserted directly, not through waitUntil: runServe resolves only after
+    // close() has called back, so anything still listening here is a real
+    // failure rather than a race worth retrying.
     expect(await isListening(port)).toBe(false);
     await events.body?.cancel().catch(() => {});
   });

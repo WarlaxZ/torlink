@@ -36,10 +36,13 @@ export interface ServeOptions {
   seedTimeMs?: number;
   /** With seedTimeMs, also delete the files when the timer expires. */
   deleteFiles?: boolean;
-  /** Also serve the browser UI. */
+  /**
+   * Serve the browser UI. It binds this same host and port: the web server
+   * already routes the entire daemon API (see web/routes.ts, which delegates
+   * every non-/api/ path to handleApi), so a second listener would only be a
+   * second copy of the same surface on a port nobody asked for.
+   */
   web?: boolean;
-  /** Port for the browser UI; defaults to the API port + 1. */
-  webPort?: number;
 }
 
 // Pull a magnet / info hash out of a request body. Accepts JSON ({ magnet } or
@@ -291,124 +294,113 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     return;
   }
 
-  // --web-port deliberately does NOT imply --web: a port left behind in a script
-  // would otherwise quietly start a public-facing dashboard. But accepting the
-  // flag and doing nothing is its own trap, so say so.
-  if (!options.web && options.webPort !== undefined) {
-    log(`warning: --web-port ${options.webPort} ignored without --web`);
-  }
-
-  // The two servers are separate processes' worth of exposure in one process, so
-  // catch the overlap here rather than letting the API's listen() die of
-  // EADDRINUSE on a port the user believes they configured deliberately.
-  const webPort = options.webPort ?? port + 1;
-  if (options.web && webPort === port) {
-    console.error(
-      `error: the web ui port (${webPort}) must differ from the api port (${port}). ` +
-        `Pass a different --web-port.`,
-    );
-    process.exit(1);
-    return;
-  }
-
   const runtime = await startRuntime(options.downloadDir);
 
   if (options.seedTimeMs && options.seedTimeMs > 0) {
     startSeedReaper(runtime.queue, options.seedTimeMs, { deleteFiles: options.deleteFiles, log });
   }
 
-  // The browser UI listens on its own port so the JSON API's port stays a stable,
-  // documented contract and can be firewalled separately. It binds the *same*
-  // host as the API: one process makes one exposure decision, so nobody who
-  // deliberately kept the API on loopback can publish the dashboard by way of a
-  // flag that reads as cosmetic.
+  // With --web there is one server, not two. It binds the port the user chose,
+  // and answers both the dashboard and the add API — one process, one address,
+  // one exposure decision.
   let web: WebServerHandle | null = null;
   if (options.web) {
     try {
       web = await startWebServer(runtime, {
-        port: webPort,
+        port,
         host,
         ...(token ? { token } : {}),
         log,
       });
     } catch (e) {
-      // A startup failure, not a degraded mode: coming up with the API live and
-      // the dashboard silently missing is worse than not coming up at all.
+      // A startup failure, not a degraded mode: coming up with the dashboard
+      // silently missing is worse than not coming up at all.
       await failStartup(
-        `error: could not start the web ui on port ${webPort}: ` +
+        `error: could not start the web ui on port ${port}: ` +
           `${e instanceof Error ? e.message : String(e)}`,
         null,
       );
       return;
     }
+    log(`listening on http://${host}:${port}  (api + web ui, downloads -> ${runtime.downloadDir})`);
+    log(token ? "auth: token required" : "auth: none (loopback only)");
   }
 
-  const server = http.createServer((req, res) => {
-    void (async () => {
-      const method = req.method ?? "GET";
-      const urlPath = (req.url ?? "/").split("?")[0]!;
-      // Tokenless means loopback-bound; require a loopback Host so a hostile
-      // webpage can't reach us through DNS rebinding.
-      if (!token && !hostHeaderOk(req.headers.host)) {
-        res.writeHead(403, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "forbidden host" }));
-        log(`${method} ${urlPath} -> 403 (host)`);
-        return;
-      }
-      // CSRF: a browser page on another origin can reach this port with a POST
-      // that passes both guards above (it sets Host itself, and tokenless means
-      // no credential to forge), which for `{"action":"delete"}` means deleting
-      // a visitor's files. Rejected only when the headers positively say
-      // cross-site, so curl and scripts — which send neither header — keep
-      // working. GETs are untouched.
-      if (method !== "GET" && method !== "HEAD" && isCrossSiteHttpRequest(req.headers)) {
-        res.writeHead(403, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "cross-site request blocked" }));
-        log(`${method} ${urlPath} -> 403 (cross-site)`);
-        return;
-      }
-      const body = method === "POST" ? await readBody(req) : { text: "", tooLarge: false };
-      if (body.tooLarge) {
-        res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
-        res.end(JSON.stringify({ error: "body too large" }));
-        res.once("finish", () => req.destroy());
-        log(`${method} ${urlPath} -> 413`);
-        return;
-      }
-      const bodyText = body.text;
-      let out: ApiResponse;
-      try {
-        out = await handleApi(runtime, token, method, urlPath, req.headers.authorization, bodyText);
-      } catch {
-        out = { status: 500, body: { error: "internal error" } };
-      }
-      const payload = JSON.stringify(out.body);
-      res.writeHead(out.status, { "Content-Type": "application/json" });
-      res.end(payload);
-      if (method !== "GET" || urlPath !== "/health") {
-        log(`${method} ${urlPath} -> ${out.status}`);
-      }
-    })();
-  });
+  // The bare JSON API, for a daemon running without the dashboard. A function
+  // rather than an inline expression so the --web case reads as one line: with
+  // --web this server is not built at all, because the web server above already
+  // answers every route it would have.
+  const createApiServer = (): http.Server =>
+    http.createServer((req, res) => {
+      void (async () => {
+        const method = req.method ?? "GET";
+        const urlPath = (req.url ?? "/").split("?")[0]!;
+        // Tokenless means loopback-bound; require a loopback Host so a hostile
+        // webpage can't reach us through DNS rebinding.
+        if (!token && !hostHeaderOk(req.headers.host)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "forbidden host" }));
+          log(`${method} ${urlPath} -> 403 (host)`);
+          return;
+        }
+        // CSRF: a browser page on another origin can reach this port with a POST
+        // that passes both guards above (it sets Host itself, and tokenless means
+        // no credential to forge), which for `{"action":"delete"}` means deleting
+        // a visitor's files. Rejected only when the headers positively say
+        // cross-site, so curl and scripts — which send neither header — keep
+        // working. GETs are untouched.
+        if (method !== "GET" && method !== "HEAD" && isCrossSiteHttpRequest(req.headers)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "cross-site request blocked" }));
+          log(`${method} ${urlPath} -> 403 (cross-site)`);
+          return;
+        }
+        const body = method === "POST" ? await readBody(req) : { text: "", tooLarge: false };
+        if (body.tooLarge) {
+          res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+          res.end(JSON.stringify({ error: "body too large" }));
+          res.once("finish", () => req.destroy());
+          log(`${method} ${urlPath} -> 413`);
+          return;
+        }
+        const bodyText = body.text;
+        let out: ApiResponse;
+        try {
+          out = await handleApi(runtime, token, method, urlPath, req.headers.authorization, bodyText);
+        } catch {
+          out = { status: 500, body: { error: "internal error" } };
+        }
+        const payload = JSON.stringify(out.body);
+        res.writeHead(out.status, { "Content-Type": "application/json" });
+        res.end(payload);
+        if (method !== "GET" || urlPath !== "/health") {
+          log(`${method} ${urlPath} -> ${out.status}`);
+        }
+      })();
+    });
+
+  const server = options.web ? null : createApiServer();
 
   // A bind failure arrives as an 'error' event, not a throw. Unhandled it is an
   // uncaught exception — an EADDRINUSE stack trace, which reads like a crash
   // rather than "that port is taken". Turned into the same one-line refusal the
   // host/token guard above uses. Detached once listening so a later runtime error
   // still goes somewhere.
-  const listenErr = await new Promise<Error | null>((resolve) => {
-    const onError = (err: Error): void => resolve(err);
-    server.once("error", onError);
-    server.listen(port, host, () => {
-      server.off("error", onError);
-      log(`listening on http://${host}:${port}  (downloads -> ${runtime.downloadDir})`);
-      log(token ? "auth: token required" : "auth: none (loopback only)");
-      resolve(null);
+  if (server) {
+    const listenErr = await new Promise<Error | null>((resolve) => {
+      const onError = (err: Error): void => resolve(err);
+      server.once("error", onError);
+      server.listen(port, host, () => {
+        server.off("error", onError);
+        log(`listening on http://${host}:${port}  (downloads -> ${runtime.downloadDir})`);
+        log(token ? "auth: token required" : "auth: none (loopback only)");
+        resolve(null);
+      });
     });
-  });
-  if (listenErr) {
-    await failStartup(`error: could not start the api on port ${port}: ${listenErr.message}`, web);
-    return;
+    if (listenErr) {
+      await failStartup(`error: could not start the api on port ${port}: ${listenErr.message}`, web);
+      return;
+    }
   }
 
   await new Promise<void>((resolve) => {
@@ -431,18 +423,21 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
         // only shrink once no new one can be started. The queue last: it is what
         // the streams and requests were reading, so suspending it first would tear
         // state out from under work still unwinding.
-        await new Promise<void>((done) => {
-          server.close(() => done());
-          // The same fix web/server.ts documents for the web server, and for the
-          // same reason: close() stops accepting and then waits for open
-          // connections to end, and a socket that is connected with no *complete*
-          // request in flight — a browser preconnect, a TCP health probe, a port
-          // scan, half-sent headers — never ends. One bare `net.connect` used to
-          // make Ctrl-C hang here forever, which is also what made
-          // `daemon/restart.ts` give up after 10s and report stillRunning: true,
-          // leaving `torlnk update` with the old daemon still alive.
-          server.closeAllConnections();
-        });
+        if (server) {
+          await new Promise<void>((done) => {
+            server.close(() => done());
+            // The same fix web/server.ts documents for the web server, and for
+            // the same reason: close() stops accepting and then waits for open
+            // connections to end, and a socket that is connected with no
+            // *complete* request in flight — a browser preconnect, a TCP health
+            // probe, a port scan, half-sent headers — never ends. One bare
+            // `net.connect` used to make Ctrl-C hang here forever, which is also
+            // what made `daemon/restart.ts` give up after 10s and report
+            // stillRunning: true, leaving `torlnk update` with the old daemon
+            // still alive.
+            server.closeAllConnections();
+          });
+        }
         // Both are awaited so the order above is real, and both swallow a
         // rejection: a failure to tear one thing down must not skip suspend()
         // (which is what flushes state and disarms the boot marker) or leave this
