@@ -573,8 +573,10 @@ function renderTabs(): void {
         // already here: the server searches only that group's sources, so the
         // other tabs' hits were never fetched. Matches the TUI, where each tab
         // is its own slice of one fan-out.
-        if (searchView.query) startSearch(searchView.query);
-        else renderResults();
+        // `mode`, not `query`: a browse has an empty query but absolutely needs
+        // re-running, because the server only fetched the old tab's sources.
+        if (searchView.mode === "idle") renderResults();
+        else startSearch(searchView.query);
       });
       return button;
     }),
@@ -605,7 +607,10 @@ function stopSearch(): void {
 
 function startSearch(query: string): void {
   stopSearch();
-  searchView = { ...searchView, query, snapshot: null, running: true };
+  // An empty query is browse mode, not a mistake — the server accepts it and
+  // every source answers with its own top/latest list. See parseSearchParams.
+  const mode = query ? "search" : "browse";
+  searchView = { ...searchView, query, mode, snapshot: null, running: true };
   selectedHash = null;
   preview.select(null, searchView.group);
   renderResults();
@@ -656,9 +661,9 @@ function startSearch(query: string): void {
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const query = queryInput.value.trim();
-  if (!query) return;
-  startSearch(query);
+  // No guard on an empty value: submitting a blank box is how you browse the
+  // top lists, the same as pressing Enter on an empty box in the TUI.
+  startSearch(queryInput.value.trim());
 });
 
 sortSelect.addEventListener("change", () => {
