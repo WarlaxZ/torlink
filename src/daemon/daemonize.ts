@@ -44,7 +44,14 @@ export interface RunDescriptor {
 // descriptor the same way.
 export function spawnDaemon(name: string, argv: string[], cwd: string): number {
   fs.mkdirSync(logsDir, { recursive: true });
-  const out = fs.openSync(logPathFor(name), "a");
+  // 0600, and tightened on every spawn rather than only at creation: since
+  // `serve --web` began minting a token for a non-loopback bind, this file can
+  // contain a live credential — the daemon's stdout is where that token is
+  // printed. It used to hold nothing worth reading, so it was created with the
+  // default 0644 and every existing install still has one at that mode.
+  // fchmod (not chmod) so the mode lands on the descriptor we just opened.
+  const out = fs.openSync(logPathFor(name), "a", 0o600);
+  fs.fchmodSync(out, 0o600);
   const child = spawn(process.execPath, argv, {
     cwd,
     detached: true,

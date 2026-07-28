@@ -15,6 +15,7 @@ import {
   fakeRuntime,
   isListening,
   waitUntil,
+  withTimeout,
   freePort,
   newSignalHandler,
   snapshotSignalListeners,
@@ -273,7 +274,16 @@ describe("runServe --web startup output", () => {
   it("still refuses a non-loopback bind without --web", async () => {
     // No link to hand back, so nothing justifies a secret the caller did not
     // choose: a scripted API consumer needs a token stable across restarts.
-    await runServe({ port: await freePort(), host: "0.0.0.0", downloadDir: dir });
+    //
+    // Bounded, because `process.exit` is stubbed here: if this guard regresses
+    // into minting, runServe goes on to bind a socket and never resolves, and
+    // the failure arrives as a bare 5s vitest timeout that says nothing about
+    // what broke. withTimeout names it in one second instead.
+    await withTimeout(
+      runServe({ port: await freePort(), host: "0.0.0.0", downloadDir: dir }),
+      1000,
+      "the refusal to bind 0.0.0.0 without a token",
+    );
     expect(process.exit).toHaveBeenCalledWith(1);
     expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
   });

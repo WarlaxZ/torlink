@@ -51,7 +51,7 @@ export interface ServeOptions {
    * to compute the LAN addresses printed alongside the local URL. Real callers
    * never set this — it exists so a test can hand in a fixture NIC list
    * instead of depending on the machine's actual network, the same reason
-   * Task 6 injects `isTTY` and `openUrlImpl` rather than reading them live.
+   * `isTTY` and `openUrlImpl` below are injected rather than read live.
    */
   interfaces?: NetInterfaces;
 }
@@ -352,9 +352,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // bound, which is the only correct answer once `port: 0` is in play.
     const bound = web.port;
     const { local, lan } = displayHosts(host, options.interfaces ?? os.networkInterfaces());
-    // One place for token + bound to reach every URL this block logs, so
-    // Task 6's browser-open target (`localUrl`) and every line below it are
-    // built the same way and cannot drift apart.
+    // One place for token + bound to reach every URL this block logs, so the
+    // browser-open target (`localUrl`) and every line below it are built the
+    // same way and cannot drift apart.
     const link = (h: string): string => webUrl(h, bound, token ?? undefined);
     localUrl = link(local);
     // The marker comes before the URL, not after: it lines up in a column
