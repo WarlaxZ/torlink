@@ -127,7 +127,7 @@ describe("startWebServer", () => {
 
   // The other half of the bind rule: a token is what makes a public bind legal,
   // so the guard must be about the *pair*. A guard that only looked at the host
-  // would make --web-host 0.0.0.0 impossible however it was configured.
+  // would make --host 0.0.0.0 impossible however it was configured.
   it("binds a public host when a token is set", async () => {
     handle = await startWebServer(runtime(), {
       port: 0,

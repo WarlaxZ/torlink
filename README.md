@@ -188,7 +188,7 @@ torlnk --web          # the TUI hosts it; quitting the TUI stops it
 torlnk serve --web    # headless: the add API plus the browser UI
 ```
 
-Either way it lands on **`http://127.0.0.1:9162`**, and `torlnk --web` prints the address on the splash. Change it with `--web-port`. Under `serve`, the UI port is derived from the API port + 1 (so `serve --port 8080 --web` puts the API on 8080 and the UI on 8081) unless you pass `--web-port` yourself.
+`torlnk --web` lands on **`http://127.0.0.1:9162`** and prints the address on the splash; `torlnk serve --web` lands on serve's own port, **`http://127.0.0.1:9161`**. Change either with `--port`. Under `serve` there's one server, not two: the same port answers the dashboard *and* `/add`, `/downloads` and `/control`, so there's one address to remember and one thing to firewall.
 
 **Turning it off is just leaving `--web` off** — there's no setting to forget about, and nothing listens until you ask for it. If the port is already taken, the TUI says so and carries on without the dashboard (the terminal is the product; a missing web UI shouldn't kill your session), while `serve --web` treats it as a startup failure and exits, because a daemon that came up half-configured is worse than one that didn't come up.
 
@@ -197,22 +197,22 @@ Either way it lands on **`http://127.0.0.1:9162`**, and `torlnk --web` prints th
 Binding anything other than loopback **requires** a token — torlink refuses to start rather than leave your queue open to the network:
 
 ```sh
-torlnk --web --web-host 0.0.0.0 --web-token "$(openssl rand -hex 16)"
+torlnk --web --host 0.0.0.0 --token "$(openssl rand -hex 16)"
+torlnk serve --web --host 0.0.0.0 --token "$(openssl rand -hex 16)"
 ```
 
-Under `serve` the UI binds serve's own `--host` and reuses its `--token`, so one process makes one exposure decision; only the port is separate, since two servers can't share one.
+Both commands read the same three flags — `--host`, `--port`, `--token` — because both are one process making one exposure decision.
 
 #### Setting the token
 
-Three ways, in the order torlink prefers them:
+Two ways, in the order torlink prefers them:
 
 | | |
 |---|---|
-| `--web-token <secret>` | Most specific. TUI only. |
-| `--token <secret>` | Works for both — this is `serve`'s own flag, and the TUI accepts it too so the muscle memory carries over. |
-| `TORLINK_API_TOKEN` | Environment. Keeps the secret out of your shell history and out of `ps`, which is what you want on a shared box. Used by `serve` and by `torlnk --web`. |
+| `--token <secret>` | The flag. Works on `--web`, `serve` and `files` alike. |
+| `TORLINK_API_TOKEN` | Environment. Keeps the secret out of your shell history and out of `ps`, which is what you want on a shared box. Used by `serve` and by `torlnk --web`; `files` reads `TORLINK_FILES_TOKEN`. |
 
-A flag beats the environment variable, and `--web-token` beats `--token`. The environment variable is only consulted when you actually pass `--web`, so a `TORLINK_API_TOKEN` you exported for the daemon doesn't quietly become a password on your interactive session.
+The flag beats the environment variable. The environment variable is only consulted when you actually pass `--web`, so a `TORLINK_API_TOKEN` you exported for the daemon doesn't quietly become a password on your interactive session.
 
 There's no token in the config file on purpose: `config.json` is world-readable in your home directory, and a shared secret doesn't belong there.
 
@@ -276,12 +276,12 @@ torlink also runs without the TUI, for servers and seedboxes:
 
     torlnk watch <dir>    download anything dropped into a folder
     torlnk serve          take magnets over HTTP
-    torlnk files          stream finished downloads over HTTP
+    torlnk files [dir]    stream finished downloads over HTTP
     torlnk attach         keep the TUI alive across ssh sessions
     torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
     torlnk import-trakt           connect Trakt and import your history into reccd
 
-Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) alongside the add API; `torlnk --help` has the full list of modes and flags.
+Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) on the same port as the add API; `torlnk --help` has the full list of modes and flags.
 
 ## Contributing
 
