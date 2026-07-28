@@ -158,8 +158,8 @@ git commit -m "feat(web): accept a blank search query as browse mode"
 In `src/web/server.test.ts`, inside `describe("/api/search")`, add this after the existing `it("narrows to a group", ...)` test. It reuses the `searchServer()` helper already defined in that describe block (which stubs `searchImpl` so no network is touched):
 
 ```ts
-  // Browse mode: no query at all. The server must not 400 this, and the stream
-  // must complete exactly like a real search.
+  // Browse mode: q present but blank. The server must not 400 this, and the
+  // stream must complete exactly like a real search.
   it("streams a blank query as browse", async () => {
     const base = await searchServer();
     const res = await fetch(`${base}/api/search?q=`);
@@ -171,13 +171,21 @@ In `src/web/server.test.ts`, inside `describe("/api/search")`, add this after th
     expect(text).toContain("yts result");
   });
 
-  it("rejects a search with no q at all", async () => {
+  // The tab-switch path in Task 4 depends on this: a browse still has to be
+  // narrowed by group, and only a socket test proves the fan-out really is.
+  it("narrows a browse to a group", async () => {
     const base = await searchServer();
-    const res = await fetch(`${base}/api/search`);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "missing query" });
+    const text = await (await fetch(`${base}/api/search?q=&group=TV`)).text();
+    expect(text).toContain("eztv result");
+    expect(text).not.toContain("yts result");
   });
 ```
+
+Do **not** add a standalone `no q at all` test here: the pre-existing table
+`it.each([["/api/search", "missing query"], …])` further down this describe block
+already asserts exactly that, and duplicating it is bookkeeping that will drift.
+That table also has a row `["/api/search?q=", "missing query"]` which asserts the
+behaviour Task 1 just inverted — **remove that one row** and leave the other two.
 
 - [ ] **Step 2: Run the tests**
 
