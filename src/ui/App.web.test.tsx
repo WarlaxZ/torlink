@@ -422,6 +422,48 @@ describe("App --web mount", () => {
     }
   });
 
+  it("does not open a browser on shift+w while a prompt owns input", async () => {
+    // The other half of the "W must not steal a keystroke" guarantee: a W typed
+    // while a prompt is up must reach the prompt, not launch a browser.
+    //
+    // Scope of this test, stated honestly because it is narrower than it looks.
+    // It pins the *behaviour* and nothing about *why* it holds: hoisting the W
+    // branch above this prompt's `if (editingFolder) return;` guard does not
+    // make it fail, so something sturdier than the guard ordering is keeping the
+    // keystroke away — and this test would not notice if that ordering broke. An
+    // earlier attempt at the neighbouring case (pressing "/" to reach
+    // `captureMode === "text"`) passed whether its guard was present or not, and
+    // was deleted rather than kept as false comfort; reaching text-capture needs
+    // focus moved into the results region first. Both orderings are therefore
+    // correct-by-reading and unpinned by tests.
+    const start = vi.fn(async () => ({ port: 19007, close: async () => {} }) as WebServerHandle);
+    const ui = renderUI(<App web startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      ui.press(TAB);
+      await vi.waitFor(() => expect(ui.frame()).toContain("Downloads"));
+      // One press per barrier: back-to-back presses coalesce into a single
+      // input chunk Ink will not split (see Downloads.test.tsx).
+      ui.press("o");
+      await vi.waitFor(() => expect(ui.frame()).toContain("Default download folder"));
+      ui.press("W");
+      // The prompt stays up and the browser stays shut. Waiting on the prompt
+      // again gives a wrongly-handled W a frame in which to have acted.
+      await vi.waitFor(() => expect(ui.frame()).toContain("Default download folder"));
+      // Both halves of the branch, not just the opening one. Asserting only
+      // "openUrl was not called" could not tell a blocked W from one that ran
+      // and fell into the else — that assertion passed even with the branch
+      // hoisted above this prompt's guard, which is the mutation it exists to
+      // catch.
+      expect(openUrl).not.toHaveBeenCalled();
+      expect(ui.frame()).not.toContain("web UI is not running");
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
   it("does not open a browser on shift+w from the splash — it types instead", async () => {
     // Pins the constraint the whole task turns on: the global keymap (where W
     // lives) is gated on view === "browser", so the splash's search field must
