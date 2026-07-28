@@ -31,6 +31,7 @@ import {
   ALL_TAB,
   categoryTabs,
   emptyView,
+  modeForQuery,
   parseSort,
   previewApplies,
   reportsHealthLookup,
@@ -574,8 +575,7 @@ function renderTabs(): void {
         // already here: the server searches only that group's sources, so the
         // other tabs' hits were never fetched. Matches the TUI, where each tab
         // is its own slice of one fan-out.
-        // `mode`, not `query`: a browse has an empty query but absolutely needs
-        // re-running, because the server only fetched the old tab's sources.
+        // mode, not query: a browse's query is empty but still needs re-running.
         if (searchView.mode === "idle") renderResults();
         else startSearch(searchView.query);
       });
@@ -606,11 +606,15 @@ function stopSearch(): void {
   searchStream = null;
 }
 
-function startSearch(query: string): void {
+function startSearch(raw: string): void {
   stopSearch();
+  // Trimmed here, once, so every caller — including searchForPick, which hands
+  // over an untrusted title from reccd — gets the same normalisation the server
+  // applies before it decides search vs. browse (parseSearchParams).
+  const query = raw.trim();
   // An empty query is browse mode, not a mistake — the server accepts it and
-  // every source answers with its own top/latest list. See parseSearchParams.
-  const mode = query ? "search" : "browse";
+  // most sources answer with their own top/latest list; a couple opt out.
+  const mode = modeForQuery(query);
   searchView = { ...searchView, query, mode, snapshot: null, running: true };
   selectedHash = null;
   preview.select(null, searchView.group);
@@ -664,7 +668,7 @@ searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   // No guard on an empty value: submitting a blank box is how you browse the
   // top lists, the same as pressing Enter on an empty box in the TUI.
-  startSearch(queryInput.value.trim());
+  startSearch(queryInput.value);
 });
 
 sortSelect.addEventListener("change", () => {

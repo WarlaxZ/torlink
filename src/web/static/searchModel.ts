@@ -158,7 +158,11 @@ export interface SearchStatus {
 }
 
 export function searchStatus(view: SearchView, shown: number): SearchStatus {
-  if (view.mode === "idle") return { text: "Search across every enabled source.", tone: "dim" };
+  if (view.mode === "idle")
+    return {
+      text: "Search across every enabled source — or submit a blank box to browse.",
+      tone: "dim",
+    };
   const browse = view.mode === "browse";
   const progress = progressLabel(view.snapshot);
   if (view.running) {
@@ -213,6 +217,20 @@ export function searchStatus(view: SearchView, shown: number): SearchStatus {
  */
 export function statusLineHidden(view: SearchView, shown: number): boolean {
   return shown > 0 && !view.running && view.mode !== "browse";
+}
+
+/**
+ * Which mode a submitted query puts the view into.
+ *
+ * Trims before deciding because the server does: `parseSearchParams` trims
+ * `raw` before checking for blank. A caller that used truthiness on the
+ * untrimmed string would label a whitespace-only submit `"search"` while the
+ * server treats it as a browse — the exact query/mode split this field exists
+ * to prevent, one layer up. Never returns `"idle"`; that is `emptyView()`'s
+ * business only.
+ */
+export function modeForQuery(query: string): SearchView["mode"] {
+  return query.trim() ? "search" : "browse";
 }
 
 /** The `GET /api/search` URL for a query. `token` empty means a tokenless server. */

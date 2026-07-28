@@ -6,6 +6,7 @@ import {
   categoryTabs,
   emptyView,
   erroredSources,
+  modeForQuery,
   previewApplies,
   progressLabel,
   reportsHealthLookup,
@@ -281,7 +282,9 @@ describe("searchStatus", () => {
   });
 
   it("still shows the idle line before anything is submitted", () => {
-    expect(searchStatus(emptyView(), 0).text).toBe("Search across every enabled source.");
+    expect(searchStatus(emptyView(), 0).text).toBe(
+      "Search across every enabled source — or submit a blank box to browse.",
+    );
   });
 });
 
@@ -313,6 +316,21 @@ describe("statusLineHidden", () => {
 
   it("keeps the line up before anything has been submitted", () => {
     expect(statusLineHidden(emptyView(), 0)).toBe(false);
+  });
+});
+
+describe("modeForQuery", () => {
+  it("is search for real text", () => {
+    expect(modeForQuery("sintel")).toBe("search");
+  });
+
+  it("is browse for an empty string", () => {
+    expect(modeForQuery("")).toBe("browse");
+  });
+
+  it("is browse for whitespace-only text, matching the server's trim", () => {
+    expect(modeForQuery("   ")).toBe("browse");
+    expect(modeForQuery("\t\n")).toBe("browse");
   });
 });
 
