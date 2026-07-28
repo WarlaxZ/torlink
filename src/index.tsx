@@ -20,7 +20,9 @@ if (cmd.kind === "version") {
 }
 
 if (cmd.kind === "invalid") {
-  console.error(`error: unknown argument '${cmd.arg}'\n`);
+  // A removed flag gets its replacement named. "unknown argument '--web-host'"
+  // is true but useless — the user is looking for the setting, not the spelling.
+  console.error(`error: ${cmd.hint ?? `unknown argument '${cmd.arg}'`}\n`);
   console.error(HELP_TEXT);
   process.exit(1);
 }
@@ -65,7 +67,6 @@ if (cmd.kind === "update") {
     seedTimeMs: cmd.seedTimeMs,
     deleteFiles: cmd.deleteFiles,
     web: cmd.web,
-    webPort: cmd.webPort,
   };
   void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
 } else if (cmd.kind === "files") {
@@ -130,17 +131,17 @@ const app = render(
     initialTorrent={cmd.initialTorrent}
     onQuit={() => forceExit(0)}
     web={cmd.web}
-    webPort={cmd.webPort}
-    webHost={cmd.webHost}
+    webPort={cmd.port}
+    webHost={cmd.host}
     // parseCliArgs is pure and never reads the environment, so the env fallback
     // the daemon paths apply above has to be applied here too — otherwise
-    // `torlnk --web --web-host 0.0.0.0` with only TORLINK_API_TOKEN set is
-    // refused for a missing token the user did supply.
+    // `torlnk --web --host 0.0.0.0` with only TORLINK_API_TOKEN set is refused
+    // for a missing token the user did supply.
     //
     // Only on the --web path: merging it unconditionally would turn a
-    // TORLINK_API_TOKEN exported for the daemon into a phantom --web-token and
-    // make App warn about a flag nobody passed.
-    webToken={cmd.web ? (cmd.webToken ?? process.env.TORLINK_API_TOKEN) : cmd.webToken}
+    // TORLINK_API_TOKEN exported for the daemon into a phantom --token and make
+    // App warn about a flag nobody passed.
+    webToken={cmd.web ? (cmd.token ?? process.env.TORLINK_API_TOKEN) : cmd.token}
   />,
   { exitOnCtrlC: false },
 );

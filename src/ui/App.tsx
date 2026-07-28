@@ -530,15 +530,14 @@ export function App({
     };
   }, [web, queue, webPort, webHost, webToken, startWebServerImpl]);
 
-  // `--web-port 8080` without `--web` parses fine and does nothing, which is the
-  // same trap `torlnk serve` warns about. Say so rather than silently accepting
-  // a flag the user believes turned something on.
+  // `--port 8080` without `--web` parses fine and does nothing. Say so rather
+  // than silently accepting a flag the user believes turned something on.
   useEffect(() => {
     if (web) return;
     const orphans = [
-      webPort !== undefined ? "--web-port" : null,
-      webHost ? "--web-host" : null,
-      webToken ? "--web-token" : null,
+      webPort !== undefined ? "--port" : null,
+      webHost ? "--host" : null,
+      webToken ? "--token" : null,
     ].filter((f): f is string => f !== null);
     if (orphans.length === 0) return;
     log.warn(`[web] ${orphans.join(", ")} ignored without --web`);
