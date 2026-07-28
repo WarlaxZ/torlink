@@ -11,6 +11,11 @@ const IFACES: NetInterfaces = {
     { family: "IPv4", address: "192.168.1.24", internal: false },
     { family: "IPv6", address: "fe80::1", internal: false },
   ],
+  // A docker bridge, and it is expected in the LAN list *on purpose* — not an
+  // oversight to tidy away. 172.16/12 is a legitimate private range, nothing in
+  // an address distinguishes a bridge from a real NIC, and printing one address
+  // a phone cannot reach costs the user a failed paste, while hiding one it
+  // could have reached costs them the feature.
   docker0: [{ family: "IPv4", address: "172.17.0.1", internal: false }],
 };
 
