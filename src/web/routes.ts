@@ -434,9 +434,15 @@ export interface SearchParams {
  *
  * Separate from the streaming itself because SSE gives up its status code the
  * moment the headers go out: once we have written `200 text/event-stream`,
- * "you forgot the query" can only be an error *frame*, which a client has to
- * parse to discover it asked wrong. So the decidable part is a pure function
- * the socket layer runs first and answers 400 from.
+ * "you asked wrong" can only be an error *frame*, which a client has to parse
+ * to discover it. So the decidable part is a pure function the socket layer
+ * runs first and answers 400 from.
+ *
+ * A blank `q` is *valid*: it is browse mode, the empty query the TUI sends when
+ * you press Enter on an empty box, which each source maps to its own top/latest
+ * endpoint. But `q` must be *present* — a bare `GET /api/search` is far more
+ * likely to be a stray request than an intent to fan out to every source, so
+ * absent and blank are deliberately different answers.
  *
  * An unknown group is rejected rather than silently searched as "All": a typo'd
  * tab that quietly returns everything is worse than one that says no. A group
@@ -447,8 +453,9 @@ export interface SearchParams {
 export function parseSearchParams(
   query: URLSearchParams,
 ): { ok: true; params: SearchParams } | { ok: false; error: string } {
-  const q = (query.get("q") ?? "").trim();
-  if (!q) return { ok: false, error: "missing query" };
+  const raw = query.get("q");
+  if (raw === null) return { ok: false, error: "missing query" };
+  const q = raw.trim();
   const rawGroup = (query.get("group") ?? "").trim();
   if (!rawGroup || rawGroup === "All") return { ok: true, params: { query: q, group: null } };
   const group = SOURCE_GROUPS.find((g) => g === rawGroup);

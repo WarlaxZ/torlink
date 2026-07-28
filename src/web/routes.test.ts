@@ -768,8 +768,27 @@ describe("parseSearchParams", () => {
     });
   });
 
-  it.each(["", "q=", "q=%20%20"])("rejects a missing or blank query (%s)", (qs) => {
-    expect(parseSearchParams(new URLSearchParams(qs))).toEqual({ ok: false, error: "missing query" });
+  // A blank q is not a mistake, it is browse mode: the same empty query the TUI
+  // sends when you press Enter on an empty box, which every source maps to its
+  // own top/latest endpoint. See runSearch — it has no empty-query check.
+  it.each(["q=", "q=%20%20"])("accepts a blank query as browse (%s)", (qs) => {
+    expect(parseSearchParams(new URLSearchParams(qs))).toEqual({
+      ok: true,
+      params: { query: "", group: null },
+    });
+  });
+
+  it("browses one group when a blank query names a tab", () => {
+    expect(parseSearchParams(new URLSearchParams("q=&group=Movies"))).toEqual({
+      ok: true,
+      params: { query: "", group: "Movies" },
+    });
+  });
+
+  // q must still be *present*. A bare GET /api/search with no params is far
+  // more likely to be a stray request than an intent to fan out to 23 sources.
+  it("rejects a request with no q at all", () => {
+    expect(parseSearchParams(new URLSearchParams(""))).toEqual({ ok: false, error: "missing query" });
   });
 
   // A typo'd tab that quietly searches everything is worse than one that says
