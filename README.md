@@ -181,7 +181,7 @@ TORLINK_DNS=cloudflare npm start
 
 ## In your browser (optional)
 
-Add `--web` and torlink also serves a browser interface — search every source, posters and plots, play something, the queue, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
+Add `--web` and torlink also serves a browser interface — search every source (or submit an empty box to browse the curated library, same as the TUI), posters and plots, play something, the queue, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
 
 ```sh
 torlnk --web          # the TUI hosts it; quitting the TUI stops it

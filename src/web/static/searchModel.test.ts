@@ -6,6 +6,7 @@ import {
   categoryTabs,
   emptyView,
   erroredSources,
+  modeForQuery,
   previewApplies,
   progressLabel,
   reportsHealthLookup,
@@ -14,6 +15,7 @@ import {
   searchStatus,
   searchUrl,
   sourceLabel,
+  statusLineHidden,
   visibleResults,
   type PublicSearchResult,
   type PublicSearchSnapshot,
@@ -46,7 +48,12 @@ function snapshot(results: PublicSearchResult[], over: Partial<PublicSearchSnaps
 }
 
 function view(over: Partial<SearchView> = {}): SearchView {
-  return { ...emptyView(), query: "sintel", ...over };
+  return { ...emptyView(), query: "sintel", mode: "search", ...over };
+}
+
+/** A view mid-browse: the blank query the TUI sends on an empty submit. */
+function browsing(over: Partial<SearchView> = {}): SearchView {
+  return { ...emptyView(), query: "", mode: "browse", ...over };
 }
 
 const ALWAYS_HEALTHY = (): boolean => true;
@@ -226,6 +233,120 @@ describe("searchStatus", () => {
     });
     expect(searchStatus(v, 4).text).toBe("4 results · 1 source down");
   });
+
+  it("counts sources while browsing, without calling it a search", () => {
+    const v = browsing({ running: true, snapshot: snapshot([], { done: 12, total: 23 }) });
+    expect(searchStatus(v, 0).text).toBe("Loading 12/23 sources");
+    expect(searchStatus(v, 5).text).toBe("loading… 12/23 sources");
+  });
+
+  it("says nothing is new rather than quoting an empty query", () => {
+    const v = browsing({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("Nothing new right now.");
+    expect(searchStatus(v, 0).tone).toBe("dim");
+  });
+
+  it("labels browse results as the newest across all sources", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(searchStatus(v, 4).text).toBe("4 results · newest across all sources");
+  });
+
+  it("composes the outage note and the browse tail, in that order", () => {
+    const v = browsing({
+      snapshot: snapshot([result()], {
+        total: 3,
+        done: 3,
+        perSource: { a: { loading: false, error: "timed out", code: "timed out", count: 0 } },
+      }),
+    });
+    expect(searchStatus(v, 4).text).toBe("4 results · 1 source down · newest across all sources");
+  });
+
+  // The mode-independent branches must keep winning over the browse lines:
+  // "every source is down" and "your filters did this" are still the truth.
+  it("keeps the outage and filter branches while browsing", () => {
+    const down = {
+      perSource: {
+        a: { loading: false, error: "timed out", code: "timed out", count: 0 },
+        b: { loading: false, error: "HTTP 503", code: "HTTP 503", count: 0 },
+      },
+      total: 2,
+      done: 2,
+    };
+    const failed = searchStatus(browsing({ snapshot: snapshot([], down) }), 0);
+    expect(failed.text).toBe("Couldn't reach any source. They may be down.");
+    expect(failed.tone).toBe("error");
+
+    const filtered = browsing({ snapshot: snapshot([result()], { total: 2, done: 2 }), textFilter: "zzz" });
+    expect(searchStatus(filtered, 0).text).toBe("Nothing matches those filters.");
+  });
+
+  it("still shows the idle line before anything is submitted", () => {
+    expect(searchStatus(emptyView(), 0).text).toBe(
+      "Search across every enabled source — or submit a blank box to browse.",
+    );
+  });
+
+  it("does not blame an active filter for an upstream that returned nothing while browsing", () => {
+    const v = browsing({ hideDead: true, snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("Nothing new right now.");
+  });
+
+  it("does not blame an active filter for an upstream that returned nothing while searching", () => {
+    const v = view({ hideDead: true, snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("No results for “sintel”.");
+  });
+
+  it("uses the singular for exactly one browse result", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(searchStatus(v, 1).text).toBe("1 result · newest across all sources");
+  });
+});
+
+describe("statusLineHidden", () => {
+  it("hides the line for a settled search with rows — the count is redundant with the rows themselves", () => {
+    const v = view({ snapshot: snapshot([result()], { total: 1, done: 1 }) });
+    expect(statusLineHidden(v, 1)).toBe(true);
+  });
+
+  it("keeps the line up while a search is still running, even with rows already in", () => {
+    const v = view({ running: true, snapshot: snapshot([result()], { total: 3, done: 1 }) });
+    expect(statusLineHidden(v, 1)).toBe(false);
+  });
+
+  it("keeps the line up for a settled search with no rows — it's the only message the user gets", () => {
+    const v = view({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(statusLineHidden(v, 0)).toBe(false);
+  });
+
+  it("keeps the line up for a settled browse with rows — it names what the rows are", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(statusLineHidden(v, 1)).toBe(false);
+  });
+
+  it("keeps the line up for a settled browse with no rows", () => {
+    const v = browsing({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(statusLineHidden(v, 0)).toBe(false);
+  });
+
+  it("keeps the line up before anything has been submitted", () => {
+    expect(statusLineHidden(emptyView(), 0)).toBe(false);
+  });
+});
+
+describe("modeForQuery", () => {
+  it("is search for real text", () => {
+    expect(modeForQuery("sintel")).toBe("search");
+  });
+
+  it("is browse for an empty string", () => {
+    expect(modeForQuery("")).toBe("browse");
+  });
+
+  it("is browse for whitespace-only text, matching the server's trim", () => {
+    expect(modeForQuery("   ")).toBe("browse");
+    expect(modeForQuery("\t\n")).toBe("browse");
+  });
 });
 
 describe("progressLabel / erroredSources", () => {
@@ -254,6 +375,10 @@ describe("searchUrl", () => {
 
   it("omits ?k= entirely on a tokenless server", () => {
     expect(searchUrl("x", "All", "")).toBe("/api/search?q=x&group=All");
+  });
+
+  it("sends q= for a browse, so the server can tell blank from absent", () => {
+    expect(searchUrl("", "All", "")).toBe("/api/search?q=&group=All");
   });
 });
 

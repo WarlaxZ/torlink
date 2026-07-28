@@ -83,8 +83,15 @@ export function sourceLabel(sources: SourcesResponse | null, id: string): string
 
 /** Everything the results list is rendered from. */
 export interface SearchView {
-  /** The submitted query. Empty before the first search. */
+  /** The submitted query. Only meaningful in `"search"` mode. */
   query: string;
+  /**
+   * Which of three states the pane is in. This is NOT derivable from `query`:
+   * browse mode submits the empty string, so `!query` alone cannot tell "the
+   * user asked for the top lists" from "nothing has been submitted yet", and
+   * conflating them makes a browse render as a fresh page.
+   */
+  mode: "idle" | "search" | "browse";
   /** `ALL_TAB` or one of the server's group names. */
   group: string;
   /** The latest frame, or null before one arrives. */
@@ -99,6 +106,7 @@ export interface SearchView {
 export function emptyView(): SearchView {
   return {
     query: "",
+    mode: "idle",
     group: ALL_TAB,
     snapshot: null,
     running: false,
@@ -150,28 +158,83 @@ export interface SearchStatus {
 }
 
 export function searchStatus(view: SearchView, shown: number): SearchStatus {
-  if (!view.query) return { text: "Search across every enabled source.", tone: "dim" };
+  if (view.mode === "idle")
+    return {
+      text: "Search across every enabled source — or submit a blank box to browse.",
+      tone: "dim",
+    };
+  const browse = view.mode === "browse";
   const progress = progressLabel(view.snapshot);
   if (view.running) {
-    const head = shown > 0 ? `searching… ${progress}` : `Searching ${progress}`;
+    // "Loading" not "Searching" while browsing: nothing was searched for. Both
+    // casings are spelled out rather than capitalized at runtime — the literal
+    // strings are what you grep for when a status line looks wrong.
+    // The TUI's lowercase line (Results.tsx:510) says "searching…" even while
+    // browsing; that reads wrong and is not worth copying.
+    const head =
+      shown > 0
+        ? `${browse ? "loading" : "searching"}… ${progress}`
+        : `${browse ? "Loading" : "Searching"} ${progress}`;
     return { text: head, tone: "dim" };
   }
   const down = erroredSources(view.snapshot);
   const total = view.snapshot?.total ?? 0;
   if (shown === 0) {
-    // Every source failing and every source finding nothing look identical in a
-    // results list, so they must not read the same. This is the whole reason
-    // `perSource.error` is on the wire.
+    // The outage branch outranks the mode: "every source is down" is true
+    // whether or not the user typed anything. The filter branch below is NOT
+    // mode-independent in the same way — see its own comment.
     if (total > 0 && down.length >= total) {
       return { text: "Couldn't reach any source. They may be down.", tone: "error" };
     }
-    if (view.hideDead || view.textFilter.trim()) {
+    // A filter can only be to blame if something arrived and was then removed.
+    // Without this check an empty upstream reads as the user's fault — and the
+    // TUI doesn't make that mistake (Results.tsx:538 gates the same message on
+    // having rows to filter).
+    const fetched = view.snapshot?.results.length ?? 0;
+    if (fetched > 0 && (view.hideDead || view.textFilter.trim())) {
       return { text: "Nothing matches those filters.", tone: "dim" };
     }
+    if (browse) return { text: "Nothing new right now.", tone: "dim" };
     return { text: `No results for “${view.query}”.`, tone: "dim" };
   }
   const note = down.length > 0 ? ` · ${down.length} source${down.length === 1 ? "" : "s"} down` : "";
-  return { text: `${shown} result${shown === 1 ? "" : "s"}${note}`, tone: "dim" };
+  // The TUI drops the count while browsing because its panel title already says
+  // "latest". The web has no such title, so keep the count and append the
+  // phrase rather than replacing one true thing with another.
+  const tail = browse ? " · newest across all sources" : "";
+  return { text: `${shown} result${shown === 1 ? "" : "s"}${note}${tail}`, tone: "dim" };
+}
+
+/**
+ * Whether the status line should be hidden once results are on screen.
+ *
+ * A settled search's status line is just a result count, and that count is
+ * redundant with the rows the user is already looking at — hide it. Browse
+ * mode's line is not a count, or not only one: `searchStatus`'s "· newest
+ * across all sources" tail is the only thing on the page saying these rows
+ * are a curated top list rather than a match for something typed, so it must
+ * stay up exactly when there are rows to explain. Anything still `running` or
+ * with nothing to show keeps the line for the same reason `searchStatus` still
+ * has something to say then — the progress text and the empty-state messages
+ * ("Nothing new right now.", "Couldn't reach any source.", …) are the only
+ * content on the page in those cases.
+ */
+export function statusLineHidden(view: SearchView, shown: number): boolean {
+  return shown > 0 && !view.running && view.mode !== "browse";
+}
+
+/**
+ * Which mode a submitted query puts the view into.
+ *
+ * Trims before deciding because the server does: `parseSearchParams` trims
+ * `raw` before checking for blank. A caller that used truthiness on the
+ * untrimmed string would label a whitespace-only submit `"search"` while the
+ * server treats it as a browse — the exact query/mode split this field exists
+ * to prevent, one layer up. Never returns `"idle"`; that is `emptyView()`'s
+ * business only.
+ */
+export function modeForQuery(query: string): SearchView["mode"] {
+  return query.trim() ? "search" : "browse";
 }
 
 /** The `GET /api/search` URL for a query. `token` empty means a tokenless server. */
