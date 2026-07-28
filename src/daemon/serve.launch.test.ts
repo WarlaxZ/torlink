@@ -28,7 +28,7 @@ vi.mock("./runtime", async (importOriginal) => ({
   startRuntime,
 }));
 
-const { runServe } = await import("./serve");
+const { runServe, shouldOpenBrowser } = await import("./serve");
 const { disarmBootMarker } = await import("../download/bootguard");
 
 // Same shape as web/links.test.ts's IFACES: a loopback entry, an external
@@ -286,5 +286,115 @@ describe("runServe --web startup output", () => {
     );
     expect(process.exit).toHaveBeenCalledWith(1);
     expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
+  });
+
+  it("opens the loopback link, fragment and all", async () => {
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      host: "127.0.0.1",
+      token: "s3cret",
+      web: true,
+      downloadDir: dir,
+      isTTY: true,
+      openUrlImpl: async (url: string) => {
+        opened.push(url);
+        return true;
+      },
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    expect(await waitUntil(async () => opened.length > 0)).toBe(true);
+    expect(opened).toEqual([`http://127.0.0.1:${port}/#k=s3cret`]);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("opens nothing under --headless", async () => {
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      web: true,
+      downloadDir: dir,
+      headless: true,
+      isTTY: true,
+      openUrlImpl: async (url: string) => {
+        opened.push(url);
+        return true;
+      },
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    expect(opened).toEqual([]);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("survives an opener that fails, and says where to go instead", async () => {
+    // A box with no xdg-open must still come up. This is the difference between
+    // "the dashboard is at <url>" and a dead daemon.
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      web: true,
+      downloadDir: dir,
+      isTTY: true,
+      openUrlImpl: async () => false,
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    expect(await waitUntil(async () => logs.join("\n").includes("could not open a browser"))).toBe(true);
+    expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}`);
+    const alive = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(alive.status).toBe(200);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("opens the loopback URL, never the LAN one, for a wildcard bind", async () => {
+    // The browser runs on this machine, not out on the LAN — even though a LAN
+    // address would often work too, opening it would be the wrong choice, and
+    // a bug that grabbed the last logged URL instead of the local one would
+    // pick a LAN address whenever `interfaces` reports any.
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      host: "0.0.0.0",
+      token: "s3cret",
+      web: true,
+      downloadDir: dir,
+      interfaces: IFACES,
+      isTTY: true,
+      openUrlImpl: async (url: string) => {
+        opened.push(url);
+        return true;
+      },
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    expect(await waitUntil(async () => opened.length > 0)).toBe(true);
+    expect(opened).toEqual([`http://127.0.0.1:${port}/#k=s3cret`]);
+    newSignalHandler(before)();
+    await done;
+  });
+});
+
+describe("shouldOpenBrowser", () => {
+  it("opens for an interactive foreground serve --web", () => {
+    expect(shouldOpenBrowser({ headless: false, daemon: false, isTTY: true })).toBe(true);
+  });
+  it("does not open when --headless was passed", () => {
+    expect(shouldOpenBrowser({ headless: true, daemon: false, isTTY: true })).toBe(false);
+  });
+  it("does not open under --daemon — the child has no user", () => {
+    expect(shouldOpenBrowser({ headless: false, daemon: true, isTTY: true })).toBe(false);
+  });
+  it("does not open when stdout is not a terminal", () => {
+    // systemd, a pipe, CI: nothing is watching, and a browser would be a
+    // process spawned on a machine nobody is sitting at.
+    expect(shouldOpenBrowser({ headless: false, daemon: false, isTTY: false })).toBe(false);
   });
 });

@@ -18,6 +18,7 @@ import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } fr
 import { startWebServer, type WebServerHandle } from "../web/server";
 import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
+import { openUrl } from "../util/openUrl";
 
 export { isAuthorized } from "./auth";
 
@@ -46,12 +47,27 @@ export interface ServeOptions {
    * second copy of the same surface on a port nobody asked for.
    */
   web?: boolean;
+  /** Do not open a browser. Only meaningful with `web`. */
+  headless?: boolean;
+  /**
+   * This process was detached by `--daemon`. Used only to decide against
+   * opening a browser: the parent that had a user has already exited.
+   */
+  daemon?: boolean;
+  /**
+   * Whether stdout is a terminal. Injected rather than read here, because
+   * vitest's stdout is never a TTY — without this seam the browser-open path
+   * would be unreachable from a test, which is exactly the path worth pinning.
+   */
+  isTTY?: boolean;
+  /** The browser opener. Injected so a test does not spawn a real browser. */
+  openUrlImpl?: (url: string) => Promise<boolean>;
   /**
    * Override for `os.networkInterfaces()`, consulted only for a wildcard host
    * to compute the LAN addresses printed alongside the local URL. Real callers
    * never set this — it exists so a test can hand in a fixture NIC list
    * instead of depending on the machine's actual network, the same reason
-   * `isTTY` and `openUrlImpl` below are injected rather than read live.
+   * `isTTY` and `openUrlImpl` above are injected rather than read live.
    */
   interfaces?: NetInterfaces;
 }
@@ -290,6 +306,23 @@ async function failStartup(message: string, web: WebServerHandle | null): Promis
   process.exit(1);
 }
 
+/**
+ * Whether to open a browser on startup. Three ways to say no, and only the
+ * first is a preference: `--headless` is the user's, `--daemon` means the
+ * process that had a user has already exited, and a non-terminal stdout means
+ * nobody is watching (systemd, a pipe, CI) — spawning a browser there puts a
+ * window on a machine nobody is sitting at.
+ */
+export function shouldOpenBrowser(opts: {
+  headless?: boolean;
+  daemon?: boolean;
+  isTTY?: boolean;
+}): boolean {
+  if (opts.headless) return false;
+  if (opts.daemon) return false;
+  return opts.isTTY === true;
+}
+
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const port = options.port ?? DEFAULT_API_PORT;
   const host = options.host ?? "127.0.0.1";
@@ -370,6 +403,12 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // Unfragmented and on its own line: the link is for the human, this is for
     // whatever script is reading the log.
     if (mintedToken) log(`token ${token}  (pass --token to pin it across restarts)`);
+    if (localUrl && shouldOpenBrowser({ ...options, isTTY: options.isTTY ?? process.stdout.isTTY === true })) {
+      // Never fails the boot: openUrl swallows its own errors and reports false,
+      // and a machine with no xdg-open is a machine that still wants its daemon.
+      const opener = options.openUrlImpl ?? openUrl;
+      if (!(await opener(localUrl))) log(`could not open a browser — open ${localUrl} yourself`);
+    }
   }
 
   // The bare JSON API, for a daemon running without the dashboard. A function
