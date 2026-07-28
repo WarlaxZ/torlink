@@ -217,6 +217,33 @@ describe("runServe --web startup output", () => {
     await done;
   });
 
+  it("mints a different token each boot — not a fixed placeholder", async () => {
+    // The other mint test only pins shape (32 hex chars) and that the token
+    // actually gates the API; a hardcoded 32-char constant would pass both.
+    // Two boots minting the same value is the concrete failure that would slip
+    // through otherwise: everyone on the LAN sharing one baked-in "secret".
+    const portA = await freePort();
+    const beforeA = new Set(process.listeners("SIGTERM"));
+    const doneA = runServe({ port: portA, host: "0.0.0.0", web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(portA))).toBe(true);
+    const mintedA = /\btoken ([0-9a-f]{32})\b/.exec(logs.join("\n"))?.[1];
+    expect(mintedA).toBeDefined();
+    newSignalHandler(beforeA)();
+    await doneA;
+
+    logs.length = 0;
+    const portB = await freePort();
+    const beforeB = new Set(process.listeners("SIGTERM"));
+    const doneB = runServe({ port: portB, host: "0.0.0.0", web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(portB))).toBe(true);
+    const mintedB = /\btoken ([0-9a-f]{32})\b/.exec(logs.join("\n"))?.[1];
+    expect(mintedB).toBeDefined();
+    newSignalHandler(beforeB)();
+    await doneB;
+
+    expect(mintedA).not.toBe(mintedB);
+  });
+
   it("does not mint on a loopback bind — a tokenless local API keeps working", async () => {
     const port = await freePort();
     const before = new Set(process.listeners("SIGTERM"));
