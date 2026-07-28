@@ -8,7 +8,9 @@
 // default; exposing it on a public interface requires a token.
 
 import http from "node:http";
+import os from "node:os";
 import { startRuntime, addInput, type Runtime } from "./runtime";
+import { displayHosts, webUrl } from "../web/links";
 import { disarmBootMarker } from "../download/bootguard";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } from "./auth";
@@ -303,6 +305,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // With --web there is one server, not two. It binds the port the user chose,
   // and answers both the dashboard and the add API — one process, one address,
   // one exposure decision.
+  // The URL a browser on this machine should open — set once the web server is
+  // up, so the browser-open below and the log above cannot disagree.
+  let localUrl: string | null = null;
   let web: WebServerHandle | null = null;
   if (options.web) {
     try {
@@ -322,7 +327,18 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       );
       return;
     }
-    log(`listening on http://${host}:${port}  (api + web ui, downloads -> ${runtime.downloadDir})`);
+    // The handle's port, not the requested one: it reports what was actually
+    // bound, which is the only correct answer once `port: 0` is in play. `web?.`
+    // because it is assigned inside the try above, which TypeScript will not
+    // narrow through the catch — it is never null here.
+    const bound = web?.port ?? port;
+    const { local, lan } = displayHosts(host, os.networkInterfaces());
+    localUrl = webUrl(local, bound, token ?? undefined);
+    log(`web ui on ${localUrl}  (this machine)`);
+    for (const address of lan) {
+      log(`web ui on ${webUrl(address, bound, token ?? undefined)}  (from your LAN)`);
+    }
+    log(`api + web ui on one port, downloads -> ${runtime.downloadDir}`);
     log(token ? "auth: token required" : "auth: none (loopback only)");
   }
 
