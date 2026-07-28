@@ -9,6 +9,7 @@
 
 import http from "node:http";
 import os from "node:os";
+import { randomBytes } from "node:crypto";
 import { startRuntime, addInput, type Runtime } from "./runtime";
 import { displayHosts, webUrl, type NetInterfaces } from "../web/links";
 import { disarmBootMarker } from "../download/bootguard";
@@ -292,16 +293,27 @@ async function failStartup(message: string, web: WebServerHandle | null): Promis
 export async function runServe(options: ServeOptions = {}): Promise<void> {
   const port = options.port ?? DEFAULT_API_PORT;
   const host = options.host ?? "127.0.0.1";
-  const token = options.token && options.token.trim() ? options.token.trim() : null;
+  let token = options.token && options.token.trim() ? options.token.trim() : null;
+  let mintedToken = false;
 
   // Fail soft, not open: never expose a public interface without a token.
+  //
+  // With --web there is a browser to hand a working link to, so the secret can
+  // be minted rather than demanded — that is the whole difference between the
+  // two branches. Without --web there is nothing to hand it to: the caller is a
+  // script, and a fresh secret every boot is worse than the error it replaced,
+  // because the script would start failing 401 instead of failing to start.
   if (!LOOPBACK_HOSTS.has(host) && !token) {
-    console.error(
-      `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
-        `(or set TORLINK_API_TOKEN), or bind 127.0.0.1.`,
-    );
-    process.exit(1);
-    return;
+    if (!options.web) {
+      console.error(
+        `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
+          `(or set TORLINK_API_TOKEN), or bind 127.0.0.1.`,
+      );
+      process.exit(1);
+      return;
+    }
+    token = randomBytes(16).toString("hex");
+    mintedToken = true;
   }
 
   const runtime = await startRuntime(options.downloadDir);
@@ -355,6 +367,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       log(`open from your LAN:    ${link(address)}`);
     }
     log(`api + web ui on one port, downloads -> ${runtime.downloadDir}`);
+    // Unfragmented and on its own line: the link is for the human, this is for
+    // whatever script is reading the log.
+    if (mintedToken) log(`token ${token}  (pass --token to pin it across restarts)`);
   }
 
   // The bare JSON API, for a daemon running without the dashboard. A function

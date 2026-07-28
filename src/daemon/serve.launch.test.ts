@@ -192,4 +192,62 @@ describe("runServe --web startup output", () => {
     newSignalHandler(before)();
     await done;
   });
+
+  it("mints a token for a non-loopback bind with --web and no token", async () => {
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, host: "0.0.0.0", web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+
+    const minted = /\b([0-9a-f]{32})\b/.exec(logs.join("\n"))?.[1];
+    expect(minted).toBeDefined();
+    // Printed unfragmented too, so a script can scrape it out of the log.
+    expect(logs.join("\n")).toContain(`token ${minted}`);
+    expect(logs.join("\n")).toContain(`#k=${minted}`);
+
+    // And it is the real credential, not decoration.
+    const denied = await fetch(`http://127.0.0.1:${port}/api/status`);
+    expect(denied.status).toBe(401);
+    const allowed = await fetch(`http://127.0.0.1:${port}/api/status`, {
+      headers: { Authorization: `Bearer ${minted}` },
+    });
+    expect(allowed.status).toBe(200);
+
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("does not mint on a loopback bind — a tokenless local API keeps working", async () => {
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    expect(logs.join("\n")).not.toMatch(/\b[0-9a-f]{32}\b/);
+    const open = await fetch(`http://127.0.0.1:${port}/api/status`);
+    expect(open.status).toBe(200);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("never overrides a supplied token", async () => {
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port, host: "0.0.0.0", token: "s3cret", web: true, downloadDir: dir });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    const allowed = await fetch(`http://127.0.0.1:${port}/api/status`, {
+      headers: { Authorization: "Bearer s3cret" },
+    });
+    expect(allowed.status).toBe(200);
+    expect(logs.join("\n")).not.toMatch(/\b[0-9a-f]{32}\b/);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("still refuses a non-loopback bind without --web", async () => {
+    // No link to hand back, so nothing justifies a secret the caller did not
+    // choose: a scripted API consumer needs a token stable across restarts.
+    await runServe({ port: await freePort(), host: "0.0.0.0", downloadDir: dir });
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
+  });
 });
