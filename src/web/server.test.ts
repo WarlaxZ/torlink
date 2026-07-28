@@ -650,8 +650,8 @@ describe("/api/search", () => {
     expect(text).not.toContain("yts result");
   });
 
-  // Browse mode: no query at all. The server must not 400 this, and the stream
-  // must complete exactly like a real search.
+  // Browse mode: q present but blank. The server must not 400 this, and the
+  // stream must complete exactly like a real search.
   it("streams a blank query as browse", async () => {
     const base = await searchServer();
     const res = await fetch(`${base}/api/search?q=`);
@@ -663,11 +663,11 @@ describe("/api/search", () => {
     expect(text).toContain("yts result");
   });
 
-  it("rejects a search with no q at all", async () => {
+  it("narrows a browse to a group", async () => {
     const base = await searchServer();
-    const res = await fetch(`${base}/api/search`);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "missing query" });
+    const text = await (await fetch(`${base}/api/search?q=&group=TV`)).text();
+    expect(text).toContain("eztv result");
+    expect(text).not.toContain("yts result");
   });
 
   // A search spends the user's bandwidth on up to 23 requests to public

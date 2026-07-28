@@ -768,9 +768,7 @@ describe("parseSearchParams", () => {
     });
   });
 
-  // A blank q is not a mistake, it is browse mode: the same empty query the TUI
-  // sends when you press Enter on an empty box, which every source maps to its
-  // own top/latest endpoint. See runSearch — it has no empty-query check.
+  // Blank is browse mode, not a mistake. See parseSearchParams.
   it.each(["q=", "q=%20%20"])("accepts a blank query as browse (%s)", (qs) => {
     expect(parseSearchParams(new URLSearchParams(qs))).toEqual({
       ok: true,
@@ -785,8 +783,7 @@ describe("parseSearchParams", () => {
     });
   });
 
-  // q must still be *present*. A bare GET /api/search with no params is far
-  // more likely to be a stray request than an intent to fan out to 23 sources.
+  // Absent and blank are deliberately different. See parseSearchParams.
   it("rejects a request with no q at all", () => {
     expect(parseSearchParams(new URLSearchParams(""))).toEqual({ ok: false, error: "missing query" });
   });
