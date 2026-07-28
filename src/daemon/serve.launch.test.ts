@@ -49,6 +49,17 @@ function perHostLines(logs: string[]): string[] {
   return logs.filter((l) => l.includes("open on ") || l.includes("open from "));
 }
 
+// A happens-after barrier for the "opener was not called" tests: the log line
+// below is the very last thing the `if (options.web)` block writes, after
+// which the browser-open decision has already been made (fire-and-forget or
+// not). Asserting `opened` is empty right after `isListening` goes true was
+// only passing on incidental ordering — with the open now fired without an
+// `await` (so a slow opener can't block startup), that luck matters more, not
+// less, so a negative assertion waits for this line first.
+async function waitForBootLine(logs: string[]): Promise<void> {
+  expect(await waitUntil(async () => logs.some((l) => l.includes("api + web ui on one port")))).toBe(true);
+}
+
 describe("runServe --web startup output", () => {
   let dir: string;
   let logs: string[];
@@ -308,7 +319,7 @@ describe("runServe --web startup output", () => {
     expect(await waitUntil(async () => opened.length > 0)).toBe(true);
     expect(opened).toEqual([`http://127.0.0.1:${port}/#k=s3cret`]);
     newSignalHandler(before)();
-    await done;
+    await withTimeout(done, 1000, "shutdown after opening the loopback link");
   });
 
   it("falls back to the real process.stdout.isTTY when none is injected", async () => {
@@ -325,7 +336,7 @@ describe("runServe --web startup output", () => {
     const opened: string[] = [];
     const before = new Set(process.listeners("SIGTERM"));
     const original = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
-    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true, writable: true });
     try {
       const done = runServe({
         port,
@@ -343,7 +354,7 @@ describe("runServe --web startup output", () => {
       expect(await waitUntil(async () => opened.length > 0, 1500)).toBe(true);
       expect(opened).toEqual([`http://127.0.0.1:${port}`]);
       newSignalHandler(before)();
-      await done;
+      await withTimeout(done, 1000, "shutdown after the isTTY fallback open");
     } finally {
       // Restored precisely, not deleted: leaving isTTY true would make every
       // later test in this worker think it was attached to a terminal.
@@ -368,9 +379,57 @@ describe("runServe --web startup output", () => {
       },
     });
     expect(await waitUntil(() => isListening(port))).toBe(true);
+    await waitForBootLine(logs);
     expect(opened).toEqual([]);
     newSignalHandler(before)();
-    await done;
+    await withTimeout(done, 1000, "shutdown after a headless boot");
+  });
+
+  it("opens nothing under --daemon — the detached child has no user to show it to", async () => {
+    // runServe itself never calls daemonize() (that lives in index.tsx, the
+    // process that forks the detached child) — passing daemon: true here forks
+    // nothing, it only feeds the same flag the real detached child's argv
+    // would carry through to runServe.
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      web: true,
+      downloadDir: dir,
+      daemon: true,
+      isTTY: true,
+      openUrlImpl: async (url: string) => {
+        opened.push(url);
+        return true;
+      },
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    await waitForBootLine(logs);
+    expect(opened).toEqual([]);
+    newSignalHandler(before)();
+    await withTimeout(done, 1000, "shutdown after a --daemon boot");
+  });
+
+  it("opens nothing when stdout is not a terminal", async () => {
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({
+      port,
+      web: true,
+      downloadDir: dir,
+      isTTY: false,
+      openUrlImpl: async (url: string) => {
+        opened.push(url);
+        return true;
+      },
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+    await waitForBootLine(logs);
+    expect(opened).toEqual([]);
+    newSignalHandler(before)();
+    await withTimeout(done, 1000, "shutdown after a non-terminal boot");
   });
 
   it("survives an opener that fails, and says where to go instead", async () => {
@@ -391,7 +450,7 @@ describe("runServe --web startup output", () => {
     const alive = await fetch(`http://127.0.0.1:${port}/health`);
     expect(alive.status).toBe(200);
     newSignalHandler(before)();
-    await done;
+    await withTimeout(done, 1000, "shutdown after a failed browser open");
   });
 
   it("opens the loopback URL, never the LAN one, for a wildcard bind", async () => {
@@ -419,7 +478,7 @@ describe("runServe --web startup output", () => {
     expect(await waitUntil(async () => opened.length > 0)).toBe(true);
     expect(opened).toEqual([`http://127.0.0.1:${port}/#k=s3cret`]);
     newSignalHandler(before)();
-    await done;
+    await withTimeout(done, 1000, "shutdown after opening the loopback URL over a wildcard bind");
   });
 });
 

@@ -55,9 +55,10 @@ export interface ServeOptions {
    */
   daemon?: boolean;
   /**
-   * Whether stdout is a terminal. Injected rather than read here, because
-   * vitest's stdout is never a TTY — without this seam the browser-open path
-   * would be unreachable from a test, which is exactly the path worth pinning.
+   * Whether stdout is a terminal. Read here only as the default (real
+   * `process.stdout.isTTY`) — injectable because vitest's stdout is never a
+   * TTY, and without this seam the browser-open path would be unreachable
+   * from a test, which is exactly the path worth pinning.
    */
   isTTY?: boolean;
   /** The browser opener. Injected so a test does not spawn a real browser. */
@@ -403,11 +404,32 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // Unfragmented and on its own line: the link is for the human, this is for
     // whatever script is reading the log.
     if (mintedToken) log(`token ${token}  (pass --token to pin it across restarts)`);
-    if (localUrl && shouldOpenBrowser({ ...options, isTTY: options.isTTY ?? process.stdout.isTTY === true })) {
-      // Never fails the boot: openUrl swallows its own errors and reports false,
-      // and a machine with no xdg-open is a machine that still wants its daemon.
+    if (
+      localUrl &&
+      shouldOpenBrowser({
+        headless: options.headless,
+        daemon: options.daemon,
+        isTTY: options.isTTY ?? process.stdout.isTTY === true,
+      })
+    ) {
+      // Deliberately not awaited. `xdg-open`/`gio open` (util/openFolder.ts's
+      // `launch()`) can block for up to ~4s each — a `$BROWSER` handler or a
+      // desktop entry with Terminal=true both do it for real — and awaiting
+      // here would run that wait *before* the SIGINT/SIGTERM handlers below are
+      // registered, since --web skips the `if (server)` listen block that
+      // would otherwise occupy that time. A Ctrl-C in that window hits Node's
+      // default disposition (immediate death) instead of `shutdown()`, and
+      // because the boot marker is armed until `queue.suspend()` runs (see
+      // download/bootguard.ts) and BOOT_SETTLE_MS is 4000 — almost exactly
+      // this window — that death leaves the marker armed. The next launch then
+      // restores everything paused and starts no engines: a slow browser
+      // handler silently pausing the user's downloads on their next run.
+      // Firing and forgetting closes the gap to microseconds; openUrl never
+      // throws, and a log line arriving after shutdown has begun is harmless.
       const opener = options.openUrlImpl ?? openUrl;
-      if (!(await opener(localUrl))) log(`could not open a browser — open ${localUrl} yourself`);
+      void opener(localUrl).then((ok) => {
+        if (!ok) log(`could not open a browser — open ${localUrl} yourself`);
+      });
     }
   }
 
