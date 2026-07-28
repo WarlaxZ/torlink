@@ -118,8 +118,10 @@ test.
 - `index.html:52-53`: label → `Search every source`, placeholder →
   `the matrix 1999 — or leave blank to browse`.
 
-Tab switching (`app.ts:568-578`) re-runs the current query, so it carries browse
-mode across tabs with no extra work.
+- `app.ts:576`: the tab-switch re-run is guarded on `if (searchView.query)`,
+  which would silently do nothing while browsing. It must switch on `mode`
+  instead — a browse has an empty query but still needs re-running, because the
+  server only fetched the previous tab's sources.
 
 Explicitly unchanged: the results list and row rendering, the preview pane,
 `POST /api/add`, and the play/stream flows — all are query-agnostic. Unlike the
