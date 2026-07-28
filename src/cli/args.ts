@@ -11,9 +11,10 @@ export type CliCommand =
       initialTorrent?: string;
       /** Host the browser dashboard in-process, sharing the TUI's queue. */
       web?: boolean;
-      webPort?: number;
-      webHost?: string;
-      webToken?: string;
+      /** The interface, port and token the in-process dashboard binds. */
+      host?: string;
+      port?: number;
+      token?: string;
     }
   | {
       kind: "watch";
@@ -33,49 +34,87 @@ export type CliCommand =
       deleteFiles?: boolean;
       daemon?: boolean;
       /**
-       * Also mount the browser dashboard. It binds `host` — the same interface
-       * as the add API — so one process makes one exposure decision; only the
-       * port is separately configurable, because two servers cannot share one.
+       * Serve the browser dashboard instead of the bare JSON API. Same port,
+       * same host, same token: the web server already routes the whole API
+       * (web/routes.ts), so there is nothing for a second listener to add.
        */
       web?: boolean;
-      webPort?: number;
     }
   | { kind: "files"; port?: number; host?: string; token?: string; dir?: string; daemon?: boolean }
   | { kind: "attach" }
   | { kind: "update"; force?: boolean }
   | { kind: "import-netflix"; file: string }
   | { kind: "import-trakt" }
-  | { kind: "invalid"; arg: string };
+  | { kind: "invalid"; arg: string; hint?: string };
 
-// Valueless boolean flags for the headless subcommands (everything else is a
-// `--flag value` pair).
-const BOOL_FLAGS = new Set(["delete-files", "daemon", "web"]);
+/**
+ * Spellings that used to exist, mapped to the message that names their
+ * replacement. A removed flag must never read as a typo: the whole point of
+ * dropping `--web-host` was that it used to be *accepted and ignored*, so the
+ * one thing the error has to do is say where the setting went.
+ */
+const REMOVED_FLAGS: Record<string, string> = {
+  "web-host": "--web-host is not a flag; the web ui binds --host",
+  "web-port": "--web-port is not a flag; the web ui binds --port",
+  "web-token": "--web-token is not a flag; use --token",
+  dir: "--dir is not a flag; use --to, or pass the folder to `torlnk files` positionally",
+};
 
-function splitBooleans(args: string[]): { bools: Set<string>; rest: string[] } {
-  const bools = new Set<string>();
-  const rest: string[] = [];
-  for (const arg of args) {
-    if (arg.startsWith("--") && BOOL_FLAGS.has(arg.slice(2))) bools.add(arg.slice(2));
-    else rest.push(arg);
-  }
-  return { bools, rest };
+/** What one subcommand accepts: `--flag value` pairs, and valueless booleans. */
+interface FlagSpec {
+  values: readonly string[];
+  bools: readonly string[];
 }
 
-// Minimal `--flag value` reader for the headless subcommands. Unknown tokens are
-// left in `rest` so the caller can decide what to do with them.
-function readFlags(args: string[]): { flags: Record<string, string>; rest: string[] } {
+type Scan =
+  | { ok: true; flags: Record<string, string>; bools: Set<string>; rest: string[] }
+  | { ok: false; error: CliCommand };
+
+/**
+ * The one argument reader every command uses. Strict by construction: a `--`
+ * token outside the command's own spec is an error, never a value quietly
+ * eaten off the next argument. That silent swallow is exactly how
+ * `serve --web-host 0.0.0.0` came to bind loopback and say nothing.
+ */
+function scanFlags(args: string[], spec: FlagSpec): Scan {
   const flags: Record<string, string> = {};
+  const bools = new Set<string>();
   const rest: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg.startsWith("--") && i + 1 < args.length) {
-      flags[arg.slice(2)] = args[++i]!;
-    } else {
+    if (!arg.startsWith("--")) {
       rest.push(arg);
+      continue;
     }
+    const name = arg.slice(2);
+    if (spec.bools.includes(name)) {
+      bools.add(name);
+      continue;
+    }
+    if (spec.values.includes(name)) {
+      const value = args[++i];
+      if (value === undefined) {
+        return { ok: false, error: { kind: "invalid", arg: `${arg} (missing value)` } };
+      }
+      flags[name] = value;
+      continue;
+    }
+    const hint = REMOVED_FLAGS[name];
+    return { ok: false, error: hint ? { kind: "invalid", arg, hint } : { kind: "invalid", arg } };
   }
-  return { flags, rest };
+  return { ok: true, flags, bools, rest };
 }
+
+const RUN_FLAGS: FlagSpec = { values: ["host", "port", "token"], bools: ["web"] };
+const WATCH_FLAGS: FlagSpec = {
+  values: ["to", "seed-time"],
+  bools: ["delete-files", "daemon"],
+};
+const SERVE_FLAGS: FlagSpec = {
+  values: ["port", "host", "token", "to", "seed-time"],
+  bools: ["delete-files", "daemon", "web"],
+};
+const FILES_FLAGS: FlagSpec = { values: ["port", "host", "token"], bools: ["daemon"] };
 
 function parsePort(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
@@ -107,56 +146,55 @@ export function parseCliArgs(argv: string[]): CliCommand {
   }
   if (a === "import-trakt") return { kind: "import-trakt" };
   if (a === "watch") {
-    const { bools, rest: r0 } = splitBooleans(args.slice(1));
-    const { flags, rest } = readFlags(r0);
-    const dir = rest[0];
+    const scan = scanFlags(args.slice(1), WATCH_FLAGS);
+    if (!scan.ok) return scan.error;
+    const dir = scan.rest[0];
     if (!dir) return { kind: "invalid", arg: "watch (missing directory)" };
+    // The folder to watch is the one positional this command takes; a second
+    // one is a `--to` the user forgot to name, not a second watch folder.
+    if (scan.rest.length > 1) return { kind: "invalid", arg: scan.rest[1]! };
     return {
       kind: "watch",
       dir,
-      downloadDir: flags.to ?? flags.dir,
-      seedTimeMs: seedTimeFrom(flags["seed-time"]),
-      deleteFiles: bools.has("delete-files"),
-      daemon: bools.has("daemon"),
+      downloadDir: scan.flags.to,
+      seedTimeMs: seedTimeFrom(scan.flags["seed-time"]),
+      deleteFiles: scan.bools.has("delete-files"),
+      daemon: scan.bools.has("daemon"),
     };
   }
   if (a === "serve") {
-    const { bools, rest: r0 } = splitBooleans(args.slice(1));
-    const { flags } = readFlags(r0);
+    const scan = scanFlags(args.slice(1), SERVE_FLAGS);
+    if (!scan.ok) return scan.error;
+    if (scan.rest.length > 0) return { kind: "invalid", arg: scan.rest[0]! };
     return {
       kind: "serve",
-      port: parsePort(flags.port),
-      host: flags.host,
-      token: flags.token,
-      downloadDir: flags.to ?? flags.dir,
-      seedTimeMs: seedTimeFrom(flags["seed-time"]),
-      deleteFiles: bools.has("delete-files"),
-      daemon: bools.has("daemon"),
-      web: bools.has("web"),
-      webPort: parsePort(flags["web-port"]),
+      port: parsePort(scan.flags.port),
+      host: scan.flags.host,
+      token: scan.flags.token,
+      downloadDir: scan.flags.to,
+      seedTimeMs: seedTimeFrom(scan.flags["seed-time"]),
+      deleteFiles: scan.bools.has("delete-files"),
+      daemon: scan.bools.has("daemon"),
+      web: scan.bools.has("web"),
     };
   }
   if (a === "files") {
-    const { bools, rest: r0 } = splitBooleans(args.slice(1));
-    const { flags } = readFlags(r0);
+    const scan = scanFlags(args.slice(1), FILES_FLAGS);
+    if (!scan.ok) return scan.error;
+    // Positional, like `watch <dir>`: across the CLI a bare directory is always
+    // the folder the command operates on, and --to is always where output goes.
+    if (scan.rest.length > 1) return { kind: "invalid", arg: scan.rest[1]! };
     return {
       kind: "files",
-      port: parsePort(flags.port),
-      host: flags.host,
-      token: flags.token,
-      dir: flags.dir,
-      daemon: bools.has("daemon"),
+      port: parsePort(scan.flags.port),
+      host: scan.flags.host,
+      token: scan.flags.token,
+      dir: scan.rest[0],
+      daemon: scan.bools.has("daemon"),
     };
   }
   return parseRun(args);
 }
-
-// The interactive command's `--flag value` pairs. Kept as an explicit set — and
-// scanned by hand rather than through readFlags — because this is the one branch
-// with no subcommand word to vouch for it: an unrecognised token here must stay
-// `invalid`, not be quietly eaten as some flag's value. `--web` itself is
-// valueless and handled separately.
-const RUN_VALUE_FLAGS = new Set(["web-port", "web-host", "web-token", "token"]);
 
 /**
  * The bare invocation: an optional magnet / info hash / .torrent path, plus the
@@ -166,23 +204,13 @@ const RUN_VALUE_FLAGS = new Set(["web-port", "web-host", "web-token", "token"]);
  * download in the other.
  */
 function parseRun(args: string[]): CliCommand {
-  let target: string | undefined;
-  let web = false;
-  const flags: Record<string, string> = {};
+  const scan = scanFlags(args, RUN_FLAGS);
+  if (!scan.ok) return scan.error;
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "--web") {
-      web = true;
-    } else if (arg.startsWith("--") && RUN_VALUE_FLAGS.has(arg.slice(2))) {
-      const value = args[++i];
-      if (value === undefined) return { kind: "invalid", arg: `${arg} (missing value)` };
-      flags[arg.slice(2)] = value;
-    } else if (target === undefined && isRunTarget(arg)) {
-      target = arg;
-    } else {
-      return { kind: "invalid", arg };
-    }
+  let target: string | undefined;
+  for (const arg of scan.rest) {
+    if (target === undefined && isRunTarget(arg)) target = arg;
+    else return { kind: "invalid", arg };
   }
 
   const isTorrent = target !== undefined && /\.torrent$/i.test(target);
@@ -190,12 +218,10 @@ function parseRun(args: string[]): CliCommand {
     kind: "run",
     initialMagnet: isTorrent ? undefined : target,
     initialTorrent: isTorrent ? target : undefined,
-    web,
-    webPort: parsePort(flags["web-port"]),
-    webHost: flags["web-host"],
-    // The more specific spelling wins. `--token` is the muscle memory from
-    // serve/files; `--web-token` says which server it is for.
-    webToken: flags["web-token"] ?? flags.token,
+    web: scan.bools.has("web"),
+    host: scan.flags.host,
+    port: parsePort(scan.flags.port),
+    token: scan.flags.token,
   };
 }
 

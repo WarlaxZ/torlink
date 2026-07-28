@@ -192,76 +192,29 @@ describe("parseCliArgs", () => {
   });
 });
 
-describe("web flags", () => {
-  it("enables the web UI on serve", () => {
-    expect(parseCliArgs(["serve", "--web"])).toMatchObject({ kind: "serve", web: true });
-  });
-
-  it("defaults serve web to off", () => {
-    expect(parseCliArgs(["serve"])).toMatchObject({ kind: "serve", web: false });
-  });
-
-  it("reads a web port and token on serve", () => {
-    expect(
-      parseCliArgs(["serve", "--web", "--web-port", "8080", "--token", "s3cret"]),
-    ).toMatchObject({
-      kind: "serve",
-      web: true,
-      webPort: 8080,
-      token: "s3cret",
-    });
-  });
-
+describe("run flags", () => {
   it("enables the web UI alongside the TUI", () => {
     expect(parseCliArgs(["--web"])).toMatchObject({ kind: "run", web: true });
   });
 
-  it("reads a web port and token for the TUI", () => {
+  it("reads host, port and token for the TUI", () => {
     expect(
-      parseCliArgs([
-        "--web",
-        "--web-port",
-        "8080",
-        "--web-host",
-        "0.0.0.0",
-        "--token",
-        "s3cret",
-      ]),
+      parseCliArgs(["--web", "--host", "0.0.0.0", "--port", "8080", "--token", "s3cret"]),
     ).toMatchObject({
       kind: "run",
       web: true,
-      webPort: 8080,
-      webHost: "0.0.0.0",
-      webToken: "s3cret",
+      host: "0.0.0.0",
+      port: 8080,
+      token: "s3cret",
     });
   });
 
-  it("still treats a bare magnet as a run", () => {
-    expect(parseCliArgs(["magnet:?xt=urn:btih:abc"])).toMatchObject({
-      kind: "run",
-      initialMagnet: "magnet:?xt=urn:btih:abc",
-    });
-  });
-
-  it("rejects an invalid web port rather than binding a random one", () => {
-    expect(parseCliArgs(["serve", "--web", "--web-port", "nope"])).toMatchObject({
-      kind: "serve",
-      web: true,
-      webPort: undefined,
-    });
-  });
-
-  // --- flag ordering: a magnet and --web must combine, in either order ---
-
-  it("combines a magnet with --web when the magnet comes first", () => {
+  it("combines a magnet with --web in either order", () => {
     expect(parseCliArgs(["magnet:?xt=urn:btih:abc", "--web"])).toMatchObject({
       kind: "run",
       initialMagnet: "magnet:?xt=urn:btih:abc",
       web: true,
     });
-  });
-
-  it("combines a magnet with --web when --web comes first", () => {
     expect(parseCliArgs(["--web", "magnet:?xt=urn:btih:abc"])).toMatchObject({
       kind: "run",
       initialMagnet: "magnet:?xt=urn:btih:abc",
@@ -269,28 +222,46 @@ describe("web flags", () => {
     });
   });
 
-  it("combines a .torrent path and an infohash with web flags", () => {
-    expect(parseCliArgs(["./Foo.torrent", "--web", "--web-port", "8080"])).toMatchObject({
+  it("combines a .torrent path and an infohash with the web flags", () => {
+    expect(parseCliArgs(["./Foo.torrent", "--web", "--port", "8080"])).toMatchObject({
       kind: "run",
       initialTorrent: "./Foo.torrent",
       web: true,
-      webPort: 8080,
+      port: 8080,
     });
     const hash = "abcdef0123456789abcdef0123456789abcdef01";
-    expect(parseCliArgs(["--web-host", "127.0.0.1", "--web", hash])).toMatchObject({
+    expect(parseCliArgs(["--host", "127.0.0.1", "--web", hash])).toMatchObject({
       kind: "run",
       initialMagnet: hash,
       web: true,
-      webHost: "127.0.0.1",
+      host: "127.0.0.1",
     });
   });
 
-  it("takes web flags without --web, so a mount site can still ignore them", () => {
-    expect(parseCliArgs(["--web-port", "8080"])).toMatchObject({
+  it("takes the flags without --web, so a mount site can still ignore them", () => {
+    expect(parseCliArgs(["--port", "8080"])).toMatchObject({
       kind: "run",
       web: false,
-      webPort: 8080,
+      port: 8080,
     });
+  });
+
+  it("ignores a port that is not a positive number", () => {
+    for (const bad of ["0", "-1", "nope"]) {
+      expect(parseCliArgs(["--web", "--port", bad])).toMatchObject({ web: true, port: undefined });
+    }
+  });
+
+  it("does not read a token from the environment (mount sites do that)", () => {
+    const prev = process.env.TORLINK_API_TOKEN;
+    process.env.TORLINK_API_TOKEN = "from-env";
+    try {
+      expect(parseCliArgs(["--web"])).toMatchObject({ kind: "run", web: true, token: undefined });
+      expect(parseCliArgs(["serve", "--web"])).toMatchObject({ kind: "serve", token: undefined });
+    } finally {
+      if (prev === undefined) delete process.env.TORLINK_API_TOKEN;
+      else process.env.TORLINK_API_TOKEN = prev;
+    }
   });
 
   // --- strictness: never silently swallow an unknown flag ---
@@ -299,10 +270,10 @@ describe("web flags", () => {
     expect(parseCliArgs(["--nope", "value"])).toEqual({ kind: "invalid", arg: "--nope" });
   });
 
-  it("rejects a web value flag with no value", () => {
-    expect(parseCliArgs(["--web", "--web-port"])).toEqual({
+  it("rejects a value flag with no value", () => {
+    expect(parseCliArgs(["--web", "--port"])).toEqual({
       kind: "invalid",
-      arg: "--web-port (missing value)",
+      arg: "--port (missing value)",
     });
   });
 
@@ -317,71 +288,29 @@ describe("web flags", () => {
     expect(parseCliArgs(["--web", "hello"])).toEqual({ kind: "invalid", arg: "hello" });
   });
 
-  // --- token spellings and precedence ---
+  // --- removed spellings get a hint, not a bare "unknown argument" ---
 
-  it("accepts --web-token as a spelling of the TUI web token", () => {
-    expect(parseCliArgs(["--web", "--web-token", "s3cret"])).toMatchObject({
-      kind: "run",
-      web: true,
-      webToken: "s3cret",
+  it("hints at --host when given the removed --web-host", () => {
+    expect(parseCliArgs(["--web", "--web-host", "0.0.0.0"])).toEqual({
+      kind: "invalid",
+      arg: "--web-host",
+      hint: "--web-host is not a flag; the web ui binds --host",
     });
   });
 
-  it("prefers the more specific --web-token over --token", () => {
-    expect(parseCliArgs(["--web", "--token", "general", "--web-token", "specific"])).toMatchObject({
-      kind: "run",
-      web: true,
-      webToken: "specific",
+  it("hints at --port when given the removed --web-port", () => {
+    expect(parseCliArgs(["--web", "--web-port", "8080"])).toEqual({
+      kind: "invalid",
+      arg: "--web-port",
+      hint: "--web-port is not a flag; the web ui binds --port",
     });
   });
 
-  it("does not read a token from the environment (mount sites do that)", () => {
-    const prev = process.env.TORLINK_API_TOKEN;
-    process.env.TORLINK_API_TOKEN = "from-env";
-    try {
-      expect(parseCliArgs(["--web"])).toMatchObject({ kind: "run", web: true, webToken: undefined });
-      expect(parseCliArgs(["serve", "--web"])).toMatchObject({ kind: "serve", token: undefined });
-    } finally {
-      if (prev === undefined) delete process.env.TORLINK_API_TOKEN;
-      else process.env.TORLINK_API_TOKEN = prev;
-    }
-  });
-
-  // --- port validation on both commands ---
-
-  it("rejects a non-positive web port on both commands", () => {
-    expect(parseCliArgs(["serve", "--web", "--web-port", "0"])).toMatchObject({
-      web: true,
-      webPort: undefined,
-    });
-    expect(parseCliArgs(["--web", "--web-port", "-1"])).toMatchObject({
-      web: true,
-      webPort: undefined,
-    });
-    expect(parseCliArgs(["--web", "--web-port", "nope"])).toMatchObject({
-      web: true,
-      webPort: undefined,
-    });
-  });
-
-  it("leaves serve's api port and host alone when --web is on", () => {
-    expect(
-      parseCliArgs(["serve", "--web", "--web-port", "8080", "--port", "9999", "--host", "0.0.0.0"]),
-    ).toMatchObject({
-      kind: "serve",
-      web: true,
-      webPort: 8080,
-      port: 9999,
-      host: "0.0.0.0",
-    });
-  });
-
-  it("keeps --web out of serve's other flag values", () => {
-    // If --web were not a valueless boolean it would eat the next token.
-    expect(parseCliArgs(["serve", "--web", "--to", "/mnt/media"])).toMatchObject({
-      kind: "serve",
-      web: true,
-      downloadDir: "/mnt/media",
+  it("hints at --token when given the removed --web-token", () => {
+    expect(parseCliArgs(["--web", "--web-token", "s3cret"])).toEqual({
+      kind: "invalid",
+      arg: "--web-token",
+      hint: "--web-token is not a flag; use --token",
     });
   });
 });
