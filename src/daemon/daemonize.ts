@@ -86,6 +86,11 @@ export function daemonize(name: string): void {
 
   console.log(`torlink ${name} daemon started (pid ${pid}).`);
   console.log(`  logs: ${logPath}`);
+  // Said out loud because `--daemon` is the one launch that does not end with a
+  // dashboard on screen: the child's stdout is the log file, so the browsable
+  // link — and a minted token, when there is one — is in there and nowhere else.
+  // Without this the user gets a pid and has to guess where the address went.
+  if (process.argv.includes("--web")) console.log(`  web ui: the link is in that log`);
   console.log(`  stop: kill ${pid}   (or: kill $(cat ${pidPath}))`);
   process.exit(0);
 }
