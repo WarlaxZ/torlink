@@ -311,6 +311,47 @@ describe("runServe --web startup output", () => {
     await done;
   });
 
+  it("falls back to the real process.stdout.isTTY when none is injected", async () => {
+    // The production default, and the one branch every other test here steps
+    // around by passing `isTTY` explicitly: `options.isTTY ?? process.stdout
+    // .isTTY === true`. Replacing that whole expression with a bare
+    // `options.isTTY` used to break nothing at all.
+    //
+    // Safe to drive for real because the *opener* is still injected — this
+    // makes the decision take the production path without any chance of a
+    // browser window opening on the machine running the suite. vitest's stdout
+    // is never a TTY, hence the override.
+    const port = await freePort();
+    const opened: string[] = [];
+    const before = new Set(process.listeners("SIGTERM"));
+    const original = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    try {
+      const done = runServe({
+        port,
+        web: true,
+        downloadDir: dir,
+        openUrlImpl: async (url: string) => {
+          opened.push(url);
+          return true;
+        },
+      });
+      expect(await waitUntil(() => isListening(port))).toBe(true);
+      // 1.5s, not the 5s default: the open happens within milliseconds of the
+      // listener coming up, so a regression here should report in a second
+      // rather than sitting on the default and looking like a slow machine.
+      expect(await waitUntil(async () => opened.length > 0, 1500)).toBe(true);
+      expect(opened).toEqual([`http://127.0.0.1:${port}`]);
+      newSignalHandler(before)();
+      await done;
+    } finally {
+      // Restored precisely, not deleted: leaving isTTY true would make every
+      // later test in this worker think it was attached to a terminal.
+      if (original) Object.defineProperty(process.stdout, "isTTY", original);
+      else delete (process.stdout as { isTTY?: boolean }).isTTY;
+    }
+  });
+
   it("opens nothing under --headless", async () => {
     const port = await freePort();
     const opened: string[] = [];
