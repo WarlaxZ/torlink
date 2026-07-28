@@ -31,6 +31,7 @@ import {
   ALL_TAB,
   categoryTabs,
   emptyView,
+  modeForQuery,
   parseSort,
   previewApplies,
   reportsHealthLookup,
@@ -39,6 +40,7 @@ import {
   searchStatus,
   searchUrl,
   sourceLabel,
+  statusLineHidden,
   visibleResults,
   type AddVia,
   type PublicSearchResult,
@@ -573,8 +575,9 @@ function renderTabs(): void {
         // already here: the server searches only that group's sources, so the
         // other tabs' hits were never fetched. Matches the TUI, where each tab
         // is its own slice of one fan-out.
-        if (searchView.query) startSearch(searchView.query);
-        else renderResults();
+        // mode, not query: a browse's query is empty but still needs re-running.
+        if (searchView.mode === "idle") renderResults();
+        else startSearch(searchView.query);
       });
       return button;
     }),
@@ -603,9 +606,20 @@ function stopSearch(): void {
   searchStream = null;
 }
 
-function startSearch(query: string): void {
+function startSearch(raw: string): void {
   stopSearch();
-  searchView = { ...searchView, query, snapshot: null, running: true };
+  // Trimmed here, once, so every caller — including searchForPick, which hands
+  // over an untrusted title from reccd — gets the same normalisation the server
+  // applies before it decides search vs. browse (parseSearchParams).
+  const query = raw.trim();
+  // An empty query is browse mode, not a mistake — the server accepts it and
+  // most sources answer with their own top/latest list; a couple opt out.
+  const mode = modeForQuery(query);
+  searchView = { ...searchView, query, mode, snapshot: null, running: true };
+  // The box and the state must not disagree: without this, submitting "   "
+  // leaves #query showing whitespace while searchView.query (and the URL sent
+  // to the server) is already trimmed.
+  queryInput.value = query;
   selectedHash = null;
   preview.select(null, searchView.group);
   renderResults();
@@ -656,9 +670,9 @@ function startSearch(query: string): void {
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const query = queryInput.value.trim();
-  if (!query) return;
-  startSearch(query);
+  // No guard on an empty value: submitting a blank box is how you browse the
+  // top lists, the same as pressing Enter on an empty box in the TUI.
+  startSearch(queryInput.value);
 });
 
 sortSelect.addEventListener("change", () => {
@@ -742,7 +756,7 @@ function renderResults(): void {
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
   searchStatusLine.classList.toggle("error", status.tone === "error");
-  searchStatusLine.hidden = shown.length > 0 && !searchView.running;
+  searchStatusLine.hidden = statusLineHidden(searchView, shown.length);
   searchProgress.textContent = searchView.snapshot
     ? `${searchView.snapshot.done}/${searchView.snapshot.total} sources`
     : "";
@@ -1074,12 +1088,20 @@ async function actOnPick(action: ReccAction, item: PublicRecommendation): Promis
 
 /** Hand a pick to the search pane — the feed's way out into the rest of the app. */
 function searchForPick(item: PublicRecommendation): void {
+  // A blank title from reccd must not fall through to browse mode: an empty
+  // submit is a deliberate user gesture, and silently answering a pick with
+  // the top-100 list would look like a working search for the wrong thing.
+  const title = item.title.trim();
+  if (!title) {
+    showNotice("That pick has no title to search for.");
+    return;
+  }
   const group = searchGroupForType(recc.state().filters.type, sources);
   searchView = { ...searchView, group };
   renderTabs();
-  queryInput.value = item.title;
+  queryInput.value = title;
   showView("search");
-  startSearch(item.title);
+  startSearch(title);
 }
 
 // Same createElement/textContent rule as every other list on this page, and for

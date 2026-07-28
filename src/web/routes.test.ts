@@ -768,8 +768,24 @@ describe("parseSearchParams", () => {
     });
   });
 
-  it.each(["", "q=", "q=%20%20"])("rejects a missing or blank query (%s)", (qs) => {
-    expect(parseSearchParams(new URLSearchParams(qs))).toEqual({ ok: false, error: "missing query" });
+  // Blank is browse mode, not a mistake. See parseSearchParams.
+  it.each(["q=", "q=%20%20"])("accepts a blank query as browse (%s)", (qs) => {
+    expect(parseSearchParams(new URLSearchParams(qs))).toEqual({
+      ok: true,
+      params: { query: "", group: null },
+    });
+  });
+
+  it("browses one group when a blank query names a tab", () => {
+    expect(parseSearchParams(new URLSearchParams("q=&group=Movies"))).toEqual({
+      ok: true,
+      params: { query: "", group: "Movies" },
+    });
+  });
+
+  // Absent and blank are deliberately different. See parseSearchParams.
+  it("rejects a request with no q at all", () => {
+    expect(parseSearchParams(new URLSearchParams(""))).toEqual({ ok: false, error: "missing query" });
   });
 
   // A typo'd tab that quietly searches everything is worse than one that says
