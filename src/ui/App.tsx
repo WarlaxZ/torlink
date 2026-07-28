@@ -118,7 +118,7 @@ import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
 import { vpnRouteIsSafe } from "../util/vpn";
 import { StreamSessionRegistry } from "../core/streamSession";
-import { displayHosts, webUrl } from "../web/links";
+import { displayHosts, webUrl, withoutToken } from "../web/links";
 import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
 import type { Runtime } from "../daemon/runtime";
 import { log } from "../util/logger";
@@ -520,7 +520,11 @@ export function App({
         // the link works without typing it (web/links.ts).
         const { local } = displayHosts(host, os.networkInterfaces());
         const url = webUrl(local, started.port, token);
-        setNotice(`${ICON.done} Web UI on ${url}`);
+        // The notice is shown without the token for the same reason the splash
+        // line is (web/links.ts): both land in terminal scrollback, which
+        // `torlnk attach` keeps alive in a tmux session. `webStatus` holds the
+        // real link, so shift+w still opens something that works.
+        setNotice(`${ICON.done} Web UI on ${withoutToken(url)}`);
         setWebStatus({ url });
       } catch (e) {
         // Every failure mode lands here, including startWebServer's refusal to

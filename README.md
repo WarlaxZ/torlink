@@ -291,9 +291,9 @@ If you've connected [reccd](#recommendations-optional), the **for you** tab show
 
 The dashboard is served from `dist/web`, **not** `src`. Edit anything under `src/web/static/`, reload, and you'll get silently stale assets — it reads exactly like a browser cache bug, so it's easy to lose twenty minutes in devtools before suspecting the build. Rerun `npm run build` after any change there. `npm run dev` only re-executes the server's TypeScript; it does not rebuild the browser bundle.
 
-## Headless
+## Without the TUI
 
-torlink also runs without the TUI, for servers and seedboxes:
+torlink also runs with no terminal UI at all, for servers and seedboxes:
 
     torlnk watch <dir>    download anything dropped into a folder
     torlnk serve          take magnets over HTTP

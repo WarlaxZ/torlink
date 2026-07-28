@@ -360,9 +360,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // and answers both the dashboard and the add API — one process, one address,
   // one exposure decision.
 
-  // The URL a browser on this machine should open — set once the web server is
-  // up, so the browser-open below and the log above cannot disagree.
-  let localUrl: string | null = null;
   let web: WebServerHandle | null = null;
   if (options.web) {
     try {
@@ -390,7 +387,10 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // browser-open target (`localUrl`) and every line below it are built the
     // same way and cannot drift apart.
     const link = (h: string): string => webUrl(h, bound, token ?? undefined);
-    localUrl = link(local);
+    // The URL a browser on this machine should open. A const inside this block,
+    // so the log lines and the browser-open below cannot disagree about it and
+    // there is no null state to guard against.
+    const localUrl = link(local);
     // The marker comes before the URL, not after: it lines up in a column
     // regardless of address width, and it leaves the pasteable URL last on the
     // line, which is where an 80-column wrap does the least damage. The bind
@@ -405,7 +405,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // whatever script is reading the log.
     if (mintedToken) log(`token ${token}  (pass --token to pin it across restarts)`);
     if (
-      localUrl &&
       shouldOpenBrowser({
         headless: options.headless,
         daemon: options.daemon,

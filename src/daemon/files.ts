@@ -1,5 +1,5 @@
-// Headless HTTP file server: serve the downloads directory over HTTP so finished
-// files can be streamed or fetched from another machine — a browser, a media
+// HTTP file server, no terminal UI: serve the downloads directory over HTTP so
+// finished files can be streamed or fetched from another machine — a browser, a media
 // player, a seedbox front-end. Read-only, range-aware (so video seeks and
 // resumable downloads work), and rooted at the downloads folder with no way out.
 //
@@ -7,10 +7,12 @@
 // deliberately non-standard and overridable with --port.
 
 import http from "node:http";
+import os from "node:os";
 import { pipeline } from "node:stream";
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { displayHosts, webUrl } from "../web/links";
 import { loadConfig } from "../config/config";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk } from "./auth";
 
@@ -237,7 +239,14 @@ export async function runFiles(options: FilesOptions = {}): Promise<void> {
 
   await new Promise<void>((resolve) => {
     server.listen(port, host, () => {
-      log(`serving ${root} on http://${host}:${port}`);
+      // Through web/links.ts for the same reason serve --web is: this mode
+      // exists so finished files stream to a browser or a media player, and
+      // `--host 0.0.0.0` printed `http://0.0.0.0:9160` — an address neither can
+      // use. The bind is stated separately from the URL to open.
+      const { local, lan } = displayHosts(host, os.networkInterfaces());
+      log(`serving ${root}, bound to ${host}:${port}`);
+      log(`open on this machine:  ${webUrl(local, port)}`);
+      for (const address of lan) log(`open from your LAN:    ${webUrl(address, port)}`);
       log(token ? "auth: token required" : "auth: none (loopback only)");
       resolve();
     });

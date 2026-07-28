@@ -29,9 +29,18 @@ const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "::0", "[::]", "*", ""]);
  * The browsable host(s) for a bind address: one to hand the local machine, and
  * the LAN addresses to hand anything else.
  *
- * A wildcard yields loopback plus every external IPv4. IPv6 is deliberately
- * left out of the LAN list — link-local addresses (`fe80::…`) need a scope id to
- * be usable and would be noise in a startup log.
+ * A wildcard yields loopback plus every external IPv4. The LAN list is IPv4
+ * only, deliberately and including global IPv6 — not just the link-local
+ * `fe80::…` addresses that would need a scope id to be usable at all. Most
+ * machines hold several v6 addresses (SLAAC, privacy extensions, a ULA) that all
+ * reach the same host, so listing them turns a two-line "here is where to go"
+ * into a wall nobody reads.
+ *
+ * The cost is real and worth stating: on a v6-only LAN this prints a loopback
+ * link and no LAN line at all, which reads as "nothing was exposed" when
+ * something was. The bind line above it still names the address that was bound,
+ * so the truth is on screen — but if v6-only setups ever matter here, this is
+ * the decision to revisit.
  */
 export function displayHosts(
   bindHost: string,
@@ -78,6 +87,21 @@ function bracket(host: string): string {
  * `webUrl` — which is exactly what happens at the call sites this module
  * exists to fix — still gets a working URL instead of `http://::1:9161`.
  */
+/**
+ * The same URL with the token elided — for anywhere it is *displayed* rather
+ * than followed.
+ *
+ * The TUI's splash is the case that needs it: a full link there puts the secret
+ * into terminal scrollback for the whole session, and `torlnk attach` keeps that
+ * scrollback in a tmux session that outlives the terminal. Nothing is lost by
+ * hiding it, because the TUI never mints — its token is always one the user
+ * passed on the command line, so they already know it. `shift+w` still opens the
+ * unredacted URL; only the rendered string is trimmed.
+ */
+export function withoutToken(url: string): string {
+  return url.replace(/\/?#k=[^#]*$/, "");
+}
+
 export function webUrl(host: string, port: number, token?: string): string {
   const base = `http://${bracket(host)}:${port}`;
   return token ? `${base}/#k=${encodeURIComponent(token)}` : base;

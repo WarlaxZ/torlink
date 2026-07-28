@@ -3,7 +3,7 @@
 // visit. Pure by construction — the interface list is a parameter — so every
 // case below is exercised without depending on the machine's NICs.
 import { describe, it, expect } from "vitest";
-import { displayHosts, webUrl, type NetInterfaces } from "./links";
+import { displayHosts, webUrl, withoutToken, type NetInterfaces } from "./links";
 
 const IFACES: NetInterfaces = {
   lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
@@ -93,5 +93,23 @@ describe("webUrl", () => {
   it("does not double-bracket a host already bracketed by displayHosts", () => {
     const { local } = displayHosts("::1", IFACES);
     expect(webUrl(local, 9161)).toBe("http://[::1]:9161");
+  });
+});
+
+describe("withoutToken", () => {
+  it("strips a token fragment, and the slash webUrl added with it", () => {
+    expect(withoutToken("http://127.0.0.1:9161/#k=abc")).toBe("http://127.0.0.1:9161");
+  });
+  it("leaves a tokenless URL alone", () => {
+    expect(withoutToken("http://127.0.0.1:9161")).toBe("http://127.0.0.1:9161");
+  });
+  it("strips an encoded token whole", () => {
+    expect(withoutToken("http://127.0.0.1:9161/#k=a%20b%26c")).toBe("http://127.0.0.1:9161");
+  });
+  it("round-trips whatever webUrl builds, for any token", () => {
+    // The pairing that matters: these two must not drift, or the splash would
+    // render half a secret.
+    expect(withoutToken(webUrl("127.0.0.1", 9161, "s3cret"))).toBe(webUrl("127.0.0.1", 9161));
+    expect(withoutToken(webUrl("[::1]", 9161, "s3cret"))).toBe(webUrl("[::1]", 9161));
   });
 });

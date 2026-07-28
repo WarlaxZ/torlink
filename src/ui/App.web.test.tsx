@@ -380,8 +380,37 @@ describe("App --web mount", () => {
     );
     try {
       await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
-      await vi.waitFor(() => expect(ui.frame()).toContain("http://127.0.0.1:19004/#k=s3cret"));
+      await vi.waitFor(() => expect(ui.frame()).toContain("http://127.0.0.1:19004"));
+      // The wildcard bind is never the advice — the whole point of the change.
       expect(ui.frame()).not.toContain("http://0.0.0.0");
+      // And the token is not on screen: the splash and its notice both live in
+      // terminal scrollback, which `torlnk attach` keeps in a tmux session for
+      // as long as it runs. Nothing is lost by hiding it, because the TUI never
+      // mints — this token came from the user's own --token.
+      expect(ui.frame()).not.toContain("s3cret");
+      expect(ui.frame()).not.toContain("#k=");
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("opens the full token-carrying link on shift+w, not the redacted one", async () => {
+    // The pair that must not drift: the splash hides the token, the key opens a
+    // URL that still has it. Redacting the value `webStatus` holds — rather than
+    // only the rendered string — would leave the key opening a dashboard that
+    // stops at the unlock form.
+    const start = vi.fn(async () => ({ port: 19009, close: async () => {} }) as WebServerHandle);
+    const ui = renderUI(<App web webToken="s3cret" startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      ui.press(TAB);
+      await vi.waitFor(() => expect(ui.frame()).toContain("Downloads"));
+      ui.press("W");
+      await vi.waitFor(() =>
+        expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:19009/#k=s3cret"),
+      );
       expectNothingOnStdout();
     } finally {
       ui.unmount();
