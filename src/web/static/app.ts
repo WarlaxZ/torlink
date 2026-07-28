@@ -1249,7 +1249,7 @@ function showUnreachable(detail: string): void {
   showView("queue");
   rows = [];
   render();
-  emptyNote.textContent = `Can't reach torlnk (${detail}). Check it is still running, then reload.`;
+  emptyNote.textContent = `Can't reach torlink (${detail}). Check it is still running, then reload.`;
   emptyNote.classList.add("error");
   emptyNote.hidden = false;
 }
@@ -1325,7 +1325,7 @@ authForm.addEventListener("submit", (event) => {
       authError.textContent = "That token was rejected.";
       authError.hidden = false;
     } else {
-      authError.textContent = `Can't reach torlnk (${result.detail}).`;
+      authError.textContent = `Can't reach torlink (${result.detail}).`;
       authError.hidden = false;
     }
   });

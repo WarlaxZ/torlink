@@ -1,7 +1,7 @@
 import { fetch as undiciFetch } from "undici";
 import { getDnsDispatcher } from "./dns";
 
-export const USER_AGENT = "torlink (+https://www.npmjs.com/package/torlnk)";
+export const USER_AGENT = "torlink (+https://www.npmjs.com/package/torlink)";
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 

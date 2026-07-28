@@ -97,7 +97,7 @@ export function parseRange(header: string | undefined, size: number): Range | nu
 }
 
 function log(message: string): void {
-  console.log(`[torlnk files] ${new Date().toISOString()} ${message}`);
+  console.log(`[torlink files] ${new Date().toISOString()} ${message}`);
 }
 
 async function sendListing(res: http.ServerResponse, dir: string, method: string): Promise<void> {

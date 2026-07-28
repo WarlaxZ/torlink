@@ -2,7 +2,7 @@ import { loadConfig, resolveReccConfig } from "../config/config";
 import { runTraktFlow } from "../recc/traktImport";
 import { formatImportSummary } from "../recc/importSummary";
 
-// Headless `torlnk import-trakt`. Interactive: it prints a code + URL to stderr
+// Headless `torlink import-trakt`. Interactive: it prints a code + URL to stderr
 // and blocks (polling) while the user authorizes at trakt.tv, then imports.
 // Throws on failure so index.tsx's failHeadless prints the message and exits
 // non-zero.

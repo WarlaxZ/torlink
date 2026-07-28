@@ -1,4 +1,4 @@
-// Headless HTTP add API: torlnk exposes a tiny local server so another program
+// Headless HTTP add API: torlink exposes a tiny local server so another program
 // (a seedbox web app, a script, curl) can hand it a torrent over HTTP instead of
 // a keypress. It complements the watch folder — same headless runtime, a
 // different doorway.
@@ -243,7 +243,7 @@ export function readBody(req: http.IncomingMessage): Promise<{ text: string; too
 }
 
 function log(message: string): void {
-  console.log(`[torlnk serve] ${new Date().toISOString()} ${message}`);
+  console.log(`[torlink serve] ${new Date().toISOString()} ${message}`);
 }
 
 /**
@@ -255,7 +255,7 @@ function log(message: string): void {
  * failure lands in milliseconds, so `process.exit(1)` here used to leave the
  * marker on disk — and the *next* launch of any mode (TUI included) came up in
  * safe mode with every restored download and seed paused, announcing "recovered
- * from a crashed start". `torlnk serve --web` against a port a TUI is already
+ * from a crashed start". `torlink serve --web` against a port a TUI is already
  * hosting on is an easy way to trigger it.
  *
  * `disarmBootMarker()`, not `queue.suspend()`: the marker file is the only thing
@@ -440,7 +440,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
           // scan, half-sent headers — never ends. One bare `net.connect` used to
           // make Ctrl-C hang here forever, which is also what made
           // `daemon/restart.ts` give up after 10s and report stillRunning: true,
-          // leaving `torlnk update` with the old daemon still alive.
+          // leaving `torlink update` with the old daemon still alive.
           server.closeAllConnections();
         });
         // Both are awaited so the order above is real, and both swallow a

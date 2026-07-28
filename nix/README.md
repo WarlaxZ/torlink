@@ -1,7 +1,7 @@
 # Flake install
 Add this repo to your ```flake.nix```. The package is built using the unstable channel. You can overwrite this by setting ```inputs.nixpkgs.follows = "nixpkgs"``` (if your default is 26.05).
 
-**The binary is executed as ```torlnk```.**
+**The binary is executed as ```torlink``` (```torlnk``` still works as an alias).**
 
 ```nix
 inputs = {

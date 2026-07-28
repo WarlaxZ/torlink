@@ -141,7 +141,7 @@ function render(): void {
 
   nameLabel.textContent = target.filename || "Unnamed file";
   nameLabel.title = target.filename;
-  document.title = target.filename ? `${target.filename} — torlnk` : "torlnk";
+  document.title = target.filename ? `${target.filename} — torlink` : "torlink";
 
   const stream = absoluteUrl(location.origin, streamPath(target));
   const playlist = absoluteUrl(location.origin, playlistPath(target));

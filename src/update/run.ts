@@ -1,4 +1,4 @@
-// `torlnk update`: fetch the latest GitHub release, apply it, and bring any
+// `torlink update`: fetch the latest GitHub release, apply it, and bring any
 // --daemon process back on the new code. Three install shapes are handled: a
 // self-contained release bundle (download the matching asset, verify it, swap
 // it in place), a git checkout (pull, install, build), and a global npm install
@@ -79,7 +79,7 @@ async function restartDaemons(): Promise<void> {
     const res = await restartDaemon(d);
     console.log(
       res.stillRunning
-        ? "still shutting down; skipped (stop it, then rerun torlnk update --force)."
+        ? "still shutting down; skipped (stop it, then rerun torlink update --force)."
         : res.newPid
           ? `now pid ${res.newPid}.`
           : "it had already stopped.",

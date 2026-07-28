@@ -87,7 +87,7 @@ export function Splash({
       </Box>
 
       {/* The browser UI's address, for as long as the splash is up: the notice
-          that also carries it expires after four seconds, which left `torlnk
+          that also carries it expires after four seconds, which left `torlink
           --web`'s headline feature discoverable only from the log file. A status
           line in the same dim treatment as the tip above it, never a banner —
           and never a url unless the server really bound one. */}

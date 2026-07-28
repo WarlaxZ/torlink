@@ -98,13 +98,16 @@ buildNpmPackage (finalAttrs: {
     popd
 
     # wrap clipboard
-    wrapProgram $out/bin/torlnk \
-      --prefix PATH : ${
-        lib.makeBinPath [
-          wl-clipboard
-          xclip
-        ]
-      }
+    # Both bin entries point at the same script, so wrap each one.
+    for prog in torlink torlnk; do
+      wrapProgram $out/bin/$prog \
+        --prefix PATH : ${
+          lib.makeBinPath [
+            wl-clipboard
+            xclip
+          ]
+        }
+    done
   '';
 
   meta = {
@@ -113,7 +116,7 @@ buildNpmPackage (finalAttrs: {
     changelog = "https://github.com/baairon/torlink/releases/tag/${finalAttrs.src.tag}";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [ ghastrum ];
-    mainProgram = "torlnk";
+    mainProgram = "torlink";
     platforms = lib.platforms.linux;
   };
 })
