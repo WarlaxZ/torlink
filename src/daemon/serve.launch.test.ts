@@ -119,8 +119,23 @@ describe("runServe --web startup output", () => {
     const before = new Set(process.listeners("SIGTERM"));
     const done = runServe({ port, web: true, downloadDir: dir });
     expect(await waitUntil(() => isListening(port))).toBe(true);
-    expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}`);
+
+    // The old code's `listening on http://127.0.0.1:${port}` line already
+    // contains this substring, so a bare `.toContain` here would pass against
+    // the pre-fix implementation too. The `(this machine)` marker only the new
+    // per-host logging produces, so anchor on that instead.
+    expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}  (this machine)`);
     expect(logs.join("\n")).not.toContain("from your LAN");
+
+    // Exactly one per-host line: a loopback bind has one host to report, and a
+    // regression that always appended a LAN line (even with an empty list)
+    // would otherwise slip past the "not.toContain" check above. Matched on the
+    // "(this machine)" / "(from your LAN)" suffix rather than "web ui on" alone,
+    // since the summary line ("api + web ui on one port...") also contains that
+    // substring.
+    const perHostLines = logs.filter((l) => / \(this machine\)| \(from your LAN\)/.test(l));
+    expect(perHostLines).toHaveLength(1);
+
     newSignalHandler(before)();
     await done;
   });
