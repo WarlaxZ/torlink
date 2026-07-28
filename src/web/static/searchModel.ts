@@ -197,6 +197,24 @@ export function searchStatus(view: SearchView, shown: number): SearchStatus {
   return { text: `${shown} result${shown === 1 ? "" : "s"}${note}${tail}`, tone: "dim" };
 }
 
+/**
+ * Whether the status line should be hidden once results are on screen.
+ *
+ * A settled search's status line is just a result count, and that count is
+ * redundant with the rows the user is already looking at — hide it. Browse
+ * mode's line is not a count, or not only one: `searchStatus`'s "· newest
+ * across all sources" tail is the only thing on the page saying these rows
+ * are a curated top list rather than a match for something typed, so it must
+ * stay up exactly when there are rows to explain. Anything still `running` or
+ * with nothing to show keeps the line for the same reason `searchStatus` still
+ * has something to say then — the progress text and the empty-state messages
+ * ("Nothing new right now.", "Couldn't reach any source.", …) are the only
+ * content on the page in those cases.
+ */
+export function statusLineHidden(view: SearchView, shown: number): boolean {
+  return shown > 0 && !view.running && view.mode !== "browse";
+}
+
 /** The `GET /api/search` URL for a query. `token` empty means a tokenless server. */
 export function searchUrl(query: string, group: string, token: string): string {
   const params = new URLSearchParams({ q: query, group });

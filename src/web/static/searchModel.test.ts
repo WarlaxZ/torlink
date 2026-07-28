@@ -14,6 +14,7 @@ import {
   searchStatus,
   searchUrl,
   sourceLabel,
+  statusLineHidden,
   visibleResults,
   type PublicSearchResult,
   type PublicSearchSnapshot,
@@ -281,6 +282,37 @@ describe("searchStatus", () => {
 
   it("still shows the idle line before anything is submitted", () => {
     expect(searchStatus(emptyView(), 0).text).toBe("Search across every enabled source.");
+  });
+});
+
+describe("statusLineHidden", () => {
+  it("hides the line for a settled search with rows — the count is redundant with the rows themselves", () => {
+    const v = view({ snapshot: snapshot([result()], { total: 1, done: 1 }) });
+    expect(statusLineHidden(v, 1)).toBe(true);
+  });
+
+  it("keeps the line up while a search is still running, even with rows already in", () => {
+    const v = view({ running: true, snapshot: snapshot([result()], { total: 3, done: 1 }) });
+    expect(statusLineHidden(v, 1)).toBe(false);
+  });
+
+  it("keeps the line up for a settled search with no rows — it's the only message the user gets", () => {
+    const v = view({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(statusLineHidden(v, 0)).toBe(false);
+  });
+
+  it("keeps the line up for a settled browse with rows — it names what the rows are", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(statusLineHidden(v, 1)).toBe(false);
+  });
+
+  it("keeps the line up for a settled browse with no rows", () => {
+    const v = browsing({ snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(statusLineHidden(v, 0)).toBe(false);
+  });
+
+  it("keeps the line up before anything has been submitted", () => {
+    expect(statusLineHidden(emptyView(), 0)).toBe(false);
   });
 });
 

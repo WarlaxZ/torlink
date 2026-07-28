@@ -39,6 +39,7 @@ import {
   searchStatus,
   searchUrl,
   sourceLabel,
+  statusLineHidden,
   visibleResults,
   type AddVia,
   type PublicSearchResult,
@@ -747,7 +748,7 @@ function renderResults(): void {
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
   searchStatusLine.classList.toggle("error", status.tone === "error");
-  searchStatusLine.hidden = shown.length > 0 && !searchView.running;
+  searchStatusLine.hidden = statusLineHidden(searchView, shown.length);
   searchProgress.textContent = searchView.snapshot
     ? `${searchView.snapshot.done}/${searchView.snapshot.total} sources`
     : "";
