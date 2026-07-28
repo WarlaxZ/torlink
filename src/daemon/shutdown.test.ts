@@ -13,7 +13,17 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import type { Runtime } from "./runtime";
+import {
+  fakeRuntime,
+  isListening,
+  waitUntil,
+  withTimeout,
+  freePortPair,
+  newSignalHandler,
+  snapshotSignalListeners,
+  restoreSignalListeners,
+  type Fake,
+} from "./testHarness";
 
 const startRuntime = vi.hoisted(() => vi.fn());
 vi.mock("./runtime", async (importOriginal) => ({
@@ -27,88 +37,13 @@ const { armBootMarker, disarmBootMarker, wasBootInterrupted } = await import(
   "../download/bootguard"
 );
 
-interface Fake {
-  runtime: Runtime;
-  suspend: ReturnType<typeof vi.fn>;
-  stopAll: ReturnType<typeof vi.fn>;
-}
-
-function fakeRuntime(downloadDir: string): Fake {
-  const suspend = vi.fn();
-  const stopAll = vi.fn().mockResolvedValue(undefined);
-  const runtime = {
-    queue: {
-      suspend,
-      on: vi.fn(),
-      off: vi.fn(),
-      getItems: () => [],
-      getSeeds: () => [],
-    } as unknown as Runtime["queue"],
-    downloadDir,
-    sessions: { stopAll } as unknown as Runtime["sessions"],
-  };
-  return { runtime, suspend, stopAll };
-}
-
-function isListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = net.connect({ port, host: "127.0.0.1" });
-    sock.once("connect", () => {
-      sock.destroy();
-      resolve(true);
-    });
-    sock.once("error", () => resolve(false));
-  });
-}
-
-// Fail with "timed out waiting for X" instead of vitest's bare test timeout: the
-// hang these tests exist for is indistinguishable from a slow machine otherwise.
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<never>((_resolve, reject) => {
-      setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), ms).unref();
-    }),
-  ]);
-}
-
-async function waitUntil(fn: () => Promise<boolean>, ms = 5000): Promise<boolean> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    if (await fn()) return true;
-    if (Date.now() > deadline) return false;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
-// A port whose successor is also free. serve binds one port now, but several
-// tests assert that the *next* one stays free — that is where the dashboard used
-// to land, and "no second listener" is the claim worth pinning down.
-async function freePortPair(): Promise<number> {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const base = 20000 + Math.floor(Math.random() * 20000);
-    if (!(await isListening(base)) && !(await isListening(base + 1))) return base;
-  }
-  throw new Error("no free port pair");
-}
-
-// Signals are delivered by calling the handler runServe/runWatch just installed,
-// not by process.emit: vitest has its own signal handlers and emitting for real
-// would take the worker down with us.
-function newSignalHandler(before: Set<unknown>): () => void {
-  const added = process.listeners("SIGTERM").find((l) => !before.has(l));
-  if (!added) throw new Error("no SIGTERM handler was installed");
-  return added as () => void;
-}
-
 describe("runServe web mount", () => {
   let dir: string;
   let fake: Fake;
   let exit: ReturnType<typeof vi.spyOn>;
   let errors: string[];
   let logs: string[];
-  let sigterm: Set<unknown>;
-  let sigint: Set<unknown>;
+  let signals: ReturnType<typeof snapshotSignalListeners>;
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-mount-"));
@@ -120,17 +55,11 @@ describe("runServe web mount", () => {
     vi.spyOn(console, "error").mockImplementation((m: unknown) => void errors.push(String(m)));
     vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
     exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
-    sigterm = new Set(process.listeners("SIGTERM"));
-    sigint = new Set(process.listeners("SIGINT"));
+    signals = snapshotSignalListeners();
   });
 
   afterEach(async () => {
-    for (const l of process.listeners("SIGTERM")) {
-      if (!sigterm.has(l)) process.off("SIGTERM", l as never);
-    }
-    for (const l of process.listeners("SIGINT")) {
-      if (!sigint.has(l)) process.off("SIGINT", l as never);
-    }
+    restoreSignalListeners(signals);
     vi.restoreAllMocks();
     // The marker lives in this worker's TORLINK_STATE_DIR (see test-setup.ts);
     // clear it either way so a test that arms it cannot leak into the next one.
@@ -333,32 +262,25 @@ describe("runServe web mount", () => {
     // Both handlers were removed by the first pass, so a third signal reaches
     // Node's default handler — the escape hatch from a shutdown that does hang.
     expect(process.listeners("SIGTERM").some((l) => !before.has(l))).toBe(false);
-    expect(process.listeners("SIGINT").some((l) => !sigint.has(l))).toBe(false);
+    expect(process.listeners("SIGINT").some((l) => !signals.sigint.has(l))).toBe(false);
   });
 });
 
 describe("runWatch shutdown", () => {
   let dir: string;
   let fake: Fake;
-  let sigterm: Set<unknown>;
-  let sigint: Set<unknown>;
+  let signals: ReturnType<typeof snapshotSignalListeners>;
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-watch-shutdown-"));
     fake = fakeRuntime(dir);
     startRuntime.mockResolvedValue(fake.runtime);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
-    sigterm = new Set(process.listeners("SIGTERM"));
-    sigint = new Set(process.listeners("SIGINT"));
+    signals = snapshotSignalListeners();
   });
 
   afterEach(async () => {
-    for (const l of process.listeners("SIGTERM")) {
-      if (!sigterm.has(l)) process.off("SIGTERM", l as never);
-    }
-    for (const l of process.listeners("SIGINT")) {
-      if (!sigint.has(l)) process.off("SIGINT", l as never);
-    }
+    restoreSignalListeners(signals);
     vi.restoreAllMocks();
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   });

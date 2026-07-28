@@ -1,16 +1,25 @@
 // What `runServe --web` tells the user, and what it opens.
 //
 // Separate from shutdown.test.ts (which is about teardown) and sharing its
-// harness shape: real sockets, because "what got printed for this bind" is only
-// observable once something is actually listening, and `startRuntime` stubbed,
-// because the real one loads the user's config and arms a boot marker.
+// harness (testHarness.ts): real sockets, because "what got printed for this
+// bind" is only observable once something is actually listening, and
+// `startRuntime` stubbed, because the real one loads the user's config and
+// arms a boot marker.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import type { Runtime } from "./runtime";
+import type { NetInterfaces } from "../web/links";
+import {
+  fakeRuntime,
+  isListening,
+  waitUntil,
+  freePort,
+  newSignalHandler,
+  snapshotSignalListeners,
+  restoreSignalListeners,
+} from "./testHarness";
 
 const startRuntime = vi.hoisted(() => vi.fn());
 vi.mock("./runtime", async (importOriginal) => ({
@@ -21,94 +30,76 @@ vi.mock("./runtime", async (importOriginal) => ({
 const { runServe } = await import("./serve");
 const { disarmBootMarker } = await import("../download/bootguard");
 
-function fakeRuntime(downloadDir: string): Runtime {
-  return {
-    queue: {
-      suspend: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getItems: () => [],
-      getSeeds: () => [],
-    } as unknown as Runtime["queue"],
-    downloadDir,
-    sessions: { stopAll: vi.fn().mockResolvedValue(undefined) } as unknown as Runtime["sessions"],
-  };
-}
+// Same shape as web/links.test.ts's IFACES: a loopback entry, an external
+// IPv4 (what a LAN line should show), and an IPv6 link-local (which the LAN
+// list deliberately omits — see links.ts for why).
+const IFACES: NetInterfaces = {
+  lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+  eth0: [
+    { family: "IPv4", address: "192.168.1.24", internal: false },
+    { family: "IPv6", address: "fe80::1", internal: false },
+  ],
+  docker0: [{ family: "IPv4", address: "172.17.0.1", internal: false }],
+};
 
-function isListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = net.connect({ port, host: "127.0.0.1" });
-    sock.once("connect", () => {
-      sock.destroy();
-      resolve(true);
-    });
-    sock.once("error", () => resolve(false));
-  });
-}
-
-async function waitUntil(fn: () => Promise<boolean>, ms = 5000): Promise<boolean> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    if (await fn()) return true;
-    if (Date.now() > deadline) return false;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
-async function freePort(): Promise<number> {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const base = 20000 + Math.floor(Math.random() * 20000);
-    if (!(await isListening(base))) return base;
-  }
-  throw new Error("no free port");
-}
-
-// Signals are delivered by calling the handler runServe just installed, not by
-// process.emit: vitest has its own handlers and emitting for real takes the
-// worker down.
-function newSignalHandler(before: Set<unknown>): () => void {
-  const added = process.listeners("SIGTERM").find((l) => !before.has(l));
-  if (!added) throw new Error("no SIGTERM handler was installed");
-  return added as () => void;
+// Lines this suite cares about, pulled out once so every test filters the
+// same way regardless of exact wording elsewhere in the log.
+function perHostLines(logs: string[]): string[] {
+  return logs.filter((l) => l.includes("open on ") || l.includes("open from "));
 }
 
 describe("runServe --web startup output", () => {
   let dir: string;
   let logs: string[];
   let errors: string[];
-  let sigterm: Set<unknown>;
-  let sigint: Set<unknown>;
+  let signals: ReturnType<typeof snapshotSignalListeners>;
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-launch-"));
     startRuntime.mockReset();
-    startRuntime.mockResolvedValue(fakeRuntime(dir));
+    startRuntime.mockResolvedValue(fakeRuntime(dir).runtime);
     logs = [];
     errors = [];
     vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
     vi.spyOn(console, "error").mockImplementation((m: unknown) => void errors.push(String(m)));
     vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
-    sigterm = new Set(process.listeners("SIGTERM"));
-    sigint = new Set(process.listeners("SIGINT"));
+    signals = snapshotSignalListeners();
   });
 
   afterEach(async () => {
-    for (const l of process.listeners("SIGTERM")) if (!sigterm.has(l)) process.off("SIGTERM", l as never);
-    for (const l of process.listeners("SIGINT")) if (!sigint.has(l)) process.off("SIGINT", l as never);
+    restoreSignalListeners(signals);
     vi.restoreAllMocks();
     disarmBootMarker();
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("never prints the wildcard bind address as a URL", async () => {
+  it("ignores an injected LAN-shaped interfaces fixture for an explicit host", async () => {
     const port = await freePort();
     const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, host: "0.0.0.0", token: "s3cret", web: true, downloadDir: dir });
+    // A loopback bind, not host: "0.0.0.0" — binding the real wildcard address
+    // risks a macOS firewall prompt and briefly exposes a port to the LAN in
+    // CI. `interfaces` carries addresses that *would* show up as LAN lines if
+    // the bind were a wildcard, so this still exercises something real: that
+    // displayHosts's non-wildcard branch (see web/links.ts) truly ignores the
+    // interface list rather than passing only because the test runner's own
+    // NICs happen to have nothing external.
+    const done = runServe({
+      port,
+      host: "127.0.0.1",
+      token: "s3cret",
+      web: true,
+      downloadDir: dir,
+      interfaces: IFACES,
+    });
     expect(await waitUntil(() => isListening(port))).toBe(true);
 
-    // The whole bug: this string used to be the advice the user was given.
-    expect(logs.join("\n")).not.toContain("http://0.0.0.0");
+    // The whole bug: a bare 0.0.0.0 (with or without a scheme) used to be the
+    // advice the user was given. Checked against the per-host lines
+    // specifically, not the whole log, so a regression elsewhere in the log
+    // block can't hide a real failure here.
+    expect(perHostLines(logs).some((l) => l.includes("0.0.0.0"))).toBe(false);
     expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}`);
+    expect(logs.join("\n")).not.toContain("open from your LAN");
 
     newSignalHandler(before)();
     await done;
@@ -119,23 +110,10 @@ describe("runServe --web startup output", () => {
     const before = new Set(process.listeners("SIGTERM"));
     const done = runServe({ port, web: true, downloadDir: dir });
     expect(await waitUntil(() => isListening(port))).toBe(true);
-
-    // The old code's `listening on http://127.0.0.1:${port}` line already
-    // contains this substring, so a bare `.toContain` here would pass against
-    // the pre-fix implementation too. The `(this machine)` marker only the new
-    // per-host logging produces, so anchor on that instead.
-    expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}  (this machine)`);
-    expect(logs.join("\n")).not.toContain("from your LAN");
-
-    // Exactly one per-host line: a loopback bind has one host to report, and a
-    // regression that always appended a LAN line (even with an empty list)
-    // would otherwise slip past the "not.toContain" check above. Matched on the
-    // "(this machine)" / "(from your LAN)" suffix rather than "web ui on" alone,
-    // since the summary line ("api + web ui on one port...") also contains that
-    // substring.
-    const perHostLines = logs.filter((l) => / \(this machine\)| \(from your LAN\)/.test(l));
-    expect(perHostLines).toHaveLength(1);
-
+    expect(logs.join("\n")).toContain(`open on this machine:  http://127.0.0.1:${port}`);
+    expect(logs.join("\n")).not.toContain("open from your LAN");
+    // Exactly one per-host line: a loopback bind has one host to report.
+    expect(perHostLines(logs)).toHaveLength(1);
     newSignalHandler(before)();
     await done;
   });
@@ -143,9 +121,68 @@ describe("runServe --web startup output", () => {
   it("puts a supplied token in the link fragment", async () => {
     const port = await freePort();
     const before = new Set(process.listeners("SIGTERM"));
-    const done = runServe({ port, host: "0.0.0.0", token: "s3cret", web: true, downloadDir: dir });
+    const done = runServe({
+      port,
+      host: "127.0.0.1",
+      token: "s3cret",
+      web: true,
+      downloadDir: dir,
+    });
     expect(await waitUntil(() => isListening(port))).toBe(true);
     expect(logs.join("\n")).toContain(`http://127.0.0.1:${port}/#k=s3cret`);
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("prints every LAN address from an injected interfaces fixture, exactly once each", async () => {
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    // A real wildcard bind, kept deliberately: displayHosts only takes its LAN
+    // branch when the *bind* host is a wildcard (see web/links.ts), so there is
+    // no way to exercise it without one — a loopback bind ignores `interfaces`
+    // entirely, which is exactly what the test above pins. `interfaces` is
+    // still injected so the LAN addresses asserted below are the fixture's,
+    // not whatever NICs happen to be present on the machine running this
+    // suite. A token is required here for the same reason it would be in
+    // production: runServe refuses to bind a non-loopback host without one.
+    const done = runServe({
+      port,
+      host: "0.0.0.0",
+      token: "s3cret",
+      web: true,
+      downloadDir: dir,
+      interfaces: IFACES,
+    });
+    expect(await waitUntil(() => isListening(port))).toBe(true);
+
+    const lines = perHostLines(logs);
+    expect(lines.some((l) => l.includes("0.0.0.0"))).toBe(false);
+    expect(logs.join("\n")).toContain(`open on this machine:  http://127.0.0.1:${port}/#k=s3cret`);
+    expect(logs.join("\n")).toContain(`open from your LAN:    http://192.168.1.24:${port}/#k=s3cret`);
+    expect(logs.join("\n")).toContain(`open from your LAN:    http://172.17.0.1:${port}/#k=s3cret`);
+    // Two LAN addresses in the fixture, plus the local line: three total, and
+    // no more — a regression that duplicated the loop or re-ran it would
+    // otherwise slip past the two toContain checks above.
+    expect(lines).toHaveLength(3);
+
+    newSignalHandler(before)();
+    await done;
+  });
+
+  it("logs the port actually bound, not the literal 0 requested with port: 0", async () => {
+    const before = new Set(process.listeners("SIGTERM"));
+    const done = runServe({ port: 0, web: true, downloadDir: dir });
+    expect(
+      await waitUntil(async () => logs.some((l) => l.includes("open on this machine:"))),
+    ).toBe(true);
+
+    const line = logs.find((l) => l.includes("open on this machine:")) ?? "";
+    const match = line.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+    expect(match).not.toBeNull();
+    const bound = Number(match![1]);
+    expect(bound).toBeGreaterThan(0);
+    expect(await isListening(bound)).toBe(true);
+
     newSignalHandler(before)();
     await done;
   });

@@ -528,7 +528,7 @@ export async function startWebServer(
   // know what a browser should type — a wildcard bind has no single answer, and
   // printing `http://0.0.0.0:9161` here is what sent users to a dead address.
   // The browsable URLs are the caller's to log (see web/links.ts).
-  log(`web ui listening on ${host}:${bound}${token ? " (token required)" : " (loopback only)"}`);
+  log(`web ui bound to ${host}:${bound}${token ? " (token required)" : " (loopback only)"}`);
 
   let closed: Promise<void> | null = null;
   const close = (): Promise<void> => {

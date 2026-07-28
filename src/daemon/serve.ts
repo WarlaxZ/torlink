@@ -10,7 +10,7 @@
 import http from "node:http";
 import os from "node:os";
 import { startRuntime, addInput, type Runtime } from "./runtime";
-import { displayHosts, webUrl } from "../web/links";
+import { displayHosts, webUrl, type NetInterfaces } from "../web/links";
 import { disarmBootMarker } from "../download/bootguard";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } from "./auth";
@@ -45,6 +45,14 @@ export interface ServeOptions {
    * second copy of the same surface on a port nobody asked for.
    */
   web?: boolean;
+  /**
+   * Override for `os.networkInterfaces()`, consulted only for a wildcard host
+   * to compute the LAN addresses printed alongside the local URL. Real callers
+   * never set this — it exists so a test can hand in a fixture NIC list
+   * instead of depending on the machine's actual network, the same reason
+   * Task 6 injects `isTTY` and `openUrlImpl` rather than reading them live.
+   */
+  interfaces?: NetInterfaces;
 }
 
 // Pull a magnet / info hash out of a request body. Accepts JSON ({ magnet } or
@@ -305,6 +313,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // With --web there is one server, not two. It binds the port the user chose,
   // and answers both the dashboard and the add API — one process, one address,
   // one exposure decision.
+
   // The URL a browser on this machine should open — set once the web server is
   // up, so the browser-open below and the log above cannot disagree.
   let localUrl: string | null = null;
@@ -328,18 +337,24 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       return;
     }
     // The handle's port, not the requested one: it reports what was actually
-    // bound, which is the only correct answer once `port: 0` is in play. `web?.`
-    // because it is assigned inside the try above, which TypeScript will not
-    // narrow through the catch — it is never null here.
-    const bound = web?.port ?? port;
-    const { local, lan } = displayHosts(host, os.networkInterfaces());
-    localUrl = webUrl(local, bound, token ?? undefined);
-    log(`web ui on ${localUrl}  (this machine)`);
+    // bound, which is the only correct answer once `port: 0` is in play.
+    const bound = web.port;
+    const { local, lan } = displayHosts(host, options.interfaces ?? os.networkInterfaces());
+    // One place for token + bound to reach every URL this block logs, so
+    // Task 6's browser-open target (`localUrl`) and every line below it are
+    // built the same way and cannot drift apart.
+    const link = (h: string): string => webUrl(h, bound, token ?? undefined);
+    localUrl = link(local);
+    // The marker comes before the URL, not after: it lines up in a column
+    // regardless of address width, and it leaves the pasteable URL last on the
+    // line, which is where an 80-column wrap does the least damage. The bind
+    // line above (web/server.ts) already states the auth mode, so it is not
+    // repeated here.
+    log(`open on this machine:  ${localUrl}`);
     for (const address of lan) {
-      log(`web ui on ${webUrl(address, bound, token ?? undefined)}  (from your LAN)`);
+      log(`open from your LAN:    ${link(address)}`);
     }
     log(`api + web ui on one port, downloads -> ${runtime.downloadDir}`);
-    log(token ? "auth: token required" : "auth: none (loopback only)");
   }
 
   // The bare JSON API, for a daemon running without the dashboard. A function
