@@ -170,11 +170,22 @@ let token = readStoredToken();
 // writes, then stripped from the address bar: a token that has since been
 // rotated must present as the unlock form, and a hash left in place would make
 // every reload retry the dead secret instead.
+// A link beats a stored token on purpose: it was minted against the server that
+// is running now, while sessionStorage may hold one from a previous boot.
 const linkToken = tokenFromHash(location.hash);
 if (linkToken) {
   token = linkToken;
   storeToken(token);
-  history.replaceState(null, "", location.pathname + location.search);
+  try {
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch {
+    // Same defence, and the same reason, as readStoredToken/storeToken above:
+    // an opaque origin (a sandboxed iframe without allow-same-origin) breaks
+    // the History API and sessionStorage together. This is a module script, so
+    // an uncaught throw here would abandon the rest of this file — no render,
+    // no listeners, a dead page — to avoid a visible `#k=` in the address bar.
+    // A visible fragment is a cosmetic loss; the page is not.
+  }
 }
 
 let rows: DashRow[] = [];

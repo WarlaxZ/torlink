@@ -9,6 +9,13 @@
 // has to pass the token in a query string because browsers cannot attach headers
 // to an EventSource.
 
+// One decoding quirk, worth knowing before someone rediscovers it with `node -e`:
+// URLSearchParams is form-decoding, so a *raw* `+` in the fragment becomes a
+// space. Links this codebase prints cannot hit that — webUrl builds them with
+// encodeURIComponent, which writes `%2B`, and that decodes back to a literal `+`
+// — so it takes a hand-edited address bar to corrupt a token containing one. The
+// existing EventSource `?k=` param has always behaved the same way.
+
 /** The token in `#k=<token>`, or "" when the fragment carries none. */
 export function tokenFromHash(hash: string): string {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
