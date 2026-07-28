@@ -616,6 +616,10 @@ function startSearch(raw: string): void {
   // most sources answer with their own top/latest list; a couple opt out.
   const mode = modeForQuery(query);
   searchView = { ...searchView, query, mode, snapshot: null, running: true };
+  // The box and the state must not disagree: without this, submitting "   "
+  // leaves #query showing whitespace while searchView.query (and the URL sent
+  // to the server) is already trimmed.
+  queryInput.value = query;
   selectedHash = null;
   preview.select(null, searchView.group);
   renderResults();
@@ -1084,12 +1088,20 @@ async function actOnPick(action: ReccAction, item: PublicRecommendation): Promis
 
 /** Hand a pick to the search pane — the feed's way out into the rest of the app. */
 function searchForPick(item: PublicRecommendation): void {
+  // A blank title from reccd must not fall through to browse mode: an empty
+  // submit is a deliberate user gesture, and silently answering a pick with
+  // the top-100 list would look like a working search for the wrong thing.
+  const title = item.title.trim();
+  if (!title) {
+    showNotice("That pick has no title to search for.");
+    return;
+  }
   const group = searchGroupForType(recc.state().filters.type, sources);
   searchView = { ...searchView, group };
   renderTabs();
-  queryInput.value = item.title;
+  queryInput.value = title;
   showView("search");
-  startSearch(item.title);
+  startSearch(title);
 }
 
 // Same createElement/textContent rule as every other list on this page, and for

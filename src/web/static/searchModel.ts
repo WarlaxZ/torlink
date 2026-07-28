@@ -180,14 +180,18 @@ export function searchStatus(view: SearchView, shown: number): SearchStatus {
   const down = erroredSources(view.snapshot);
   const total = view.snapshot?.total ?? 0;
   if (shown === 0) {
-    // Every source failing and every source finding nothing look identical in a
-    // results list, so they must not read the same. This is the whole reason
-    // `perSource.error` is on the wire. Both of these outrank the mode: they are
-    // true whether or not the user typed anything.
+    // The outage branch outranks the mode: "every source is down" is true
+    // whether or not the user typed anything. The filter branch below is NOT
+    // mode-independent in the same way — see its own comment.
     if (total > 0 && down.length >= total) {
       return { text: "Couldn't reach any source. They may be down.", tone: "error" };
     }
-    if (view.hideDead || view.textFilter.trim()) {
+    // A filter can only be to blame if something arrived and was then removed.
+    // Without this check an empty upstream reads as the user's fault — and the
+    // TUI doesn't make that mistake (Results.tsx:538 gates the same message on
+    // having rows to filter).
+    const fetched = view.snapshot?.results.length ?? 0;
+    if (fetched > 0 && (view.hideDead || view.textFilter.trim())) {
       return { text: "Nothing matches those filters.", tone: "dim" };
     }
     if (browse) return { text: "Nothing new right now.", tone: "dim" };

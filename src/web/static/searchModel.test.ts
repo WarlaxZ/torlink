@@ -286,6 +286,21 @@ describe("searchStatus", () => {
       "Search across every enabled source — or submit a blank box to browse.",
     );
   });
+
+  it("does not blame an active filter for an upstream that returned nothing while browsing", () => {
+    const v = browsing({ hideDead: true, snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("Nothing new right now.");
+  });
+
+  it("does not blame an active filter for an upstream that returned nothing while searching", () => {
+    const v = view({ hideDead: true, snapshot: snapshot([], { total: 2, done: 2 }) });
+    expect(searchStatus(v, 0).text).toBe("No results for “sintel”.");
+  });
+
+  it("uses the singular for exactly one browse result", () => {
+    const v = browsing({ snapshot: snapshot([result()], { total: 3, done: 3 }) });
+    expect(searchStatus(v, 1).text).toBe("1 result · newest across all sources");
+  });
 });
 
 describe("statusLineHidden", () => {
