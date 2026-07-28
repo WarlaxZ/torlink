@@ -576,7 +576,7 @@ with:
   }
 ```
 
-Then, in the `if (options.web)` block from Task 2, add one line after the `auth:` line:
+Then, in the `if (options.web)` block from Task 2, add one line as the last log in the block (after the `api + web ui on one port…` summary — see the Task 2 amendment at the end of this plan; the `auth:` line this originally referred to no longer exists in the `--web` branch):
 
 ```ts
     // Unfragmented and on its own line: the link is for the human, this is for
@@ -1046,7 +1046,7 @@ export function shouldOpenBrowser(opts: {
 }
 ```
 
-At the end of the `if (options.web)` block — after the `auth:` and minted-token log lines — add:
+At the end of the `if (options.web)` block — after the summary and minted-token log lines (the `auth:` line was dropped from this branch; see the Task 2 amendment at the end of this plan) — add:
 
 ```ts
     if (localUrl && shouldOpenBrowser({ ...options, isTTY: options.isTTY ?? process.stdout.isTTY === true })) {
@@ -1264,8 +1264,10 @@ Binding anything other than loopback **requires** a token — torlink will not l
 
 ```sh
 torlnk serve --web --host 0.0.0.0
-# web ui on http://127.0.0.1:9161/#k=8f3c…      (this machine)
-# web ui on http://192.168.1.24:9161/#k=8f3c…   (from your LAN)
+# web ui bound to 0.0.0.0:9161 (token required)
+# open on this machine:  http://127.0.0.1:9161/#k=8f3c…
+# open from your LAN:    http://192.168.1.24:9161/#k=8f3c…
+# api + web ui on one port, downloads -> ~/Downloads/torlink
 # token 8f3c…  (pass --token to pin it across restarts)
 ```
 
@@ -1330,6 +1332,43 @@ git commit -m "docs: the new web launch, and one meaning for 'headless'"
 ```
 
 ---
+
+## Amendment: what Task 2 actually landed
+
+Task 2's code blocks above are what was *specified*; three things changed during
+its review, and later tasks should follow this section where the two disagree.
+
+**The log block was reformatted.** As written, the block printed
+`0.0.0.0:9161` one line above the good URL differing by a single word, said
+`token required` twice two lines apart, and pushed the `(this machine)` marker
+past 80 columns where it wrapped to an unpredictable offset. What landed:
+
+```
+web ui bound to 0.0.0.0:9161 (token required)
+open on this machine:  http://127.0.0.1:9161/#k=8f3c…
+open from your LAN:    http://172.25.6.62:9161/#k=8f3c…
+api + web ui on one port, downloads -> /home/ash/Downloads/torlink
+```
+
+`server.ts` says `web ui bound to` (not `listening on`) so there is only one
+`web ui …` line to confuse with the actionable ones. Markers *precede* the URL,
+so they align in a column whatever the address width and survive a wrap. The
+`auth:` line is gone from the `--web` branch only — the bind line above already
+states it. The non-`--web` branch is untouched and keeps its `auth:` line.
+
+**`const bound = web?.port ?? port` became `const bound = web.port`.** The
+comment justifying the fallback claimed TypeScript will not narrow `web` through
+the `catch`. That was wrong — the `catch` returns, so the fallback was
+unreachable, and it was the silently-wrong branch: under `port: 0` it would have
+printed `:0` as the address instead of failing loudly.
+
+**`ServeOptions` gained `interfaces?: NetInterfaces`**, defaulting to
+`os.networkInterfaces()`. Without it the LAN branch was unreachable from a test,
+and mutation testing found that the entire `for (const address of lan)` loop and
+its marker could be deleted with a green suite. Same argument as Task 6's
+`isTTY` seam. The shared test helpers also moved to `src/daemon/testHarness.ts`
+(following `src/ui/testHarness.ts`), which both `serve.launch.test.ts` and
+`shutdown.test.ts` now import.
 
 ## Out of scope
 
