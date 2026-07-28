@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { render } from "ink-testing-library";
 import jpeg from "jpeg-js";
 import { ForYou } from "./ForYou";
@@ -18,11 +18,25 @@ vi.mock("../../util/openUrl", () => ({
   imdbTitleUrl: (id: string) => `https://www.imdb.com/title/${id}/`,
 }));
 
-// ink flushes React passive effects via the scheduler's MessageChannel, which
-// fake timers can't drive — so these tests need real time to settle. `flush`
-// is a short settle; debounce/fetch-dependent assertions use vi.waitFor (below)
-// so they resolve as soon as ready rather than sleeping a fixed, CI-fragile span.
-const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
+// No wall-clock sleeps. `advanceTimersByTimeAsync` is the load-bearing part:
+// unlike the sync form it awaits between timers, which lets ink's React
+// scheduler drain its MessageChannel macrotask — so passive effects, the
+// recommendations fetch and the re-render all settle under fake time.
+//
+// A fixed real-time sleep used to stand here, and it lost the race on a loaded
+// CI runner: the keypress landed before the picks existed, `selectedItem` was
+// undefined, and the handler silently did nothing.
+// Captured before fake timers are installed: `setImmediate` here is a yield to
+// the real event loop, not a wall-clock sleep. ink's React scheduler drains its
+// work through a MessageChannel message — a macrotask — and awaiting fake
+// timers only drains microtasks, so without this the frame never repaints.
+const yieldToLoop = setImmediate;
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 8; i++) {
+    await vi.advanceTimersByTimeAsync(25);
+    await new Promise<void>((r) => yieldToLoop(() => r()));
+  }
+};
 const ESC = String.fromCharCode(27);
 
 const REC = { imdbId: "tt1", title: "Chernobyl", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
@@ -81,6 +95,13 @@ function fetchStubFull(plot: string): { impl: FetchImpl; urls: string[] } {
 }
 
 describe("ForYou", () => {
+  beforeAll(() => {
+    vi.useFakeTimers();
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   it("fetches and renders picks once active", async () => {
     const { impl } = fetchStub();
     const { lastFrame } = render(
@@ -253,10 +274,11 @@ describe("ForYou", () => {
   it("does not fetch a plot when no OMDb key is configured", async () => {
     const { impl, urls } = fetchStubWithPlot("A nuclear disaster.");
     render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
-    // No key ⇒ the lookup never even schedules; wait past the debounce window to
-    // be sure, then confirm nothing was requested. (Negative assertion, so there
-    // is nothing to poll for — a bounded wait is unavoidable here.)
-    await new Promise((r) => setTimeout(r, 250));
+    // No key ⇒ the lookup never even schedules. Fake time makes this negative
+    // assertion exact rather than hopeful: run the clock a full second past the
+    // 150ms debounce (see useTitlePreview) and nothing can still be pending.
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
     expect(urls.some((u) => u.includes("omdbapi.com"))).toBe(false);
   });
 
