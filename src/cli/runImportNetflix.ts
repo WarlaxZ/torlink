@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { loadConfig, resolveReccConfig } from "../config/config";
 import { uploadNetflixCsv, formatImportSummary } from "../recc/netflixImport";
 
-// Headless `torlink import-netflix <file>`. Throws on any failure so index.tsx's
+// Headless `torlnk import-netflix <file>`. Throws on any failure so index.tsx's
 // failHeadless prints the message and exits non-zero.
 export async function runImportNetflix(filePath: string): Promise<void> {
   const config = await loadConfig();

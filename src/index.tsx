@@ -40,7 +40,7 @@ if (cmd.kind === "attach") {
 
 // Headless subcommands: run the download queue with no terminal UI (for
 // seedboxes and servers). Kept above the alt-screen setup below — these paths
-// never touch the TUI. Each is dynamically imported so a plain `torlink` launch
+// never touch the TUI. Each is dynamically imported so a plain `torlnk` launch
 // pays nothing for them.
 function failHeadless(err: unknown): never {
   console.error(err instanceof Error ? err.message : String(err));
@@ -134,7 +134,7 @@ const app = render(
     webHost={cmd.webHost}
     // parseCliArgs is pure and never reads the environment, so the env fallback
     // the daemon paths apply above has to be applied here too — otherwise
-    // `torlink --web --web-host 0.0.0.0` with only TORLINK_API_TOKEN set is
+    // `torlnk --web --web-host 0.0.0.0` with only TORLINK_API_TOKEN set is
     // refused for a missing token the user did supply.
     //
     // Only on the --web path: merging it unconditionally would turn a

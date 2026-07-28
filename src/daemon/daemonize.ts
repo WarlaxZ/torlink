@@ -3,7 +3,7 @@
 // a pidfile plus a run descriptor, and exits the parent. You can then log out and
 // it keeps running.
 //
-// The run descriptor is what lets `torlink update` relaunch a daemon on its exact
+// The run descriptor is what lets `torlnk update` relaunch a daemon on its exact
 // original command after rebuilding.
 //
 // NOTE: on a box with systemd, a `systemctl --user` service with linger is a
@@ -29,7 +29,7 @@ export function runPathFor(name: string): string {
 
 // Records argv and cwd only, not env: a daemon relaunched after an update
 // inherits the updater's environment, so env-dependent behavior (proxies,
-// TORLINK_* overrides) follows the shell that ran `torlink update`.
+// TORLINK_* overrides) follows the shell that ran `torlnk update`.
 export interface RunDescriptor {
   name: string;
   pid: number;

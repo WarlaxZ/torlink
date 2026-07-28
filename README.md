@@ -16,24 +16,20 @@ Download a standalone executable from [Releases](https://github.com/WarlaxZ/torl
 curl -fsSL https://raw.githubusercontent.com/WarlaxZ/torlink/main/scripts/install.sh | sh
 ```
 
-Or, with [Node 22+](https://nodejs.org), install it from npm — the command is `torlink`:
+Or, with [Node 22+](https://nodejs.org), install it from npm — the command is `torlnk`:
 
 ```sh
-npm install -g torlink
-torlink
+npm install -g torlnk-rd
+torlnk
 ```
 
 Or run it once, without installing anything:
 
 ```sh
-npx torlink
+npx torlnk-rd
 ```
 
-The package and the command are both `torlink`. `torlnk` still works as an
-alias, so anything you've already scripted keeps running. If you installed the
-older `torlnk-rd` package, run `npm i -g torlink` once to move across.
-
-Globally-installed copies keep themselves current: `torlink update` pulls the latest release (and `torlink` quietly points it out when one is available).
+Globally-installed copies keep themselves current: `torlnk update` pulls the latest release (and `torlnk` quietly points it out when one is available).
 
 You can still build from source with [Node 22+](https://nodejs.org):
 
@@ -129,7 +125,7 @@ Seed reccd with what you've already watched on Netflix, so its recommendations k
 1. Open [netflix.com/viewingactivity](https://www.netflix.com/viewingactivity) and click **Download all** (bottom of the page). You'll get a CSV.
 2. Import it, either way:
    - **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and give it the CSV path — you can drag the file onto the terminal to paste the path.
-   - **From the shell:** `torlink import-netflix ~/Downloads/NetflixViewingActivity.csv`
+   - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
 
 torlink doesn't care what you watch — titles go only to your own reccd server to seed recommendations, and nothing else is done with them. Large exports upload in batches automatically, and re-importing the same file won't double-count anything.
 
@@ -138,7 +134,7 @@ torlink doesn't care what you watch — titles go only to your own reccd server 
 Already track your watching on [Trakt](https://trakt.tv)? Pull your watch history and ratings straight in — no file needed.
 
 - **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and choose **Trakt**. You'll get a short code and a URL — open the URL, enter the code to authorize, and torlink imports automatically. After the first time you won't need to re-authorize.
-- **From the shell:** `torlink import-trakt` — it prints the code + URL, waits for you to authorize, then imports.
+- **From the shell:** `torlnk import-trakt` — it prints the code + URL, waits for you to authorize, then imports.
 
 This needs the reccd server to have a Trakt app configured (`RECCD_TRAKT_CLIENT_ID` / `RECCD_TRAKT_CLIENT_SECRET`); without it, torlink will tell you Trakt isn't enabled on your server.
 
@@ -186,11 +182,11 @@ TORLINK_DNS=cloudflare npm start
 Add `--web` and torlink also serves a browser interface — search every source, posters and plots, play something, the queue, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
 
 ```sh
-torlink --web          # the TUI hosts it; quitting the TUI stops it
-torlink serve --web    # headless: the add API plus the browser UI
+torlnk --web          # the TUI hosts it; quitting the TUI stops it
+torlnk serve --web    # headless: the add API plus the browser UI
 ```
 
-Either way it lands on **`http://127.0.0.1:9162`**, and `torlink --web` prints the address on the splash. Change it with `--web-port`. Under `serve`, the UI port is derived from the API port + 1 (so `serve --port 8080 --web` puts the API on 8080 and the UI on 8081) unless you pass `--web-port` yourself.
+Either way it lands on **`http://127.0.0.1:9162`**, and `torlnk --web` prints the address on the splash. Change it with `--web-port`. Under `serve`, the UI port is derived from the API port + 1 (so `serve --port 8080 --web` puts the API on 8080 and the UI on 8081) unless you pass `--web-port` yourself.
 
 **Turning it off is just leaving `--web` off** — there's no setting to forget about, and nothing listens until you ask for it. If the port is already taken, the TUI says so and carries on without the dashboard (the terminal is the product; a missing web UI shouldn't kill your session), while `serve --web` treats it as a startup failure and exits, because a daemon that came up half-configured is worse than one that didn't come up.
 
@@ -199,7 +195,7 @@ Either way it lands on **`http://127.0.0.1:9162`**, and `torlink --web` prints t
 Binding anything other than loopback **requires** a token — torlink refuses to start rather than leave your queue open to the network:
 
 ```sh
-torlink --web --web-host 0.0.0.0 --web-token "$(openssl rand -hex 16)"
+torlnk --web --web-host 0.0.0.0 --web-token "$(openssl rand -hex 16)"
 ```
 
 Under `serve` the UI binds serve's own `--host` and reuses its `--token`, so one process makes one exposure decision; only the port is separate, since two servers can't share one.
@@ -212,7 +208,7 @@ Three ways, in the order torlink prefers them:
 |---|---|
 | `--web-token <secret>` | Most specific. TUI only. |
 | `--token <secret>` | Works for both — this is `serve`'s own flag, and the TUI accepts it too so the muscle memory carries over. |
-| `TORLINK_API_TOKEN` | Environment. Keeps the secret out of your shell history and out of `ps`, which is what you want on a shared box. Used by `serve` and by `torlink --web`. |
+| `TORLINK_API_TOKEN` | Environment. Keeps the secret out of your shell history and out of `ps`, which is what you want on a shared box. Used by `serve` and by `torlnk --web`. |
 
 A flag beats the environment variable, and `--web-token` beats `--token`. The environment variable is only consulted when you actually pass `--web`, so a `TORLINK_API_TOKEN` you exported for the daemon doesn't quietly become a password on your interactive session.
 
@@ -247,16 +243,16 @@ From a result you can **add** it to the queue, **add via RD** where Real-Debrid 
 
 ### Playing something
 
-Hit **play** on any row. torlink resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
+Hit **play** on any row. torlnk resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
 
 What happens next depends on the release, and it's worth knowing why:
 
 - **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because the server honours range requests.
 - **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox. No browser ships those codecs. Rather than showing you a black rectangle, the page says so and offers a **Download .m3u** button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get a direct VLC link.
 
-There's no transcoding. torlink will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
+There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
 
-With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlink — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
+With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
 
 ### For You
 
@@ -276,14 +272,14 @@ The dashboard is served from `dist/web`, **not** `src`. Edit anything under `src
 
 torlink also runs without the TUI, for servers and seedboxes:
 
-    torlink watch <dir>    download anything dropped into a folder
-    torlink serve          take magnets over HTTP
-    torlink files          stream finished downloads over HTTP
-    torlink attach         keep the TUI alive across ssh sessions
-    torlink import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
-    torlink import-trakt           connect Trakt and import your history into reccd
+    torlnk watch <dir>    download anything dropped into a folder
+    torlnk serve          take magnets over HTTP
+    torlnk files          stream finished downloads over HTTP
+    torlnk attach         keep the TUI alive across ssh sessions
+    torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
+    torlnk import-trakt           connect Trakt and import your history into reccd
 
-Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) alongside the add API; `torlink --help` has the full list of modes and flags.
+Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the [browser dashboard](#in-your-browser-optional) alongside the add API; `torlnk --help` has the full list of modes and flags.
 
 ## Contributing
 

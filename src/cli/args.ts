@@ -160,8 +160,8 @@ const RUN_VALUE_FLAGS = new Set(["web-port", "web-host", "web-token", "token"]);
 
 /**
  * The bare invocation: an optional magnet / info hash / .torrent path, plus the
- * web-UI flags, in any order. Order-independence is deliberate — `torlink
- * "magnet:?..." --web` and `torlink --web "magnet:?..."` both read naturally, and
+ * web-UI flags, in any order. Order-independence is deliberate — `torlnk
+ * "magnet:?..." --web` and `torlnk --web "magnet:?..."` both read naturally, and
  * accepting only one of them would mean silently dropping either the flag or the
  * download in the other.
  */
@@ -206,23 +206,20 @@ function isRunTarget(arg: string): boolean {
 export const HELP_TEXT = `torlink, terminal-native torrent search
 
 usage
-  torlink                      open the search TUI
-  torlink "magnet:?xt=..."     start a download on launch
-  torlink path/to/file.torrent open a .torrent file on launch
-  torlink --web                open the TUI and serve the browser UI on :9162
-  torlink watch <dir>          headless: download torrents dropped into <dir>
-  torlink serve                headless: HTTP add API (POST /add) on :9161
-  torlink serve --web          headless: add API plus the browser UI on :9162
-  torlink files                headless: serve downloads over HTTP on :9160
-  torlink attach               open/reattach the TUI in a persistent tmux session
-  torlink update [--force]     update to the latest release and restart any daemon
-                               (--force rebuilds/restarts even if already current)
-  torlink import-netflix <csv>  send a Netflix "viewing activity" CSV to reccd
-  torlink import-trakt          connect Trakt and import your history into reccd
-  torlink --version            print the version
-
-the command is torlink; torlnk still works as an alias, so old scripts and
-muscle memory keep running unchanged.
+  torlnk                      open the search TUI
+  torlnk "magnet:?xt=..."     start a download on launch
+  torlnk path/to/file.torrent open a .torrent file on launch
+  torlnk --web                open the TUI and serve the browser UI on :9162
+  torlnk watch <dir>          headless: download torrents dropped into <dir>
+  torlnk serve                headless: HTTP add API (POST /add) on :9161
+  torlnk serve --web          headless: add API plus the browser UI on :9162
+  torlnk files                headless: serve downloads over HTTP on :9160
+  torlnk attach               open/reattach the TUI in a persistent tmux session
+  torlnk update [--force]     update to the latest release and restart any daemon
+                              (--force rebuilds/restarts even if already current)
+  torlnk import-netflix <csv>  send a Netflix "viewing activity" CSV to reccd
+  torlnk import-trakt          connect Trakt and import your history into reccd
+  torlnk --version            print the version
 
 once open: type to search every source at once, enter to run, arrows to move,
 d to download, ? for keys
@@ -239,8 +236,8 @@ after it finishes (e.g. 1h, 30m, 90s, 2d); files are kept by default. Add
 --daemon (watch/serve/files): background the process (own session, logs to a
 file), so you can log out and it keeps running. Prints the pid and log path.
 
-torlink attach: run the TUI inside a persistent tmux session. Detach with
-tmux's ctrl-b d, log out, then torlink attach again to reattach where you
+torlnk attach: run the TUI inside a persistent tmux session. Detach with
+tmux's ctrl-b d, log out, then torlnk attach again to reattach where you
 left off. Downloads and seeds keep running while detached.
 
 serve mode (no TUI): a small HTTP API for handing torlink a magnet.
@@ -253,8 +250,8 @@ flags: --port <n> (default 9161), --host <addr> (default 127.0.0.1),
 
 web ui (--web): search, posters, streaming, the queue and For You in a
 browser, over the same queue as the process hosting it.
-  torlink --web            the TUI hosts it; quitting the TUI stops it
-  torlink serve --web      the daemon hosts it, next to the add API
+  torlnk --web             the TUI hosts it; quitting the TUI stops it
+  torlnk serve --web       the daemon hosts it, next to the add API
 flags: --web-port <n> (default 9162; under serve, the api port + 1),
 --web-host <addr> (default 127.0.0.1, TUI only), --token <secret> (also
 spelled --web-token for the TUI, or set TORLINK_API_TOKEN).

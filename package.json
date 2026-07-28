@@ -1,10 +1,9 @@
 {
-  "name": "torlink",
+  "name": "torlnk-rd",
   "version": "1.8.0",
   "description": "Search, stream and download torrents — in your terminal or your browser. Zero setup, optional Real-Debrid.",
   "type": "module",
   "bin": {
-    "torlink": "dist/cli.cjs",
     "torlnk": "dist/cli.cjs"
   },
   "files": [

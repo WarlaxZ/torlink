@@ -11,7 +11,7 @@ case "$os:$arch" in
   Linux:x86_64|Linux:amd64) asset=torlnk-linux-x64.tar.gz ;;
   Darwin:x86_64) asset=torlnk-macos-x64.tar.gz ;;
   Darwin:arm64) asset=torlnk-macos-arm64.tar.gz ;;
-  *) echo "No prebuilt torlink binary for $os/$arch" >&2; exit 1 ;;
+  *) echo "No prebuilt torlnk binary for $os/$arch" >&2; exit 1 ;;
 esac
 
 tmp=$(mktemp -d)
@@ -29,10 +29,6 @@ mkdir -p "$install_dir"
 rm -rf "$runtime_dir"
 mkdir -p "$(dirname "$runtime_dir")"
 mv "$tmp/torlnk-runtime" "$runtime_dir"
-# Both names: `torlink` is canonical, `torlnk` stays as an alias so existing
-# scripts and muscle memory keep working.
-for name in torlink torlnk; do
-  printf '%s\n' '#!/bin/sh' "exec \"$runtime_dir/node\" \"$runtime_dir/dist/cli.cjs\" \"\$@\"" > "$install_dir/$name"
-  chmod 755 "$install_dir/$name"
-done
-echo "Installed torlink to $install_dir/torlink (also available as torlnk)"
+printf '%s\n' '#!/bin/sh' "exec \"$runtime_dir/node\" \"$runtime_dir/dist/cli.cjs\" \"\$@\"" > "$install_dir/torlnk"
+chmod 755 "$install_dir/torlnk"
+echo "Installed torlnk to $install_dir/torlnk"

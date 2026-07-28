@@ -66,10 +66,10 @@ export async function startRuntime(overrideDir?: string): Promise<Runtime> {
   // 1 Hz vpnRouteIsSafe() loop; a one-shot check at boot would go stale and
   // look like a kill switch that isn't one. A configured vpnInterface gets the
   // loud warning below instead of silent, absent protection.
-  console.log(`[torlink] ${policySummary(cfg)}`);
+  console.log(`[torlnk] ${policySummary(cfg)}`);
   if (cfg.vpnInterface?.trim()) {
     console.error(
-      `[torlink] warning: VPN kill switch (${cfg.vpnInterface.trim()}) is not enforced headlessly; ` +
+      `[torlnk] warning: VPN kill switch (${cfg.vpnInterface.trim()}) is not enforced headlessly; ` +
         "it only runs in the interactive TUI.",
     );
   }
@@ -82,7 +82,7 @@ export async function startRuntime(overrideDir?: string): Promise<Runtime> {
   queue.restoreSeeds(await loadSeeds(), { safe });
   setTimeout(disarmBootMarker, BOOT_SETTLE_MS).unref();
   if (safe) {
-    console.error("[torlink] recovered from a crashed start: restored downloads are paused");
+    console.error("[torlnk] recovered from a crashed start: restored downloads are paused");
   }
   const downloadDir = overrideDir && overrideDir.trim() ? overrideDir.trim() : cfg.downloadDir;
   return { queue, downloadDir, sessions: new StreamSessionRegistry(), recovered: safe };

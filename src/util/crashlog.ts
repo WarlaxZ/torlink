@@ -31,7 +31,7 @@ export function containUnhandledRejections(opts: { echo?: boolean } = {}): void 
     logCrash("unhandledRejection", reason);
     if (opts.echo) {
       const msg = reason instanceof Error ? reason.message : String(reason);
-      console.error(`[torlink] recovered from a background error: ${msg}`);
+      console.error(`[torlnk] recovered from a background error: ${msg}`);
     }
   });
 }

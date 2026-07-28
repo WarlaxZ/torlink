@@ -388,21 +388,9 @@ describe("web flags", () => {
 
 describe("HELP_TEXT", () => {
   it("documents the web UI on both hosts", () => {
-    expect(HELP_TEXT).toContain("torlink --web");
-    expect(HELP_TEXT).toContain("torlink serve --web");
+    expect(HELP_TEXT).toContain("torlnk --web");
+    expect(HELP_TEXT).toContain("torlnk serve --web");
     expect(HELP_TEXT).toContain("--web-port <n>");
     expect(HELP_TEXT).toContain("--web-host <addr>");
-  });
-
-  it("spells every usage line as torlink, not torlnk", () => {
-    // The bin exposes both names, but the help text is where we say which one
-    // is canonical — a stray `torlnk foo` line here is what re-teaches the old
-    // spelling. `torlnk` may appear only in the alias note.
-    const usageLines = HELP_TEXT.split("\n").filter((l) => /\btorlnk\b/.test(l));
-    expect(usageLines).toEqual(["the command is torlink; torlnk still works as an alias, so old scripts and"]);
-  });
-
-  it("tells the reader torlnk still works as an alias", () => {
-    expect(HELP_TEXT).toContain("torlnk still works as an alias");
   });
 });
