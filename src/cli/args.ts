@@ -248,12 +248,13 @@ flags: --port <n> (default 9161), --host <addr> (default 127.0.0.1),
 --token <secret> (required to bind a public --host; or TORLINK_API_TOKEN),
 --to <dir> (where files land).
 
-web ui (--web): a browser dashboard — search, queue, and downloads — over the
-same queue as the process hosting it.
+web ui (--web): search, posters, streaming, the queue and For You in a
+browser, over the same queue as the process hosting it.
   torlnk --web             the TUI hosts it; quitting the TUI stops it
   torlnk serve --web       the daemon hosts it, next to the add API
-flags: --web-port <n> (default 9162), --web-host <addr> (default 127.0.0.1,
-TUI only), --token <secret> (also spelled --web-token for the TUI).
+flags: --web-port <n> (default 9162; under serve, the api port + 1),
+--web-host <addr> (default 127.0.0.1, TUI only), --token <secret> (also
+spelled --web-token for the TUI, or set TORLINK_API_TOKEN).
 A non-loopback host is refused without a token. Under serve the UI binds
 serve's own --host and reuses its --token, so one process makes one exposure
 decision; only the port is separate, since two servers cannot share one.
