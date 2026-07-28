@@ -63,6 +63,8 @@ import {
   reasonTitle,
   reccEventBody,
   reccItems,
+  reccPosterHint,
+  reccPosterNote,
   reccStatus,
   recommendationsUrl,
   RECC_ACTIONS,
@@ -70,6 +72,7 @@ import {
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccAction,
+  type ReccPosterOutcome,
   type ReccState,
   type ReccType,
 } from "./reccModel";
@@ -118,6 +121,7 @@ const reccGenreInput = el<HTMLInputElement>("recc-genre");
 const reccExploreCheck = el<HTMLInputElement>("recc-explore");
 const reccRefreshButton = el<HTMLButtonElement>("recc-refresh");
 const reccStatusLine = el<HTMLParagraphElement>("recc-status");
+const reccHintLine = el<HTMLParagraphElement>("recc-hint");
 const reccList = el<HTMLUListElement>("recc-list");
 
 const searchForm = el<HTMLFormElement>("search");
@@ -928,15 +932,30 @@ const preview = createPreviewController({
 // OMDb lookups against a key with a daily cap. Cleared (and revoked) whenever
 // the feed itself is re-fetched, which is the only time the set of picks can
 // change underneath it.
-const reccPosterCache = new Map<string, string | null>();
-const reccPosterPending = new Map<string, Promise<string | null>>();
+const reccPosterCache = new Map<string, ReccPosterOutcome>();
+const reccPosterPending = new Map<string, Promise<ReccPosterOutcome>>();
 
 function clearReccPosters(): void {
-  for (const url of reccPosterCache.values()) {
-    if (url !== null) URL.revokeObjectURL(url);
+  for (const outcome of reccPosterCache.values()) {
+    if (outcome.kind === "poster") URL.revokeObjectURL(outcome.url);
   }
   reccPosterCache.clear();
   reccPosterPending.clear();
+  // The note summarises the outcomes just discarded, so it goes with them —
+  // otherwise a reload that now finds a key keeps telling you to add one.
+  paintReccHint();
+}
+
+/**
+ * The feed's single "no OMDb key" line, decided by reccPosterHint over every answer
+ * so far — not per card, and not by asking the server a second time. Repainted as
+ * each lookup settles because one answer is enough to know, and waiting for twenty
+ * would leave the frames unexplained meanwhile.
+ */
+function paintReccHint(): void {
+  const hint = reccPosterHint(reccPosterCache.values());
+  reccHintLine.textContent = hint ?? "";
+  reccHintLine.hidden = hint === null;
 }
 
 /**
@@ -945,40 +964,48 @@ function clearReccPosters(): void {
  * Two hops because reccd returns no artwork — only an id — and because the
  * poster must not be fetched from the CDN by the browser directly: an `<img
  * src>` pointing at Amazon leaks the user's IP and referer on every card, which
- * is what `/api/poster` exists to prevent. Every failure (no OMDb key, a title
- * OMDb doesn't know, a 404 from the cache) resolves to null and the card keeps
- * its labelled frame rather than a broken image.
+ * is what `/api/poster` exists to prevent.
+ *
+ * Every failure still leaves the card a labelled frame rather than a broken image,
+ * but WHY it failed is carried out rather than flattened to null: with no OMDb key
+ * the server answers `{status:"no-key"}` for all twenty picks, and a reader given
+ * twenty bare "No poster" boxes concludes the feature is broken instead of that
+ * they are one setting away from artwork.
  */
-async function fetchReccPoster(imdbId: string): Promise<string | null> {
+async function fetchReccPoster(imdbId: string): Promise<ReccPosterOutcome> {
   try {
     const metaRes = await fetch(`/api/title?imdb=${encodeURIComponent(imdbId)}`, {
       headers: authHeaders(),
     });
-    if (!metaRes.ok) return null;
+    if (!metaRes.ok) return { kind: "none" };
     const meta = (await metaRes.json()) as PublicTitleMeta;
-    if (!meta || meta.status !== "ok" || !meta.posterUrl) return null;
+    if (!meta) return { kind: "none" };
+    if (meta.status === "no-key") return { kind: "no-key" };
+    if (meta.status !== "ok" || !meta.posterUrl) return { kind: "none" };
     const posterRes = await fetch(posterPath(meta.posterUrl), { headers: authHeaders() });
-    if (!posterRes.ok) return null;
-    return URL.createObjectURL(await posterRes.blob());
+    if (!posterRes.ok) return { kind: "none" };
+    return { kind: "poster", url: URL.createObjectURL(await posterRes.blob()) };
   } catch {
-    return null;
+    return { kind: "none" };
   }
 }
 
-function reccPosterNote(host: HTMLElement, note: string): void {
+function paintPosterNote(host: HTMLElement, note: string): void {
   const span = document.createElement("span");
   span.className = "poster-note";
   span.textContent = note;
   host.replaceChildren(span);
 }
 
-function paintReccPoster(host: HTMLElement, url: string | null): void {
-  if (url === null) {
-    reccPosterNote(host, "No poster");
+function paintReccPoster(host: HTMLElement, outcome: ReccPosterOutcome): void {
+  if (outcome.kind !== "poster") {
+    // The wording is the model's: "No OMDb key" for the config gap, "No poster"
+    // for a title that simply has none.
+    paintPosterNote(host, reccPosterNote(outcome));
     return;
   }
   const img = document.createElement("img");
-  img.src = url;
+  img.src = outcome.url;
   img.alt = "";
   host.replaceChildren(img);
 }
@@ -989,27 +1016,29 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
     paintReccPoster(host, cached);
     return;
   }
-  reccPosterNote(host, "Loading");
+  paintPosterNote(host, "Loading");
   let inflight = reccPosterPending.get(imdbId);
   if (!inflight) {
-    inflight = fetchReccPoster(imdbId).then((url) => {
+    inflight = fetchReccPoster(imdbId).then((outcome) => {
       reccPosterPending.delete(imdbId);
       // A feed reload between the request and its answer clears the cache; the
       // URL created for a pick nobody is showing any more is revoked rather
-      // than leaked back into an empty map.
-      if (reccPosterCache.size === 0 && reccPosterPending.size === 0 && url !== null) {
-        URL.revokeObjectURL(url);
-        return null;
+      // than leaked back into an empty map. The outcome is dropped with it, so a
+      // late answer cannot resurrect the note over a feed that has moved on.
+      if (reccPosterCache.size === 0 && reccPosterPending.size === 0) {
+        if (outcome.kind === "poster") URL.revokeObjectURL(outcome.url);
+        return { kind: "none" };
       }
-      reccPosterCache.set(imdbId, url);
-      return url;
+      reccPosterCache.set(imdbId, outcome);
+      paintReccHint();
+      return outcome;
     });
     reccPosterPending.set(imdbId, inflight);
   }
-  void inflight.then((url) => {
+  void inflight.then((outcome) => {
     // The card this was for may have been rated away or re-rendered while the
     // two round trips were in flight; a detached node is not worth painting.
-    if (host.isConnected) paintReccPoster(host, url);
+    if (host.isConnected) paintReccPoster(host, outcome);
   });
 }
 

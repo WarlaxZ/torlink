@@ -139,6 +139,11 @@
         </div>
 
         <p id="recc-status" class="empty">Picks based on what you've watched.</p>
+        <!-- Shown once, not per card, when the poster lookups come back saying
+             there is no OMDb key: twenty copies of one fix-it sentence are worse
+             than the twenty blank frames they explain. Filled in by app.ts from
+             the same constant the search preview uses. -->
+        <p id="recc-hint" class="empty" hidden></p>
         <ul id="recc-list" class="recc-grid"></ul>
       </section>
 

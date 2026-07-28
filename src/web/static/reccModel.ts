@@ -9,6 +9,7 @@
 // slow earlier answer cannot overwrite a newer one.
 //
 // Bundled for the browser: no node:* imports.
+import { NO_KEY_POSTER_NOTE, NO_POSTER_NOTE, OMDB_KEY_HINT } from "./previewModel";
 import { ALL_TAB, categoryTabs, type SourcesResponse } from "./searchModel";
 import type {
   PublicReccEventType,
@@ -324,6 +325,56 @@ export function reccEventBody(action: ReccAction, item: PublicRecommendation): R
 export function actionNotice(action: ReccAction, item: PublicRecommendation): string {
   if (action === "watchlist") return `Added “${item.title}” to your watchlist.`;
   return `Thanks — noted “${item.title}” as ${ACTION_EVENT[action]}.`;
+}
+
+/**
+ * Why a card has no poster, as opposed to just "it hasn't got one".
+ *
+ * reccd returns an id and nothing else, so every card's artwork is a separate OMDb
+ * lookup — and its failures are not equivalent to a reader. "OMDb has no artwork
+ * for this film" is a fact about the film; "there is no OMDb key" is a config gap
+ * the user can close in thirty seconds. Collapsing both to null is what produced
+ * twenty identical unexplained frames.
+ */
+export type ReccPosterOutcome =
+  /** The bytes arrived. `url` is an object URL, never OMDb's own. */
+  | { kind: "poster"; url: string }
+  /** No OMDb key configured — this will be every card, so say the fix once. */
+  | { kind: "no-key" }
+  /** Asked and got nothing: OMDb doesn't know the id, has no artwork, or the hop failed. */
+  | { kind: "none" };
+
+/**
+ * What one card's frame should say when it has no image.
+ *
+ * The search pane's wording, from the search pane's own constants — the same
+ * condition must not be described two ways on two tabs.
+ */
+export function reccPosterNote(outcome: ReccPosterOutcome): string {
+  return outcome.kind === "no-key" ? NO_KEY_POSTER_NOTE : NO_POSTER_NOTE;
+}
+
+/**
+ * The note above the feed, or null for no note.
+ *
+ * The question this answers: *given what the poster lookups came back with, should
+ * the feed explain the missing key?* Yes exactly when at least one lookup said
+ * "no-key", and then ONCE — a fix-it sentence repeated per card is noise, and
+ * twenty copies of it are worse than the twenty blank frames they explain.
+ *
+ * A no-artwork title must never trigger it: with a key configured, an obscure pick
+ * OMDb has never heard of would otherwise tell the user to add a key they already
+ * have. That is the whole reason "none" and "no-key" are separate outcomes.
+ *
+ * Lookups still in flight are simply absent from the input, so the note appears as
+ * soon as the first answer proves the key is missing rather than waiting for all
+ * twenty.
+ */
+export function reccPosterHint(outcomes: Iterable<ReccPosterOutcome>): string | null {
+  for (const outcome of outcomes) {
+    if (outcome.kind === "no-key") return OMDB_KEY_HINT;
+  }
+  return null;
 }
 
 /**

@@ -9,6 +9,8 @@ import {
   reasonTitle,
   reccEventBody,
   reccItems,
+  reccPosterHint,
+  reccPosterNote,
   reccStatus,
   recommendationsUrl,
   sameFilters,
@@ -16,8 +18,15 @@ import {
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccFilters,
+  type ReccPosterOutcome,
   type ReccState,
 } from "./reccModel";
+import {
+  NO_KEY_POSTER_NOTE,
+  NO_POSTER_NOTE,
+  OMDB_KEY_HINT,
+  previewCopy,
+} from "./previewModel";
 import type { SourcesResponse } from "./searchModel";
 
 function pick(over: Partial<PublicRecommendation> = {}): PublicRecommendation {
@@ -410,5 +419,93 @@ describe("render", () => {
     const ctl = createReccController({ fetch: async () => OK([]), render });
     ctl.setType("all");
     expect(render).not.toHaveBeenCalled();
+  });
+});
+
+// The graceful-degradation half of the feed. With no OMDb key the server answers
+// `{status:"no-key"}` for every pick, and the feed's job is to say so once and to
+// label the frames the way the search pane labels them — not to show twenty
+// unexplained boxes that read as a broken feature.
+describe("reccPosterNote", () => {
+  it("names the missing key on the frame, in the search pane's words", () => {
+    expect(reccPosterNote({ kind: "no-key" })).toBe("No OMDb key");
+    expect(reccPosterNote({ kind: "no-key" })).toBe(NO_KEY_POSTER_NOTE);
+  });
+
+  it("keeps 'No poster' for a title that simply has no artwork", () => {
+    expect(reccPosterNote({ kind: "none" })).toBe("No poster");
+    expect(reccPosterNote({ kind: "none" })).toBe(NO_POSTER_NOTE);
+  });
+
+  it("never nags about a key for an outcome that has a poster", () => {
+    // Not reached in practice — a poster paints an <img> — but the function is
+    // total, and "No poster" is the safe answer rather than a key nag.
+    expect(reccPosterNote({ kind: "poster", url: "blob:x" })).toBe(NO_POSTER_NOTE);
+  });
+});
+
+describe("reccPosterHint", () => {
+  it("explains the missing key when a lookup says no-key", () => {
+    const hint = reccPosterHint([{ kind: "no-key" }, { kind: "no-key" }, { kind: "no-key" }]);
+    expect(hint).toBe(OMDB_KEY_HINT);
+    expect(hint).toContain("OMDb API key");
+    expect(hint).toContain("Accounts tab");
+  });
+
+  it("says it once for twenty no-key cards, not twenty times", () => {
+    const outcomes: ReccPosterOutcome[] = Array.from(
+      { length: 20 },
+      () => ({ kind: "no-key" }) as const,
+    );
+    // One string is the whole point: the caller renders it in one place.
+    expect(reccPosterHint(outcomes)).toBe(OMDB_KEY_HINT);
+  });
+
+  it("stays silent for an ordinary title OMDb has no artwork for", () => {
+    // THE MUTATION THIS CATCHES: keying the note off "no poster" rather than off
+    // "no key" tells a user who HAS a key to go and add one.
+    expect(reccPosterHint([{ kind: "none" }, { kind: "none" }])).toBeNull();
+  });
+
+  it("stays silent when every poster loaded", () => {
+    expect(
+      reccPosterHint([
+        { kind: "poster", url: "blob:a" },
+        { kind: "poster", url: "blob:b" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("stays silent with nothing answered yet", () => {
+    expect(reccPosterHint([])).toBeNull();
+  });
+
+  it("appears on the first no-key answer among posters that did load", () => {
+    // A mixed feed is real: /api/title is cached per id server-side, so a key
+    // removed mid-session leaves some ids answered from cache. One is enough.
+    expect(
+      reccPosterHint([{ kind: "poster", url: "blob:a" }, { kind: "no-key" }, { kind: "none" }]),
+    ).toBe(OMDB_KEY_HINT);
+  });
+
+  it("reads a Map's values, which is how the caller holds the outcomes", () => {
+    const cache = new Map<string, ReccPosterOutcome>([
+      ["tt1", { kind: "none" }],
+      ["tt2", { kind: "no-key" }],
+    ]);
+    expect(reccPosterHint(cache.values())).toBe(OMDB_KEY_HINT);
+  });
+});
+
+describe("the no-key wording is shared with the search preview", () => {
+  it("uses previewCopy's own sentence and frame label, not a second copy", () => {
+    // This project has been bitten repeatedly by a second copy of something
+    // drifting. The feed must fail here if the preview's wording changes.
+    const copy = previewCopy("Sintel.2010", {
+      status: "no-key",
+      parsed: { title: "Sintel", year: 2010, type: "movie" },
+    });
+    expect(reccPosterHint([{ kind: "no-key" }])).toBe(copy.body);
+    expect(reccPosterNote({ kind: "no-key" })).toBe(copy.posterNote);
   });
 });
