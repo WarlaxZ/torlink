@@ -238,8 +238,8 @@ usage
   torlnk --web                open the TUI and serve the browser UI on :9162
   torlnk watch <dir>          headless: download torrents dropped into <dir>
   torlnk serve                headless: HTTP add API (POST /add) on :9161
-  torlnk serve --web          headless: add API plus the browser UI on :9162
-  torlnk files                headless: serve downloads over HTTP on :9160
+  torlnk serve --web          headless: the add API plus the browser UI on :9161
+  torlnk files [dir]          headless: serve downloads over HTTP on :9160
   torlnk attach               open/reattach the TUI in a persistent tmux session
   torlnk update [--force]     update to the latest release and restart any daemon
                               (--force rebuilds/restarts even if already current)
@@ -250,6 +250,14 @@ usage
 once open: type to search every source at once, enter to run, arrows to move,
 d to download, ? for keys
 tip: quote magnet links (they contain & characters)
+
+flags, one name per thing
+  --host <addr>    the interface this process binds (default 127.0.0.1)
+  --port <n>       the port it binds (serve 9161, files 9160, --web 9162)
+  --token <secret> the shared secret; required to bind anything but loopback
+  --to <dir>       where downloads land (watch, serve)
+A bare directory argument is always the folder a command operates on
+(watch <dir>, files [dir]); --to is always where output goes.
 
 watch mode (no TUI): drop a .torrent, or a .magnet/.txt holding a magnet or
 info hash, into <dir> and it downloads then seeds. Add --to <dir> to choose
@@ -270,28 +278,24 @@ serve mode (no TUI): a small HTTP API for handing torlink a magnet.
   POST /add {"magnet":"..."}   queue a magnet or info hash
   GET  /downloads              list active downloads and seeds
   GET  /health                 liveness (no auth)
-flags: --port <n> (default 9161), --host <addr> (default 127.0.0.1),
---token <secret> (required to bind a public --host; or TORLINK_API_TOKEN),
---to <dir> (where files land).
+flags: --port <n> (default 9161), --host <addr>, --token <secret> (required
+to bind a public --host; or TORLINK_API_TOKEN), --to <dir> (where files land).
 
 web ui (--web): search, posters, streaming, the queue and For You in a
 browser, over the same queue as the process hosting it.
   torlnk --web             the TUI hosts it; quitting the TUI stops it
-  torlnk serve --web       the daemon hosts it, next to the add API
-flags: --web-port <n> (default 9162; under serve, the api port + 1),
---web-host <addr> (default 127.0.0.1, TUI only), --token <secret> (also
-spelled --web-token for the TUI, or set TORLINK_API_TOKEN).
-A non-loopback host is refused without a token. Under serve the UI binds
-serve's own --host and reuses its --token, so one process makes one exposure
-decision; only the port is separate, since two servers cannot share one.
+  torlnk serve --web       the daemon hosts it, on serve's own port
+It binds --host and --port like everything else — under serve there is one
+server, not two: the dashboard's port also answers /add, /downloads and
+/control. A non-loopback host is refused without a token.
 
 files mode (no TUI): a read-only, range-aware HTTP server over the downloads
 folder, so finished files stream to a browser or media player.
   GET /            list the folder (JSON)
   GET /<path>      stream a file (supports Range for seeking/resuming)
-flags: --port <n> (default 9160), --host <addr> (default 127.0.0.1),
---token <secret> (required to bind a public --host; or TORLINK_FILES_TOKEN),
---dir <dir> (folder to serve; defaults to your downloads folder).
+flags: --port <n> (default 9160), --host <addr>, --token <secret> (required
+to bind a public --host; or TORLINK_FILES_TOKEN). Pass the folder to serve as
+a positional argument; it defaults to your downloads folder.
 
 logs: ${logFile}
 `;

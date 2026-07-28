@@ -20,7 +20,9 @@ if (cmd.kind === "version") {
 }
 
 if (cmd.kind === "invalid") {
-  console.error(`error: unknown argument '${cmd.arg}'\n`);
+  // A removed flag gets its replacement named. "unknown argument '--web-host'"
+  // is true but useless — the user is looking for the setting, not the spelling.
+  console.error(`error: ${cmd.hint ?? `unknown argument '${cmd.arg}'`}\n`);
   console.error(HELP_TEXT);
   process.exit(1);
 }

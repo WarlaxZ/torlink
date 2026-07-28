@@ -375,7 +375,19 @@ describe("HELP_TEXT", () => {
   it("documents the web UI on both hosts", () => {
     expect(HELP_TEXT).toContain("torlnk --web");
     expect(HELP_TEXT).toContain("torlnk serve --web");
-    expect(HELP_TEXT).toContain("--web-port <n>");
-    expect(HELP_TEXT).toContain("--web-host <addr>");
+  });
+  it("documents only the canonical flags", () => {
+    expect(HELP_TEXT).toContain("--host <addr>");
+    expect(HELP_TEXT).toContain("--port <n>");
+    expect(HELP_TEXT).toContain("--token <secret>");
+    expect(HELP_TEXT).toContain("--to <dir>");
+  });
+  it("does not mention the removed spellings", () => {
+    for (const gone of ["--web-host", "--web-port", "--web-token", "--dir <dir>"]) {
+      expect(HELP_TEXT).not.toContain(gone);
+    }
+  });
+  it("shows the files folder as a positional", () => {
+    expect(HELP_TEXT).toContain("torlnk files [dir]");
   });
 });
