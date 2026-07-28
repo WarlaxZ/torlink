@@ -1,7 +1,7 @@
-// Headless HTTP add API: torlnk exposes a tiny local server so another program
-// (a seedbox web app, a script, curl) can hand it a torrent over HTTP instead of
-// a keypress. It complements the watch folder — same headless runtime, a
-// different doorway.
+// The HTTP add API (no terminal UI): torlnk exposes a tiny local server so
+// another program (a seedbox web app, a script, curl) can hand it a torrent
+// over HTTP instead of a keypress. It complements the watch folder — same
+// runtime, a different doorway.
 //
 // Default port 9161 sits next to Tor's control port (9051 / browser 9151); it's
 // deliberately non-standard and overridable with --port. Binds 127.0.0.1 by
@@ -74,7 +74,7 @@ export function extractMagnet(bodyText: string): string | null {
   return raw;
 }
 
-// Control actions the headless API accepts (POST /control). A seedbox web app
+// Control actions the add API accepts (POST /control). A seedbox web app
 // drives per-torrent buttons through these instead of the interactive keymap.
 export const CONTROL_ACTIONS = [
   "pause", // pause an active/queued download

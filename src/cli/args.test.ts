@@ -129,6 +129,7 @@ describe("parseCliArgs", () => {
       deleteFiles: false,
       daemon: false,
       web: false,
+      headless: false,
     });
   });
   it("parses serve flags", () => {
@@ -156,6 +157,32 @@ describe("parseCliArgs", () => {
       deleteFiles: false,
       daemon: false,
       web: false,
+      headless: false,
+    });
+  });
+  it("parses --headless on serve --web", () => {
+    expect(parseCliArgs(["serve", "--web", "--headless"])).toMatchObject({
+      kind: "serve",
+      web: true,
+      headless: true,
+    });
+  });
+  it("rejects --headless without --web, naming why", () => {
+    expect(parseCliArgs(["serve", "--headless"])).toEqual({
+      kind: "invalid",
+      arg: "--headless",
+      hint: "--headless only means something with --web: it stops torlink opening a browser",
+    });
+  });
+  it("rejects --headless outside serve", () => {
+    expect(parseCliArgs(["--headless"])).toEqual({ kind: "invalid", arg: "--headless" });
+    expect(parseCliArgs(["watch", "/tmp", "--headless"])).toEqual({
+      kind: "invalid",
+      arg: "--headless",
+    });
+    expect(parseCliArgs(["files", "--headless"])).toEqual({
+      kind: "invalid",
+      arg: "--headless",
     });
   });
   it("ignores a bad --port", () => {
