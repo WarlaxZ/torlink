@@ -50,6 +50,23 @@ describe("displayHosts", () => {
   it("tolerates an undefined interface entry", () => {
     expect(displayHosts("0.0.0.0", { eth0: undefined }).lan).toEqual([]);
   });
+  it("trims surrounding whitespace before checking for a wildcard", () => {
+    expect(displayHosts("  0.0.0.0  ", IFACES).local).toBe("127.0.0.1");
+  });
+  it("treats a bare asterisk as a wildcard", () => {
+    expect(displayHosts("*", IFACES).local).toBe("127.0.0.1");
+  });
+  it("treats the ::0 and [::] spellings of the IPv6 wildcard as wildcards", () => {
+    expect(displayHosts("::0", IFACES).local).toBe("127.0.0.1");
+    expect(displayHosts("[::]", IFACES).local).toBe("127.0.0.1");
+  });
+  it("dedupes an address reported by more than one interface", () => {
+    const dup: NetInterfaces = {
+      eth0: [{ family: "IPv4", address: "192.168.1.24", internal: false }],
+      br0: [{ family: "IPv4", address: "192.168.1.24", internal: false }],
+    };
+    expect(displayHosts("0.0.0.0", dup).lan).toEqual(["192.168.1.24"]);
+  });
 });
 
 describe("webUrl", () => {
@@ -64,5 +81,12 @@ describe("webUrl", () => {
   });
   it("treats an empty token as no token", () => {
     expect(webUrl("127.0.0.1", 9161, "")).toBe("http://127.0.0.1:9161");
+  });
+  it("brackets a raw IPv6 host on its own, without going through displayHosts", () => {
+    expect(webUrl("::1", 9161)).toBe("http://[::1]:9161");
+  });
+  it("does not double-bracket a host already bracketed by displayHosts", () => {
+    const { local } = displayHosts("::1", IFACES);
+    expect(webUrl(local, 9161)).toBe("http://[::1]:9161");
   });
 });
