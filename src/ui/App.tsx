@@ -488,12 +488,18 @@ export function App({
       },
       sessions,
     };
+    // One reading of the token for the whole mount: the server is given it and
+    // the displayed link embeds it, and those two must agree — a link carrying a
+    // token the server does not enforce (or vice versa) is a dashboard that
+    // won't open. Empty and whitespace-only both mean "no token", matching
+    // web/server.ts's own check.
+    const token = webToken?.trim() || undefined;
     void (async () => {
       try {
         const started = await startWebServerImpl(runtime, {
           ...(webPort !== undefined ? { port: webPort } : {}),
           host,
-          ...(webToken?.trim() ? { token: webToken.trim() } : {}),
+          ...(token ? { token } : {}),
           // THE constraint of this mount: Ink owns stdout and repaints by
           // tracking cursor position, so a stray write from a request handler
           // lands inside a rendered frame and corrupts it — and reads as a
@@ -513,7 +519,7 @@ export function App({
         // sent users to http://0.0.0.0:9162. The token rides in the fragment so
         // the link works without typing it (web/links.ts).
         const { local } = displayHosts(host, os.networkInterfaces());
-        const url = webUrl(local, started.port, webToken?.trim() || undefined);
+        const url = webUrl(local, started.port, token);
         setNotice(`${ICON.done} Web UI on ${url}`);
         setWebStatus({ url });
       } catch (e) {
@@ -1917,6 +1923,11 @@ export function App({
           void openUrl(target).then((ok) => {
             if (!ok) setNotice(`Couldn't open a browser — open ${target} yourself`);
           });
+        } else if (webStatus) {
+          // Three states, not two. A failed bind is not the same as no --web,
+          // and telling someone who passed the flag to pass the flag sends them
+          // in a circle — the reason is in the log (the splash says so too).
+          setNotice("The web UI failed to start — see the log");
         } else {
           setNotice("The web UI is not running — relaunch with --web");
         }

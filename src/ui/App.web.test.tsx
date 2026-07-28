@@ -426,16 +426,11 @@ describe("App --web mount", () => {
     // The other half of the "W must not steal a keystroke" guarantee: a W typed
     // while a prompt is up must reach the prompt, not launch a browser.
     //
-    // Scope of this test, stated honestly because it is narrower than it looks.
-    // It pins the *behaviour* and nothing about *why* it holds: hoisting the W
-    // branch above this prompt's `if (editingFolder) return;` guard does not
-    // make it fail, so something sturdier than the guard ordering is keeping the
-    // keystroke away — and this test would not notice if that ordering broke. An
-    // earlier attempt at the neighbouring case (pressing "/" to reach
-    // `captureMode === "text"`) passed whether its guard was present or not, and
-    // was deleted rather than kept as false comfort; reaching text-capture needs
-    // focus moved into the results region first. Both orderings are therefore
-    // correct-by-reading and unpinned by tests.
+    // The barrier being pinned is the keymap's `if (editingFolder) return;`,
+    // which sits above every single-key shortcut including W. Nothing else
+    // protects the keystroke: Ink broadcasts each input to every active
+    // `useInput` handler, so with that guard gone the W branch does fire and a
+    // character typed into the prompt launches a browser.
     const start = vi.fn(async () => ({ port: 19007, close: async () => {} }) as WebServerHandle);
     const ui = renderUI(<App web startWebServerImpl={start} />);
     try {
@@ -448,16 +443,41 @@ describe("App --web mount", () => {
       ui.press("o");
       await vi.waitFor(() => expect(ui.frame()).toContain("Default download folder"));
       ui.press("W");
-      // The prompt stays up and the browser stays shut. Waiting on the prompt
-      // again gives a wrongly-handled W a frame in which to have acted.
-      await vi.waitFor(() => expect(ui.frame()).toContain("Default download folder"));
-      // Both halves of the branch, not just the opening one. Asserting only
-      // "openUrl was not called" could not tell a blocked W from one that ran
-      // and fell into the else — that assertion passed even with the branch
-      // hoisted above this prompt's guard, which is the mutation it exists to
-      // catch.
+      // THE assertion, and it has to be one that was *false* before the press.
+      // The prompt's field renders the typed character, so this proves the
+      // keystroke was actually delivered and that the prompt is what received
+      // it. An earlier version waited on "Default download folder" — already on
+      // screen, so the wait yielded nothing, the byte was still sitting in the
+      // harness's stdin buffer at unmount, and every assertion below passed
+      // vacuously. It stayed green even with the W branch hoisted above this
+      // prompt's guard, which is the one mutation it exists to catch.
+      await vi.waitFor(() => expect(ui.frame()).toContain(`${DOWNLOAD_DIR}W`));
       expect(openUrl).not.toHaveBeenCalled();
       expect(ui.frame()).not.toContain("web UI is not running");
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("points at the log, not at --web, when shift+w follows a failed bind", async () => {
+    // The third state. "Relaunch with --web" is the right advice for someone who
+    // never passed it and useless for someone whose bind failed — they did pass
+    // it, and sending them round that loop hides the reason, which is in the log.
+    const start = vi.fn(async () => {
+      throw new Error("listen EADDRINUSE: address already in use 127.0.0.1:19008");
+    });
+    const ui = renderUI(<App web webPort={19008} startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(ui.frame()).toContain("web ui · failed to start"));
+      ui.press(TAB);
+      await vi.waitFor(() => expect(ui.frame()).toContain("Downloads"));
+      ui.press("W");
+      // Truncated at the frame width ("…see th…"), so match only the part that
+      // survives — the notice sits beside the wordmark with truncate-end.
+      await vi.waitFor(() => expect(ui.frame()).toContain("The web UI failed to start"));
+      expect(ui.frame()).not.toContain("relaunch with --web");
+      expect(openUrl).not.toHaveBeenCalled();
       expectNothingOnStdout();
     } finally {
       ui.unmount();
@@ -474,7 +494,13 @@ describe("App --web mount", () => {
       await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
       await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
       ui.press("W");
-      await vi.waitFor(() => expect(ui.frame()).toContain("W"));
+      // The typed W inside the splash's search field — the placeholder is gone
+      // once anything is typed, so this is false before the press. `toContain
+      // ("W")` was not: the splash's own "Web UI on <url>" notice already
+      // contains one, so the wait passed instantly and the keystroke could
+      // still be unread at unmount. That also made this test flaky, because
+      // the notice expires and the substring came and went.
+      await vi.waitFor(() => expect(ui.frame()).toContain("❯ W"));
       expect(openUrl).not.toHaveBeenCalled();
       expectNothingOnStdout();
     } finally {
