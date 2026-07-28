@@ -24,6 +24,15 @@ import { StreamSessionRegistry } from "../core/streamSession";
 const DOWNLOAD_DIR = "/tmp/torlink-web-test";
 const TAB = "\t";
 
+// Same pattern Results.test.tsx uses for the same module: a browser launch is
+// the one thing a test must never actually do, so openUrl is a spy all the
+// way down, never the real opener.
+const openUrl = vi.hoisted(() => vi.fn(async (_url: string) => true));
+vi.mock("../util/openUrl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../util/openUrl")>()),
+  openUrl: (url: string) => openUrl(url),
+}));
+
 // A queue stub: App only boots it, listens to it, and tears it down.
 class FakeQueue extends EventEmitter {
   setTrackers = vi.fn();
@@ -121,6 +130,7 @@ beforeEach(() => {
   logSpies.info.mockClear();
   logSpies.warn.mockClear();
   logSpies.error.mockClear();
+  openUrl.mockClear();
   stdoutWrites = [];
   // Ink is handed the harness's stdout stub, so a write landing on the real
   // process.stdout during this test could only come from the mount.
@@ -357,6 +367,73 @@ describe("App --web mount", () => {
       await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
       expect(start).not.toHaveBeenCalled();
       expect(logSpies.warn).not.toHaveBeenCalled();
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("shows a browsable URL on the splash, never the wildcard bind", async () => {
+    const start = vi.fn(async () => ({ port: 19004, close: async () => {} }) as WebServerHandle);
+    const ui = renderUI(
+      <App web webHost="0.0.0.0" webToken="s3cret" startWebServerImpl={start} />,
+    );
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(ui.frame()).toContain("http://127.0.0.1:19004/#k=s3cret"));
+      expect(ui.frame()).not.toContain("http://0.0.0.0");
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("opens the dashboard on shift+w", async () => {
+    const start = vi.fn(async () => ({ port: 19005, close: async () => {} }) as WebServerHandle);
+    const ui = renderUI(<App web startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      // The global keymap is only live in the browser view — the splash's search
+      // field owns every printable key, which is why W cannot live there.
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      ui.press(TAB);
+      // Two immediate press() calls can coalesce into one input chunk (see
+      // Downloads.test.tsx); wait for the view to actually switch first.
+      await vi.waitFor(() => expect(ui.frame()).toContain("Downloads"));
+      ui.press("W");
+      await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith("http://127.0.0.1:19005"));
+      expectNothingOnStdout();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("says so on shift+w when the web UI never started", async () => {
+    const ui = renderUI(<App startWebServerImpl={vi.fn()} />);
+    try {
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      ui.press(TAB);
+      await vi.waitFor(() => expect(ui.frame()).toContain("Downloads"));
+      ui.press("W");
+      await vi.waitFor(() => expect(ui.frame()).toContain("web UI is not running"));
+      expect(openUrl).not.toHaveBeenCalled();
+    } finally {
+      ui.unmount();
+    }
+  });
+
+  it("does not open a browser on shift+w from the splash — it types instead", async () => {
+    // Pins the constraint the whole task turns on: the global keymap (where W
+    // lives) is gated on view === "browser", so the splash's search field must
+    // still own the keystroke, not fire the shortcut.
+    const start = vi.fn(async () => ({ port: 19006, close: async () => {} }) as WebServerHandle);
+    const ui = renderUI(<App web startWebServerImpl={start} />);
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(ui.frame()).toContain("Search"));
+      ui.press("W");
+      await vi.waitFor(() => expect(ui.frame()).toContain("W"));
+      expect(openUrl).not.toHaveBeenCalled();
       expectNothingOnStdout();
     } finally {
       ui.unmount();
