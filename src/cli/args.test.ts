@@ -76,13 +76,18 @@ describe("parseCliArgs", () => {
       deleteFiles: false,
       daemon: false,
     });
-    expect(parseCliArgs(["watch", "--dir", "/mnt/media", "/srv/blackhole"])).toEqual({
-      kind: "watch",
-      dir: "/srv/blackhole",
-      downloadDir: "/mnt/media",
-      seedTimeMs: undefined,
-      deleteFiles: false,
-      daemon: false,
+  });
+  it("rejects the removed --dir on watch with a hint", () => {
+    expect(parseCliArgs(["watch", "/srv/blackhole", "--dir", "/mnt/media"])).toEqual({
+      kind: "invalid",
+      arg: "--dir",
+      hint: "--dir is not a flag; use --to, or pass the folder to `torlnk files` positionally",
+    });
+  });
+  it("rejects a second positional on watch", () => {
+    expect(parseCliArgs(["watch", "/srv/blackhole", "/mnt/media"])).toEqual({
+      kind: "invalid",
+      arg: "/mnt/media",
     });
   });
   it("parses watch --seed-time, --delete-files, and --daemon", () => {
@@ -157,6 +162,38 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["serve", "--port", "abc"]).kind).toBe("serve");
     expect((parseCliArgs(["serve", "--port", "abc"]) as { port?: number }).port).toBeUndefined();
   });
+  it("enables the web UI on serve without a second port", () => {
+    expect(parseCliArgs(["serve", "--web", "--port", "9999", "--host", "0.0.0.0"])).toMatchObject({
+      kind: "serve",
+      web: true,
+      port: 9999,
+      host: "0.0.0.0",
+    });
+  });
+  it("rejects the removed --web-port on serve with a hint", () => {
+    expect(parseCliArgs(["serve", "--web", "--web-port", "8080"])).toEqual({
+      kind: "invalid",
+      arg: "--web-port",
+      hint: "--web-port is not a flag; the web ui binds --port",
+    });
+  });
+  it("rejects the removed --web-host on serve with a hint", () => {
+    expect(parseCliArgs(["serve", "--web", "--web-host", "0.0.0.0"])).toEqual({
+      kind: "invalid",
+      arg: "--web-host",
+      hint: "--web-host is not a flag; the web ui binds --host",
+    });
+  });
+  it("rejects a bareword on serve instead of ignoring it", () => {
+    expect(parseCliArgs(["serve", "oops"])).toEqual({ kind: "invalid", arg: "oops" });
+  });
+  it("keeps --web out of serve's other flag values", () => {
+    expect(parseCliArgs(["serve", "--web", "--to", "/mnt/media"])).toMatchObject({
+      kind: "serve",
+      web: true,
+      downloadDir: "/mnt/media",
+    });
+  });
   it("parses files with defaults", () => {
     expect(parseCliArgs(["files"])).toEqual({
       kind: "files",
@@ -167,18 +204,17 @@ describe("parseCliArgs", () => {
       daemon: false,
     });
   });
-  it("parses files flags", () => {
+  it("parses files flags with the folder as a positional", () => {
     expect(
       parseCliArgs([
         "files",
+        "/mnt/media",
         "--port",
         "9160",
         "--host",
         "0.0.0.0",
         "--token",
         "s3cret",
-        "--dir",
-        "/mnt/media",
         "--daemon",
       ]),
     ).toEqual({
@@ -188,6 +224,26 @@ describe("parseCliArgs", () => {
       token: "s3cret",
       dir: "/mnt/media",
       daemon: true,
+    });
+  });
+  it("takes the folder positionally in any position", () => {
+    expect(parseCliArgs(["files", "--port", "9160", "/mnt/media"])).toMatchObject({
+      kind: "files",
+      dir: "/mnt/media",
+      port: 9160,
+    });
+  });
+  it("rejects the removed --dir on files with a hint", () => {
+    expect(parseCliArgs(["files", "--dir", "/mnt/media"])).toEqual({
+      kind: "invalid",
+      arg: "--dir",
+      hint: "--dir is not a flag; use --to, or pass the folder to `torlnk files` positionally",
+    });
+  });
+  it("rejects a second positional on files", () => {
+    expect(parseCliArgs(["files", "/mnt/a", "/mnt/b"])).toEqual({
+      kind: "invalid",
+      arg: "/mnt/b",
     });
   });
 });
