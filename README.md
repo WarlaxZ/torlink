@@ -29,6 +29,8 @@ Or run it once, without installing anything:
 npx torlnk-rd
 ```
 
+On the names, since there are three: the project is **torlink** — and so is your config directory and every `TORLINK_*` variable — but the command is `torlnk` and the npm package is `torlnk-rd`. Plain `torlnk` on npm is the upstream project this forked from, and npm rejects `torlink` as too similar to it, so the short spellings are the ones that were actually available.
+
 Globally-installed copies keep themselves current: `torlnk update` pulls the latest release (and `torlnk` quietly points it out when one is available).
 
 You can still build from source with [Node 22+](https://nodejs.org):
