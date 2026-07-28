@@ -650,6 +650,26 @@ describe("/api/search", () => {
     expect(text).not.toContain("yts result");
   });
 
+  // Browse mode: no query at all. The server must not 400 this, and the stream
+  // must complete exactly like a real search.
+  it("streams a blank query as browse", async () => {
+    const base = await searchServer();
+    const res = await fetch(`${base}/api/search?q=`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+    const text = await res.text();
+    expect(text.match(/event: results/g)).toHaveLength(3);
+    expect(text).toContain("event: done");
+    expect(text).toContain("yts result");
+  });
+
+  it("rejects a search with no q at all", async () => {
+    const base = await searchServer();
+    const res = await fetch(`${base}/api/search`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "missing query" });
+  });
+
   // A search spends the user's bandwidth on up to 23 requests to public
   // trackers, so an anonymous caller with a loop is a traffic amplifier.
   it("401s without credentials when a token is set", async () => {
@@ -680,7 +700,6 @@ describe("/api/search", () => {
   // socket, "you asked wrong" can only be a frame the client has to parse.
   it.each([
     ["/api/search", "missing query"],
-    ["/api/search?q=", "missing query"],
     ["/api/search?q=x&group=Films", "unknown group"],
   ])("400s %s as a real status, not an error frame", async (path, error) => {
     const base = await searchServer();
