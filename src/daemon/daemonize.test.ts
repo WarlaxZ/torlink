@@ -24,10 +24,17 @@ function cleanup(): void {
   }
 }
 
+// POSIX modes only. On Windows `chmod` models nothing but the read-only bit and
+// owner-only access is an ACL question, so `mode & 0o777` there says nothing
+// about what this code is trying to guarantee — skipped rather than asserted
+// loosely, which would read as coverage it does not have. The mode arguments
+// themselves are harmless on Windows.
+const posixOnly = process.platform !== "win32";
+
 describe("spawnDaemon", () => {
   afterEach(() => cleanup());
 
-  it("creates the log file readable only by its owner", () => {
+  it.skipIf(!posixOnly)("creates the log file readable only by its owner", () => {
     cleanup();
     // `node -e ""` is a real child that exits immediately: enough to make
     // spawnDaemon open the log and hand it over as stdio, without leaving a
@@ -39,7 +46,7 @@ describe("spawnDaemon", () => {
     expect(mode).toBe(0o600);
   });
 
-  it("keeps the run descriptor owner-only, because it stores the argv", () => {
+  it.skipIf(!posixOnly)("keeps the run descriptor owner-only, because it stores the argv", () => {
     // `torlnk update` relaunches a daemon from this file, so it holds the whole
     // command line — and `--token <secret>` is in there verbatim. World-readable
     // was survivable when nothing pushed people toward tokens; `serve --web`
@@ -55,7 +62,7 @@ describe("spawnDaemon", () => {
     expect(desc.argv).toContain("-e");
   });
 
-  it("tightens a run descriptor that already exists at a looser mode", () => {
+  it.skipIf(!posixOnly)("tightens a run descriptor that already exists at a looser mode", () => {
     cleanup();
     fs.mkdirSync(path.dirname(runPathFor(NAME)), { recursive: true });
     fs.writeFileSync(runPathFor(NAME), "{}\n", { mode: 0o644 });
@@ -66,7 +73,7 @@ describe("spawnDaemon", () => {
     expect(fs.statSync(runPathFor(NAME)).mode & 0o777).toBe(0o600);
   });
 
-  it("tightens a log file that already exists at a looser mode", () => {
+  it.skipIf(!posixOnly)("tightens a log file that already exists at a looser mode", () => {
     // The upgrade path, and the reason fchmod is called rather than trusting
     // openSync's mode argument: openSync only applies a mode when it *creates*
     // the file, so an install that has been running since before this change

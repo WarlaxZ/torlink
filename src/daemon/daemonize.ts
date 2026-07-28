@@ -51,7 +51,13 @@ export function spawnDaemon(name: string, argv: string[], cwd: string): number {
   // default 0644 and every existing install still has one at that mode.
   // fchmod (not chmod) so the mode lands on the descriptor we just opened.
   const out = fs.openSync(logPathFor(name), "a", 0o600);
-  fs.fchmodSync(out, 0o600);
+  // Best-effort, never fatal: this is hardening, and refusing to start a daemon
+  // because a mode could not be set would be a worse outcome than a loose mode.
+  // Windows models almost none of this (owner-only there is an ACL question),
+  // which is the main reason it is allowed to fail quietly.
+  try {
+    fs.fchmodSync(out, 0o600);
+  } catch {}
   const child = spawn(process.execPath, argv, {
     cwd,
     detached: true,
@@ -70,7 +76,9 @@ export function spawnDaemon(name: string, argv: string[], cwd: string): number {
     // daemon since before this would otherwise keep its world-readable copy.
     const desc: RunDescriptor = { name, pid, argv, cwd, startedAt: Date.now() };
     fs.writeFileSync(runPathFor(name), `${JSON.stringify(desc, null, 2)}\n`, { mode: 0o600 });
-    fs.chmodSync(runPathFor(name), 0o600);
+    try {
+      fs.chmodSync(runPathFor(name), 0o600);
+    } catch {}
   }
   return pid;
 }
