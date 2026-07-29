@@ -78,6 +78,22 @@ import {
   type ReccState,
   type ReccType,
 } from "./reccModel";
+import {
+  applySaved,
+  emptySaved,
+  favouriteMeta,
+  libraryBody,
+  libraryStatus,
+  watchlistBody,
+  watchlistStatus,
+  type LibraryInput,
+  type PublicFavourite,
+  type SavedResponse,
+  type SavedState,
+} from "./savedModel";
+// favouriteLabel and isInLibrary are unused until Task 8 wires the ★ button
+// onto a search row — importing them here now would be an unused-import lint
+// error under this repo's `no-unused-vars: error`.
 import { tokenFromHash } from "./authLink";
 
 // The token is held in sessionStorage and sent as an Authorization header on
@@ -113,11 +129,17 @@ const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
 const viewReccTab = el<HTMLButtonElement>("view-recc");
+const viewSavedTab = el<HTMLButtonElement>("view-saved");
 const viewQueueTab = el<HTMLButtonElement>("view-queue");
 const queueCount = el<HTMLSpanElement>("queue-count");
 const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
+const paneSaved = el<HTMLElement>("pane-saved");
 const paneQueue = el<HTMLElement>("pane-queue");
+const watchlistStatusLine = el<HTMLParagraphElement>("watchlist-status");
+const watchlistRows = el<HTMLUListElement>("watchlist-rows");
+const libraryStatusLine = el<HTMLParagraphElement>("library-status");
+const libraryRows = el<HTMLUListElement>("library-rows");
 
 const reccTypeSelect = el<HTMLSelectElement>("recc-type");
 const reccGenreInput = el<HTMLInputElement>("recc-genre");
@@ -550,7 +572,7 @@ async function play(row: DashRow): Promise<void> {
 // Search opens first. This app is a torrent finder; a queue monitor is what it
 // looks like when it opens on the queue. The Queue tab carries a count so
 // nothing in flight is out of sight.
-type ViewName = "search" | "recc" | "queue";
+type ViewName = "search" | "recc" | "saved" | "queue";
 let view: ViewName = "search";
 
 let searchView: SearchView = emptyView();
@@ -565,18 +587,25 @@ function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
   paneRecc.hidden = next !== "recc";
+  paneSaved.hidden = next !== "saved";
   paneQueue.hidden = next !== "queue";
   viewSearchTab.setAttribute("aria-pressed", String(next === "search"));
   viewReccTab.setAttribute("aria-pressed", String(next === "recc"));
+  viewSavedTab.setAttribute("aria-pressed", String(next === "saved"));
   viewQueueTab.setAttribute("aria-pressed", String(next === "queue"));
   // The feed's first load happens here and nowhere else — `open()` is a no-op
   // after the first call, so this is "the tab has been visited", not "fetch
   // again". Nothing asks reccd for anything until a human opens this pane.
   if (next === "recc") recc.open();
+  // Refetched on every visit, not once: a favourite added from a search row
+  // while this pane sat hidden must be here when the user opens it, and the
+  // response is two small arrays.
+  if (next === "saved") void loadSaved();
 }
 
 viewSearchTab.addEventListener("click", () => showView("search"));
 viewReccTab.addEventListener("click", () => showView("recc"));
+viewSavedTab.addEventListener("click", () => showView("saved"));
 viewQueueTab.addEventListener("click", () => showView("queue"));
 
 // The tab strip, from GET /api/sources. The adult category is absent from that
@@ -1240,6 +1269,208 @@ reccGenreInput.addEventListener("change", () => recc.setGenre(reccGenreInput.val
 reccExploreCheck.addEventListener("change", () => recc.setExplore(reccExploreCheck.checked));
 reccRefreshButton.addEventListener("click", () => recc.refresh());
 
+// ---- saved ------------------------------------------------------------
+// The watchlist and the library. Decisions — which body each button sends, what
+// an empty or broken list says — are savedModel.ts's; what is here is fetch and
+// DOM.
+
+let savedState: SavedState = emptySaved();
+
+async function loadSaved(): Promise<void> {
+  try {
+    const res = await fetch("/api/saved", { headers: authHeaders() });
+    if (!res.ok) {
+      savedState = { ...savedState, loaded: true, error: `Couldn't load your lists (HTTP ${res.status}).` };
+      renderSaved();
+      return;
+    }
+    savedState = applySaved(savedState, (await readJson(res)) as unknown as SavedResponse);
+  } catch {
+    savedState = { ...savedState, loaded: true, error: "Couldn't load your lists — the server is not responding." };
+  }
+  renderSaved();
+}
+
+// Both mutators post, then render the list the SERVER returned rather than a
+// list predicted here. The optimistic half is the button's own label, which
+// flips before the round trip and is corrected by the response — so a failed
+// toggle cannot leave a ★ claiming something the server never stored.
+async function postSaved(path: string, body: unknown): Promise<Record<string, unknown> | null> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    showNotice("That didn't reach the server.");
+    setConn("lost");
+    return null;
+  }
+  if (!res.ok) {
+    const envelope = await readEnvelope(res);
+    showNotice(envelope.error ?? `That didn't stick (HTTP ${res.status}).`);
+    return null;
+  }
+  return readJson(res);
+}
+
+// Exported (unusually, for this file): nothing in Task 7's own markup calls
+// this yet — the watchlist pane only ever removes a row it already has. It
+// exists here for Task 8's search-row ★ button to import, which is also the
+// reason it stays unused-import-clean under this repo's `no-unused-vars: error`.
+export async function toggleWatchlist(query: string): Promise<void> {
+  const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
+  if (!body) return;
+  savedState = {
+    ...savedState,
+    watchlist: Array.isArray(body.watchlist) ? (body.watchlist as string[]) : savedState.watchlist,
+    loaded: true,
+    error: null,
+  };
+  showNotice(body.saved === true ? "Saved to your watchlist." : "Removed from your watchlist.");
+  renderSaved();
+}
+
+async function removeFromWatchlist(query: string): Promise<void> {
+  const body = await postSaved("/api/watchlist", watchlistBody(query, "remove"));
+  if (!body) return;
+  savedState = {
+    ...savedState,
+    watchlist: Array.isArray(body.watchlist) ? (body.watchlist as string[]) : savedState.watchlist,
+    loaded: true,
+    error: null,
+  };
+  renderSaved();
+}
+
+// Exported for the same reason toggleWatchlist is: Task 8 wires the ★ on a
+// search row to this, not anything in this pane.
+export async function toggleLibrary(input: LibraryInput): Promise<void> {
+  const body = await postSaved("/api/library", libraryBody(input, "toggle"));
+  if (!body) return;
+  savedState = {
+    ...savedState,
+    library: Array.isArray(body.library) ? (body.library as PublicFavourite[]) : savedState.library,
+    loaded: true,
+    error: null,
+  };
+  showNotice(body.favourited === true ? "Added to your library." : "Removed from your library.");
+  renderSaved();
+  // The ★ on the matching search row has to agree with what just happened.
+  renderResults();
+}
+
+async function removeFromLibrary(infoHash: string, name: string): Promise<void> {
+  const body = await postSaved("/api/library", libraryBody({ infoHash, name }, "remove"));
+  if (!body) return;
+  savedState = {
+    ...savedState,
+    library: Array.isArray(body.library) ? (body.library as PublicFavourite[]) : savedState.library,
+    loaded: true,
+    error: null,
+  };
+  renderSaved();
+  renderResults();
+}
+
+// createElement + textContent, as everywhere else on this page. A saved query is
+// the user's own typing, but a favourite's name is a release name from whoever
+// uploaded the torrent — so this list is as much an XSS surface as the results
+// list is.
+function renderWatchlistRow(query: string): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const run = document.createElement("button");
+  run.type = "button";
+  run.className = "saved-query";
+  run.textContent = query;
+  run.title = `Search for ${query}`;
+  run.addEventListener("click", () => {
+    queryInput.value = query;
+    showView("search");
+    startSearch(query);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeFromWatchlist(query));
+  actions.append(remove);
+
+  li.append(run, actions);
+  return li;
+}
+
+function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+  const name = document.createElement("span");
+  name.className = "row-name";
+  name.textContent = f.name;
+  name.title = f.name;
+  head.append(name);
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  meta.textContent = favouriteMeta(f);
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  // Play, through the same runPlay every other Play on this page uses. A
+  // favourite has no magnet on the wire and does not need one: POST /api/stream
+  // rebuilds it from the hash, exactly as it does for a search hit.
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () =>
+    void play({
+      id: f.id,
+      name: f.name,
+      kind: "download",
+      status: "queued",
+      percent: 0,
+      peers: 0,
+      rate: 0,
+      uploaded: 0,
+    }),
+  );
+  actions.append(playButton);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeFromLibrary(f.id, f.name));
+  actions.append(remove);
+
+  li.append(head, meta, actions);
+  return li;
+}
+
+function renderSaved(): void {
+  watchlistRows.replaceChildren(...savedState.watchlist.map(renderWatchlistRow));
+  libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+
+  const wl = watchlistStatus(savedState);
+  watchlistStatusLine.textContent = wl.text;
+  watchlistStatusLine.classList.toggle("error", wl.tone === "error");
+  watchlistStatusLine.hidden = !wl.show;
+
+  const lib = libraryStatus(savedState);
+  libraryStatusLine.textContent = lib.text;
+  libraryStatusLine.classList.toggle("error", lib.tone === "error");
+  libraryStatusLine.hidden = !lib.show;
+}
+
 // ---- connection -----------------------------------------------------------
 
 // One probe of the JSON API, which — unlike EventSource — reports why it failed.
@@ -1309,6 +1540,7 @@ function openApp(payload: StatusPayload): void {
   showView(view);
   renderTabs();
   renderResults();
+  renderSaved();
   rows = mergeRows(rows, rowsFromStatus(payload));
   render();
   connect();

@@ -10,13 +10,19 @@
   <body>
     <header>
       <h1>torlnk</h1>
-      <!-- Search / For You / Queue, the three things this app is. Buttons
-           rather than links or a router: it is one page with three panes, and a
-           URL that could be bookmarked mid-search would promise a restored
-           search it cannot deliver (the stream is not replayable). -->
+      <!-- Search / For You / Saved / Queue. Buttons rather than links or a
+           router: it is one page with four panes, and a URL that could be
+           bookmarked mid-search would promise a restored search it cannot
+           deliver (the stream is not replayable).
+
+           Saved holds both of the TUI's lists — the watchlist (saved search
+           queries) and the library (favourited torrents) — in one pane rather
+           than two tabs. Five tabs across the top of a phone is where this nav
+           stops working. -->
       <nav id="views" class="views" hidden>
         <button id="view-search" type="button" class="view-tab" aria-pressed="true">search</button>
         <button id="view-recc" type="button" class="view-tab" aria-pressed="false">for you</button>
+        <button id="view-saved" type="button" class="view-tab" aria-pressed="false">saved</button>
         <button id="view-queue" type="button" class="view-tab" aria-pressed="false">
           queue<span id="queue-count" class="badge" hidden></span>
         </button>
@@ -145,6 +151,27 @@
              the same constant the search preview uses. -->
         <p id="recc-hint" class="empty" hidden></p>
         <ul id="recc-list" class="recc-grid"></ul>
+      </section>
+
+      <!-- ---- saved ------------------------------------------------------- -->
+      <!-- Both lists the TUI has: the watchlist (config.savedSearches) and the
+           library (config.favourites). Every row is built by app.ts with
+           createElement — a favourite's name is a release name written by
+           whoever uploaded the torrent, the same stranger's string a search row
+           carries. -->
+      <section id="pane-saved" hidden>
+        <div class="saved-split">
+          <div class="saved-list">
+            <h2 class="saved-heading">watchlist</h2>
+            <p id="watchlist-status" class="empty">Loading…</p>
+            <ul id="watchlist-rows" class="rows"></ul>
+          </div>
+          <div class="saved-list">
+            <h2 class="saved-heading">library</h2>
+            <p id="library-status" class="empty">Loading…</p>
+            <ul id="library-rows" class="rows"></ul>
+          </div>
+        </div>
       </section>
 
       <!-- ---- queue ------------------------------------------------------- -->

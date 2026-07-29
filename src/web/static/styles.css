@@ -707,3 +707,53 @@ select:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* ---------------------------------------------------------------------------
+   The saved pane. Two lists side by side on a wide screen and stacked on a
+   phone, using .rows and .row from the search pane rather than a third row
+   style — a saved search and a favourite are both list rows, and the only thing
+   new here is the pair of headings. */
+.saved-split {
+  display: grid;
+  /* minmax(0, …) for the reason .rows uses it: a long release name must
+     ellipsis rather than widen its track past the viewport. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* The same breakpoint the search pane's .split uses, so the page reflows in one
+   step rather than two. */
+@media (max-width: 46rem) {
+  .saved-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.saved-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* A watchlist row is a button spanning the row: the whole thing re-runs that
+   search, so a small hit target inside a wide row would be a phone-hostile
+   near-miss. */
+.saved-query {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.saved-query:hover {
+  color: var(--accent);
+}
