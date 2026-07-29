@@ -83,7 +83,9 @@ import {
   applySaved,
   applyWatchlistResponse,
   emptySaved,
+  favouriteLabel,
   favouriteMeta,
+  isInLibrary,
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
@@ -95,9 +97,6 @@ import {
   type SavedResponse,
   type SavedState,
 } from "./savedModel";
-// favouriteLabel and isInLibrary are unused until Task 8 wires the ★ button
-// onto a search row — importing them here now would be an unused-import lint
-// error under this repo's `no-unused-vars: error`.
 import { tokenFromHash } from "./authLink";
 
 // The token is held in sessionStorage and sent as an Authorization header on
@@ -155,6 +154,7 @@ const reccList = el<HTMLUListElement>("recc-list");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
+const saveSearchButton = el<HTMLButtonElement>("save-search");
 const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
@@ -401,6 +401,12 @@ const playing = new Set<string>();
 // without stopping it would leave that running until the idle reaper notices.
 let pickerSession: string | null = null;
 
+// The info hash the open picker belongs to, so a chosen file can be recorded as
+// watched against a favourite. Tracked beside pickerSession, set when a play
+// starts and cleared with the picker, for the same reason pickerSession is: the
+// picker outlives the call that opened it.
+let pickerHash: string | null = null;
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
@@ -500,6 +506,7 @@ function openPlayer(path: string): void {
 
 function hidePicker(): void {
   pickerSession = null;
+  pickerHash = null;
   picker.hidden = true;
   pickerFiles.replaceChildren();
 }
@@ -523,9 +530,21 @@ function showPicker(
       button.textContent = fileLabel(file);
       button.title = file.filename;
       button.addEventListener("click", () => {
+        // Read BEFORE hidePicker(), which clears it.
+        const infoHash = pickerHash;
         // hidePicker() clears pickerSession, so the Cancel handler can no longer
         // stop the session we are about to hand to the player.
         hidePicker();
+        // Fire-and-forget, and only once a file was actually chosen. The server
+        // no-ops when this torrent is not favourited, so there is nothing to
+        // check here and nothing to wait for — the same shape as the TUI's
+        // markPlayed, which also records only after a player launches.
+        if (infoHash) {
+          void postSaved(
+            "/api/library",
+            libraryBody({ infoHash, name }, "watched", file.filename),
+          );
+        }
         openPlayer(playerPath(sessionId, file, capability));
       });
       li.append(button);
@@ -551,6 +570,7 @@ pickerCancel.addEventListener("click", () => {
 async function play(row: DashRow): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
+  pickerHash = row.id;
   try {
     await runPlay(row, {
       start: startSession,
@@ -733,6 +753,18 @@ searchForm.addEventListener("submit", (event) => {
   startSearch(queryInput.value);
 });
 
+// Saves whatever is in the box, submitted or not: the thing worth keeping is
+// the query you just typed, and requiring a search first would mean running one
+// to save one.
+saveSearchButton.addEventListener("click", () => {
+  const query = queryInput.value.trim();
+  if (!query) {
+    showNotice("Type a search to save it.");
+    return;
+  }
+  void toggleWatchlist(query);
+});
+
 sortSelect.addEventListener("change", () => {
   // parseSort is the TUI's own parser, so "seeders:desc" means the same thing
   // in both places and anything unrecognised falls back to the server's order.
@@ -792,6 +824,23 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   addButton.textContent = "add";
   addButton.addEventListener("click", () => void addResult(result, "p2p"));
   actions.append(addButton);
+
+  // The library toggle. Labelled by what the click will do, and rebuilt from
+  // savedState on every render — the results list is re-rendered on every
+  // snapshot frame, so a hardcoded label here would go stale within a second of
+  // being clicked.
+  const inLibrary = isInLibrary(savedState, result.infoHash);
+  const favButton = document.createElement("button");
+  favButton.type = "button";
+  favButton.textContent = favouriteLabel(inLibrary);
+  favButton.setAttribute("aria-pressed", String(inLibrary));
+  favButton.addEventListener("click", () => {
+    const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
+    if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
+    if (result.source) input.source = result.source;
+    void toggleLibrary(input);
+  });
+  actions.append(favButton);
 
   // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
   // configured. A button that always answered "set a token first" is noise.
@@ -1320,9 +1369,7 @@ async function postSaved(path: string, body: unknown): Promise<Record<string, un
   return readJson(res);
 }
 
-// Task 8 adds the callers (the search-row favourite button and the
-// save-search button); this is wired up one commit from now.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Called by the save-search button beside the search box.
 async function toggleWatchlist(query: string): Promise<void> {
   const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
   if (!body) return;
@@ -1338,9 +1385,7 @@ async function removeFromWatchlist(query: string): Promise<void> {
   renderSaved();
 }
 
-// Task 8 adds the caller (the search-row ★ button); this is wired up one
-// commit from now.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Called by the favourite button on each search row.
 async function toggleLibrary(input: LibraryInput): Promise<void> {
   const body = await postSaved("/api/library", libraryBody(input, "toggle"));
   if (!body) return;
@@ -1532,6 +1577,10 @@ function openApp(payload: StatusPayload): void {
   // After the panes are on screen: the tab strip and the source badges improve
   // when it lands, and nothing waits on it.
   void loadSources();
+  // Ahead of any search, because renderResult labels its favourite button from
+  // savedState: without this, a hit already in the library opens reading
+  // "favourite" and the first click removes it.
+  void loadSaved();
   queryInput.focus();
 }
 
