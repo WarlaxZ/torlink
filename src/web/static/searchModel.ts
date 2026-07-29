@@ -259,23 +259,27 @@ export function resultMeta(result: PublicSearchResult, sources: SourcesResponse 
 }
 
 /**
- * A search hit as `runPlay` wants it.
+ * A `DashRow` for `runPlay`, from just the two fields it actually needs.
  *
- * THE NAME IS LOAD-BEARING AND IS NOT DERIVABLE. `runPlay` puts `row.name` in
- * the Real-Debrid confirmation prompt, in the "preparing…" progress line, in
- * the file-picker heading, and — through `POST /api/stream` — in the session,
+ * THE NAME IS LOAD-BEARING AND IS NOT DERIVABLE. `runPlay` puts `name` in the
+ * Real-Debrid confirmation prompt, in the "preparing…" progress line, in the
+ * file-picker heading, and — through `POST /api/stream` — in the session,
  * which is what the player page and the queue display. A row built with the
  * info hash in the name field works end to end and shows the user forty hex
  * characters at every one of those points.
  *
- * `status: "queued"` because nothing is downloading: a search hit is not a
- * queue item. It only has to satisfy `isPlayable`, which refuses "failed"
- * downloads and "missing" seeds and nothing else.
+ * `status: "queued"` because nothing is downloading: neither a search hit nor
+ * a library favourite is a queue item. It only has to satisfy `isPlayable`,
+ * which refuses "failed" downloads and "missing" seeds and nothing else.
+ *
+ * One definition, two callers (a search result and a library row) — so this
+ * docstring and the "queued" choice it explains do not have to be copied, or
+ * silently drift, into a second place that builds the same shape.
  */
-export function rowForPlay(result: PublicSearchResult): DashRow {
+export function dashRowForPlay(id: string, name: string): DashRow {
   return {
-    id: result.infoHash,
-    name: result.name,
+    id,
+    name,
     kind: "download",
     status: "queued",
     percent: 0,
@@ -283,6 +287,11 @@ export function rowForPlay(result: PublicSearchResult): DashRow {
     rate: 0,
     uploaded: 0,
   };
+}
+
+/** A search hit as `runPlay` wants it. See {@link dashRowForPlay}. */
+export function rowForPlay(result: PublicSearchResult): DashRow {
+  return dashRowForPlay(result.infoHash, result.name);
 }
 
 /** Which network an add should use. Mirrors the TUI's `d` and `r` keys. */

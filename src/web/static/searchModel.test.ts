@@ -4,6 +4,7 @@ import {
   addPlan,
   ALL_TAB,
   categoryTabs,
+  dashRowForPlay,
   emptyView,
   erroredSources,
   modeForQuery,
@@ -402,6 +403,17 @@ describe("resultMeta / sourceLabel", () => {
   });
 });
 
+describe("dashRowForPlay", () => {
+  it("builds a playable row from just an id and a name — rowForPlay's own shape", () => {
+    // The one definition rowForPlay and the library row in app.ts both call.
+    const row = dashRowForPlay("beef", "Sintel 2010");
+    expect(row.id).toBe("beef");
+    expect(row.name).toBe("Sintel 2010");
+    expect(row.status).toBe("queued");
+    expect(isPlayable(row)).toBe(true);
+  });
+});
+
 describe("rowForPlay", () => {
   it("carries the result's name", () => {
     // MUTATION GUARD (runPlay not receiving the name). runPlay puts row.name in
@@ -498,44 +510,40 @@ describe("parseLayout", () => {
 });
 
 describe("tabClickPlan", () => {
-  it("browses when nothing has been submitted — THE BUG FIX", () => {
+  it("returns the box's current value when browsing (an empty box)", () => {
     // Opening the page and clicking "Movies" with an empty search box used to
-    // call renderResults() while idle, which re-rendered an empty list. This
-    // test verifies the fix: the handler gets { action: "run", query: "" },
-    // which causes startSearch("") → modeForQuery("") → "browse".
-    // THE HANDLER MUST USE plan.query, NOT "".
+    // call renderResults() while idle, which re-rendered an empty list. The
+    // fix is returning { action: "run", query: boxValue } here rather than
+    // deciding "" for anyone, which causes startSearch("") → modeForQuery("")
+    // → "browse" one layer up.
     expect(tabClickPlan(emptyView(), "Movies", "")).toEqual({
       action: "run",
       query: "",
     });
   });
 
-  it("preserves typed-but-unsubmitted text when switching groups", () => {
+  it("returns the box's current value when it holds typed-but-unsubmitted text", () => {
     // User types "dune" without pressing Enter, then clicks a different tab.
-    // The search box value is "dune". The function returns that query.
-    // If the handler ignores plan.query and uses "" instead, the text gets wiped.
-    // This test pins that bug: the handler MUST use plan.query.
+    // tabClickPlan hands back the box's own value rather than "", so a
+    // handler that renders plan.query keeps it on screen.
     expect(tabClickPlan(emptyView(), "Movies", "dune")).toEqual({
       action: "run",
       query: "dune",
     });
   });
 
-  it("re-runs a search in a different group", () => {
-    // A search is already on screen. User clicks a different tab.
-    // The box still has the search text. We run the same search in the new group.
-    const view: SearchView = { ...emptyView(), query: "sintel", mode: "search", group: "All" };
-    expect(tabClickPlan(view, "Movies", "sintel")).toEqual({
+  it("returns the box's value on a group change regardless of the view's mode or query", () => {
+    // tabClickPlan only compares view.group to the clicked group — it reads
+    // neither view.mode nor view.query, so the same plan comes back whether
+    // the view was mid-search or mid-browse; the box's own value is what gets
+    // used for the run.
+    const searching: SearchView = { ...emptyView(), query: "sintel", mode: "search", group: "All" };
+    expect(tabClickPlan(searching, "Movies", "sintel")).toEqual({
       action: "run",
       query: "sintel",
     });
-  });
-
-  it("re-runs a browse in a different group", () => {
-    // A browse (empty query) is on screen. User clicks a different tab.
-    // We browse the new group, not search.
-    const view: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
-    expect(tabClickPlan(view, "TV", "")).toEqual({
+    const browsing: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
+    expect(tabClickPlan(browsing, "TV", "")).toEqual({
       action: "run",
       query: "",
     });
