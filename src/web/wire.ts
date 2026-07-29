@@ -536,3 +536,35 @@ export interface WatchlistResponse {
   saved: boolean;
   watchlist: string[];
 }
+
+/**
+ * The body of `POST /api/library`.
+ *
+ * IDENTIFIED BY INFO HASH, WITH NO MAGNET, and that is forced rather than
+ * chosen: `PublicSearchResult` carries no magnet (it would be ~6MB a search)
+ * while a stored favourite REQUIRES one — `isFavouriteItem` drops an entry
+ * without it. The server bridges that with `buildMagnet(infoHash, name)`, the
+ * same reconstruction `POST /api/stream` already does for a hash-only play. So
+ * `name` is not decoration here: it becomes the magnet's `dn` and the row's
+ * label, and without it a favourite is 40 hex characters.
+ *
+ * `"watched"` records one episode filename against an existing favourite,
+ * mirroring the TUI's `markWatchedInFavourite`. It requires `filename`.
+ */
+export interface LibraryRequest {
+  /** 40 hex characters, or 32 base32. Also the dedupe key. */
+  infoHash: string;
+  name: string;
+  sizeBytes?: number;
+  source?: string;
+  action: "toggle" | "remove" | "watched";
+  /** Required for `"watched"`, ignored otherwise. */
+  filename?: string;
+}
+
+/** The 200 body of `POST /api/library`. Same contract as `WatchlistResponse`: the caller renders what comes back. */
+export interface LibraryResponse {
+  /** Whether THIS torrent is in the library afterwards. */
+  favourited: boolean;
+  library: PublicFavourite[];
+}

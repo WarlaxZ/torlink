@@ -13,14 +13,15 @@ import {
   type WebResponse,
 } from "./routes";
 import { DownloadQueue } from "../download/queue";
-import { defaultConfig, type Config } from "../config/config";
+import { defaultConfig, type Config, type FavouriteItem } from "../config/config";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
 import { SOURCES } from "../sources/registry";
 import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
 import type { FetchTitleMetaResult } from "../recc/omdb";
+import type { ReccEvent } from "../recc/client";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
-import type { PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
+import type { LibraryResponse, PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -2023,5 +2024,181 @@ describe("handleWebApi — POST /api/watchlist", () => {
       JSON.stringify({ query: "dune", action: "toggle" }),
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("handleWebApi — POST /api/library", () => {
+  const HASH = "b".repeat(40);
+
+  function fav(over: Partial<FavouriteItem> = {}): FavouriteItem {
+    return {
+      id: HASH,
+      name: "Severance.S02.1080p.WEB-DL",
+      magnet: `magnet:?xt=urn:btih:${HASH}`,
+      addedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  function capture(config: Partial<Config> = {}) {
+    const saved: Config[] = [];
+    const events: ReccEvent[] = [];
+    const d = deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }),
+      saveConfigImpl: async (c: Config) => {
+        saved.push(c);
+      },
+      postEventImpl: async (_cfg, e) => {
+        events.push(e);
+      },
+    });
+    return { deps: d, saved, events };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/library", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("favourites a search hit, building a magnet the config layer accepts", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, {
+      infoHash: HASH,
+      name: "Severance.S02.1080p.WEB-DL",
+      sizeBytes: 24_000_000_000,
+      source: "eztv",
+      action: "toggle",
+    });
+
+    expect(res.status).toBe(200);
+    const body = res.json as LibraryResponse;
+    expect(body.favourited).toBe(true);
+    expect(body.library).toHaveLength(1);
+    expect(body.library[0]?.name).toBe("Severance.S02.1080p.WEB-DL");
+    expect(body.library[0]?.watched).toBe(0);
+
+    // The stored entry MUST carry a magnet: a search result has none on the
+    // wire, and isFavouriteItem drops an entry without one — so without
+    // buildMagnet this favourite would vanish on the next loadConfig.
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.magnet).toContain(`xt=urn:btih:${HASH}`);
+    expect(stored?.magnet).toContain("dn=Severance.S02.1080p.WEB-DL");
+    expect(stored?.magnet).toContain("tr=");
+  });
+
+  it("stamps addedAt with the server clock, never the browser's", async () => {
+    const { deps: d, saved } = capture();
+    const before = Date.now();
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.addedAt).toBeGreaterThanOrEqual(before);
+    expect(stored?.addedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("toggle unfavourites a torrent already in the library", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav()] });
+    const res = await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+
+    expect((res.json as LibraryResponse).favourited).toBe(false);
+    expect((res.json as LibraryResponse).library).toEqual([]);
+    expect(saved[0]?.favourites).toEqual([]);
+  });
+
+  it("remove is idempotent", async () => {
+    const { deps: d } = capture({ favourites: [fav()] });
+    const gone = await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    expect((gone.json as LibraryResponse).library).toEqual([]);
+
+    const again = await post(d, { infoHash: "c".repeat(40), name: "Other", action: "remove" });
+    expect((again.json as LibraryResponse).library).toHaveLength(1);
+    expect((again.json as LibraryResponse).favourited).toBe(false);
+  });
+
+  it("posts favourited / unfavourited to reccd, so the taste profile matches the TUI", async () => {
+    const on = capture({ reccUrl: "http://localhost:4100" });
+    await post(on.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    expect(on.events).toEqual([
+      expect.objectContaining({ type: "favourited", rawName: "Severance.S02", source: "torlink" }),
+    ]);
+
+    const off = capture({ reccUrl: "http://localhost:4100", favourites: [fav()] });
+    await post(off.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    expect(off.events).toEqual([expect.objectContaining({ type: "unfavourited" })]);
+  });
+
+  it("uses the server clock for the event ts, not a browser's", async () => {
+    const { deps: d, events } = capture({ reccUrl: "http://localhost:4100" });
+    const before = Date.now();
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(events[0]?.ts).toBeGreaterThanOrEqual(before);
+  });
+
+  it("posts no event on remove — the TUI's ✕ does not rate anything either", async () => {
+    const { deps: d, events } = capture({
+      reccUrl: "http://localhost:4100",
+      favourites: [fav()],
+    });
+    await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    expect(events).toEqual([]);
+  });
+
+  it("succeeds with reccd unconfigured, and when the event post rejects", async () => {
+    const quiet = capture(); // no reccUrl
+    const ok = await post(quiet.deps, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(ok.status).toBe(200);
+    expect(quiet.events).toEqual([]);
+
+    const broken = deps({
+      loadConfigImpl: async () => ({
+        ...defaultConfig,
+        downloadDir: "/tmp/dl",
+        reccUrl: "http://localhost:4100",
+      }),
+      saveConfigImpl: async () => {},
+      postEventImpl: async () => {
+        throw new Error("reccd is down");
+      },
+    });
+    const survives = await post(broken, { infoHash: HASH, name: "Severance", action: "toggle" });
+    // reccd must never take a favourite with it: the event is fire-and-forget.
+    expect(survives.status).toBe(200);
+  });
+
+  it("rejects a bad hash, a missing name, and an unknown action", async () => {
+    const { deps: d, saved } = capture();
+
+    expect((await post(d, { infoHash: "nope", name: "X", action: "toggle" })).status).toBe(400);
+    expect((await post(d, { infoHash: HASH, name: "   ", action: "toggle" })).status).toBe(400);
+    expect((await post(d, { infoHash: HASH, name: "X", action: "explode" })).status).toBe(400);
+    expect(saved).toHaveLength(0);
+  });
+
+  it("preserves unrelated config fields", async () => {
+    const { deps: d, saved } = capture({ realDebridToken: "rd-token", trackers: ["udp://x/announce"] });
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(saved[0]?.realDebridToken).toBe("rd-token");
+    expect(saved[0]?.trackers).toEqual(["udp://x/announce"]);
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/library",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ infoHash: HASH, name: "X", action: "toggle" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("stores an entry that survives loadConfig's own validation", async () => {
+    const { deps: d, saved } = capture();
+    await post(d, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    // isFavouriteItem's three requirements, which is what would silently drop
+    // this entry on the next boot if buildMagnet were ever removed.
+    expect(typeof stored?.id).toBe("string");
+    expect(stored?.id.length).toBeGreaterThan(0);
+    expect(stored?.name.length).toBeGreaterThan(0);
+    expect(stored?.magnet.length).toBeGreaterThan(0);
   });
 });

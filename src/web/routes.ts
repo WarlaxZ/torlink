@@ -24,7 +24,12 @@ import {
 } from "../recc/client";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { validateToken } from "../integrations/realdebrid";
-import { parseInput } from "../sources/magnet";
+import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
+import {
+  isFavourited,
+  removeFavourite as removeFromFavourites,
+  toggleFavourite as toggleInFavourites,
+} from "../util/favouriteList";
 import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
 import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
 import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
@@ -41,6 +46,7 @@ import { hintForGroup, parseRelease } from "../util/release";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  LibraryResponse,
   PublicFavourite,
   PublicSearchResult,
   PublicTitleParse,
@@ -794,6 +800,85 @@ async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResp
   return { status: 200, json: out };
 }
 
+async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  const action = body.action;
+  if (action !== "toggle" && action !== "remove" && action !== "watched") {
+    return { status: 400, json: { error: "invalid action" } };
+  }
+
+  // isInfoHash is anchored to the WHOLE string, so an ordinary query can never
+  // slip through; normalizeInfoHash does not itself validate, it only
+  // lowercases and converts 32-char base32 to hex, so the id ends up in one
+  // canonical form and the dedupe key matches whatever the TUI stored.
+  // Validated rather than trusted because this string becomes a magnet the
+  // download engine and Real-Debrid will act on.
+  const rawHash = typeof body.infoHash === "string" ? body.infoHash.trim() : "";
+  if (!isInfoHash(rawHash)) return { status: 400, json: { error: "invalid info hash" } };
+  const infoHash = normalizeInfoHash(rawHash);
+
+  // Required even on remove, where it is unused: a body missing it is a client
+  // bug, and accepting it on one action but not another is the kind of
+  // asymmetry that gets a caller written against the wrong shape.
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return { status: 400, json: { error: "missing name" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const current = config.favourites ?? [];
+  const wasFavourited = isFavourited(current, infoHash);
+
+  let favourites: FavouriteItem[];
+  if (action === "remove") {
+    favourites = removeFromFavourites(current, infoHash);
+  } else {
+    const item: FavouriteItem = {
+      id: infoHash,
+      name,
+      // The bridge this route exists to build. See LibraryRequest's comment.
+      magnet: buildMagnet(infoHash, name),
+      // The SERVER's clock. A browser's can be years out, and the library is
+      // ordered most-recent-first — one bad addedAt pins a row to the top for
+      // good.
+      addedAt: Date.now(),
+    };
+    if (typeof body.sizeBytes === "number" && body.sizeBytes > 0) item.sizeBytes = body.sizeBytes;
+    if (typeof body.source === "string" && body.source) item.source = body.source as SourceId;
+    favourites = toggleInFavourites(current, item);
+  }
+
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+
+  // Only a toggle rates anything. Removing a row from the library is
+  // housekeeping — the TUI's ✕ posts no event either, and treating it as a
+  // verdict would teach reccd that tidying up is a dislike.
+  if (action === "toggle") {
+    const reccConfig = resolveReccConfig(config);
+    if (reccConfig.reccUrl) {
+      const event: ReccEvent = {
+        type: wasFavourited ? "unfavourited" : "favourited",
+        rawName: name,
+        // Server clock and fixed source, for the reason reccEvent states.
+        ts: Date.now(),
+        source: "torlink",
+      };
+      // `.catch` on top of postEvent's own swallowing, and for the same reason
+      // reccEvent does it: this promise is unwatched, and an unhandled
+      // rejection from an injected impl would take the daemon down — which is
+      // the exact "reccd must never take the process with it" rule these
+      // routes exist to honour.
+      void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
+    }
+  }
+
+  const out: LibraryResponse = {
+    favourited: isFavourited(favourites, infoHash),
+    library: favourites.map(toPublicFavourite),
+  };
+  return { status: 200, json: out };
+}
+
 // ---- title metadata ----------------------------------------------------
 
 /**
@@ -1248,6 +1333,10 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === "/api/watchlist") {
     return watchlistAction(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/library") {
+    return libraryAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {
