@@ -757,3 +757,27 @@ select:focus-visible {
 .saved-query:hover {
   color: var(--accent);
 }
+
+/* A result row's thumbnail. The row keeps its head/meta/actions layout and
+   gains a fixed-width poster column, so a row with no artwork is the row this
+   page has always had rather than a hole where an image should be. */
+.result-with-poster {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+}
+
+/* Overrides .poster's centring and cap: in a row the frame IS its column. */
+.result-thumb {
+  max-width: none;
+  margin-inline: 0;
+  margin-bottom: 0;
+}
+
+/* At 3.5rem there is no room for "NO OMDB KEY" — the row's own hint line says
+   it once for the page, so the frame stays an empty box. */
+.result-thumb .poster-note {
+  font-size: 0.55rem;
+  padding: 0.2rem;
+}

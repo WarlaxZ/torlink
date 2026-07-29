@@ -51,11 +51,17 @@ import {
 } from "./searchModel";
 import {
   createPreviewController,
+  OMDB_KEY_HINT,
   posterPath,
   previewCopy,
   type PreviewState,
   type PublicTitleMeta,
 } from "./previewModel";
+import {
+  createPosterCache,
+  postersApply,
+  type PosterOutcome,
+} from "./resultPosters";
 import {
   ACTION_LABEL,
   createReccController,
@@ -162,6 +168,7 @@ const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
 const searchProgress = el<HTMLSpanElement>("search-progress");
 const searchStatusLine = el<HTMLParagraphElement>("search-status");
+const searchHintLine = el<HTMLParagraphElement>("search-hint");
 const resultsList = el<HTMLUListElement>("results");
 
 const previewPane = el<HTMLElement>("preview");
@@ -696,6 +703,10 @@ function startSearch(raw: string): void {
   queryInput.value = query;
   selectedHash = null;
   preview.select(null, searchView.group);
+  // A new search is the only moment the whole set of rows changes, so it is the
+  // only moment every blob is certainly dead.
+  resultPosters.clear();
+  paintSearchHint();
   renderResults();
 
   const source = new EventSource(searchUrl(query, searchView.group, token));
@@ -778,6 +789,163 @@ aliveCheck.addEventListener("change", () => {
   renderResults();
 });
 
+// One cache for the whole page. Cleared when a new search starts — the only
+// moment the set of rows changes wholesale — which revokes every blob it holds.
+const resultPosters = createPosterCache({
+  async fetchMeta(release, group): Promise<PublicTitleMeta | null> {
+    const params = new URLSearchParams({ release });
+    // The group, not a parsed hint: the server maps it (hintForGroup) so the
+    // browser never has to know that "TV" means OMDb's "series".
+    if (group && group !== ALL_TAB) params.set("group", group);
+    try {
+      const res = await fetch(`/api/title?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return null;
+      const body = (await res.json()) as unknown;
+      return body && typeof body === "object" ? (body as PublicTitleMeta) : null;
+    } catch {
+      return null;
+    }
+  },
+  async fetchBlob(posterUrl): Promise<string | null> {
+    // Through /api/poster, never an <img src> at the CDN: that would leak the
+    // user's IP and referer on every row, which is why that route exists. It is
+    // also behind the bearer token, and an <img> cannot send a header.
+    try {
+      const res = await fetch(posterPath(posterUrl), { headers: authHeaders() });
+      if (!res.ok) return null;
+      return URL.createObjectURL(await res.blob());
+    } catch {
+      return null;
+    }
+  },
+  revoke: (url) => URL.revokeObjectURL(url),
+});
+
+/**
+ * The page's single "no OMDb key" line.
+ *
+ * TWO SOURCES, and the second is the one that matters. `resultPosters.hint()`
+ * answers from the lookups that were made — but with no key configured
+ * `postersApply` makes NONE, so that path would stay silent on exactly the
+ * install that needs the sentence. The config flag is therefore checked first,
+ * gated on the tab having artwork to miss: a Games tab has no posters to explain
+ * and must not carry a note about a key it would never use.
+ *
+ * `hint()` still matters for the race — a key revoked mid-session, where lookups
+ * were made and came back `no-key`.
+ */
+function paintSearchHint(): void {
+  const keyless =
+    sources !== null && !sources.omdbConfigured && previewApplies(searchView.group);
+  const hint = keyless ? OMDB_KEY_HINT : resultPosters.hint();
+  searchHintLine.textContent = hint ?? "";
+  searchHintLine.hidden = hint === null;
+}
+
+/**
+ * Paint one poster frame.
+ *
+ * `compact` is the row thumbnail, where the frame is 3.5rem wide and "NO OMDB
+ * KEY" does not fit — it gets an empty box with the wording on `title`, and the
+ * page's hint line carries the explanation. A grid card's frame is poster-width,
+ * so it shows the note as text the way the For You cards do.
+ */
+function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean): void {
+  if (outcome.kind === "poster") {
+    const img = document.createElement("img");
+    img.src = outcome.url;
+    img.alt = "";
+    host.replaceChildren(img);
+    return;
+  }
+  const note = resultPosters.note(outcome);
+  const span = document.createElement("span");
+  span.className = "poster-note";
+  span.textContent = compact ? "" : note;
+  // An attribute, not markup — and the only way the compact frame says anything.
+  span.title = note;
+  host.replaceChildren(span);
+}
+
+// ONE observer for the page, not one per row, and this is the same hazard
+// resultPosters.ts exists for — one layer up.
+//
+// The results list is rebuilt on every snapshot frame, up to 23 a search. A row
+// whose poster has not settled yet has nothing to paint, so a per-row
+// `new IntersectionObserver(...)` would be constructed again on every frame —
+// and `disconnect()` only ever runs on intersect, so every row that never
+// scrolls into view leaves its observer alive holding a detached frame (the old
+// `li` having been discarded by `replaceChildren`). A 100-row browse across 23
+// frames is ~2300 live observers pinning dead nodes. Exactly the 23×-fetch,
+// 22-leaked-blob failure the cache prevents, in a different currency.
+//
+// One observer, disconnected wholesale at the top of every render and re-armed
+// on the new frames, cannot accumulate: after `disconnect()` it observes exactly
+// the frames now on the page.
+const posterObserver: IntersectionObserver | null =
+  // No IntersectionObserver (an old browser, a non-DOM environment) means fetch
+  // eagerly instead — a missing optimisation must not become a missing feature.
+  typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          // Stop watching this frame specifically; the others stay armed.
+          posterObserver?.unobserve(entry.target);
+          const pending = posterTargets.get(entry.target);
+          if (pending) startPoster(pending.release, entry.target as HTMLElement, pending.compact);
+        }
+      })
+    : null;
+
+// What each observed frame is waiting for. A WeakMap so a frame discarded by a
+// re-render is collectable — a Map keyed on elements would be the leak this
+// design is avoiding, just spelled differently.
+const posterTargets = new WeakMap<Element, { release: string; compact: boolean }>();
+
+function startPoster(release: string, host: HTMLElement, compact: boolean): void {
+  const outcome = resultPosters.want(release, searchView.group);
+  if (!(outcome instanceof Promise)) {
+    paintPoster(host, outcome, compact);
+    return;
+  }
+  void outcome.then((settledOutcome) => {
+    // The row may have been re-rendered or filtered away during the two round
+    // trips; a detached node is not worth painting.
+    if (host.isConnected) paintPoster(host, settledOutcome, compact);
+    paintSearchHint();
+  });
+}
+
+/**
+ * Mount a row's poster, lazily.
+ *
+ * Lazy because a browse can return 100+ rows, and fetching artwork for rows
+ * nobody scrolled to would spend a daily-capped OMDb key on them. For You is
+ * naturally ~20 picks and needs no such gate, which is why its own mount is
+ * eager.
+ */
+function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void {
+  const known = resultPosters.peek(release);
+  if (known !== undefined) {
+    // Settled already: paint it and never observe it. This is the path almost
+    // every frame of a re-render takes, and it is why the observer set stays
+    // small after the first pass.
+    paintPoster(host, known, compact);
+    return;
+  }
+  // An empty frame while it waits — NOT paintPoster's "none", which would put
+  // "No poster" on a grid card before anything had been asked. The CSS gives the
+  // frame its border and 2:3 box, so an empty one is a placeholder rather than a
+  // hole, and the row does not resize when the image lands.
+  host.replaceChildren();
+  if (posterObserver === null) {
+    startPoster(release, host, compact);
+    return;
+  }
+  posterTargets.set(host, { release, compact });
+  posterObserver.observe(host);
+}
+
 // Every node below is createElement + textContent. A release name is written by
 // whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
 // stranger on a public tracker.
@@ -848,11 +1016,30 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
     actions.append(debridButton);
   }
 
-  li.append(head, meta, actions);
+  const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
+  if (!withPoster) {
+    li.append(head, meta, actions);
+    return li;
+  }
+
+  // The row's own layout is untouched — it moves wholesale into the second grid
+  // column, so a keyless page and a Games tab render exactly what they always
+  // did.
+  li.classList.add("result-with-poster");
+  const frame = document.createElement("div");
+  frame.className = "poster result-thumb";
+  const body = document.createElement("div");
+  body.append(head, meta, actions);
+  li.append(frame, body);
+  mountResultPoster(result.name, frame, true);
   return li;
 }
 
 function renderResults(): void {
+  // Every frame about to be replaced stops being watched. Without this the
+  // observer accumulates targets across all 23 snapshot frames of a search,
+  // pinning detached nodes for every row that never scrolled into view.
+  posterObserver?.disconnect();
   const shown = visibleResults(searchView, reportsHealthLookup(sources));
   resultsList.replaceChildren(...shown.map(renderResult));
 
@@ -870,6 +1057,7 @@ function renderResults(): void {
     selectedHash = null;
     preview.select(null, searchView.group);
   }
+  paintSearchHint();
 }
 
 function selectResult(result: PublicSearchResult): void {
