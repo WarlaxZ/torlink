@@ -355,25 +355,33 @@ export function previewApplies(group: string): boolean {
   return group === ALL_TAB || group === "Movies" || group === "TV" || group === "Anime";
 }
 
+/** What clicking a category tab should do. */
+export type TabClickPlan =
+  | { action: "ignore" }
+  | { action: "run"; query: string };
+
 /**
- * What clicking a category tab should do.
+ * Decides a tab click: what to do and what query to search.
  *
- * `"run"` for every real change, INCLUDING from `mode: "idle"` — which is the
- * bug this replaced. The old branch called `renderResults()` while idle, so
- * opening the page and clicking "Movies" re-rendered an empty list and waited
- * for the search box to be submitted. Clicking a category is a request to see
- * that category; a blank query then means browse, which is exactly what the
- * server does with one.
+ * `{ action: "ignore" }` for the tab already selected, so a stray tap does not
+ * restart a 23-source fan-out.
  *
- * A re-run rather than a filter over what is on screen, because the server
- * searches only the selected group's sources — the other tabs' hits were never
- * fetched. Same as the TUI, where each tab is its own slice of one fan-out.
+ * `{ action: "run", query }` for every real group change, INCLUDING from
+ * `mode: "idle"`. Clicking a category is a request to see it; the query is
+ * taken from the search box, so a blank query browses (which is exactly what
+ * the server does). This is the bug that was fixed: the old code called
+ * `renderResults()` while idle, so opening the page and clicking "Movies"
+ * re-rendered an empty list. Passing the box — not "" — preserves text the
+ * user typed but did not yet submit.
  *
- * `"ignore"` for the tab already selected, so a stray tap on the current tab
- * does not restart a 23-source fan-out.
+ * A re-run rather than a filter, because the server searches only the selected
+ * group's sources — the other tabs' hits were never fetched. Same as the TUI,
+ * where each tab is its own slice of one fan-out.
  */
-export function groupChangePlan(view: SearchView, group: string): "ignore" | "run" {
-  return view.group === group ? "ignore" : "run";
+export function tabClickPlan(view: SearchView, group: string, boxValue: string): TabClickPlan {
+  return view.group === group
+    ? { action: "ignore" }
+    : { action: "run", query: boxValue };
 }
 
 // A release name in a confirm() has to leave room for the question and the

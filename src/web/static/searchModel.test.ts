@@ -6,7 +6,6 @@ import {
   categoryTabs,
   emptyView,
   erroredSources,
-  groupChangePlan,
   modeForQuery,
   previewApplies,
   progressLabel,
@@ -17,6 +16,7 @@ import {
   searchUrl,
   sourceLabel,
   statusLineHidden,
+  tabClickPlan,
   visibleResults,
   type PublicSearchResult,
   type PublicSearchSnapshot,
@@ -478,30 +478,54 @@ describe("previewApplies", () => {
   });
 });
 
-describe("groupChangePlan", () => {
-  it("runs a browse when nothing has been submitted yet — THE BUG", () => {
-    // Opening the page and clicking "Movies" used to render nothing: the old
-    // code called renderResults() while idle, which re-renders an empty list.
-    // Clicking a category IS a request to see that category.
-    expect(groupChangePlan(emptyView(), "Movies")).toBe("run");
+describe("tabClickPlan", () => {
+  it("browses when nothing has been submitted — THE BUG FIX", () => {
+    // Opening the page and clicking "Movies" with an empty search box used to
+    // call renderResults() while idle, which re-rendered an empty list. This
+    // test verifies the fix: the handler gets { action: "run", query: "" },
+    // which causes startSearch("") → modeForQuery("") → "browse".
+    // THE HANDLER MUST USE plan.query, NOT "".
+    expect(tabClickPlan(emptyView(), "Movies", "")).toEqual({
+      action: "run",
+      query: "",
+    });
   });
 
-  it("re-runs a search when one is already on screen", () => {
-    // Not a filter over what is here: the server searches only the selected
-    // group's sources, so the other tabs' hits were never fetched.
-    const view: SearchView = { ...emptyView(), query: "dune", mode: "search", group: "All" };
-    expect(groupChangePlan(view, "Movies")).toBe("run");
+  it("preserves typed-but-unsubmitted text when switching groups", () => {
+    // User types "dune" without pressing Enter, then clicks a different tab.
+    // The search box value is "dune". The function returns that query.
+    // If the handler ignores plan.query and uses "" instead, the text gets wiped.
+    // This test pins that bug: the handler MUST use plan.query.
+    expect(tabClickPlan(emptyView(), "Movies", "dune")).toEqual({
+      action: "run",
+      query: "dune",
+    });
   });
 
-  it("re-runs a browse, whose query is empty but still needs running", () => {
+  it("re-runs a search in a different group", () => {
+    // A search is already on screen. User clicks a different tab.
+    // The box still has the search text. We run the same search in the new group.
+    const view: SearchView = { ...emptyView(), query: "sintel", mode: "search", group: "All" };
+    expect(tabClickPlan(view, "Movies", "sintel")).toEqual({
+      action: "run",
+      query: "sintel",
+    });
+  });
+
+  it("re-runs a browse in a different group", () => {
+    // A browse (empty query) is on screen. User clicks a different tab.
+    // We browse the new group, not search.
     const view: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
-    expect(groupChangePlan(view, "TV")).toBe("run");
+    expect(tabClickPlan(view, "TV", "")).toEqual({
+      action: "run",
+      query: "",
+    });
   });
 
-  it("ignores a click on the tab that is already selected", () => {
-    // Otherwise every stray tap on the current tab restarts a 23-source fan-out.
+  it("ignores a click on the already-selected tab", () => {
+    // Clicking the current tab restarts a 23-source fan-out. Don't do that.
     const view: SearchView = { ...emptyView(), mode: "search", query: "dune", group: "Movies" };
-    expect(groupChangePlan(view, "Movies")).toBe("ignore");
-    expect(groupChangePlan(emptyView(), "All")).toBe("ignore");
+    expect(tabClickPlan(view, "Movies", "dune")).toEqual({ action: "ignore" });
+    expect(tabClickPlan(emptyView(), "All", "")).toEqual({ action: "ignore" });
   });
 });

@@ -31,7 +31,6 @@ import {
   ALL_TAB,
   categoryTabs,
   emptyView,
-  groupChangePlan,
   modeForQuery,
   parseSort,
   previewApplies,
@@ -42,6 +41,7 @@ import {
   searchUrl,
   sourceLabel,
   statusLineHidden,
+  tabClickPlan,
   visibleResults,
   type AddVia,
   type PublicSearchResult,
@@ -647,16 +647,11 @@ function renderTabs(): void {
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(group === searchView.group));
       button.addEventListener("click", () => {
-        if (groupChangePlan(searchView, group) === "ignore") return;
+        const plan = tabClickPlan(searchView, group, queryInput.value);
+        if (plan.action === "ignore") return;
         searchView = { ...searchView, group };
         renderTabs();
-        // queryInput.value, NOT "". startSearch assigns its trimmed query back
-        // into the box, so passing the empty string here would wipe text the
-        // user had typed but not yet submitted. Passing the box browses when it
-        // is blank and searches when it is not — and the blank case is the one
-        // manual testing misses, because the box is empty when you click a tab
-        // to check this works.
-        startSearch(queryInput.value);
+        startSearch(plan.query);
       });
       return button;
     }),
