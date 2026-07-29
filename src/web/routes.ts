@@ -27,6 +27,7 @@ import { validateToken } from "../integrations/realdebrid";
 import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
 import {
   isFavourited,
+  markWatched,
   removeFavourite as removeFromFavourites,
   toggleFavourite as toggleInFavourites,
 } from "../util/favouriteList";
@@ -828,6 +829,28 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const current = config.favourites ?? [];
   const wasFavourited = isFavourited(current, infoHash);
+
+  if (action === "watched") {
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    if (!filename) return { status: 400, json: { error: "missing filename" } };
+
+    // markWatched returns the SAME array reference when nothing changed — the
+    // id is not favourited, or the episode was already recorded. Both are
+    // ordinary: this fires whenever a player launches, including for a torrent
+    // the user never favourited. Writing anyway would churn config.json on
+    // every re-watch, so the reference check is the write gate.
+    const favourites = markWatched(current, infoHash, filename);
+    if (favourites !== current) {
+      await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+    }
+    const out: LibraryResponse = {
+      // Not an error when absent: the browser fires this after a successful
+      // play and must not be told off for playing something unfavourited.
+      favourited: isFavourited(favourites, infoHash),
+      library: favourites.map(toPublicFavourite),
+    };
+    return { status: 200, json: out };
+  }
 
   let favourites: FavouriteItem[];
   if (action === "remove") {

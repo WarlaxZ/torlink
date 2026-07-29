@@ -2209,4 +2209,58 @@ describe("handleWebApi — POST /api/library", () => {
     expect(stored?.name.length).toBeGreaterThan(0);
     expect(stored?.magnet.length).toBeGreaterThan(0);
   });
+
+  it("records a watched episode against a favourite", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
+    const res = await post(d, {
+      infoHash: HASH,
+      name: "Severance",
+      action: "watched",
+      filename: "ep2.mkv",
+    });
+
+    expect(res.status).toBe(200);
+    expect((res.json as LibraryResponse).library[0]?.watched).toBe(2);
+    expect(saved[0]?.favourites?.[0]?.watched).toEqual(["ep1.mkv", "ep2.mkv"]);
+  });
+
+  it("skips the disk write when nothing changed", async () => {
+    // Already recorded: markWatched returns the same array reference, and
+    // writing anyway would churn the config file every time a user re-watched
+    // an episode.
+    const dupe = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
+    await post(dupe.deps, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    expect(dupe.saved).toHaveLength(0);
+
+    // Not favourited at all: there is nothing to record against. Still a 200 —
+    // the browser fires this after a player launches and must not be handed an
+    // error for playing something it never favourited.
+    const absent = capture();
+    const res = await post(absent.deps, {
+      infoHash: HASH,
+      name: "Severance",
+      action: "watched",
+      filename: "ep1.mkv",
+    });
+    expect(res.status).toBe(200);
+    expect((res.json as LibraryResponse).favourited).toBe(false);
+    expect(absent.saved).toHaveLength(0);
+  });
+
+  it("rejects watched without a filename", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav()] });
+    const res = await post(d, { infoHash: HASH, name: "Severance", action: "watched" });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: "missing filename" });
+    expect(saved).toHaveLength(0);
+  });
+
+  it("posts no reccd event for watched — it is progress, not a rating", async () => {
+    const { deps: d, events } = capture({
+      reccUrl: "http://localhost:4100",
+      favourites: [fav()],
+    });
+    await post(d, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    expect(events).toEqual([]);
+  });
 });
