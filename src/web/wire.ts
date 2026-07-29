@@ -298,6 +298,20 @@ export interface SourcesResponse {
    * thing the TUI does, and deliberately not a silent downgrade to P2P.
    */
   debridConfigured: boolean;
+  /**
+   * Whether an OMDb API key is configured (file or `TORLINK_OMDB_KEY`).
+   *
+   * A capability flag, never the key — the same contract as
+   * `debridConfigured` above, and here for the same reason: this response is
+   * the one thing the search UI fetches before it can render anything.
+   *
+   * WHAT IT SAVES. Without it, a keyless server has every visible result row
+   * fire a `/api/title` lookup purely to be told `{status: "no-key"}` — one
+   * round trip per row to learn a fact that is true for the whole page. With
+   * it the browser fetches no artwork at all and shows the one setup hint.
+   * That difference IS the graceful degradation.
+   */
+  omdbConfigured: boolean;
 }
 
 /**

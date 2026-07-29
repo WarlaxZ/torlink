@@ -644,6 +644,10 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // must agree with the TUI about whether Real-Debrid is on, and the TUI
     // resolves it the same way.
     debridConfigured: resolveRealDebridToken(config) !== "",
+    // resolveOmdbApiKey, not config.omdbApiKey, so TORLINK_OMDB_KEY counts —
+    // the browser must agree with the TUI about whether artwork is available,
+    // and the TUI resolves it the same way.
+    omdbConfigured: resolveOmdbApiKey(config) !== "",
   };
 }
 

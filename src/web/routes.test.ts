@@ -1147,6 +1147,45 @@ describe("GET /api/sources", () => {
   });
 });
 
+describe("sourcesResponse — omdbConfigured", () => {
+  beforeEach(() => {
+    // resolveOmdbApiKey reads TORLINK_OMDB_KEY, which a developer may well have
+    // exported — without this the false case passes or fails by accident.
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+  });
+
+  const ask = (config: Partial<Config>) =>
+    handleWebApi(
+      deps({ loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }) }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+
+  it("is false with no key, so the browser fetches no posters at all", async () => {
+    const res = await ask({});
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(false);
+  });
+
+  it("is true from the config file", async () => {
+    const res = await ask({ omdbApiKey: "abc123" });
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(true);
+  });
+
+  it("is true from TORLINK_OMDB_KEY, so the browser agrees with the TUI", async () => {
+    vi.stubEnv("TORLINK_OMDB_KEY", "from-env");
+    const res = await ask({});
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(true);
+  });
+
+  it("never puts the key itself on the wire", async () => {
+    const res = await ask({ omdbApiKey: "super-secret-key" });
+    expect(JSON.stringify(res.json)).not.toContain("super-secret-key");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Title metadata
 // ---------------------------------------------------------------------------

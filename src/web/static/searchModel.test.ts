@@ -91,6 +91,7 @@ const sourcesResponse = (over: Partial<SourcesResponse> = {}): SourcesResponse =
   ],
   adultEnabled: false,
   debridConfigured: false,
+  omdbConfigured: false,
   ...over,
 });
 
