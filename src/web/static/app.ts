@@ -32,6 +32,7 @@ import {
   categoryTabs,
   emptyView,
   modeForQuery,
+  parseLayout,
   parseSort,
   previewApplies,
   reportsHealthLookup,
@@ -46,6 +47,7 @@ import {
   type AddVia,
   type PublicSearchResult,
   type PublicSearchSnapshot,
+  type ResultLayout,
   type SearchView,
   type SourcesResponse,
 } from "./searchModel";
@@ -166,6 +168,8 @@ const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
+const layoutControl = el<HTMLLabelElement>("layout-control");
+const layoutSelect = el<HTMLSelectElement>("layout");
 const searchProgress = el<HTMLSpanElement>("search-progress");
 const searchStatusLine = el<HTMLParagraphElement>("search-status");
 const searchHintLine = el<HTMLParagraphElement>("search-hint");
@@ -615,6 +619,23 @@ let searchStream: EventSource | null = null;
 // 23 of those arrive during one search.
 let selectedHash: string | null = null;
 
+// Remembered across reloads, and read through parseLayout because localStorage
+// is user-writable. Wrapped in try/catch for the reason readStoredToken is:
+// storage throws rather than returning null when it is blocked (Safari private
+// mode, a hardened profile), and a dead page is a worse outcome than a
+// forgotten preference.
+const LAYOUT_KEY = "torlnk.layout";
+
+function readStoredLayout(): ResultLayout {
+  try {
+    return parseLayout(localStorage.getItem(LAYOUT_KEY));
+  } catch {
+    return "list";
+  }
+}
+
+let layout: ResultLayout = readStoredLayout();
+
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
@@ -789,6 +810,18 @@ aliveCheck.addEventListener("change", () => {
   renderResults();
 });
 
+layoutSelect.addEventListener("change", () => {
+  layout = parseLayout(layoutSelect.value);
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout);
+  } catch {
+    /* not remembering the layout is survivable; failing the click is not */
+  }
+  // No refetch: both layouts render from the same visibleResults output and the
+  // same poster cache, so a toggle costs nothing.
+  renderResults();
+});
+
 // One cache for the whole page. Cleared when a new search starts — the only
 // moment the set of rows changes wholesale — which revokes every blob it holds.
 const resultPosters = createPosterCache({
@@ -946,6 +979,87 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
   posterObserver.observe(host);
 }
 
+// The three buttons a result offers, built once and used by both layouts: a
+// grid card that offered fewer of them than the list row would be a downgrade
+// dressed as a view option.
+function resultActions(result: PublicSearchResult): HTMLDivElement {
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void play(rowForPlay(result)));
+  actions.append(playButton);
+
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.textContent = "add";
+  addButton.addEventListener("click", () => void addResult(result, "p2p"));
+  actions.append(addButton);
+
+  const inLibrary = isInLibrary(savedState, result.infoHash);
+  const favButton = document.createElement("button");
+  favButton.type = "button";
+  favButton.textContent = favouriteLabel(inLibrary);
+  favButton.setAttribute("aria-pressed", String(inLibrary));
+  favButton.addEventListener("click", () => {
+    const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
+    if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
+    if (result.source) input.source = result.source;
+    void toggleLibrary(input);
+  });
+  actions.append(favButton);
+
+  if (sources?.debridConfigured) {
+    const debridButton = document.createElement("button");
+    debridButton.type = "button";
+    debridButton.textContent = "add via RD";
+    debridButton.addEventListener("click", () => void addResult(result, "debrid"));
+    actions.append(debridButton);
+  }
+
+  return actions;
+}
+
+// Same createElement/textContent rule as every other list here: a release name
+// is written by whoever uploaded the torrent.
+function renderResultCard(result: PublicSearchResult): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row result-card";
+  li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
+
+  // The poster is the card's primary target and what it does is select the
+  // result, which fills the preview pane — the same thing clicking the name
+  // does in list view.
+  const posterButton = document.createElement("button");
+  posterButton.type = "button";
+  posterButton.className = "recc-poster";
+  posterButton.title = result.name;
+  const frame = document.createElement("div");
+  frame.className = "poster";
+  posterButton.append(frame);
+  posterButton.addEventListener("click", () => selectResult(result));
+  // compact: false — a card's frame is poster-width, so an empty one shows its
+  // note as text rather than relying on a tooltip.
+  mountResultPoster(result.name, frame, false);
+
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "result-name row-name";
+  name.textContent = result.name;
+  name.title = result.name;
+  name.addEventListener("click", () => selectResult(result));
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  meta.textContent = resultMeta(result, sources);
+
+  li.append(posterButton, name, meta, resultActions(result));
+  return li;
+}
+
 // Every node below is createElement + textContent. A release name is written by
 // whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
 // stranger on a public tracker.
@@ -973,48 +1087,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
 
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
-
-  const playButton = document.createElement("button");
-  playButton.type = "button";
-  playButton.className = "play";
-  playButton.textContent = "play";
-  playButton.addEventListener("click", () => void play(rowForPlay(result)));
-  actions.append(playButton);
-
-  const addButton = document.createElement("button");
-  addButton.type = "button";
-  addButton.textContent = "add";
-  addButton.addEventListener("click", () => void addResult(result, "p2p"));
-  actions.append(addButton);
-
-  // The library toggle. Labelled by what the click will do, and rebuilt from
-  // savedState on every render — the results list is re-rendered on every
-  // snapshot frame, so a hardcoded label here would go stale within a second of
-  // being clicked.
-  const inLibrary = isInLibrary(savedState, result.infoHash);
-  const favButton = document.createElement("button");
-  favButton.type = "button";
-  favButton.textContent = favouriteLabel(inLibrary);
-  favButton.setAttribute("aria-pressed", String(inLibrary));
-  favButton.addEventListener("click", () => {
-    const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
-    if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
-    if (result.source) input.source = result.source;
-    void toggleLibrary(input);
-  });
-  actions.append(favButton);
-
-  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
-  // configured. A button that always answered "set a token first" is noise.
-  if (sources?.debridConfigured) {
-    const debridButton = document.createElement("button");
-    debridButton.type = "button";
-    debridButton.textContent = "add via RD";
-    debridButton.addEventListener("click", () => void addResult(result, "debrid"));
-    actions.append(debridButton);
-  }
+  const actions = resultActions(result);
 
   const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
   if (!withPoster) {
@@ -1041,7 +1114,21 @@ function renderResults(): void {
   // pinning detached nodes for every row that never scrolled into view.
   posterObserver?.disconnect();
   const shown = visibleResults(searchView, reportsHealthLookup(sources));
-  resultsList.replaceChildren(...shown.map(renderResult));
+
+  // The toggle is meaningless where there is no artwork, and a grid of empty
+  // frames is worse than the list it replaced — so on a Games tab, or with no
+  // OMDb key, the control is hidden and the layout is forced back to list. The
+  // stored preference is untouched: it applies again the moment the user is on
+  // a tab that can honour it.
+  const canGrid = postersApply(searchView.group, sources?.omdbConfigured === true);
+  layoutControl.hidden = !canGrid;
+  const effective: ResultLayout = canGrid ? layout : "list";
+
+  resultsList.classList.toggle("recc-grid", effective === "grid");
+  resultsList.classList.toggle("results-grid", effective === "grid");
+  resultsList.replaceChildren(
+    ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
+  );
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -1753,6 +1840,7 @@ function openApp(payload: StatusPayload): void {
   viewsNav.hidden = false;
   showView(view);
   renderTabs();
+  layoutSelect.value = layout;
   renderResults();
   renderSaved();
   rows = mergeRows(rows, rowsFromStatus(payload));

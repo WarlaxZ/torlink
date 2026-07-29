@@ -390,3 +390,18 @@ export function tabClickPlan(view: SearchView, group: string, boxValue: string):
 function clip(name: string): string {
   return name.length > 60 ? `${name.slice(0, 59)}…` : name;
 }
+
+/** How the results are laid out. */
+export type ResultLayout = "list" | "grid";
+
+/**
+ * A remembered layout, or the default.
+ *
+ * Parsed rather than cast because the value comes from `localStorage`: it is
+ * user-writable, it survives upgrades, and a stale entry must fall back rather
+ * than render nothing. `"list"` is the default deliberately — it is the layout
+ * that works with no OMDb key, which is the common install.
+ */
+export function parseLayout(raw: string | null): ResultLayout {
+  return raw === "grid" ? "grid" : "list";
+}

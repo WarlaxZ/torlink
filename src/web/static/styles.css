@@ -781,3 +781,41 @@ select:focus-visible {
   font-size: 0.55rem;
   padding: 0.2rem;
 }
+
+/* Grid layout for search results. Deliberately the For You feed's own grid
+   metrics, so the two poster walls on this page are one visual idea — and the
+   card carries the same play/add/add-via-RD row the list row does, on the card
+   rather than behind a hover: nothing the list offers may be lost in the grid. */
+.results-grid {
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem;
+}
+
+.result-card .poster {
+  max-width: none;
+  margin-bottom: 0.5rem;
+}
+
+.result-card .row-name {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.result-card .row-meta {
+  font-size: 0.7rem;
+}
+
+/* The actions sit at the bottom of every card whatever its title length, so a
+   row of cards has one row of buttons rather than a ragged one. */
+.result-card .row-actions {
+  margin-top: auto;
+  padding-top: 0.4rem;
+  flex-wrap: wrap;
+}

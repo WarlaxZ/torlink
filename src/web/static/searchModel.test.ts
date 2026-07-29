@@ -7,6 +7,7 @@ import {
   emptyView,
   erroredSources,
   modeForQuery,
+  parseLayout,
   previewApplies,
   progressLabel,
   reportsHealthLookup,
@@ -476,6 +477,23 @@ describe("previewApplies", () => {
     expect(previewApplies("Games")).toBe(false);
     expect(previewApplies("Music")).toBe(false);
     expect(previewApplies("Books")).toBe(false);
+  });
+});
+
+describe("parseLayout", () => {
+  it("reads the two layouts", () => {
+    expect(parseLayout("list")).toBe("list");
+    expect(parseLayout("grid")).toBe("grid");
+  });
+
+  it("falls back to list for anything else", () => {
+    // The value comes out of localStorage, which is user-writable and survives
+    // upgrades — a stale or hand-edited entry must degrade to the default
+    // rather than render nothing. List is the default because it is the layout
+    // that works without an OMDb key.
+    expect(parseLayout(null)).toBe("list");
+    expect(parseLayout("")).toBe("list");
+    expect(parseLayout("gallery")).toBe("list");
   });
 });
 

@@ -94,6 +94,15 @@
             <input id="alive" type="checkbox" />
             <span>alive only</span>
           </label>
+          <!-- Shown only on the tabs that have artwork to show, by app.ts:
+               a grid of empty frames is worse than the list it replaced. -->
+          <label class="control" id="layout-control" for="layout" hidden>
+            <span>layout</span>
+            <select id="layout">
+              <option value="list" selected>list</option>
+              <option value="grid">grid</option>
+            </select>
+          </label>
           <span id="search-progress" class="progress"></span>
         </div>
 
