@@ -31,6 +31,7 @@ import {
   ALL_TAB,
   categoryTabs,
   emptyView,
+  groupChangePlan,
   modeForQuery,
   parseSort,
   previewApplies,
@@ -646,16 +647,16 @@ function renderTabs(): void {
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(group === searchView.group));
       button.addEventListener("click", () => {
-        if (searchView.group === group) return;
+        if (groupChangePlan(searchView, group) === "ignore") return;
         searchView = { ...searchView, group };
         renderTabs();
-        // Switching category re-runs the search rather than filtering what is
-        // already here: the server searches only that group's sources, so the
-        // other tabs' hits were never fetched. Matches the TUI, where each tab
-        // is its own slice of one fan-out.
-        // mode, not query: a browse's query is empty but still needs re-running.
-        if (searchView.mode === "idle") renderResults();
-        else startSearch(searchView.query);
+        // queryInput.value, NOT "". startSearch assigns its trimmed query back
+        // into the box, so passing the empty string here would wipe text the
+        // user had typed but not yet submitted. Passing the box browses when it
+        // is blank and searches when it is not — and the blank case is the one
+        // manual testing misses, because the box is empty when you click a tab
+        // to check this works.
+        startSearch(queryInput.value);
       });
       return button;
     }),

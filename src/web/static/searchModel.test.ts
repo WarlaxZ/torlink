@@ -6,6 +6,7 @@ import {
   categoryTabs,
   emptyView,
   erroredSources,
+  groupChangePlan,
   modeForQuery,
   previewApplies,
   progressLabel,
@@ -474,5 +475,33 @@ describe("previewApplies", () => {
     expect(previewApplies("Games")).toBe(false);
     expect(previewApplies("Music")).toBe(false);
     expect(previewApplies("Books")).toBe(false);
+  });
+});
+
+describe("groupChangePlan", () => {
+  it("runs a browse when nothing has been submitted yet — THE BUG", () => {
+    // Opening the page and clicking "Movies" used to render nothing: the old
+    // code called renderResults() while idle, which re-renders an empty list.
+    // Clicking a category IS a request to see that category.
+    expect(groupChangePlan(emptyView(), "Movies")).toBe("run");
+  });
+
+  it("re-runs a search when one is already on screen", () => {
+    // Not a filter over what is here: the server searches only the selected
+    // group's sources, so the other tabs' hits were never fetched.
+    const view: SearchView = { ...emptyView(), query: "dune", mode: "search", group: "All" };
+    expect(groupChangePlan(view, "Movies")).toBe("run");
+  });
+
+  it("re-runs a browse, whose query is empty but still needs running", () => {
+    const view: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
+    expect(groupChangePlan(view, "TV")).toBe("run");
+  });
+
+  it("ignores a click on the tab that is already selected", () => {
+    // Otherwise every stray tap on the current tab restarts a 23-source fan-out.
+    const view: SearchView = { ...emptyView(), mode: "search", query: "dune", group: "Movies" };
+    expect(groupChangePlan(view, "Movies")).toBe("ignore");
+    expect(groupChangePlan(emptyView(), "All")).toBe("ignore");
   });
 });

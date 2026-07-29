@@ -355,6 +355,27 @@ export function previewApplies(group: string): boolean {
   return group === ALL_TAB || group === "Movies" || group === "TV" || group === "Anime";
 }
 
+/**
+ * What clicking a category tab should do.
+ *
+ * `"run"` for every real change, INCLUDING from `mode: "idle"` — which is the
+ * bug this replaced. The old branch called `renderResults()` while idle, so
+ * opening the page and clicking "Movies" re-rendered an empty list and waited
+ * for the search box to be submitted. Clicking a category is a request to see
+ * that category; a blank query then means browse, which is exactly what the
+ * server does with one.
+ *
+ * A re-run rather than a filter over what is on screen, because the server
+ * searches only the selected group's sources — the other tabs' hits were never
+ * fetched. Same as the TUI, where each tab is its own slice of one fan-out.
+ *
+ * `"ignore"` for the tab already selected, so a stray tap on the current tab
+ * does not restart a 23-source fan-out.
+ */
+export function groupChangePlan(view: SearchView, group: string): "ignore" | "run" {
+  return view.group === group ? "ignore" : "run";
+}
+
 // A release name in a confirm() has to leave room for the question and the
 // buttons on a phone. Same job as dashboard.ts's shortName, at the shorter
 // limit a two-line prompt can carry.
