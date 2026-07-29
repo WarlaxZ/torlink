@@ -23,6 +23,19 @@
 - Commands: `npm test` (vitest run), `npm run lint`, `npm run typecheck`. A single file: `npx vitest run <path>`. A single test: `npx vitest run <path> -t "<name>"`.
 - Caps, already enforced in `loadConfig`: **50** saved searches, **100** favourites.
 
+## Already Verified — do not re-derive
+
+**The cross-site gate covers both new POST routes with no work.** `src/web/server.ts:373` applies `isCrossSiteHttpRequest` to **every** non-GET, non-HEAD request — there is no path or method allowlist to join. This matters because the normal setup is a tokenless loopback server, where there is no credential to forge and the Origin / `Sec-Fetch-Site` check is the *only* thing stopping a hostile page from POSTing to `/api/library`. Both new routes write `config.json`, so they are state-changing; they inherit that gate by construction.
+
+**Request bodies arrive populated.** `src/web/server.ts:436` reads the body for any POST whose path satisfies `isApiPath` (i.e. `startsWith("/api/")`), not for an enumerated list of paths. So `bodyText` is non-empty for `/api/watchlist` and `/api/library`, and `parseObjectBody` will not 400 on every call.
+
+## Accepted Limitations
+
+State these in the PR rather than fixing them; both are narrow and neither is a regression.
+
+- **A single-file torrent never records a watched mark from the browser.** `showPicker` is only called when a session resolves to more than one playable file, so the `"watched"` post in Task 8 rides on the picker and a one-file play skips it. The TUI's `markPlayed` fires on any launch. Closing the gap means posting from the non-picker branch of `runPlay` too, which is a change to shared stream-flow code for a marginal case.
+- **`body.source` is cast, not validated.** `libraryAction` does `body.source as SourceId` and persists it. It degrades correctly — the registry ignores unknown ids and `sourceStyle` falls back — so a junk value costs a missing badge, not a broken row. Unlike `infoHash`, which is validated because it becomes a magnet the download engine acts on, this string is only ever displayed.
+
 ---
 
 ### Task 1: Move the two list helpers into `src/util/`
@@ -1299,7 +1312,7 @@ describe("isInLibrary / favouriteLabel", () => {
 describe("favouriteMeta", () => {
   it("reports the watched count and the size", () => {
     expect(favouriteMeta(favourite({ watched: 3, sizeBytes: 24_000_000_000 }))).toBe(
-      "3 watched · 22.4 GB",
+      "3 watched · 22.35 GB",
     );
   });
 
@@ -1308,7 +1321,7 @@ describe("favouriteMeta", () => {
   });
 
   it("says nothing about zero watched — a fresh favourite is not '0 watched'", () => {
-    expect(favouriteMeta(favourite({ watched: 0, sizeBytes: 24_000_000_000 }))).toBe("22.4 GB");
+    expect(favouriteMeta(favourite({ watched: 0, sizeBytes: 24_000_000_000 }))).toBe("22.35 GB");
   });
 
   it("says size unknown rather than 0 B", () => {
@@ -1541,7 +1554,7 @@ export function applySaved(state: SavedState, response: SavedResponse): SavedSta
 npx vitest run src/web/static/savedModel.test.ts
 ```
 
-Expected: PASS. If `favouriteMeta` fails on the size, check `formatBytes(24_000_000_000)` in `dashboard.ts` — adjust the expected string in the test to whatever it actually produces (it is base-1024, so `"22.4 GB"`), and do not add a second byte formatter.
+Expected: PASS. `"22.35 GB"` is `formatBytes(24_000_000_000)`'s verified output (base-1024, two decimals) — it is `dashboard.ts`'s formatter, reused rather than reimplemented, because a second byte formatter is one of the four copy-then-drift bugs this codebase records. If this assertion fails, the bug is in `favouriteMeta`, not in the expected string: do not edit the test to match the code.
 
 - [ ] **Step 5: Commit**
 
@@ -2854,7 +2867,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `createPosterCache`, `postersApply`, `PosterOutcome` (Task 11); `sources.omdbConfigured` (Task 10); `posterPath` (already imported in app.ts).
-- Produces, inside `app.ts` (used by Task 13): `const resultPosters: PosterCache`, `function mountResultPoster(release: string, host: HTMLElement): void`, `function paintSearchHint(): void`.
+- Produces, inside `app.ts` (used by Task 13): `const resultPosters: PosterCache`, `const posterObserver: IntersectionObserver | null`, `function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void`, `function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean): void`, `function paintSearchHint(): void`. Also imports `previewApplies` from `./searchModel` and `OMDB_KEY_HINT` from `./previewModel`.
 
 - [ ] **Step 1: Add the hint paragraph to the markup**
 
@@ -2996,48 +3009,83 @@ function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean
   host.replaceChildren(span);
 }
 
+// ONE observer for the page, not one per row, and this is the same hazard
+// resultPosters.ts exists for — one layer up.
+//
+// The results list is rebuilt on every snapshot frame, up to 23 a search. A row
+// whose poster has not settled yet has nothing to paint, so a per-row
+// `new IntersectionObserver(...)` would be constructed again on every frame —
+// and `disconnect()` only ever runs on intersect, so every row that never
+// scrolls into view leaves its observer alive holding a detached frame (the old
+// `li` having been discarded by `replaceChildren`). A 100-row browse across 23
+// frames is ~2300 live observers pinning dead nodes. Exactly the 23×-fetch,
+// 22-leaked-blob failure the cache prevents, in a different currency.
+//
+// One observer, disconnected wholesale at the top of every render and re-armed
+// on the new frames, cannot accumulate: after `disconnect()` it observes exactly
+// the frames now on the page.
+const posterObserver: IntersectionObserver | null =
+  // No IntersectionObserver (an old browser, a non-DOM environment) means fetch
+  // eagerly instead — a missing optimisation must not become a missing feature.
+  typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          // Stop watching this frame specifically; the others stay armed.
+          posterObserver?.unobserve(entry.target);
+          const pending = posterTargets.get(entry.target);
+          if (pending) startPoster(pending.release, entry.target as HTMLElement, pending.compact);
+        }
+      })
+    : null;
+
+// What each observed frame is waiting for. A WeakMap so a frame discarded by a
+// re-render is collectable — a Map keyed on elements would be the leak this
+// design is avoiding, just spelled differently.
+const posterTargets = new WeakMap<Element, { release: string; compact: boolean }>();
+
+function startPoster(release: string, host: HTMLElement, compact: boolean): void {
+  const outcome = resultPosters.want(release, searchView.group);
+  if (!(outcome instanceof Promise)) {
+    paintPoster(host, outcome, compact);
+    return;
+  }
+  void outcome.then((settledOutcome) => {
+    // The row may have been re-rendered or filtered away during the two round
+    // trips; a detached node is not worth painting.
+    if (host.isConnected) paintPoster(host, settledOutcome, compact);
+    paintSearchHint();
+  });
+}
+
 /**
- * Mount a row's poster.
+ * Mount a row's poster, lazily.
  *
- * Lazy, via IntersectionObserver: a browse can return 100+ rows, and fetching
- * artwork for rows nobody scrolled to would spend a daily-capped OMDb key on
- * them. For You is naturally ~20 picks and needs no such gate.
+ * Lazy because a browse can return 100+ rows, and fetching artwork for rows
+ * nobody scrolled to would spend a daily-capped OMDb key on them. For You is
+ * naturally ~20 picks and needs no such gate, which is why its own mount is
+ * eager.
  */
 function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void {
   const known = resultPosters.peek(release);
   if (known !== undefined) {
+    // Settled already: paint it and never observe it. This is the path almost
+    // every frame of a re-render takes, and it is why the observer set stays
+    // small after the first pass.
     paintPoster(host, known, compact);
     return;
   }
-
-  const start = (): void => {
-    const outcome = resultPosters.want(release, searchView.group);
-    if (!(outcome instanceof Promise)) {
-      paintPoster(host, outcome, compact);
-      return;
-    }
-    void outcome.then((settledOutcome) => {
-      // The row may have been re-rendered or filtered away during the two round
-      // trips; a detached node is not worth painting.
-      if (host.isConnected) paintPoster(host, settledOutcome, compact);
-      paintSearchHint();
-    });
-  };
-
-  // No IntersectionObserver (an old browser, a test environment) means fetch
-  // now: a missing optimisation must not become a missing feature.
-  if (typeof IntersectionObserver !== "function") {
-    start();
+  // An empty frame while it waits — NOT paintPoster's "none", which would put
+  // "No poster" on a grid card before anything had been asked. The CSS gives the
+  // frame its border and 2:3 box, so an empty one is a placeholder rather than a
+  // hole, and the row does not resize when the image lands.
+  host.replaceChildren();
+  if (posterObserver === null) {
+    startPoster(release, host, compact);
     return;
   }
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      observer.disconnect();
-      start();
-    }
-  });
-  observer.observe(host);
+  posterTargets.set(host, { release, compact });
+  posterObserver.observe(host);
 }
 ```
 
@@ -3074,7 +3122,16 @@ In `startSearch`, next to the existing `selectedHash = null;`:
   paintSearchHint();
 ```
 
-Add `paintSearchHint();` to the end of `renderResults()`.
+Add `paintSearchHint();` to the end of `renderResults()`, and — **this is the line that keeps the single observer single** — add this as the *first* statement of `renderResults()`, before `replaceChildren` discards the old frames:
+
+```ts
+  // Every frame about to be replaced stops being watched. Without this the
+  // observer accumulates targets across all 23 snapshot frames of a search,
+  // pinning detached nodes for every row that never scrolled into view.
+  posterObserver?.disconnect();
+```
+
+`mountResultPoster` re-arms it for whichever frames the new render creates, so after this call the observer watches exactly what is on the page.
 
 - [ ] **Step 4: Verify build and suite**
 
@@ -3096,7 +3153,8 @@ npm run dev -- serve --web
 With an OMDb key configured:
 1. Click `Movies`. Rows have thumbnails; scroll and further rows fill in as they appear.
 2. Open devtools Network, filter `api/title`. Count the requests — it must be roughly the number of **distinct films on screen**, not the number of rows, and not rows × frames. Watch during the search, while `n/23 sources` is climbing: the count must not jump each time the list re-renders.
-3. Click `Games`. No thumbnails, no `api/title` requests.
+3. **Check the observer does not accumulate.** In the devtools console, after a browse has finished loading, take a heap snapshot and search for `IntersectionObserver` — there must be exactly **one**. A count that scales with rows × frames means `posterObserver?.disconnect()` is missing from the top of `renderResults()`, and it will pin a detached node per unscrolled row for the life of the page.
+4. Click `Games`. No thumbnails, no `api/title` requests.
 
 Then without a key:
 
