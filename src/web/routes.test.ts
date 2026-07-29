@@ -2030,6 +2030,14 @@ describe("handleWebApi — POST /api/watchlist", () => {
 describe("handleWebApi — POST /api/library", () => {
   const HASH = "b".repeat(40);
 
+  beforeEach(() => {
+    // Both override the config file inside resolveReccConfig, so a developer
+    // with a real reccd exported would never see the not-configured path — and
+    // the "configured" tests would talk to their actual service.
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
   function fav(over: Partial<FavouriteItem> = {}): FavouriteItem {
     return {
       id: HASH,
