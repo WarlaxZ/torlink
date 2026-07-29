@@ -979,7 +979,7 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
   posterObserver.observe(host);
 }
 
-// The three buttons a result offers, built once and used by both layouts: a
+// The four buttons a result offers, built once and used by both layouts: a
 // grid card that offered fewer of them than the list row would be a downgrade
 // dressed as a view option.
 function resultActions(result: PublicSearchResult): HTMLDivElement {
@@ -999,6 +999,9 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   addButton.addEventListener("click", () => void addResult(result, "p2p"));
   actions.append(addButton);
 
+  // Labelled by what the click will do, and rebuilt from savedState on every
+  // render — the results list is re-rendered on every snapshot frame, so a
+  // hardcoded label here would go stale within a second of being clicked.
   const inLibrary = isInLibrary(savedState, result.infoHash);
   const favButton = document.createElement("button");
   favButton.type = "button";
@@ -1012,6 +1015,8 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   });
   actions.append(favButton);
 
+  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
+  // configured. A button that always answered "set a token first" is noise.
   if (sources?.debridConfigured) {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
