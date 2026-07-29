@@ -30,6 +30,7 @@ import {
   addPlan,
   ALL_TAB,
   categoryTabs,
+  dashRowForPlay,
   emptyView,
   modeForQuery,
   parseLayout,
@@ -53,7 +54,6 @@ import {
 } from "./searchModel";
 import {
   createPreviewController,
-  OMDB_KEY_HINT,
   posterPath,
   previewCopy,
   type PreviewState,
@@ -62,6 +62,7 @@ import {
 import {
   createPosterCache,
   postersApply,
+  searchHint,
   type PosterOutcome,
 } from "./resultPosters";
 import {
@@ -103,7 +104,6 @@ import {
   watchlistToggleNotice,
   type LibraryInput,
   type PublicFavourite,
-  type SavedResponse,
   type SavedState,
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
@@ -413,12 +413,6 @@ const playing = new Set<string>();
 // without stopping it would leave that running until the idle reaper notices.
 let pickerSession: string | null = null;
 
-// The info hash the open picker belongs to, so a chosen file can be recorded as
-// watched against a favourite. Tracked beside pickerSession, set when a play
-// starts and cleared with the picker, for the same reason pickerSession is: the
-// picker outlives the call that opened it.
-let pickerHash: string | null = null;
-
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
@@ -518,14 +512,24 @@ function openPlayer(path: string): void {
 
 function hidePicker(): void {
   pickerSession = null;
-  pickerHash = null;
   picker.hidden = true;
   pickerFiles.replaceChildren();
 }
 
 // Same createElement/textContent rule as renderRow, and for a stronger reason:
 // these strings are filenames from inside a stranger's torrent.
+//
+// `infoHash` is a PARAMETER, not a module-level variable read when a file is
+// chosen. The picker is an inline card, not a modal (index.html's `.picker` is
+// `display: block`), so the results list stays clickable while it is open —
+// clicking play on a different row opens a second picker for a different
+// torrent. A module-level "current picker hash" would be overwritten by that
+// second play(), and choosing a file from the FIRST picker would then record
+// its filename as watched against the SECOND torrent's favourite. Closing over
+// the hash at the call site (see play()) makes that impossible: each picker's
+// callbacks carry the hash they were opened with, for good.
 function showPicker(
+  infoHash: string,
   sessionId: string,
   capability: string,
   name: string,
@@ -542,8 +546,6 @@ function showPicker(
       button.textContent = fileLabel(file);
       button.title = file.filename;
       button.addEventListener("click", () => {
-        // Read BEFORE hidePicker(), which clears it.
-        const infoHash = pickerHash;
         // hidePicker() clears pickerSession, so the Cancel handler can no longer
         // stop the session we are about to hand to the player.
         hidePicker();
@@ -551,12 +553,10 @@ function showPicker(
         // no-ops when this torrent is not favourited, so there is nothing to
         // check here and nothing to wait for — the same shape as the TUI's
         // markPlayed, which also records only after a player launches.
-        if (infoHash) {
-          void postSaved(
-            "/api/library",
-            libraryBody({ infoHash, name }, "watched", file.filename),
-          );
-        }
+        void postSaved(
+          "/api/library",
+          libraryBody({ infoHash, name }, "watched", file.filename),
+        );
         openPlayer(playerPath(sessionId, file, capability));
       });
       li.append(button);
@@ -582,7 +582,6 @@ pickerCancel.addEventListener("click", () => {
 async function play(row: DashRow): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
-  pickerHash = row.id;
   try {
     await runPlay(row, {
       start: startSession,
@@ -590,7 +589,10 @@ async function play(row: DashRow): Promise<void> {
       stop: stopSession,
       confirm: (message) => confirm(message),
       notice: showNotice,
-      choose: showPicker,
+      // Closes over THIS row's hash, not a module-level variable — see
+      // showPicker's comment for why that distinction is load-bearing.
+      choose: (sessionId, capability, name, files) =>
+        showPicker(row.id, sessionId, capability, name, files),
       open: (path) => openPlayer(path),
       sleep,
       now: () => Date.now(),
@@ -854,23 +856,9 @@ const resultPosters = createPosterCache({
   revoke: (url) => URL.revokeObjectURL(url),
 });
 
-/**
- * The page's single "no OMDb key" line.
- *
- * TWO SOURCES, and the second is the one that matters. `resultPosters.hint()`
- * answers from the lookups that were made — but with no key configured
- * `postersApply` makes NONE, so that path would stay silent on exactly the
- * install that needs the sentence. The config flag is therefore checked first,
- * gated on the tab having artwork to miss: a Games tab has no posters to explain
- * and must not carry a note about a key it would never use.
- *
- * `hint()` still matters for the race — a key revoked mid-session, where lookups
- * were made and came back `no-key`.
- */
+/** The page's single "no OMDb key" line. The decision lives in resultPosters.ts's `searchHint`. */
 function paintSearchHint(): void {
-  const keyless =
-    sources !== null && !sources.omdbConfigured && previewApplies(searchView.group);
-  const hint = keyless ? OMDB_KEY_HINT : resultPosters.hint();
+  const hint = searchHint(sources ? sources.omdbConfigured : null, searchView.group, resultPosters.hint());
   searchHintLine.textContent = hint ?? "";
   searchHintLine.hidden = hint === null;
 }
@@ -1613,7 +1601,7 @@ async function loadSaved(): Promise<void> {
       renderSaved();
       return;
     }
-    savedState = applySaved(savedState, (await readJson(res)) as unknown as SavedResponse);
+    savedState = applySaved(savedState, await readJson(res));
   } catch {
     savedState = { ...savedState, loaded: true, error: "Couldn't load your lists — the server is not responding." };
   }
@@ -1738,18 +1726,7 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
-  playButton.addEventListener("click", () =>
-    void play({
-      id: f.id,
-      name: f.name,
-      kind: "download",
-      status: "queued",
-      percent: 0,
-      peers: 0,
-      rate: 0,
-      uploaded: 0,
-    }),
-  );
+  playButton.addEventListener("click", () => void play(dashRowForPlay(f.id, f.name)));
   actions.append(playButton);
 
   const remove = document.createElement("button");
