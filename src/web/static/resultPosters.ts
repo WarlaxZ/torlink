@@ -74,6 +74,39 @@ export function postersApply(group: string, omdbConfigured: boolean): boolean {
   return omdbConfigured && previewApplies(group);
 }
 
+/**
+ * The page's single "no OMDb key" line, for the current tab.
+ *
+ * TWO SOURCES, and the second is the one that matters. `cacheHint` (the
+ * cache's own `hint()`) answers from the lookups that were actually made —
+ * but with no key configured `postersApply` makes NONE, so that source would
+ * stay silent on exactly the install that needs the sentence. `omdbConfigured`
+ * is therefore checked first, gated on the tab having artwork to miss: a
+ * Games tab has no posters to explain and must not carry a note about a key
+ * it would never use.
+ *
+ * `cacheHint` still matters for the race — a key revoked mid-session, where
+ * lookups were made and came back `no-key`.
+ *
+ * `omdbConfigured: null` means `/api/sources` has not answered yet — answer
+ * null rather than flash "add a key" before the page even knows whether one
+ * is configured. BOTH sources are gated on `previewApplies(group)`, not just
+ * the no-key branch: today a `no-key` outcome can only land in `cacheHint` on
+ * a tab where lookups are made in the first place, so the asymmetry is
+ * unreachable — but gating only one branch is a trap for whoever changes that
+ * later.
+ */
+export function searchHint(
+  omdbConfigured: boolean | null,
+  group: string,
+  cacheHint: string | null,
+): string | null {
+  if (omdbConfigured === null) return null;
+  if (!previewApplies(group)) return null;
+  if (!omdbConfigured) return OMDB_KEY_HINT;
+  return cacheHint;
+}
+
 export function createPosterCache(deps: PosterDeps): PosterCache {
   // Settled outcomes by release name. The release name is the key here (not the
   // parsed title) because it is what a row has; the server's own cache collapses

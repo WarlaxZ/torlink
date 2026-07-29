@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPosterCache, postersApply, type PosterDeps } from "./resultPosters";
+import { createPosterCache, postersApply, searchHint, type PosterDeps } from "./resultPosters";
 import { NO_KEY_POSTER_NOTE, NO_POSTER_NOTE, OMDB_KEY_HINT } from "./previewModel";
 import type { PublicTitleMeta } from "../wire";
 
@@ -47,6 +47,44 @@ describe("postersApply", () => {
   it("is false without a key, whatever the tab", () => {
     expect(postersApply("Movies", false)).toBe(false);
     expect(postersApply("All", false)).toBe(false);
+  });
+});
+
+describe("searchHint", () => {
+  it("says nothing before /api/sources has answered, even on a tab that would otherwise get the hint", () => {
+    // omdbConfigured: null means the page does not know yet — flashing "add a
+    // key" before it does would be wrong for a server that turns out to have one.
+    expect(searchHint(null, "Movies", null)).toBeNull();
+    expect(searchHint(null, "All", "some cache hint")).toBeNull();
+  });
+
+  it("hints on a tab OMDb covers, with no key configured", () => {
+    expect(searchHint(false, "Movies", null)).toBe(OMDB_KEY_HINT);
+    expect(searchHint(false, "All", null)).toBe(OMDB_KEY_HINT);
+  });
+
+  it("says nothing on a tab OMDb has nothing to say about, even with no key", () => {
+    // Games and Music have no artwork to explain, so no note about a key they
+    // would never use.
+    expect(searchHint(false, "Games", null)).toBeNull();
+    expect(searchHint(false, "Music", null)).toBeNull();
+  });
+
+  it("gates a non-null cacheHint on the tab too, not only the no-key branch", () => {
+    // The asymmetry finding 5 named: today a `no-key` outcome can only land in
+    // cacheHint on a tab where lookups are made in the first place, so this
+    // case is unreachable through the real cache — but gating only the no-key
+    // branch on previewApplies, and not this one, is the trap. A key
+    // configured plus a stray cacheHint on Games must still say nothing.
+    expect(searchHint(true, "Games", OMDB_KEY_HINT)).toBeNull();
+  });
+
+  it("says nothing with a key configured and no cache hint — an obscure title is not a missing key", () => {
+    expect(searchHint(true, "Movies", null)).toBeNull();
+  });
+
+  it("passes through the cache's own hint when a key is configured — the mid-session revocation race", () => {
+    expect(searchHint(true, "Movies", OMDB_KEY_HINT)).toBe(OMDB_KEY_HINT);
   });
 });
 
@@ -295,6 +333,69 @@ describe("createPosterCache", () => {
     // late answer must not re-populate a cache that moved on.
     expect(revoked).toEqual(["blob:1"]);
     expect(cache.peek("Dune.Part.Two.2024")).toBeUndefined();
+  });
+
+  it("a stale fetch's late finally must not evict a newer fetch's still-in-flight entry for the same poster URL", async () => {
+    // Two guards work together here, and this test is the only coverage for
+    // either: fetchBlobFor's `if (blobAttempt.get(posterUrl) === attempt)`
+    // before deleting from blobPending (an unconditional delete would let a
+    // stale fetch's finally evict a live one), and clear()'s own
+    // `blobPending.clear()` (removing it would let a post-clear want() reuse a
+    // dead generation's still-open fetch instead of starting its own).
+    const posterUrl = "https://m.media-amazon.com/dune.jpg";
+    let resolveFirst!: (url: string | null) => void;
+    let resolveSecond: ((url: string | null) => void) | undefined;
+    const blobCalls: string[] = [];
+    let call = 0;
+    const { cache, revoked } = harness({
+      fetchBlob: async (url) => {
+        call += 1;
+        blobCalls.push(url);
+        if (call === 1) return new Promise<string | null>((resolve) => (resolveFirst = resolve));
+        if (call === 2) return new Promise<string | null>((resolve) => (resolveSecond = resolve));
+        // A third call means the second's in-flight entry was wrongly evicted
+        // and this want() started its own redundant fetch instead of sharing it.
+        return "blob:third-leak-should-never-happen";
+      },
+    });
+
+    // Starts the first blob fetch for posterUrl, held open.
+    const first = cache.want("A.2024", "Movies");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A new search starts while it is still in flight.
+    cache.clear();
+
+    // Same release name, but a fresh generation: the release-level caches were
+    // just emptied by clear(), so this is a genuine new lookup, not a hit on
+    // the pending map above fetchBlobFor.
+    const second = cache.want("A.2024", "Movies");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Pinned here, BEFORE resolveFirst, so a removed `blobPending.clear()`
+    // fails this assertion cleanly instead of hanging the test: without it,
+    // `second` reuses the first (dead-generation) fetch's still-open promise
+    // rather than starting its own, so only one fetchBlob call has happened
+    // by this point.
+    expect(blobCalls).toEqual([posterUrl, posterUrl]);
+
+    // The first fetch resolves late, for a generation nobody is looking at.
+    resolveFirst("blob:stale");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A different release naming the same poster URL, still in the live
+    // generation, while the second fetch is still outstanding: it must
+    // coalesce with the second fetch, not start a third one.
+    const third = cache.want("B.2024", "Movies");
+
+    resolveSecond?.("blob:live");
+    const [outcomeFirst, outcomeSecond, outcomeThird] = await Promise.all([first, second, third]);
+
+    expect(outcomeFirst).toEqual({ kind: "none" });
+    expect(outcomeSecond).toEqual({ kind: "poster", url: "blob:live" });
+    expect(outcomeThird).toEqual({ kind: "poster", url: "blob:live" });
+    expect(blobCalls).toEqual([posterUrl, posterUrl]);
+    // Exactly one revoke: the stale first fetch's late answer, and nothing else.
+    expect(revoked).toEqual(["blob:stale"]);
   });
 
   it("passes the group through so the server can hint OMDb's type", async () => {
