@@ -40,6 +40,12 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
     // Never the user's real config file, and never the real Real-Debrid API:
     // the defaults for both reach outside the test.
     loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }),
+    // A THROW, not a no-op: three routes now write config, and a test that
+    // forgets to inject a save seam must fail loudly rather than silently edit
+    // the developer's own ~/.config/torlnk/config.json.
+    saveConfigImpl: async () => {
+      throw new Error("test must inject saveConfigImpl");
+    },
     rdStatusImpl: async () => null,
     ...over,
   };
@@ -1937,6 +1943,36 @@ describe("handleWebApi — GET /api/saved", () => {
     expect(JSON.stringify(body)).not.toContain("ep1.mkv");
   });
 
+  it("omits sizeBytes for a favourite stored with a zero size, matching the client's own guard", async () => {
+    // savedModel.test.ts's libraryBody test pins the client half of this
+    // contract (a zero size is never sent); this pins the server half
+    // (toPublicFavourite must not hand one back either, if one is ever on disk).
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({
+          ...defaultConfig,
+          downloadDir: "/tmp/dl",
+          favourites: [
+            {
+              id: "a".repeat(40),
+              name: "Severance",
+              magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+              sizeBytes: 0,
+              addedAt: 1_700_000_000_000,
+            },
+          ],
+        }),
+      }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    const body = res.json as SavedResponse;
+    expect("sizeBytes" in body.library[0]!).toBe(false);
+  });
+
   it("answers empty lists for a config with neither", async () => {
     const res = await handleWebApi(
       deps(),
@@ -2009,10 +2045,23 @@ describe("handleWebApi — POST /api/watchlist", () => {
     const first = await post(d, { query: "dune part two", action: "remove" });
     expect(first.json).toEqual({ saved: false, watchlist: [] });
 
-    // Same starting config (capture() rebuilds it per load), so this stands in
-    // for the second of two clicks arriving before the list re-rendered.
-    const second = await post(d, { query: "not in the list", action: "remove" });
-    expect(second.json).toEqual({ saved: false, watchlist: ["dune part two"] });
+    // The SAME query again, on the SAME fixture. loadConfigImpl is a fixed
+    // closure over the original config (not the "saved" array from the first
+    // call), so this stands in for the second of two clicks that both fired
+    // before either write landed. It only pins that "remove" (unlike
+    // "toggle") does not flip a *present* entry off and back on twice — see
+    // the case below for the one that actually catches remove silently
+    // becoming toggle.
+    const second = await post(d, { query: "dune part two", action: "remove" });
+    expect(second.json).toEqual({ saved: false, watchlist: [] });
+
+    // The state a genuinely second-in-line click reads: the entry is already
+    // gone. remove() is a no-op here; if it were toggleSavedSearches (i.e.
+    // "remove" secretly meant "toggle"), this would ADD "dune part two" back —
+    // which is the actual "must not re-add" this test is named for.
+    const { deps: gone } = capture({ savedSearches: [] });
+    const third = await post(gone, { query: "dune part two", action: "remove" });
+    expect(third.json).toEqual({ saved: false, watchlist: [] });
   });
 
   it("rejects a blank query rather than answering 200 to a no-op", async () => {
@@ -2131,6 +2180,13 @@ describe("handleWebApi — POST /api/library", () => {
     expect(stored?.magnet).toContain("tr=");
   });
 
+  it("omits a zero sizeBytes rather than storing it as a known-and-empty size", async () => {
+    const { deps: d, saved } = capture();
+    await post(d, { infoHash: HASH, name: "Severance", sizeBytes: 0, action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored && "sizeBytes" in stored).toBe(false);
+  });
+
   it("stamps addedAt with the server clock, never the browser's", async () => {
     const { deps: d, saved } = capture();
     const before = Date.now();
@@ -2212,9 +2268,18 @@ describe("handleWebApi — POST /api/library", () => {
   it("rejects a bad hash, a missing name, and an unknown action", async () => {
     const { deps: d, saved } = capture();
 
-    expect((await post(d, { infoHash: "nope", name: "X", action: "toggle" })).status).toBe(400);
-    expect((await post(d, { infoHash: HASH, name: "   ", action: "toggle" })).status).toBe(400);
-    expect((await post(d, { infoHash: HASH, name: "X", action: "explode" })).status).toBe(400);
+    const badHash = await post(d, { infoHash: "nope", name: "X", action: "toggle" });
+    expect(badHash.status).toBe(400);
+    expect(badHash.json).toEqual({ error: "invalid info hash" });
+
+    const blankName = await post(d, { infoHash: HASH, name: "   ", action: "toggle" });
+    expect(blankName.status).toBe(400);
+    expect(blankName.json).toEqual({ error: "missing name" });
+
+    const badAction = await post(d, { infoHash: HASH, name: "X", action: "explode" });
+    expect(badAction.status).toBe(400);
+    expect(badAction.json).toEqual({ error: "invalid action" });
+
     expect(saved).toHaveLength(0);
   });
 
@@ -2235,6 +2300,29 @@ describe("handleWebApi — POST /api/library", () => {
       JSON.stringify({ infoHash: HASH, name: "X", action: "toggle" }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("normalizes an uppercase hex hash to lowercase before storing, matching the TUI's dedupe key", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, { infoHash: HASH.toUpperCase(), name: "Severance", action: "toggle" });
+    expect(res.status).toBe(200);
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.id).toBe(HASH);
+    expect(stored?.id).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it("normalizes a 32-char base32 hash to lowercase hex before storing", async () => {
+    // XO53XO53... is the base32 encoding of forty repeated 0xbb bytes, i.e. HASH.
+    const { deps: d, saved } = capture();
+    const res = await post(d, {
+      infoHash: "XO53XO53XO53XO53XO53XO53XO53XO53",
+      name: "Severance",
+      action: "toggle",
+    });
+    expect(res.status).toBe(200);
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.id).toBe(HASH);
+    expect(stored?.id).toMatch(/^[a-f0-9]{40}$/);
   });
 
   it("stores an entry that survives loadConfig's own validation", async () => {
@@ -2295,6 +2383,11 @@ describe("handleWebApi — POST /api/library", () => {
   });
 
   it("posts no reccd event for watched — it is progress, not a rating", async () => {
+    // The reccd-event gate literally checks `action === "toggle"`, so this
+    // already passed before its own fix existed — it does not prove the gate
+    // exists, it guards against a FUTURE widening of that gate (e.g. someone
+    // adding a "record progress" event type and forgetting to keep "watched"
+    // out of it).
     const { deps: d, events } = capture({
       reccUrl: "http://localhost:4100",
       favourites: [fav()],
