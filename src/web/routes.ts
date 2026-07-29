@@ -9,6 +9,7 @@ import {
   resolveOmdbApiKey,
   resolveRealDebridToken,
   resolveReccConfig,
+  saveConfig,
   type Config,
   type FavouriteItem,
 } from "../config/config";
@@ -37,6 +38,7 @@ import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
 import { hintForGroup, parseRelease } from "../util/release";
+import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
   PublicFavourite,
@@ -54,6 +56,7 @@ import type {
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
+  WatchlistResponse,
 } from "./wire";
 
 export interface WebDeps {
@@ -751,6 +754,46 @@ async function savedLists(deps: WebDeps): Promise<WebResponse> {
   return { status: 200, json: out };
 }
 
+/** A JSON object body, or null for anything that is not one. */
+function parseObjectBody(bodyText: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  const action = body.action;
+  if (action !== "toggle" && action !== "remove") {
+    return { status: 400, json: { error: "invalid action" } };
+  }
+
+  // Trimmed here so "  dune  " and "dune" are one entry, matching the TUI —
+  // toggleSavedSearches trims too, but the emptiness check below needs the
+  // trimmed value and a second trim inside the helper is not something to rely
+  // on from out here.
+  const query = typeof body.query === "string" ? body.query.trim() : "";
+  // A blank query would make toggleSavedSearches a no-op that still answered
+  // 200, telling the browser something happened when nothing did.
+  if (!query) return { status: 400, json: { error: "missing query" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const current = config.savedSearches ?? [];
+  const watchlist =
+    action === "remove" ? current.filter((q) => q !== query) : toggleSavedSearches(current, query);
+
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches: watchlist });
+
+  const out: WatchlistResponse = { saved: watchlist.includes(query), watchlist };
+  return { status: 200, json: out };
+}
+
 // ---- title metadata ----------------------------------------------------
 
 /**
@@ -1201,6 +1244,10 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/saved") {
     return savedLists(deps);
+  }
+
+  if (method === "POST" && urlPath === "/api/watchlist") {
+    return watchlistAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

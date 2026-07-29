@@ -510,3 +510,29 @@ export interface SavedResponse {
   watchlist: string[];
   library: PublicFavourite[];
 }
+
+/**
+ * The body of `POST /api/watchlist`.
+ *
+ * `toggle` mirrors the TUI's `w` key: save this query, or unsave it if it is
+ * already there. `remove` is a separate, idempotent action rather than a second
+ * toggle, for the ✕ in the list — a toggle there would RE-ADD a row the user
+ * just deleted if the click double-fired, which on a phone it does.
+ */
+export interface WatchlistRequest {
+  query: string;
+  action: "toggle" | "remove";
+}
+
+/**
+ * The 200 body of `POST /api/watchlist`.
+ *
+ * The whole list comes back, not just the verdict, so the browser never has to
+ * predict server state: it flips the button optimistically and then renders
+ * whatever this says. `saved` is the state of THIS query afterwards, which the
+ * caller would otherwise have to search the list for.
+ */
+export interface WatchlistResponse {
+  saved: boolean;
+  watchlist: string[];
+}

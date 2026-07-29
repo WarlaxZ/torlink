@@ -1922,3 +1922,106 @@ describe("handleWebApi — GET /api/saved", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("handleWebApi — POST /api/watchlist", () => {
+  // A fresh capture per test: the route must WRITE, and asserting on what it
+  // wrote is the only way to know it persisted rather than answered from memory.
+  function capture(config: Partial<Config> = {}) {
+    const saved: Config[] = [];
+    const d = deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }),
+      saveConfigImpl: async (c: Config) => {
+        saved.push(c);
+      },
+    });
+    return { deps: d, saved };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/watchlist", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("adds a query, most-recent first, and persists it", async () => {
+    const { deps: d, saved } = capture({ savedSearches: ["the bear s03"] });
+    const res = await post(d, { query: "dune part two", action: "toggle" });
+
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ saved: true, watchlist: ["dune part two", "the bear s03"] });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.savedSearches).toEqual(["dune part two", "the bear s03"]);
+  });
+
+  it("toggle removes a query that is already saved", async () => {
+    const { deps: d, saved } = capture({ savedSearches: ["dune part two", "the bear s03"] });
+    const res = await post(d, { query: "dune part two", action: "toggle" });
+
+    expect(res.json).toEqual({ saved: false, watchlist: ["the bear s03"] });
+    expect(saved[0]?.savedSearches).toEqual(["the bear s03"]);
+  });
+
+  it("trims the query, so the same search cannot be saved twice", async () => {
+    const { deps: d } = capture({ savedSearches: ["dune part two"] });
+    const res = await post(d, { query: "  dune part two  ", action: "toggle" });
+    expect(res.json).toEqual({ saved: false, watchlist: [] });
+  });
+
+  it("remove is idempotent — a double-fired click must not re-add", async () => {
+    const { deps: d } = capture({ savedSearches: ["dune part two"] });
+    const first = await post(d, { query: "dune part two", action: "remove" });
+    expect(first.json).toEqual({ saved: false, watchlist: [] });
+
+    // Same starting config (capture() rebuilds it per load), so this stands in
+    // for the second of two clicks arriving before the list re-rendered.
+    const second = await post(d, { query: "not in the list", action: "remove" });
+    expect(second.json).toEqual({ saved: false, watchlist: ["dune part two"] });
+  });
+
+  it("rejects a blank query rather than answering 200 to a no-op", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, { query: "   ", action: "toggle" });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: "missing query" });
+    expect(saved).toHaveLength(0);
+  });
+
+  it("rejects an unknown action and an unparseable body", async () => {
+    const { deps: d } = capture();
+    const bad = await post(d, { query: "dune", action: "explode" });
+    expect(bad.status).toBe(400);
+    expect(bad.json).toEqual({ error: "invalid action" });
+
+    const junk = await handleWebApi(
+      d,
+      "POST",
+      "/api/watchlist",
+      new URLSearchParams(),
+      undefined,
+      "not json",
+    );
+    expect(junk.status).toBe(400);
+    expect(junk.json).toEqual({ error: "invalid JSON body" });
+  });
+
+  it("preserves unrelated config fields — it must not clobber the file", async () => {
+    const { deps: d, saved } = capture({
+      realDebridToken: "rd-token",
+      sort: "seeders:desc",
+      disabledSources: ["eztv"],
+    });
+    await post(d, { query: "dune", action: "toggle" });
+    expect(saved[0]?.realDebridToken).toBe("rd-token");
+    expect(saved[0]?.sort).toBe("seeders:desc");
+    expect(saved[0]?.disabledSources).toEqual(["eztv"]);
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/watchlist",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ query: "dune", action: "toggle" }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
