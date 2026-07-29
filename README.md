@@ -181,7 +181,7 @@ TORLINK_DNS=cloudflare npm start
 
 ## In your browser (optional)
 
-Add `--web` and torlink also serves a browser interface — search every source (or submit an empty box to browse the curated library, same as the TUI), posters and plots, play something, the queue, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
+Add `--web` and torlink also serves a browser interface — search every source (or submit an empty box to browse the curated library, same as the TUI), posters and plots, play something, the queue, your watchlist and library, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
 
 ```sh
 torlnk --web          # the TUI hosts it; quitting the TUI stops it
@@ -239,7 +239,7 @@ There's no token in the config file on purpose: `config.json` is world-readable 
 
 You enter the token once in the browser, or follow a link that carries it. Either way it's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
 
-On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
+On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`, `watchlist`, `library`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download, or add or remove something from your saved lists. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
 
 ### From outside your network
 
@@ -285,7 +285,7 @@ If you've connected [reccd](#recommendations-optional), the **for you** tab show
 
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
 - **No subtitles, no resume position, no next-episode queue.**
-- **No configuration.** Tokens, sources, limits and folders are set in the TUI; the browser reads that config but never writes it.
+- **No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write two things: your watchlist and your library (the same saved searches and favourites the TUI's `w` and `b` keys create), both guarded by the same Origin check as `add` and `control`.
 
 ### Working on the web UI
 
