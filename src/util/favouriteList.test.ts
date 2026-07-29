@@ -6,7 +6,7 @@ import {
   isFavourited,
   watchedFor,
   markWatched,
-} from "./favourites";
+} from "./favouriteList";
 
 const fav = (id: string, extra: Partial<FavouriteItem> = {}): FavouriteItem => ({
   id,
