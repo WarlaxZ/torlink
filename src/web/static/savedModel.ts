@@ -7,7 +7,7 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 import { formatBytes } from "./dashboard";
-import type { LibraryRequest, PublicFavourite, SavedResponse, WatchlistRequest } from "../wire";
+import type { LibraryRequest, PublicFavourite, WatchlistRequest } from "../wire";
 
 export type { PublicFavourite, SavedResponse } from "../wire";
 
@@ -135,16 +135,20 @@ export function libraryStatus(state: SavedState): SavedStatus {
 /**
  * Fold a `GET /api/saved` response into the state.
  *
- * Defensive about both arrays because the body is whatever came back over the
- * network — a proxy's HTML error page parses to something that is not this
- * shape at all, and a `.map` over `undefined` here would take the pane down
- * rather than show its error line.
+ * `body` is `unknown`, not `SavedResponse`, matching its two siblings below:
+ * it is whatever came back over the network — a proxy's HTML error page, a
+ * `null`, an array — and typing it as the wire shape would be a claim this
+ * function's own `Array.isArray` guards already say it does not believe. A
+ * `.map` over `undefined` here would take the pane down rather than show its
+ * error line, which is what those guards are for.
  */
-export function applySaved(state: SavedState, response: SavedResponse): SavedState {
+export function applySaved(state: SavedState, body: unknown): SavedState {
+  const watchlist = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+  const library = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
   return {
     ...state,
-    watchlist: Array.isArray(response.watchlist) ? response.watchlist : [],
-    library: Array.isArray(response.library) ? response.library : [],
+    watchlist: Array.isArray(watchlist) ? (watchlist as string[]) : [],
+    library: Array.isArray(library) ? (library as PublicFavourite[]) : [],
     loaded: true,
     error: null,
   };
@@ -153,13 +157,12 @@ export function applySaved(state: SavedState, response: SavedResponse): SavedSta
 /**
  * Fold a `POST /api/watchlist` response into the state.
  *
- * `body` is `unknown`, not `WatchlistResponse`, because it is whatever
- * `readJson` handed back over the network — `readJson` already turns a
- * non-object body into `{}`, but a `null`, an array, or an object whose
- * `watchlist` field is not an array are all still reachable here, and this is
- * the one place that guard belongs rather than four copies of it in app.ts.
- * On a malformed body the existing list is kept rather than emptied — a
- * request that came back garbled is not evidence the list is now empty.
+ * `body` is `unknown`, not `WatchlistResponse`, because it is whatever came
+ * back over the network — `null`, an array, an object whose `watchlist` field
+ * is not an array — and this is the one place that guard belongs rather than
+ * four copies of it in app.ts. On a malformed body the existing list is kept
+ * rather than emptied — a request that came back garbled is not evidence the
+ * list is now empty.
  */
 export function applyWatchlistResponse(state: SavedState, body: unknown): SavedState {
   const list = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;

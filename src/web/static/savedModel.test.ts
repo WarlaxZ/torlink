@@ -114,7 +114,10 @@ describe("favouriteMeta", () => {
     );
   });
 
-  it("singularises one episode", () => {
+  it("reports a single watched episode the same way as any other count", () => {
+    // Named for what this actually pins: favouriteMeta's "N watched" is a bare
+    // template string with no singular/plural branch, so 1 reads "1 watched"
+    // rather than "1 watch" — there is no singularising logic to test here.
     expect(favouriteMeta(favourite({ watched: 1 }))).toBe("1 watched");
   });
 
@@ -162,6 +165,19 @@ describe("watchlistStatus / libraryStatus", () => {
     });
     expect(libraryStatus(broken).tone).toBe("error");
   });
+
+  it("shows the error even before the first load has completed — the error check must run before the loaded check", () => {
+    // Both loaded:false and error set is the one fixture that actually pins
+    // statusFor's stated precedence: with no fixture combining them, swapping
+    // the order of the error check and the !loaded check left every other
+    // test green.
+    const brokenBeforeLoad = { ...emptySaved(), error: "Can't reach torlnk." };
+    expect(watchlistStatus(brokenBeforeLoad)).toEqual({
+      text: "Can't reach torlnk.",
+      show: true,
+      tone: "error",
+    });
+  });
 });
 
 describe("applySaved", () => {
@@ -179,7 +195,12 @@ describe("applySaved", () => {
   it("tolerates a malformed response rather than throwing on the page", () => {
     // The body is whatever came back over the network; a proxy error page
     // parses to something that is not this shape at all.
-    const next = applySaved(emptySaved(), {} as never);
+    const next = applySaved(emptySaved(), {});
+    expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+  });
+
+  it("tolerates a null body rather than throwing on the page", () => {
+    const next = applySaved(emptySaved(), null);
     expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
   });
 });
