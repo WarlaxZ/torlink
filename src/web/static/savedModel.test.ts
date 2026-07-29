@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyLibraryResponse,
   applySaved,
+  applyWatchlistResponse,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
   isInLibrary,
   libraryBody,
   libraryStatus,
+  libraryToggleNotice,
   watchlistBody,
   watchlistStatus,
+  watchlistToggleNotice,
   type SavedState,
 } from "./savedModel";
 import type { PublicFavourite } from "../wire";
@@ -177,5 +181,77 @@ describe("applySaved", () => {
     // parses to something that is not this shape at all.
     const next = applySaved(emptySaved(), {} as never);
     expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+  });
+});
+
+describe("applyWatchlistResponse", () => {
+  it("takes the server's list and marks the state loaded, clearing any error", () => {
+    const next = applyWatchlistResponse(loaded({ error: "old failure" }), { watchlist: ["dune"] });
+    expect(next).toEqual({ watchlist: ["dune"], library: [], loaded: true, error: null });
+  });
+
+  it("keeps the existing list on a null body rather than emptying it", () => {
+    const state = loaded({ watchlist: ["dune"] });
+    expect(applyWatchlistResponse(state, null)).toEqual(state);
+  });
+
+  it("keeps the existing list when watchlist is missing or not an array", () => {
+    const state = loaded({ watchlist: ["dune"] });
+    expect(applyWatchlistResponse(state, {})).toEqual(state);
+    expect(applyWatchlistResponse(state, { watchlist: "dune" })).toEqual(state);
+  });
+
+  it("keeps the existing list when the body itself is not an object", () => {
+    const state = loaded({ watchlist: ["dune"] });
+    expect(applyWatchlistResponse(state, "dune")).toEqual(state);
+    expect(applyWatchlistResponse(state, 42)).toEqual(state);
+    expect(applyWatchlistResponse(state, undefined)).toEqual(state);
+  });
+});
+
+describe("applyLibraryResponse", () => {
+  it("takes the server's list and marks the state loaded, clearing any error", () => {
+    const next = applyLibraryResponse(loaded({ error: "old failure" }), { library: [favourite()] });
+    expect(next.library).toHaveLength(1);
+    expect(next.loaded).toBe(true);
+    expect(next.error).toBeNull();
+  });
+
+  it("keeps the existing list on a null body rather than emptying it", () => {
+    const state = loaded({ library: [favourite()] });
+    expect(applyLibraryResponse(state, null)).toEqual(state);
+  });
+
+  it("keeps the existing list when library is missing or not an array", () => {
+    const state = loaded({ library: [favourite()] });
+    expect(applyLibraryResponse(state, {})).toEqual(state);
+    expect(applyLibraryResponse(state, { library: "nope" })).toEqual(state);
+  });
+});
+
+describe("watchlistToggleNotice", () => {
+  it("says saved when the server reports saved: true", () => {
+    expect(watchlistToggleNotice({ saved: true })).toBe("Saved to your watchlist.");
+  });
+
+  it("says removed for saved: false and for anything malformed", () => {
+    expect(watchlistToggleNotice({ saved: false })).toBe("Removed from your watchlist.");
+    expect(watchlistToggleNotice({})).toBe("Removed from your watchlist.");
+    expect(watchlistToggleNotice(null)).toBe("Removed from your watchlist.");
+    expect(watchlistToggleNotice(undefined)).toBe("Removed from your watchlist.");
+    expect(watchlistToggleNotice("saved")).toBe("Removed from your watchlist.");
+  });
+});
+
+describe("libraryToggleNotice", () => {
+  it("says added when the server reports favourited: true", () => {
+    expect(libraryToggleNotice({ favourited: true })).toBe("Added to your library.");
+  });
+
+  it("says removed for favourited: false and for anything malformed", () => {
+    expect(libraryToggleNotice({ favourited: false })).toBe("Removed from your library.");
+    expect(libraryToggleNotice({})).toBe("Removed from your library.");
+    expect(libraryToggleNotice(null)).toBe("Removed from your library.");
+    expect(libraryToggleNotice(undefined)).toBe("Removed from your library.");
   });
 });

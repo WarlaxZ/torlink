@@ -79,13 +79,17 @@ import {
   type ReccType,
 } from "./reccModel";
 import {
+  applyLibraryResponse,
   applySaved,
+  applyWatchlistResponse,
   emptySaved,
   favouriteMeta,
   libraryBody,
   libraryStatus,
+  libraryToggleNotice,
   watchlistBody,
   watchlistStatus,
+  watchlistToggleNotice,
   type LibraryInput,
   type PublicFavourite,
   type SavedResponse,
@@ -1292,9 +1296,9 @@ async function loadSaved(): Promise<void> {
 }
 
 // Both mutators post, then render the list the SERVER returned rather than a
-// list predicted here. The optimistic half is the button's own label, which
-// flips before the round trip and is corrected by the response — so a failed
-// toggle cannot leave a ★ claiming something the server never stored.
+// list predicted here — applyWatchlistResponse/applyLibraryResponse own that
+// fold, and watchlistToggleNotice/libraryToggleNotice own the notice text, both
+// in savedModel.ts where they can be unit-tested against a malformed body.
 async function postSaved(path: string, body: unknown): Promise<Record<string, unknown> | null> {
   let res: Response;
   try {
@@ -1316,47 +1320,32 @@ async function postSaved(path: string, body: unknown): Promise<Record<string, un
   return readJson(res);
 }
 
-// Exported (unusually, for this file): nothing in Task 7's own markup calls
-// this yet — the watchlist pane only ever removes a row it already has. It
-// exists here for Task 8's search-row ★ button to import, which is also the
-// reason it stays unused-import-clean under this repo's `no-unused-vars: error`.
-export async function toggleWatchlist(query: string): Promise<void> {
+// Task 8 adds the callers (the search-row favourite button and the
+// save-search button); this is wired up one commit from now.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function toggleWatchlist(query: string): Promise<void> {
   const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
   if (!body) return;
-  savedState = {
-    ...savedState,
-    watchlist: Array.isArray(body.watchlist) ? (body.watchlist as string[]) : savedState.watchlist,
-    loaded: true,
-    error: null,
-  };
-  showNotice(body.saved === true ? "Saved to your watchlist." : "Removed from your watchlist.");
+  savedState = applyWatchlistResponse(savedState, body);
+  showNotice(watchlistToggleNotice(body));
   renderSaved();
 }
 
 async function removeFromWatchlist(query: string): Promise<void> {
   const body = await postSaved("/api/watchlist", watchlistBody(query, "remove"));
   if (!body) return;
-  savedState = {
-    ...savedState,
-    watchlist: Array.isArray(body.watchlist) ? (body.watchlist as string[]) : savedState.watchlist,
-    loaded: true,
-    error: null,
-  };
+  savedState = applyWatchlistResponse(savedState, body);
   renderSaved();
 }
 
-// Exported for the same reason toggleWatchlist is: Task 8 wires the ★ on a
-// search row to this, not anything in this pane.
-export async function toggleLibrary(input: LibraryInput): Promise<void> {
+// Task 8 adds the caller (the search-row ★ button); this is wired up one
+// commit from now.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function toggleLibrary(input: LibraryInput): Promise<void> {
   const body = await postSaved("/api/library", libraryBody(input, "toggle"));
   if (!body) return;
-  savedState = {
-    ...savedState,
-    library: Array.isArray(body.library) ? (body.library as PublicFavourite[]) : savedState.library,
-    loaded: true,
-    error: null,
-  };
-  showNotice(body.favourited === true ? "Added to your library." : "Removed from your library.");
+  savedState = applyLibraryResponse(savedState, body);
+  showNotice(libraryToggleNotice(body));
   renderSaved();
   // The ★ on the matching search row has to agree with what just happened.
   renderResults();
@@ -1365,12 +1354,7 @@ export async function toggleLibrary(input: LibraryInput): Promise<void> {
 async function removeFromLibrary(infoHash: string, name: string): Promise<void> {
   const body = await postSaved("/api/library", libraryBody({ infoHash, name }, "remove"));
   if (!body) return;
-  savedState = {
-    ...savedState,
-    library: Array.isArray(body.library) ? (body.library as PublicFavourite[]) : savedState.library,
-    loaded: true,
-    error: null,
-  };
+  savedState = applyLibraryResponse(savedState, body);
   renderSaved();
   renderResults();
 }
@@ -1425,8 +1409,9 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
-  // Play, through the same runPlay every other Play on this page uses. A
-  // favourite has no magnet on the wire and does not need one: POST /api/stream
+  // Play, through the same play() every other Play button on this page calls
+  // (which itself calls runPlay). A favourite has no magnet on the wire and
+  // does not need one: POST /api/stream
   // rebuilds it from the hash, exactly as it does for a search hit.
   const playButton = document.createElement("button");
   playButton.type = "button";

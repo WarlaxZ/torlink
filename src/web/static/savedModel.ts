@@ -149,3 +149,57 @@ export function applySaved(state: SavedState, response: SavedResponse): SavedSta
     error: null,
   };
 }
+
+/**
+ * Fold a `POST /api/watchlist` response into the state.
+ *
+ * `body` is `unknown`, not `WatchlistResponse`, because it is whatever
+ * `readJson` handed back over the network — `readJson` already turns a
+ * non-object body into `{}`, but a `null`, an array, or an object whose
+ * `watchlist` field is not an array are all still reachable here, and this is
+ * the one place that guard belongs rather than four copies of it in app.ts.
+ * On a malformed body the existing list is kept rather than emptied — a
+ * request that came back garbled is not evidence the list is now empty.
+ */
+export function applyWatchlistResponse(state: SavedState, body: unknown): SavedState {
+  const list = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+  return {
+    ...state,
+    watchlist: Array.isArray(list) ? (list as string[]) : state.watchlist,
+    loaded: true,
+    error: null,
+  };
+}
+
+/** The same fold as {@link applyWatchlistResponse}, for `POST /api/library`. */
+export function applyLibraryResponse(state: SavedState, body: unknown): SavedState {
+  const list = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
+  return {
+    ...state,
+    library: Array.isArray(list) ? (list as PublicFavourite[]) : state.library,
+    loaded: true,
+    error: null,
+  };
+}
+
+/**
+ * The notice shown after a watchlist toggle.
+ *
+ * Reads `body.saved` rather than trusting the button's own optimistic label,
+ * so a request that reached the server but flipped the opposite way (a race
+ * with another tab, say) still reports what actually happened.
+ */
+export function watchlistToggleNotice(body: unknown): string {
+  const saved = !!(body && typeof body === "object" && (body as { saved?: unknown }).saved === true);
+  return saved ? "Saved to your watchlist." : "Removed from your watchlist.";
+}
+
+/** The same choice as {@link watchlistToggleNotice}, for a library toggle. */
+export function libraryToggleNotice(body: unknown): string {
+  const favourited = !!(
+    body &&
+    typeof body === "object" &&
+    (body as { favourited?: unknown }).favourited === true
+  );
+  return favourited ? "Added to your library." : "Removed from your library.";
+}
