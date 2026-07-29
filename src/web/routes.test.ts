@@ -20,7 +20,7 @@ import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
 import type { FetchTitleMetaResult } from "../recc/omdb";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
-import type { PublicSearchSnapshot, SourcesResponse } from "./wire";
+import type { PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -1844,5 +1844,81 @@ describe("POST /api/recc-event", () => {
     // an unhandled rejection.
     settle!();
     await Promise.resolve();
+  });
+});
+
+describe("handleWebApi — GET /api/saved", () => {
+  it("returns both lists, favourites without their magnets", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({
+          ...defaultConfig,
+          downloadDir: "/tmp/dl",
+          savedSearches: ["dune part two", "the bear s03"],
+          favourites: [
+            {
+              id: "a".repeat(40),
+              name: "Severance.S02.1080p.WEB-DL",
+              magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+              source: "eztv" as SourceId,
+              sizeBytes: 24_000_000_000,
+              addedAt: 1_700_000_000_000,
+              watched: ["ep1.mkv", "ep2.mkv", "ep3.mkv"],
+            },
+          ],
+        }),
+      }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.json as SavedResponse;
+    expect(body.watchlist).toEqual(["dune part two", "the bear s03"]);
+    expect(body.library).toEqual([
+      {
+        id: "a".repeat(40),
+        name: "Severance.S02.1080p.WEB-DL",
+        source: "eztv",
+        sizeBytes: 24_000_000_000,
+        addedAt: 1_700_000_000_000,
+        watched: 3,
+      },
+    ]);
+    // The magnet must not cross this wire: the page never needs it (playing a
+    // favourite goes through POST /api/stream { infoHash, name }), and neither
+    // must the episode FILENAMES — `watched` is a count, because the pane
+    // renders "3 watched" and the filenames are strings from inside a
+    // stranger's torrent.
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+    expect(JSON.stringify(body)).not.toContain("ep1.mkv");
+  });
+
+  it("answers empty lists for a config with neither", async () => {
+    const res = await handleWebApi(
+      deps(),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ watchlist: [], library: [] });
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
   });
 });

@@ -466,3 +466,47 @@ export interface ReccEventRequest {
  * to send it, and that is a 200 the UI can read rather than a 500.
  */
 export type PublicReccEventAck = { status: "accepted" } | { status: "not-configured" };
+
+/**
+ * One favourited torrent, as `GET /api/saved` hands it to the browser.
+ *
+ * TWO FIELDS ARE DELIBERATELY ABSENT.
+ *
+ * The MAGNET, because the page has no use for it: playing a favourite goes
+ * through `POST /api/stream { infoHash, name }`, which rebuilds the magnet
+ * server-side with the default tracker list. Shipping it would put a few hundred
+ * bytes of tracker URLs per row on the wire to no end.
+ *
+ * The watched FILENAMES, replaced by a count. The pane renders "3 watched", so
+ * the count is the whole requirement — and the filenames are strings from inside
+ * a stranger's torrent, which is not something to hand a browser without a
+ * reason.
+ */
+export interface PublicFavourite {
+  /** The info hash, which is also the dedupe key. */
+  id: string;
+  name: string;
+  sizeBytes?: number;
+  source?: string;
+  /** Epoch ms. */
+  addedAt: number;
+  /** How many episodes have been streamed, NOT which ones. */
+  watched: number;
+}
+
+/**
+ * The body of `GET /api/saved` — both saved lists in one response.
+ *
+ * One route rather than two because the `saved` pane shows both lists at once,
+ * so two routes would mean two round trips for one screen.
+ *
+ * The names are the TUI's and are load-bearing: `watchlist` is
+ * `config.savedSearches` (search query strings) and `library` is
+ * `config.favourites` (pinned torrents). Both clients read and write the same
+ * config file, so a browser that renamed either would show a different list
+ * under the same word.
+ */
+export interface SavedResponse {
+  watchlist: string[];
+  library: PublicFavourite[];
+}

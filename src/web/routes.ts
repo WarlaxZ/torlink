@@ -4,12 +4,13 @@ import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache"
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
 import {
-  type Config,
   loadConfig,
   resolveAdultContent,
   resolveOmdbApiKey,
   resolveRealDebridToken,
   resolveReccConfig,
+  type Config,
+  type FavouriteItem,
 } from "../config/config";
 import {
   fetchRecommendations,
@@ -38,6 +39,7 @@ import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime"
 import { hintForGroup, parseRelease } from "../util/release";
 import type {
   AddResponse,
+  PublicFavourite,
   PublicSearchResult,
   PublicTitleParse,
   PublicSearchSnapshot,
@@ -48,6 +50,7 @@ import type {
   PublicRecommendations,
   PublicStreamSession,
   PublicTitleMeta,
+  SavedResponse,
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
@@ -71,6 +74,13 @@ export interface WebDeps {
    * gets a config without touching the user's real one.
    */
   loadConfigImpl?: () => Promise<Config>;
+  /**
+   * Persist the config. Injected with a default in the same style as
+   * `loadConfigImpl`, and for a stronger reason: the default writes the
+   * developer's real `~/.config/torlnk/config.json`, so a test that forgets this
+   * seam does not fail — it silently edits the machine it runs on.
+   */
+  saveConfigImpl?: (config: Config) => Promise<void>;
   /**
    * Last-known Real-Debrid account status for a token, or null when it can't be
    * determined. Only consulted when a token is configured (see the route).
@@ -703,6 +713,44 @@ async function addToQueue(
   return { status: 200, json: out };
 }
 
+// ---- saved lists -------------------------------------------------------
+// The watchlist (config.savedSearches) and the library (config.favourites),
+// which the TUI has had all along. Both are read here and mutated by the two
+// routes below.
+//
+// EVERY MUTATION RE-READS THE CONFIG FIRST, and that is not defensive style —
+// it is required. `serializeWrites()` in config.ts serializes writes within ONE
+// process, and `torlnk serve --web` is a separate process from any TUI the user
+// has open. A held snapshot written back would silently revert whatever the TUI
+// changed meanwhile: the Real-Debrid token, the sort, disabledSources. Last
+// writer wins on the one list being edited is acceptable (the TUI already does
+// that to itself); last writer wins on the whole file is not.
+
+/** A stored favourite as the browser sees it. Drops the magnet and the watched filenames. */
+export function toPublicFavourite(f: FavouriteItem): PublicFavourite {
+  const out: PublicFavourite = {
+    id: f.id,
+    name: f.name,
+    addedAt: f.addedAt,
+    watched: f.watched?.length ?? 0,
+  };
+  if (f.sizeBytes !== undefined && f.sizeBytes > 0) out.sizeBytes = f.sizeBytes;
+  if (f.source !== undefined) out.source = f.source;
+  return out;
+}
+
+/** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
+async function savedLists(deps: WebDeps): Promise<WebResponse> {
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const out: SavedResponse = {
+    // loadConfig already normalises both (junk dropped, caps applied), so these
+    // coalesces are for a config object built in a test, not for disk data.
+    watchlist: config.savedSearches ?? [],
+    library: (config.favourites ?? []).map(toPublicFavourite),
+  };
+  return { status: 200, json: out };
+}
+
 // ---- title metadata ----------------------------------------------------
 
 /**
@@ -1149,6 +1197,10 @@ export async function handleWebApi(
       status: 200,
       json: sourcesResponse(config, deps.sourceHealthImpl ?? sourceHealth, Date.now()),
     };
+  }
+
+  if (method === "GET" && urlPath === "/api/saved") {
+    return savedLists(deps);
   }
 
   if (method === "GET" && urlPath === "/api/title") {
