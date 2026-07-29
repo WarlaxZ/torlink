@@ -97,6 +97,129 @@ describe("createPosterCache", () => {
     expect(blobCalls).toEqual(["https://m.media-amazon.com/dune.jpg"]);
   });
 
+  it("coalesces CONCURRENT asks for different releases of one film into one blob fetch", async () => {
+    // The sequential case above (await a; await b) passes even without any
+    // dedupe of the blob fetch itself, because by the time b runs, a has
+    // already populated the blob cache. The real scenario — renderResults()
+    // mounting every row of a snapshot frame at once — is concurrent: three
+    // different releases of one film, each a release-name miss, each resolving
+    // to the same posterUrl before any of them has fetched its bytes. Without
+    // a fetch-level dedupe keyed by posterUrl, each would call fetchBlob and
+    // mint its own object URL, and the last `blobs.set` would win while the
+    // others leaked.
+    const { cache, blobCalls } = harness();
+    const all = await Promise.all([
+      cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies"),
+      cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies"),
+      cache.want("Dune.Part.Two.2024.720p.HDTV.x264-C", "Movies"),
+    ]);
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/dune.jpg"]);
+    expect(all).toEqual([
+      { kind: "poster", url: "blob:1" },
+      { kind: "poster", url: "blob:1" },
+      { kind: "poster", url: "blob:1" },
+    ]);
+  });
+
+  it("reports 'none' to every concurrent asker when the shared blob fetch fails, and lets a later ask retry", async () => {
+    let blobAttempts = 0;
+    const { cache } = harness({
+      fetchBlob: async () => {
+        blobAttempts += 1;
+        return null;
+      },
+    });
+    const all = await Promise.all([
+      cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies"),
+      cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies"),
+    ]);
+    expect(all).toEqual([{ kind: "none" }, { kind: "none" }]);
+    expect(blobAttempts).toBe(1);
+
+    // A fresh release of the same film is not stuck behind the failed fetch —
+    // the in-flight entry cleaned itself up, so this one gets to retry rather
+    // than being permanently answered "none" for a fetch that never happened.
+    await cache.want("Dune.Part.Two.2024.720p.HDTV.x264-C", "Movies");
+    expect(blobAttempts).toBe(2);
+  });
+
+  it("clearing mid-flight on a shared blob fetch revokes at most once and writes nothing back", async () => {
+    let resolveBlob!: (url: string | null) => void;
+    const { cache, revoked } = harness({
+      fetchBlob: () => new Promise<string | null>((resolve) => (resolveBlob = resolve)),
+    });
+    const a = cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies");
+    const b = cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies");
+    // Let both releases' fetchMeta calls settle and join the one in-flight
+    // blob fetch, before it resolves.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A new search starts while the shared blob fetch is still in flight.
+    cache.clear();
+    resolveBlob("blob:1");
+    const [outcomeA, outcomeB] = await Promise.all([a, b]);
+    expect(outcomeA).toEqual({ kind: "none" });
+    expect(outcomeB).toEqual({ kind: "none" });
+    // One revoke, not two — both askers shared one decision, not one each.
+    expect(revoked).toEqual(["blob:1"]);
+    expect(cache.peek("Dune.Part.Two.2024.2160p.WEB-DL.x265-A")).toBeUndefined();
+    expect(cache.peek("Dune.Part.Two.2024.1080p.BluRay.x264-B")).toBeUndefined();
+  });
+
+  it("a release that goes stale mid-flight does not poison a live release naming the same poster", async () => {
+    // X's want() is captured under the OLD generation, but clear() lands
+    // before X's own metadata even arrives — so X only discovers it is stale
+    // once its lookup resumes and reaches the blob fetch. If X were allowed to
+    // become the shared blobPending owner for this posterUrl at that point, Y
+    // — a row of the NEW search naming the very same poster (the ordinary case
+    // of the same film reappearing after a query refinement) — would attach to
+    // X's entry and inherit X's stale verdict: `none`, for a poster it very
+    // much still wants.
+    let releaseXMeta!: (meta: PublicTitleMeta) => void;
+    let releaseXBlob!: (url: string | null) => void;
+    const posterUrl = "https://m.media-amazon.com/dune.jpg";
+    const blobCalls: string[] = [];
+    let blobs = 0;
+    const deps: PosterDeps = {
+      fetchMeta: async (release) =>
+        release === "X.2024"
+          ? new Promise<PublicTitleMeta>((resolve) => (releaseXMeta = resolve))
+          : OK(posterUrl),
+      fetchBlob: async (url) => {
+        blobCalls.push(url);
+        // X's own fetch: held open, so it is still in flight — registered
+        // under the old, buggy code — when Y arrives below.
+        if (blobCalls.length === 1) {
+          return new Promise<string | null>((resolve) => (releaseXBlob = resolve));
+        }
+        blobs += 1;
+        return `blob:${blobs}`;
+      },
+      revoke: () => {},
+    };
+    const cache = createPosterCache(deps);
+
+    const stale = cache.want("X.2024", "Movies");
+    cache.clear(); // a new search starts before X's metadata even arrives
+    releaseXMeta(OK(posterUrl));
+    // Give X's lookup a turn to resume and reach the blob fetch, so it either
+    // registers itself (the bug) or takes its untracked stale path (the fix)
+    // before Y (a row of the new search) asks for the same poster, while X's
+    // own fetch is still outstanding.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const livePromise = cache.want("Y.2024", "Movies");
+    // Unblock X's fetch now that Y has had its chance to (wrongly) attach to
+    // it. A correct implementation is unaffected — Y's own fetch is separate
+    // and already resolved on its own by this point.
+    releaseXBlob("blob:x-stale");
+    const live = await livePromise;
+    // Y gets its own, independent fetch — not X's stale, revoked one.
+    expect(live).toEqual({ kind: "poster", url: "blob:1" });
+    expect(blobCalls).toEqual([posterUrl, posterUrl]);
+
+    expect(await stale).toEqual({ kind: "none" });
+  });
+
   it("carries no-key out rather than flattening it to 'no poster'", async () => {
     const { cache, blobCalls } = harness({
       fetchMeta: async () => ({ status: "no-key" }),

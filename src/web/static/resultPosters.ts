@@ -84,10 +84,80 @@ export function createPosterCache(deps: PosterDeps): PosterCache {
   const pending = new Map<string, Promise<PosterOutcome>>();
   // Object URLs by POSTER url, so different releases of one film share a blob.
   const blobs = new Map<string, string>();
+  // Blob fetches in flight, keyed by POSTER URL — the second dedupe this module
+  // needs and `pending` above cannot provide, because `pending` is keyed by
+  // release name. Fifty releases of one film are fifty distinct release-name
+  // misses that each resolve to the same posterUrl; without this map, each of
+  // those fifty would call fetchBlob and mint its own object URL, and the last
+  // `blobs.set` would win while the other forty-nine leaked.
+  const blobPending = new Map<string, Promise<string | null>>();
+  // The attempt number current for a given poster URL, so a settling fetch can
+  // tell whether it is still the one blobPending points at (see below) without
+  // referencing its own promise before that promise finishes initializing.
+  const blobAttempt = new Map<string, number>();
   // Bumped by clear(). An answer stamped with an older generation belongs to a
   // search that is gone: its blob is revoked and it is NOT written back, or a
   // slow answer would resurrect a cache that has moved on.
   let generation = 0;
+
+  // Fetches the bytes for a poster URL, coalescing concurrent askers into one
+  // deps.fetchBlob call and one decision about the result. The decision (keep
+  // vs revoke-because-stale) is made exactly once, by whichever caller happens
+  // to create the shared promise, and baked into the value every awaiter
+  // receives — so there is no way for two callers to race each other into a
+  // double revoke.
+  //
+  // A caller can arrive here already stale: `forGeneration` is captured back in
+  // `want()`, but fetchMeta's own await sits between that capture and this
+  // call, and a clear() can land in that gap. Such a caller must NEVER become
+  // the shared entry's owner — if it did, a live caller for the same posterUrl
+  // (e.g. the same film appearing again after a query refinement) would attach
+  // to it and inherit a dead search's verdict, receiving `none` for a poster
+  // that is very much still wanted. So a stale caller gets its own private
+  // fetch-and-revoke below, untracked, and only a caller whose generation is
+  // still current is allowed to register in `blobPending`.
+  function fetchBlobFor(posterUrl: string, forGeneration: number): Promise<string | null> {
+    if (forGeneration !== generation) {
+      // want()'s own generation guard discards whatever this caller gets back
+      // either way, but the brief's own contract is that a stale answer still
+      // revokes its blob rather than leaking it — so still fetch, still revoke,
+      // just never publish it for a live caller to find.
+      return (async (): Promise<string | null> => {
+        const url = await deps.fetchBlob(posterUrl);
+        if (url !== null) deps.revoke(url);
+        return null;
+      })();
+    }
+
+    const inflight = blobPending.get(posterUrl);
+    if (inflight !== undefined) return inflight;
+
+    const attempt = (blobAttempt.get(posterUrl) ?? 0) + 1;
+    blobAttempt.set(posterUrl, attempt);
+
+    const posterFetch = (async (): Promise<string | null> => {
+      try {
+        const url = await deps.fetchBlob(posterUrl);
+        if (url === null) return null;
+        if (forGeneration !== generation) {
+          // Created for a search nobody is looking at. Revoke rather than
+          // leak, and do not record it.
+          deps.revoke(url);
+          return null;
+        }
+        blobs.set(posterUrl, url);
+        return url;
+      } finally {
+        // Guarded by attempt number: clear() may already have dropped this
+        // entry from blobPending (or a newer fetch for the same posterUrl may
+        // already have replaced it), and an unconditional delete here would
+        // erase that newer entry out from under its own still-in-flight fetch.
+        if (blobAttempt.get(posterUrl) === attempt) blobPending.delete(posterUrl);
+      }
+    })();
+    blobPending.set(posterUrl, posterFetch);
+    return posterFetch;
+  }
 
   async function lookup(release: string, group: string, forGeneration: number): Promise<PosterOutcome> {
     const meta = await deps.fetchMeta(release, group);
@@ -101,15 +171,8 @@ export function createPosterCache(deps: PosterDeps): PosterCache {
     // a hit here is necessarily current.
     if (existing !== undefined) return { kind: "poster", url: existing };
 
-    const url = await deps.fetchBlob(posterUrl);
+    const url = await fetchBlobFor(posterUrl, forGeneration);
     if (url === null) return { kind: "none" };
-    if (forGeneration !== generation) {
-      // Created for a search nobody is looking at. Revoke rather than leak, and
-      // do not record it.
-      deps.revoke(url);
-      return { kind: "none" };
-    }
-    blobs.set(posterUrl, url);
     return { kind: "poster", url };
   }
 
@@ -147,6 +210,19 @@ export function createPosterCache(deps: PosterDeps): PosterCache {
       blobs.clear();
       settled.clear();
       pending.clear();
+      // A blob fetch already in flight for this generation must not be handed
+      // to a caller in the next one — a fresh want() for the same posterUrl
+      // starts its own fetch rather than awaiting a promise for a search that
+      // just ended. The in-flight fetch itself keeps running; its own stale
+      // check (above) revokes the URL it eventually produces.
+      blobPending.clear();
+      // Deliberately NOT cleared: `blobAttempt` numbers must keep counting up
+      // across generations. If they reset to 1 here, a fetch already in flight
+      // stamped attempt 1 would collide with the next generation's first fetch
+      // for the same posterUrl — also stamped 1 — and whichever of the two
+      // settles first would delete the other's still-in-flight blobPending
+      // entry. The cost is one small int retained per poster URL ever seen in
+      // the session, alongside `blobs` itself, which already grows the same way.
     },
 
     hint() {
