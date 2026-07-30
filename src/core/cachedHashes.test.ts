@@ -63,4 +63,22 @@ describe("cachedHashesFor", () => {
     // The good batch still counts; the failed one simply contributes nothing.
     expect([...cached]).toEqual(["aa"]);
   });
+
+  it("zero hashes mean zero provider calls", async () => {
+    const checkCached = vi.fn(() => Promise.resolve(new Set(["aa"])));
+    const cached = await cachedHashesFor(provider({ checkCached }), "t", []);
+    expect(cached.size).toBe(0);
+    expect(checkCached).not.toHaveBeenCalled();
+  });
+
+  it("exactly CACHED_BATCH items produce exactly one batch", () => {
+    expect(batchHashes(Array.from({ length: CACHED_BATCH }, (_, i) => `h${i}`))).toHaveLength(1);
+  });
+
+  it("empty-string hash is filtered out without calling the provider", async () => {
+    const checkCached = vi.fn(() => Promise.resolve(new Set([""])));
+    const cached = await cachedHashesFor(provider({ checkCached }), "t", [""]);
+    expect(cached.size).toBe(0);
+    expect(checkCached).not.toHaveBeenCalled();
+  });
 });
