@@ -722,8 +722,12 @@ export interface Pick<T> {
 }
 
 // 0 = names the exact episode, 1 = a pack covering it, 2 = everything else.
-// A complete-series pack ("S01-S05") lands in band 2 because the parser reports
-// no single season for a range: usable, but nobody's first choice.
+//
+// A complete-series pack ("S01-S05") parses as `season: 1` — the parser takes
+// the first number of a range rather than reporting the span. So such a pack
+// bands as a season-1 pack (band 1) and, for any other season, as band 2. That
+// is conservative in the right direction: it is genuinely a season-1 pack, and
+// for season 3 it drops to last resort rather than being wrongly promoted.
 function bandFor(parsed: ParsedRelease, intent: PickIntent): number {
   if (intent.kind === "film") return 0;
   if (parsed.season !== intent.season) return 2;

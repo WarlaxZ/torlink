@@ -374,10 +374,15 @@ the sorted list.
 
    - **Band 1** — names that exact episode (`season` and `episode` both match).
    - **Band 2** — a pack covering it: the same `season`, no `episode` in the name.
-   - **Band 3** — everything else. A complete-series pack (`S01-S05`) lands here,
-     because `parse-torrent-title` reports no single `season` for a range. That is
-     the right place for it: it is usable but it is nobody's first choice for one
-     episode, and it will still be picked when it is all that exists.
+   - **Band 3** — everything else.
+
+   A complete-series pack (`S01-S05`) parses as `season: 1` — verified: the
+   parser takes the first number of a range rather than reporting the span. So
+   it bands as a season-1 pack, and as band 3 for any other season. That is
+   conservative in the right direction: it really is a season-1 pack, and for
+   season 3 it drops to last resort rather than being wrongly promoted over a
+   release that names season 3 outright. It is still picked when it is all
+   that exists.
 
    If the winner is band 2 or 3, `fromPack` is true and the caller hands the resolved
    torrent's file list to the existing `nextEpisodeIndex()`
