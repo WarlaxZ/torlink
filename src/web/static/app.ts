@@ -1837,6 +1837,23 @@ async function actOnPick(action: ReccAction, item: PublicRecommendation): Promis
   showNotice(actionNotice(action, item));
 }
 
+/**
+ * Hand a title over to the search pane — the escape hatch every list ties
+ * into: a saved query, a For You pick (`searchForPick`, below), and a
+ * Continue Watching row's unconditional `search` button both land here.
+ * `group`, when given, switches the category tab first; a Continue Watching
+ * row has no type filter to map, so it is omitted and the current tab stands.
+ */
+function searchForTitle(title: string, group?: string): void {
+  if (group !== undefined) {
+    searchView = { ...searchView, group };
+    renderTabs();
+  }
+  queryInput.value = title;
+  showView("search");
+  startSearch(title);
+}
+
 /** Hand a pick to the search pane — the feed's way out into the rest of the app. */
 function searchForPick(item: PublicRecommendation): void {
   // A blank title from reccd must not fall through to browse mode: an empty
@@ -1848,11 +1865,7 @@ function searchForPick(item: PublicRecommendation): void {
     return;
   }
   const group = searchGroupForType(recc.state().filters.type, sources);
-  searchView = { ...searchView, group };
-  renderTabs();
-  queryInput.value = title;
-  showView("search");
-  startSearch(title);
+  searchForTitle(title, group);
 }
 
 // Same createElement/textContent rule as every other list on this page, and for
@@ -2182,6 +2195,19 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   playButton.textContent = "play";
   playButton.addEventListener("click", () => void playContinueWatching(item));
   actions.append(playButton);
+
+  // Unconditional, exactly like the For You card's own `search` button and
+  // the terminal's `s` key on both panes (ForYou.tsx and
+  // ContinueWatching.tsx): a way to see the other releases for this title
+  // without resuming or auto-playing. item.title is not a decision — it is
+  // simply what this row is — so there is nothing for pickModel.ts to own
+  // here.
+  const searchButton = document.createElement("button");
+  searchButton.type = "button";
+  searchButton.className = "play";
+  searchButton.textContent = "search";
+  searchButton.addEventListener("click", () => searchForTitle(item.title));
+  actions.append(searchButton);
 
   // Null intent means a film or a season pack: there is no honest next
   // episode (intentForHistoryRow, pickModel.ts), so no Play-next button and
