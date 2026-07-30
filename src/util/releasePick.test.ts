@@ -141,3 +141,126 @@ describe("filterCandidates", () => {
     expect(names(out.survivors)).toEqual(["Tin.Rivers.2024.2160p.WEB-DL.HDR-GROUP"]);
   });
 });
+
+import { rankReleases, pickBestRelease, type PickIntent } from "./releasePick";
+
+const FILM: PickIntent = { kind: "film" };
+const EP2: PickIntent = { kind: "episode", season: 3, episode: 2 };
+
+describe("pickBestRelease", () => {
+  it("returns null for an empty list", () => {
+    expect(pickBestRelease([], NO_PREFS, FILM)).toBeNull();
+  });
+
+  it("returns null when exclusions removed everything", () => {
+    const out = pickBestRelease(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP")],
+      prefs({ exclude: ["dv"] }),
+      FILM,
+    );
+    expect(out).toBeNull();
+  });
+
+  it("ranks resolution above size", () => {
+    const out = pickBestRelease(
+      [c("Kestrel.2010.1080p.BluRay.REMUX", 42_000), c("Kestrel.2010.2160p.WEB-DL", 15_000)],
+      NO_PREFS,
+      FILM,
+    );
+    expect(out?.chosen.name).toBe("Kestrel.2010.2160p.WEB-DL");
+  });
+
+  it("uses size only to break a resolution tie", () => {
+    const out = pickBestRelease(
+      [c("Kestrel.2010.2160p.WEB-DL", 9_000), c("Kestrel.2010.2160p.WEB-DL.DV.HDR", 15_000)],
+      NO_PREFS,
+      FILM,
+    );
+    expect(out?.chosen.name).toBe("Kestrel.2010.2160p.WEB-DL.DV.HDR");
+  });
+
+  it("prefers the single episode over a pack at the same resolution, even when smaller", () => {
+    const out = pickBestRelease(
+      [c("Harrowgate.S03.1080p.WEB-DL", 50_000), c("Harrowgate.S03E02.1080p.WEB-DL", 2_000)],
+      NO_PREFS,
+      EP2,
+    );
+    expect(out?.chosen.name).toBe("Harrowgate.S03E02.1080p.WEB-DL");
+    expect(out?.fromPack).toBe(false);
+  });
+
+  it("prefers a higher-resolution pack over a lower-resolution episode", () => {
+    const out = pickBestRelease(
+      [c("Harrowgate.S03.2160p.WEB-DL", 58_000), c("Harrowgate.S03E02.720p.WEB-DL", 1_000)],
+      NO_PREFS,
+      EP2,
+    );
+    expect(out?.chosen.name).toBe("Harrowgate.S03.2160p.WEB-DL");
+    expect(out?.fromPack).toBe(true);
+  });
+
+  it("takes the episode once the cap removes the bigger pack", () => {
+    const out = pickBestRelease(
+      [c("Harrowgate.S03.2160p.WEB-DL", 58_000), c("Harrowgate.S03E02.720p.WEB-DL", 1_000)],
+      prefs({ maxResolution: "1080p" }),
+      EP2,
+    );
+    expect(out?.chosen.name).toBe("Harrowgate.S03E02.720p.WEB-DL");
+  });
+
+  it("picks the closest above the cap, not the biggest, when nothing fits", () => {
+    const out = pickBestRelease(
+      [c("Kestrel.2010.4320p.WEB-DL"), c("Kestrel.2010.2160p.WEB-DL")],
+      prefs({ maxResolution: "1080p" }),
+      FILM,
+    );
+    expect(out?.chosen.name).toBe("Kestrel.2010.2160p.WEB-DL");
+    expect(out?.overCap).toBe(true);
+  });
+
+  it("lets a requirement beat a higher resolution", () => {
+    const out = pickBestRelease(
+      [c("Kestrel.2010.2160p.WEB-DL"), c("Kestrel.2010.1080p.WEB-DL.Atmos")],
+      prefs({ require: ["atmos"] }),
+      FILM,
+    );
+    expect(out?.chosen.name).toBe("Kestrel.2010.1080p.WEB-DL.Atmos");
+    expect(out?.relaxed).toEqual([]);
+  });
+
+  it("reports a relaxed requirement rather than refusing", () => {
+    const out = pickBestRelease([c("Kestrel.2010.1080p.BluRay.x264")], prefs({ require: ["atmos"] }), FILM);
+    expect(out?.chosen.name).toBe("Kestrel.2010.1080p.BluRay.x264");
+    expect(out?.relaxed).toEqual(["atmos"]);
+  });
+
+  it("breaks a full tie deterministically by name", () => {
+    const a = c("Kestrel.2010.1080p.WEB-DL.AAA", 100, 5);
+    const b = c("Kestrel.2010.1080p.WEB-DL.BBB", 100, 5);
+    expect(pickBestRelease([b, a], NO_PREFS, FILM)?.chosen.name).toBe(a.name);
+  });
+
+  it("ranks a release with no stated resolution below one that has it, but still picks it alone", () => {
+    const out = pickBestRelease(
+      [c("Kestrel.2010.BluRay.x264", 90_000), c("Kestrel.2010.720p.BluRay.x264", 1_000)],
+      NO_PREFS,
+      FILM,
+    );
+    expect(out?.chosen.name).toBe("Kestrel.2010.720p.BluRay.x264");
+    expect(pickBestRelease([c("Kestrel.2010.BluRay.x264")], NO_PREFS, FILM)?.chosen.name)
+      .toBe("Kestrel.2010.BluRay.x264");
+  });
+});
+
+describe("rankReleases", () => {
+  it("returns every survivor best-first, and pickBestRelease is its head", () => {
+    const list = [c("Kestrel.2010.720p.WEB-DL"), c("Kestrel.2010.2160p.WEB-DL"), c("Kestrel.2010.1080p.WEB-DL")];
+    const ranked = rankReleases(list, NO_PREFS, FILM);
+    expect(ranked.map((r) => r.chosen.name)).toEqual([
+      "Kestrel.2010.2160p.WEB-DL",
+      "Kestrel.2010.1080p.WEB-DL",
+      "Kestrel.2010.720p.WEB-DL",
+    ]);
+    expect(pickBestRelease(list, NO_PREFS, FILM)).toEqual(ranked[0]);
+  });
+});

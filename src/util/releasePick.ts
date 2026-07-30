@@ -169,3 +169,89 @@ export function filterCandidates<T extends PickableResult>(
 
   return { survivors, relaxed, overCap };
 }
+
+/** What the caller is trying to watch. Decides how packs rank against episodes. */
+export type PickIntent =
+  | { kind: "film" }
+  | { kind: "episode"; season: number; episode: number };
+
+export interface Pick<T> {
+  chosen: T;
+  parsed: ParsedRelease;
+  /** Requirements dropped to find a candidate. Empty when the preference was met. */
+  relaxed: FeatureId[];
+  /** True when no candidate was at or under the cap, so the cap was ignored. */
+  overCap: boolean;
+  /**
+   * True when the intent named an episode but the chosen release does not name
+   * that episode — a season pack, a series pack, or an unbanded release. The
+   * caller must then select the file inside it (`nextEpisodeIndex`) rather than
+   * playing the first one.
+   */
+  fromPack: boolean;
+}
+
+// 0 = names the exact episode, 1 = a pack covering it, 2 = everything else.
+// A complete-series pack ("S01-S05") lands in band 2 because the parser reports
+// no single season for a range: usable, but nobody's first choice.
+function bandFor(parsed: ParsedRelease, intent: PickIntent): number {
+  if (intent.kind === "film") return 0;
+  if (parsed.season !== intent.season) return 2;
+  if (parsed.episode === intent.episode) return 0;
+  return parsed.episode === undefined ? 1 : 2;
+}
+
+export function rankReleases<T extends PickableResult>(
+  candidates: readonly T[],
+  prefs: QualityPrefs,
+  intent: PickIntent,
+): Pick<T>[] {
+  const { survivors, relaxed, overCap } = filterCandidates(candidates, prefs);
+
+  // An unknown resolution ranks LAST among known ones. Note the deliberate
+  // asymmetry with the cap in `filterCandidates`, which treats unknown as
+  // under: optimistic for inclusion, pessimistic for ranking, so such a release
+  // is never excluded but is only chosen when nothing states a resolution.
+  //
+  // -1 is correct in BOTH directions, and the `overCap` case cannot arise:
+  // `filterCandidates` counts an unknown resolution as under the cap, so a
+  // single unknown-resolution survivor is enough to keep `overCap` false.
+  // `overCap === true` therefore implies every survivor states a height.
+  const heightRank = (p: ParsedRelease): number => resolutionHeight(p.resolution) ?? -1;
+
+  const ranked = survivors.slice().sort((a, b) => {
+    const ha = heightRank(a.parsed);
+    const hb = heightRank(b.parsed);
+    if (ha !== hb) return overCap ? ha - hb : hb - ha;
+    const ba = bandFor(a.parsed, intent);
+    const bb = bandFor(b.parsed, intent);
+    if (ba !== bb) return ba - bb;
+    if (a.item.sizeBytes !== b.item.sizeBytes) return b.item.sizeBytes - a.item.sizeBytes;
+    if (a.item.seeders !== b.item.seeders) return b.item.seeders - a.item.seeders;
+    return a.item.name.localeCompare(b.item.name);
+  });
+
+  return ranked.map((s) => ({
+    chosen: s.item,
+    parsed: s.parsed,
+    relaxed,
+    overCap,
+    fromPack: intent.kind === "episode" && bandFor(s.parsed, intent) !== 0,
+  }));
+}
+
+/**
+ * The winner, or null. Exactly `rankReleases(...)[0] ?? null`.
+ *
+ * `rankReleases` is exported alongside it because spec C walks the ranking:
+ * Real-Debrid has no cache-check endpoint, so neither "is it cached" nor "has
+ * it been taken down" can be answered without trying a candidate. Returning
+ * only a winner would force that loop to re-rank or reimplement the ordering.
+ */
+export function pickBestRelease<T extends PickableResult>(
+  candidates: readonly T[],
+  prefs: QualityPrefs,
+  intent: PickIntent,
+): Pick<T> | null {
+  return rankReleases(candidates, prefs, intent)[0] ?? null;
+}
