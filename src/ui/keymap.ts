@@ -116,6 +116,7 @@ export function footerHints(
   downloadFocus?: DownloadFocus | null,
   seedFocus?: SeedFocus | null,
   debridConfigured = false,
+  streamActive = false,
 ): Hint[] {
   if (region === "sidebar") {
     return [
@@ -141,14 +142,21 @@ export function footerHints(
       ALWAYS,
     ];
   }
+  // The three list panes all reserve "x" for stopping a live stream (App.tsx
+  // intercepts it; ContinueWatching/SavedSearches/Favourites skip their own
+  // handler while one runs), so advertising "Remove" then would promise
+  // something the next keypress will not do.
+  const REMOVE: Hint = streamActive
+    ? { keys: "x", label: "Stop stream" }
+    : { keys: "x", label: "Remove" };
   if (section === "continueWatching") {
-    return [NAVIGATE, { keys: "↵", label: "Play" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+    return [NAVIGATE, { keys: "↵", label: "Play" }, REMOVE, SWITCH, ALWAYS];
   }
   if (section === "savedSearches") {
-    return [NAVIGATE, { keys: "↵", label: "Run" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+    return [NAVIGATE, { keys: "↵", label: "Run" }, REMOVE, SWITCH, ALWAYS];
   }
   if (section === "library") {
-    return [NAVIGATE, { keys: "↵", label: "Resume" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+    return [NAVIGATE, { keys: "↵", label: "Resume" }, REMOVE, SWITCH, ALWAYS];
   }
   if (section === "forYou") {
     return [

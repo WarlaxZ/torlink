@@ -2599,7 +2599,14 @@ export function App({
             }
           >
             <Footer
-              hints={footerHints(region, section, downloadFocus, seedFocus, store.debridConfigured)}
+              hints={footerHints(
+                region,
+                section,
+                downloadFocus,
+                seedFocus,
+                store.debridConfigured,
+                store.streamActive,
+              )}
             />
           </Box>
         ) : null}
