@@ -16,7 +16,9 @@ import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
 import { downloadFiles, sanitizeFilename } from "./http";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { resolveMagnet, isTransient } from "../integrations/debrid/realdebrid";
+import { getDebridProvider } from "../integrations/debrid";
+import type { DebridProviderId, ResolveOptions } from "../integrations/debrid/types";
+import type { StreamFile } from "../util/player";
 import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
 import { log } from "../util/logger";
@@ -26,19 +28,28 @@ import { disarmBootMarker } from "./bootguard";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
 
-// Injection seam so the Real-Debrid pipeline can be stubbed in tests.
+// Injection seam so the debrid pipeline can be stubbed in tests.
 export interface DebridDeps {
-  resolveMagnet: typeof resolveMagnet;
+  resolveMagnet: (
+    provider: DebridProviderId,
+    token: string,
+    magnet: string,
+    opts: ResolveOptions,
+  ) => Promise<StreamFile[]>;
   downloadFiles: typeof downloadFiles;
   // Sleep between transient-failure requeues; defaults to real time.
   sleep?: (ms: number) => Promise<void>;
 }
 
-const defaultDebridDeps: DebridDeps = { resolveMagnet, downloadFiles };
+export const defaultDebridDeps: DebridDeps = {
+  resolveMagnet: (provider, token, magnet, opts) =>
+    getDebridProvider(provider).resolveMagnet(token, magnet, opts),
+  downloadFiles,
+};
 
 // Compact, log-safe label for a queue item (short infoHash + short name). The
 // name already lives in queue.json, so this leaks nothing new.
-function rdLabel(id: string, name: string): string {
+function debridLabel(id: string, name: string): string {
   return `${id.slice(0, 8)} ${name.slice(0, 40)}`;
 }
 
@@ -111,11 +122,11 @@ export class DownloadQueue extends EventEmitter {
   private seeds = new Map<string, SeedItem>();
   private strayHits = new Map<string, number>();
   private seedStartedAt = new Map<string, number>();
-  // Real-Debrid bookkeeping: an abort handle per in-flight RD download, the
-  // current token (kept fresh by the app so a retry can re-run), and the deps
-  // used to drive the pipeline (overridable in tests).
+  // Debrid bookkeeping: an abort handle per in-flight debrid download, the
+  // current provider + token (kept fresh by the app so a retry can re-run),
+  // and the deps used to drive the pipeline (overridable in tests).
   private debridAborts = new Map<string, AbortController>();
-  private debridToken = "";
+  private debridAuth: { provider: DebridProviderId; token: string } | null = null;
   private debridDeps: DebridDeps = defaultDebridDeps;
   private debridSem = new Semaphore(MAX_ACTIVE_DEBRID);
   private debridAttempts = new Map<string, number>();
@@ -266,23 +277,24 @@ export class DownloadQueue extends EventEmitter {
     return true;
   }
 
-  // Keep the queue's notion of the current Real-Debrid token in sync with config
-  // so a retry (which has no token in hand) can re-run the pipeline.
-  setRealDebridToken(token: string): void {
-    this.debridToken = token;
+  // Keep the queue's notion of the active debrid provider and token in sync
+  // with config so a retry (which has neither in hand) can re-run the pipeline.
+  setDebridToken(provider: DebridProviderId | null, token: string): void {
+    this.debridAuth = provider && token ? { provider, token } : null;
   }
 
-  // Download a magnet through Real-Debrid instead of P2P: resolve it to direct
-  // links on RD's cloud, then pull those over HTTP into `dir`. The returned
-  // promise settles when the whole pipeline finishes (success or failure) so the
-  // app can `void` it while tests can await it.
+  // Download a magnet through a debrid service instead of P2P: resolve it to
+  // direct links on the provider's cloud, then pull those over HTTP into `dir`.
+  // The returned promise settles when the whole pipeline finishes (success or
+  // failure) so the app can `void` it while tests can await it.
   addDebrid(
     input: AddInput,
     dir: string,
+    provider: DebridProviderId,
     token: string,
     deps: DebridDeps = defaultDebridDeps,
   ): Promise<void> {
-    this.debridToken = token;
+    this.debridAuth = { provider, token };
     this.debridDeps = deps;
     if (this.seeds.has(input.id)) {
       this.engine.remove(input.id);
@@ -300,7 +312,7 @@ export class DownloadQueue extends EventEmitter {
       magnet: input.magnet,
       dir,
       via: "debrid",
-      provider: "realdebrid",
+      provider,
       phase: "queued",
       status: "downloading",
       progress: 0,
@@ -313,15 +325,20 @@ export class DownloadQueue extends EventEmitter {
     this.items.set(item.id, item);
     this.debridAttempts.set(item.id, 0);
     this.changed();
-    log.info(`queue ${rdLabel(item.id, item.name)} queued`);
+    log.info(`queue ${debridLabel(item.id, item.name)} queued`);
     void this.persist();
-    return this.driveDebrid(item.id, token, deps);
+    return this.driveDebrid(item.id, provider, token, deps);
   }
 
-  // Schedule one Real-Debrid item: wait for a concurrency slot, run a single
+  // Schedule one debrid item: wait for a concurrency slot, run a single
   // pipeline attempt, and on a transient failure requeue with backoff until the
   // attempt budget is spent. Settles when the item reaches a terminal state.
-  private async driveDebrid(id: string, token: string, deps: DebridDeps): Promise<void> {
+  private async driveDebrid(
+    id: string,
+    provider: DebridProviderId,
+    token: string,
+    deps: DebridDeps,
+  ): Promise<void> {
     const sleep = deps.sleep ?? realSleep;
     for (;;) {
       const waiting = this.items.get(id);
@@ -335,7 +352,7 @@ export class DownloadQueue extends EventEmitter {
       try {
         const it = this.items.get(id);
         if (!it || it.status !== "downloading") return; // cancelled while waiting for the slot
-        await this.runDebrid(id, token, deps); // completes on success, throws on failure
+        await this.runDebrid(id, provider, token, deps); // completes on success, throws on failure
         return;
       } catch (e) {
         // A pause aborted the pipeline: the item is already marked paused; leave
@@ -344,7 +361,7 @@ export class DownloadQueue extends EventEmitter {
         const attempts = (this.debridAttempts.get(id) ?? 0) + 1;
         this.debridAttempts.set(id, attempts);
         const stillHere = this.items.get(id)?.status === "downloading";
-        if (isTransient(e) && attempts < MAX_DEBRID_ATTEMPTS && stillHere) {
+        if (getDebridProvider(provider).isTransient(e) && attempts < MAX_DEBRID_ATTEMPTS && stillHere) {
           retry = true;
           const it = this.items.get(id);
           if (it) {
@@ -352,7 +369,7 @@ export class DownloadQueue extends EventEmitter {
             it.speed = 0;
             this.changed();
             log.warn(
-              `queue ${rdLabel(id, it.name)} requeue reason=transient attempt=${attempts}/${MAX_DEBRID_ATTEMPTS}`,
+              `queue ${debridLabel(id, it.name)} requeue reason=transient attempt=${attempts}/${MAX_DEBRID_ATTEMPTS}`,
             );
           }
         } else {
@@ -374,10 +391,15 @@ export class DownloadQueue extends EventEmitter {
     }
   }
 
-  // One Real-Debrid attempt: resolve the magnet to direct links, then pull them
+  // One debrid attempt: resolve the magnet to direct links, then pull them
   // over HTTP. Completes the item on success; throws on any failure (the caller
   // decides whether to requeue or fail).
-  private async runDebrid(id: string, token: string, deps: DebridDeps): Promise<void> {
+  private async runDebrid(
+    id: string,
+    provider: DebridProviderId,
+    token: string,
+    deps: DebridDeps,
+  ): Promise<void> {
     const ctrl = new AbortController();
     this.debridAborts.set(id, ctrl);
     try {
@@ -385,9 +407,9 @@ export class DownloadQueue extends EventEmitter {
       if (start) {
         start.phase = "resolving";
         this.changed();
-        log.info(`queue ${rdLabel(id, start.name)} resolving`);
+        log.info(`queue ${debridLabel(id, start.name)} resolving`);
       }
-      const files = await deps.resolveMagnet(token, this.items.get(id)?.magnet ?? "", {
+      const files = await deps.resolveMagnet(provider, token, this.items.get(id)?.magnet ?? "", {
         signal: ctrl.signal,
         knownHash: id, // queue item id is the torrent infoHash
         onProgress: (percent) => {
@@ -433,7 +455,7 @@ export class DownloadQueue extends EventEmitter {
     }
   }
 
-  // Mark a Real-Debrid item failed after its attempt budget is spent (or a
+  // Mark a debrid item failed after its attempt budget is spent (or a
   // terminal error). A missing item means it was cancelled — nothing to do.
   private failDebrid(id: string, e: unknown): void {
     this.debridAttempts.delete(id);
@@ -447,22 +469,23 @@ export class DownloadQueue extends EventEmitter {
     it.speed = 0;
     it.peers = 0;
     it.phase = undefined;
-    log.warn(`queue ${rdLabel(id, it.name)} failed reason="${it.error}"`);
+    log.warn(`queue ${debridLabel(id, it.name)} failed reason="${it.error}"`);
     this.changed();
     void this.persist();
     this.maybeStopPoll();
   }
 
-  // Finish a Real-Debrid item: record it in history and drop it. Unlike a P2P
+  // Finish a debrid item: record it in history and drop it. Unlike a P2P
   // download we never seed it — there is no live torrent, and seeding would put
-  // the user back on the swarm, defeating the privacy reason for using RD.
+  // the user back on the swarm, defeating the privacy reason for using a debrid
+  // service.
   private completeDebrid(it: QueueItem): void {
     this.debridAttempts.delete(it.id);
     if (it.totalBytes) it.downloadedBytes = it.totalBytes;
     it.progress = 100;
     it.speed = 0;
     it.phase = undefined;
-    log.info(`queue ${rdLabel(it.id, it.name)} complete`);
+    log.info(`queue ${debridLabel(it.id, it.name)} complete`);
     this.recordHistory(it);
     this.items.delete(it.id);
     this.emit("completed", it.name);
@@ -604,7 +627,7 @@ export class DownloadQueue extends EventEmitter {
     let any = false;
     for (const it of this.items.values()) {
       if (it.status !== "downloading") continue;
-      // Real-Debrid items have no webtorrent engine; they push their own
+      // Debrid items have no webtorrent engine; they push their own
       // progress through the resolve/download callbacks, so leave them alone.
       if (it.via === "debrid") continue;
       const s = this.engine.stats(it.id);
@@ -722,22 +745,22 @@ export class DownloadQueue extends EventEmitter {
     const it = this.items.get(id);
     if (!it || it.status !== "paused") return;
     if (it.via === "debrid") {
-      if (!this.debridToken) {
+      if (!this.debridAuth) {
         it.status = "failed";
-        it.error = "Set a Real-Debrid token, then download again.";
+        it.error = `Set a ${getDebridProvider(it.provider ?? "realdebrid").label} token, then download again.`;
         this.changed();
         return;
       }
       // Re-run the pipeline: re-resolve for a fresh link, then downloadFiles
       // continues each partial file via HTTP Range from its on-disk size.
-      // Real-Debrid transfers are bounded by their own semaphore, so they
+      // Debrid transfers are bounded by their own semaphore, so they
       // resume immediately rather than waiting on the P2P download slot cap.
       it.status = "downloading";
       it.error = undefined;
       this.debridAttempts.set(id, 0);
       this.changed();
       void this.persist();
-      void this.driveDebrid(id, this.debridToken, this.debridDeps);
+      void this.driveDebrid(id, this.debridAuth.provider, this.debridAuth.token, this.debridDeps);
       return;
     }
     // Respect the cap on manual resume: start if a slot is free, else re-queue.
@@ -779,7 +802,7 @@ export class DownloadQueue extends EventEmitter {
     this.maybeStopPoll();
   }
 
-  // Delete a Real-Debrid item's partial files on disk (used when cancelling a
+  // Delete a debrid item's partial files on disk (used when cancelling a
   // paused item whose pipeline has already unwound). Best-effort; never throws.
   private cleanupDebridFiles(it: QueueItem): void {
     if (it.via !== "debrid" || !it.paths || it.paths.length === 0) return;
@@ -802,7 +825,7 @@ export class DownloadQueue extends EventEmitter {
   cancel(id: string): void {
     const it = this.items.get(id);
     if (!it) return;
-    // Abort an in-flight Real-Debrid transfer first; the HTTP downloader cleans
+    // Abort an in-flight debrid transfer first; the HTTP downloader cleans
     // up its own partial files once the signal fires.
     this.debridAborts.get(id)?.abort("cancel");
     this.debridAttempts.delete(id);
@@ -858,10 +881,10 @@ export class DownloadQueue extends EventEmitter {
     if (!it || it.status !== "failed") return;
     it.error = undefined;
     if (it.via === "debrid") {
-      // No token (e.g. retried after a restart): can't re-run, tell the user.
-      if (!this.debridToken) {
+      // No auth (e.g. retried after a restart): can't re-run, tell the user.
+      if (!this.debridAuth) {
         it.status = "failed";
-        it.error = "Set a Real-Debrid token, then download again.";
+        it.error = `Set a ${getDebridProvider(it.provider ?? "realdebrid").label} token, then download again.`;
         this.changed();
         return;
       }
@@ -871,7 +894,7 @@ export class DownloadQueue extends EventEmitter {
       this.debridAttempts.set(id, 0);
       this.changed();
       void this.persist();
-      void this.driveDebrid(id, this.debridToken, this.debridDeps);
+      void this.driveDebrid(id, this.debridAuth.provider, this.debridAuth.token, this.debridDeps);
       return;
     }
     // Respect the cap on retry: start if a slot is free, else queue.
@@ -1035,13 +1058,15 @@ export class DownloadQueue extends EventEmitter {
     }
     let active = 0;
     for (const raw of items) {
-      // A Real-Debrid transfer can't be resumed across a restart (no resolved
+      // A debrid transfer can't be resumed across a restart (no resolved
       // links, possibly no token), so surface it as a retryable failure rather
       // than handing its magnet to webtorrent (which would silently switch it
       // to P2P).
       if (raw.via === "debrid" && raw.status === "downloading") {
         raw.status = "failed";
-        raw.error = "Interrupted — download again via Real-Debrid.";
+        // An item with no provider predates the field, so it is Real-Debrid by
+        // definition (see normalizeVia).
+        raw.error = `Interrupted — download again via ${getDebridProvider(raw.provider ?? "realdebrid").label}.`;
         raw.phase = undefined;
         raw.speed = 0;
         raw.peers = 0;

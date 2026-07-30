@@ -6,7 +6,7 @@
 // would, then exposes a single addInput() the watch folder and HTTP API share.
 
 import { promises as fs } from "node:fs";
-import { type Config, loadConfig, resolveRealDebridToken } from "../config/config";
+import { type Config, loadConfig, resolveActiveDebrid } from "../config/config";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
@@ -20,6 +20,7 @@ import {
 import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { StreamSessionRegistry } from "../core/streamSession";
+import type { DebridProviderId } from "../integrations/debrid/types";
 
 export interface Runtime {
   queue: DownloadQueue;
@@ -38,12 +39,13 @@ export interface Runtime {
 // able to see, in its own log, why it is now capped.
 export function policySummary(cfg: Config): string {
   const rate = (kbps?: number): string => (kbps && kbps > 0 ? `${kbps} KB/s` : "unlimited");
+  const active = resolveActiveDebrid(cfg);
   const parts = [
     `down ${rate(cfg.downloadLimitKbps)}`,
     `up ${rate(cfg.uploadLimitKbps)}`,
     `seed ratio ${cfg.seedRatio && cfg.seedRatio > 0 ? cfg.seedRatio : "off"}`,
     `seed time ${cfg.seedMinutes && cfg.seedMinutes > 0 ? `${cfg.seedMinutes}m` : "off"}`,
-    `real-debrid ${resolveRealDebridToken(cfg) ? "on" : "off"}`,
+    `real-debrid ${active ? "on" : "off"}`,
   ];
   return `policy: ${parts.join(" · ")}`;
 }
@@ -57,11 +59,12 @@ export async function startRuntime(overrideDir?: string): Promise<Runtime> {
   queue.setTrackers(cfg.trackers);
   // Everything below matches App.tsx's boot: without it a headless run ignores
   // the configured transfer limits, never auto-stops a seed, and fails a
-  // resumed Real-Debrid download with "set a token" for a token that is set.
+  // resumed debrid download with "set a token" for a token that is set.
   queue.setTransferPolicy(cfg);
-  // resolveRealDebridToken, not cfg.realDebridToken: REALDEBRID_API_TOKEN wins
-  // over the file, and the two front-ends must agree on which token is live.
-  queue.setRealDebridToken(resolveRealDebridToken(cfg));
+  // resolveActiveDebrid, not cfg.realDebridToken: an env var wins over the
+  // file and the two front-ends must agree on which provider + token is live.
+  const active = resolveActiveDebrid(cfg);
+  queue.setDebridToken(active?.provider ?? null, active?.token ?? "");
   // Deliberately no setP2PAllowed here. In the TUI it isn't a setting but a
   // 1 Hz vpnRouteIsSafe() loop; a one-shot check at boot would go stale and
   // look like a kill switch that isn't one. A configured vpnInterface gets the
@@ -113,16 +116,23 @@ export interface AddInputOptions {
    */
   name?: string;
   /**
-   * Fetch through Real-Debrid with this token instead of joining the swarm.
+   * Fetch through a debrid service with this token instead of joining the swarm.
    *
    * Mirrors the TUI's `startDebridDownload`: same `queue.addDebrid`, same
    * fire-and-forget drive. The token is passed in rather than read from config
-   * here so the decision of *whether* to use Real-Debrid stays with the caller
-   * — the TUI asks the user, and the web layer requires an explicit `via`. An
-   * add that silently chose the network for you is the one outcome both
+   * here so the decision of *whether* to use debrid stays with the caller — the
+   * TUI asks the user, and the web layer requires an explicit `via`. An add
+   * that silently chose the network for you is the one outcome both
    * front-ends are built to avoid.
    */
   debridToken?: string;
+  /**
+   * Which debrid service `debridToken` belongs to. Defaults to `"realdebrid"`
+   * when omitted, so a caller written before TorBox support (e.g. today's
+   * `src/web/routes.ts`, which resolves only the Real-Debrid token) keeps
+   * behaving exactly as before.
+   */
+  debridProvider?: DebridProviderId;
   /** Total size in bytes when the caller knows it; seeds the row's progress total. */
   sizeBytes?: number;
 }
@@ -153,7 +163,8 @@ export async function addInput(
     // Not awaited, exactly as the TUI does it: addDebrid's promise resolves
     // when the whole download finishes (or fails), which is minutes away. The
     // queue row exists synchronously, which is what "added" means here.
-    void runtime.queue.addDebrid(item, runtime.downloadDir, options.debridToken);
+    const provider = options.debridProvider ?? "realdebrid";
+    void runtime.queue.addDebrid(item, runtime.downloadDir, provider, options.debridToken);
     return "added";
   }
   runtime.queue.add(item, runtime.downloadDir);

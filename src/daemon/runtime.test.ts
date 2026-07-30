@@ -107,7 +107,12 @@ describe("addInput", () => {
     // Not awaited: addDebrid's promise resolves when the whole download does,
     // which is minutes away. The queue row exists synchronously, which is what
     // "added" claims.
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), dir, "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel" }),
+      dir,
+      "realdebrid",
+      "rd-tok",
+    );
     expect(add).not.toHaveBeenCalled();
   });
 });
@@ -218,8 +223,13 @@ describe("startRuntime — applied config", () => {
 });
 
 describe("policySummary", () => {
-  // Neutralise a real token in the developer's own environment.
-  beforeEach(() => vi.stubEnv("REALDEBRID_API_TOKEN", ""));
+  // Neutralise a real token in the developer's own environment. resolveActiveDebrid
+  // now reads TorBox's env var too, so a dev with a real TorBox token locally
+  // would otherwise flip these to "on" while CI stays green.
+  beforeEach(() => {
+    vi.stubEnv("REALDEBRID_API_TOKEN", "");
+    vi.stubEnv("TORBOX_API_TOKEN", "");
+  });
   afterEach(() => vi.unstubAllEnvs());
 
   it("names the limits it applied so a capped daemon says so at startup", () => {

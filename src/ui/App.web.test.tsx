@@ -37,7 +37,7 @@ vi.mock("../util/openUrl", async (importOriginal) => ({
 class FakeQueue extends EventEmitter {
   setTrackers = vi.fn();
   setTransferPolicy = vi.fn();
-  setRealDebridToken = vi.fn();
+  setDebridToken = vi.fn();
   setP2PAllowed = vi.fn();
   restore = vi.fn();
   restoreHistory = vi.fn();

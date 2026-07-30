@@ -587,8 +587,10 @@ export function App({
 
   // Keep the queue's Real-Debrid token in step with config (and the env var), so
   // a retry can re-run the pipeline without the UI handing it back in.
+  // Literal "realdebrid": this UI still only offers Real-Debrid downloads
+  // (see startDebridDownload below) — Task 12 makes it provider-aware.
   useEffect(() => {
-    if (queue && config) queue.setRealDebridToken(resolveRealDebridToken(config));
+    if (queue && config) queue.setDebridToken("realdebrid", resolveRealDebridToken(config));
   }, [queue, config]);
 
   const quitAll = useCallback(() => {
@@ -1071,7 +1073,8 @@ export function App({
         return;
       }
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
-      void queue.addDebrid(input, config.downloadDir, token);
+      // Literal "realdebrid": Task 12 owns making this provider-aware.
+      void queue.addDebrid(input, config.downloadDir, "realdebrid", token);
       setNotice(`Real-Debrid: ${truncate(cleanText(input.name), 40)}`);
     },
     [config, queue],

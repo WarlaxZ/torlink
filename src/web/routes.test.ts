@@ -1609,7 +1609,12 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
       { infoHash: HASH, name: "Kestrel", via: "debrid" },
     );
     expect(res.status).toBe(200);
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), "/tmp/dl", "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel" }),
+      "/tmp/dl",
+      "realdebrid",
+      "rd-tok",
+    );
     expect(add).not.toHaveBeenCalled();
   });
 

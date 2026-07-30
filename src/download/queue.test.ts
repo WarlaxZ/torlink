@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { DownloadQueue, seedPolicyReached, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 import { RealDebridError } from "../integrations/debrid/realdebrid";
+import { TorBoxError } from "../integrations/debrid/torbox";
 import { deleteTorrentMeta, saveTorrentMeta } from "./persist";
 
 const tmpDirs: string[] = [];
@@ -115,7 +116,7 @@ describe("DownloadQueue file selection", () => {
   });
 });
 
-describe("DownloadQueue Real-Debrid path", () => {
+describe("DownloadQueue debrid path", () => {
   const input = {
     id: "rd1",
     name: "Movie",
@@ -125,7 +126,7 @@ describe("DownloadQueue Real-Debrid path", () => {
   it("completes a Real-Debrid download into history without ever seeding it", async () => {
     const q = new DownloadQueue();
     const deps: DebridDeps = {
-      resolveMagnet: async (_token, _magnet, opts) => {
+      resolveMagnet: async (_provider, _token, _magnet, opts) => {
         opts?.onProgress?.(100);
         return [{ url: "https://dl/f", filename: "f.mkv", bytes: 10 }];
       },
@@ -137,7 +138,7 @@ describe("DownloadQueue Real-Debrid path", () => {
     let completed = "";
     q.on("completed", (n: string) => (completed = n));
 
-    await q.addDebrid(input, "/downloads", "tok", deps);
+    await q.addDebrid(input, "/downloads", "realdebrid", "tok", deps);
 
     expect(q.has("rd1")).toBe(false); // moved to history
     expect(q.getHistory().some((h) => h.id === "rd1")).toBe(true);
@@ -156,13 +157,64 @@ describe("DownloadQueue Real-Debrid path", () => {
       downloadFiles: async () => [],
     };
 
-    await q.addDebrid(input, "/downloads", "tok", deps);
+    await q.addDebrid(input, "/downloads", "realdebrid", "tok", deps);
 
     const it = q.getItems().find((i) => i.id === "rd1");
     expect(it?.status).toBe("failed");
     expect(it?.error).toContain("dead torrent");
     expect(it?.via).toBe("debrid");
     expect(it?.provider).toBe("realdebrid");
+    q.suspend();
+  });
+
+  it("records the provider on the item and in history", async () => {
+    const q = new DownloadQueue();
+    const deps: DebridDeps = {
+      resolveMagnet: (provider, _t, _m) => {
+        expect(provider).toBe("torbox");
+        return Promise.resolve([{ url: "https://cdn.torbox.app/dl/a.mkv", filename: "a.mkv", bytes: 10 }]);
+      },
+      downloadFiles: async (_files, dir) => [path.join(dir, "a.mkv")],
+    };
+    await q.addDebrid(
+      { id: "tb1", name: "Kestrel.2010.1080p.BluRay.x264", magnet: "magnet:?xt=urn:btih:2222222222222222222222222222222222222222" },
+      "/downloads",
+      "torbox",
+      "tb-1",
+      deps,
+    );
+    const entry = q.getHistory().find((h) => h.id === "tb1")!;
+    expect(entry.via).toBe("debrid");
+    expect(entry.provider).toBe("torbox");
+    q.suspend();
+  });
+
+  it("classifies a transient failure using the ACTIVE provider's rules", async () => {
+    // A TorBox rate limit is transient; RD's isTransient would not recognise it,
+    // so a shared classifier would fail the item instead of requeuing it.
+    let attempts = 0;
+    const deps: DebridDeps = {
+      resolveMagnet: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          const e = new TorBoxError("TorBox rate limit — wait a moment and retry.", 200, "TOO_MANY_REQUESTS");
+          return Promise.reject(e);
+        }
+        return Promise.resolve([{ url: "https://cdn.torbox.app/dl/a.mkv", filename: "a.mkv", bytes: 10 }]);
+      },
+      downloadFiles: async (_files, dir) => [path.join(dir, "a.mkv")],
+      sleep: async () => {},
+    };
+    const q = new DownloadQueue();
+    await q.addDebrid(
+      { id: "tb2", name: "Ashfall.1999.1080p", magnet: "magnet:?xt=urn:btih:3333333333333333333333333333333333333333" },
+      "/downloads",
+      "torbox",
+      "tb-1",
+      deps,
+    );
+    expect(attempts).toBe(2);
+    expect(q.getHistory().some((h) => h.id === "tb2")).toBe(true);
     q.suspend();
   });
 });
@@ -190,7 +242,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     const gates: Array<() => void> = [];
     let started = 0;
     const deps: DebridDeps = {
-      resolveMagnet: async (_t, _m, opts) => {
+      resolveMagnet: async (_p, _t, _m, opts) => {
         started++;
         await new Promise<void>((res) => gates.push(res)); // block until released
         opts?.onProgress?.(100);
@@ -200,7 +252,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       sleep: async () => {},
     };
     const inputs = [1, 2, 3, 4].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
-    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
+    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "realdebrid", "tok", deps)));
 
     await waitFor(() => started === 2, "2 downloads started");
     expect(started).toBe(2);
@@ -221,7 +273,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     const q = new DownloadQueue();
     let calls = 0;
     const deps: DebridDeps = {
-      resolveMagnet: async (_t, _m, opts) => {
+      resolveMagnet: async (_p, _t, _m, opts) => {
         calls++;
         if (calls < 3) throw new RealDebridError("busy", 503);
         opts?.onProgress?.(100);
@@ -230,7 +282,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       downloadFiles: async () => [],
       sleep: async () => {},
     };
-    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "realdebrid", "tok", deps);
     expect(calls).toBe(3);
     expect(q.has("rd1")).toBe(false);
     q.suspend();
@@ -247,7 +299,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       downloadFiles: async () => [],
       sleep: async () => {},
     };
-    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    await q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "realdebrid", "tok", deps);
     expect(calls).toBe(1);
     expect(q.getItems().find((i) => i.id === "rd1")?.status).toBe("failed");
     q.suspend();
@@ -258,7 +310,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     const gates: Array<() => void> = [];
     const started: string[] = [];
     const deps: DebridDeps = {
-      resolveMagnet: async (_t, magnet, opts) => {
+      resolveMagnet: async (_p, _t, magnet, opts) => {
         started.push(magnet);
         await new Promise<void>((res, rej) => {
           gates.push(res);
@@ -274,7 +326,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       sleep: async () => {},
     };
     const inputs = [1, 2, 3].map((n) => ({ id: `rd${n}`, name: `M${n}`, magnet: `m${n}` }));
-    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "tok", deps)));
+    const all = Promise.all(inputs.map((i) => q.addDebrid(i, "/downloads", "realdebrid", "tok", deps)));
 
     await waitFor(() => started.length === 2, "cap of 2 started"); // cap = 2; rd3 waiting
     expect(started).toHaveLength(2);
@@ -315,7 +367,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       sleep: async () => {},
     };
 
-    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "tok", deps);
+    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, "/downloads", "realdebrid", "tok", deps);
     await waitFor(
       () => q.getItems().find((i) => i.id === "rd1")?.phase === "downloading",
       "download in progress",
@@ -354,7 +406,7 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
       sleep: async () => {},
     };
     const file = path.join(dir, "f.mkv");
-    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, dir, "tok", deps);
+    const p = q.addDebrid({ id: "rd1", name: "M", magnet: "m" }, dir, "realdebrid", "tok", deps);
     await waitFor(() => fileExists(file), "partial file written"); // download reached the abort wait
     q.pause("rd1");
     await p;

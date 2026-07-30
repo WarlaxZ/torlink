@@ -246,13 +246,13 @@ describe("statusPayload over a real DownloadQueue", () => {
     try {
       const blocked = new Promise<never>(() => {});
       const deps: DebridDeps = {
-        resolveMagnet: async (_token, _magnet, opts) => {
+        resolveMagnet: async (_provider, _token, _magnet, opts) => {
           opts?.onProgress?.(42);
           return blocked; // hold the item in-progress
         },
         downloadFiles: async () => [],
       };
-      void queue.addDebrid({ id: HASH, name: "Example", magnet: MAGNET }, dir, "tok", deps);
+      void queue.addDebrid({ id: HASH, name: "Example", magnet: MAGNET }, dir, "realdebrid", "tok", deps);
 
       const item = (): { progress: number; status: string } | undefined =>
         queue.getItems().find((i) => i.id === HASH);
