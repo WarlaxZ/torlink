@@ -65,7 +65,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "For You",
     hints: [
       { keys: "↑ ↓", label: "Move between picks" },
-      { keys: "↵", label: "Play the best release (films) / search the title (shows)" },
+      { keys: "↵", label: "Play the best release (confirmed films) / otherwise search the title" },
       { keys: "s", label: "Search this title instead of playing it" },
       { keys: "i", label: "Open the IMDb page" },
       { keys: "p", label: "Toggle poster / plot preview (needs OMDb key)" },
@@ -82,7 +82,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "Continue watching",
     hints: [
       { keys: "↑ ↓", label: "Move between titles" },
-      { keys: "↵", label: "Play the next episode" },
+      { keys: "↵", label: "Play the next episode, or resume where there is none" },
       { keys: "s", label: "Search this title instead of playing it" },
       { keys: "x", label: "Remove from the list" },
     ],
