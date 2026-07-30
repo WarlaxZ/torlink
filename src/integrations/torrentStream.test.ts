@@ -18,11 +18,11 @@ function fakeServer() {
 function fakeTorrent() {
   const t = new EventEmitter() as any;
   t.infoHash = "abc123";
-  t.name = "Big Buck Bunny";
+  t.name = "Copper Kettle Run";
   t.done = false;
   t.files = [
-    { name: "readme.txt", path: "Big Buck Bunny/readme.txt", length: 100 },
-    { name: "bbb.mp4", path: "Big Buck Bunny/bbb.mp4", length: 5000 },
+    { name: "readme.txt", path: "Copper Kettle Run/readme.txt", length: 100 },
+    { name: "ckr.mp4", path: "Copper Kettle Run/ckr.mp4", length: 5000 },
   ];
   return t;
 }
@@ -49,11 +49,11 @@ describe("streamTorrent", () => {
       mkdtemp: async () => "/tmp/torlink-stream-x",
       rm,
     });
-    expect(session.name).toBe("Big Buck Bunny");
-    const mp4 = session.files.find((f) => f.filename === "bbb.mp4")!;
+    expect(session.name).toBe("Copper Kettle Run");
+    const mp4 = session.files.find((f) => f.filename === "ckr.mp4")!;
     expect(mp4.bytes).toBe(5000);
     expect(mp4.url).toBe(
-      "http://localhost:54321/webtorrent/abc123/Big%20Buck%20Bunny/bbb.mp4",
+      "http://localhost:54321/webtorrent/abc123/Copper%20Kettle%20Run/ckr.mp4",
     );
   });
 

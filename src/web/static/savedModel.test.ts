@@ -1,54 +1,96 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyContinueWatchingResponse,
   applyLibraryResponse,
   applySaved,
-  applyWatchlistResponse,
+  applySavedSearchesResponse,
+  continueWatchingBody,
+  continueWatchingFallbackQuery,
+  continueWatchingStatus,
+  continueWatchingSub,
   emptySaved,
+  episodeTag,
   favouriteLabel,
   favouriteMeta,
   isInLibrary,
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
-  watchlistBody,
-  watchlistStatus,
-  watchlistToggleNotice,
+  relativeAge,
+  savedSearchesBody,
+  savedSearchesStatus,
+  savedSearchesToggleNotice,
   type SavedState,
 } from "./savedModel";
-import type { PublicFavourite } from "../wire";
+import type { PublicFavourite, PublicStreamHistoryItem } from "../wire";
+// Fine to import here even though `src/core/streamHistory.ts` pulls in
+// `node:fs`: this is a test file, never bundled for the browser (only
+// app.ts/player.ts are, per tsup.web.config.ts) — the node:* restriction is on
+// the shipped bundle, not on the test that guards against it drifting.
+import { nextEpisode, nextLabel, type StreamHistoryItem } from "../../core/streamHistory";
 
 const HASH = "b".repeat(40);
 
 function favourite(over: Partial<PublicFavourite> = {}): PublicFavourite {
-  return { id: HASH, name: "Severance.S02.1080p", addedAt: 1_700_000_000_000, watched: 0, ...over };
+  return { id: HASH, name: "Kepler.S02.1080p", addedAt: 1_700_000_000_000, watched: 0, ...over };
 }
 
 function loaded(over: Partial<SavedState> = {}): SavedState {
   return { ...emptySaved(), loaded: true, ...over };
 }
 
+const base: PublicStreamHistoryItem = {
+  key: "k",
+  title: "Kepler",
+  type: "series",
+  season: 2,
+  episode: 4,
+  next: { season: 2, episode: 5 },
+  rawName: "Kepler.S02E04.1080p",
+  infoHash: "a".repeat(40),
+  startedAt: 1_700_000_000_000,
+};
+// Exactly 86,400,000 ms after `base.startedAt`, so "1 day ago" is arithmetic
+// rather than a guess about how the formatter rounds.
+const A_DAY_LATER = 1_700_086_400_000;
+
 describe("emptySaved", () => {
   it("opens unloaded with no error, so the pane can say 'loading' rather than 'empty'", () => {
     // These are different sentences to a user: an empty library and a library
     // that has not arrived yet must not read the same.
-    expect(emptySaved()).toEqual({ watchlist: [], library: [], loaded: false, error: null });
+    expect(emptySaved()).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: false,
+      error: null,
+    });
   });
 });
 
-describe("watchlistBody", () => {
+describe("savedSearchesBody", () => {
   it("sends the query and the action", () => {
-    expect(watchlistBody("dune part two", "toggle")).toEqual({
-      query: "dune part two",
+    expect(savedSearchesBody("tin rivers", "toggle")).toEqual({
+      query: "tin rivers",
       action: "toggle",
     });
-    expect(watchlistBody("dune part two", "remove")).toEqual({
-      query: "dune part two",
+    expect(savedSearchesBody("tin rivers", "remove")).toEqual({
+      query: "tin rivers",
       action: "remove",
     });
   });
 
   it("trims, so the box's stray spaces cannot create a second entry", () => {
-    expect(watchlistBody("  dune  ", "toggle").query).toBe("dune");
+    expect(savedSearchesBody("  tin rivers  ", "toggle").query).toBe("tin rivers");
+  });
+});
+
+describe("continueWatchingBody", () => {
+  it("sends the key and the remove action — there is no toggle to send", () => {
+    expect(continueWatchingBody("kepler||series")).toEqual({
+      key: "kepler||series",
+      action: "remove",
+    });
   });
 });
 
@@ -56,12 +98,12 @@ describe("libraryBody", () => {
   it("carries the name, which is what becomes the magnet's dn server-side", () => {
     expect(
       libraryBody(
-        { infoHash: HASH, name: "Severance.S02.1080p", sizeBytes: 24_000_000_000, source: "eztv" },
+        { infoHash: HASH, name: "Kepler.S02.1080p", sizeBytes: 24_000_000_000, source: "eztv" },
         "toggle",
       ),
     ).toEqual({
       infoHash: HASH,
-      name: "Severance.S02.1080p",
+      name: "Kepler.S02.1080p",
       sizeBytes: 24_000_000_000,
       source: "eztv",
       action: "toggle",
@@ -69,14 +111,14 @@ describe("libraryBody", () => {
   });
 
   it("omits sizeBytes and source when absent rather than sending zero or empty", () => {
-    const body = libraryBody({ infoHash: HASH, name: "Severance" }, "remove");
-    expect(body).toEqual({ infoHash: HASH, name: "Severance", action: "remove" });
+    const body = libraryBody({ infoHash: HASH, name: "Kepler" }, "remove");
+    expect(body).toEqual({ infoHash: HASH, name: "Kepler", action: "remove" });
     expect("sizeBytes" in body).toBe(false);
     expect("source" in body).toBe(false);
   });
 
   it("omits a zero size — the server treats >0 as known and 0 would read as known-and-empty", () => {
-    const body = libraryBody({ infoHash: HASH, name: "Severance", sizeBytes: 0 }, "toggle");
+    const body = libraryBody({ infoHash: HASH, name: "Kepler", sizeBytes: 0 }, "toggle");
     expect("sizeBytes" in body).toBe(false);
   });
 
@@ -130,14 +172,14 @@ describe("favouriteMeta", () => {
   });
 });
 
-describe("watchlistStatus / libraryStatus", () => {
+describe("savedSearchesStatus / libraryStatus", () => {
   it("says loading before the first response, not empty", () => {
-    expect(watchlistStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
+    expect(savedSearchesStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
     expect(libraryStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
   });
 
   it("explains how to fill each list when it is empty", () => {
-    expect(watchlistStatus(loaded())).toEqual({
+    expect(savedSearchesStatus(loaded())).toEqual({
       text: "Save a search to keep it here.",
       show: true,
       tone: "dim",
@@ -150,15 +192,15 @@ describe("watchlistStatus / libraryStatus", () => {
   });
 
   it("hides the line once there are rows to look at", () => {
-    expect(watchlistStatus(loaded({ watchlist: ["dune"] })).show).toBe(false);
+    expect(savedSearchesStatus(loaded({ savedSearches: ["tin rivers"] })).show).toBe(false);
     expect(libraryStatus(loaded({ library: [favourite()] })).show).toBe(false);
   });
 
   it("shows an error over both lists, and outranks having rows", () => {
     // A stale list next to no explanation is worse than a stale list with one:
     // the user needs to know these rows may not reflect the server.
-    const broken = loaded({ watchlist: ["dune"], error: "Can't reach torlnk." });
-    expect(watchlistStatus(broken)).toEqual({
+    const broken = loaded({ savedSearches: ["tin rivers"], error: "Can't reach torlnk." });
+    expect(savedSearchesStatus(broken)).toEqual({
       text: "Can't reach torlnk.",
       show: true,
       tone: "error",
@@ -172,7 +214,7 @@ describe("watchlistStatus / libraryStatus", () => {
     // the order of the error check and the !loaded check left every other
     // test green.
     const brokenBeforeLoad = { ...emptySaved(), error: "Can't reach torlnk." };
-    expect(watchlistStatus(brokenBeforeLoad)).toEqual({
+    expect(savedSearchesStatus(brokenBeforeLoad)).toEqual({
       text: "Can't reach torlnk.",
       show: true,
       tone: "error",
@@ -183,11 +225,13 @@ describe("watchlistStatus / libraryStatus", () => {
 describe("applySaved", () => {
   it("takes the server's lists and marks the state loaded, clearing any error", () => {
     const next = applySaved(loaded({ error: "old failure" }), {
-      watchlist: ["dune"],
+      savedSearches: ["tin rivers"],
       library: [favourite()],
+      continueWatching: [base],
     });
-    expect(next.watchlist).toEqual(["dune"]);
+    expect(next.savedSearches).toEqual(["tin rivers"]);
     expect(next.library).toHaveLength(1);
+    expect(next.continueWatching).toEqual([base]);
     expect(next.loaded).toBe(true);
     expect(next.error).toBeNull();
   });
@@ -196,37 +240,55 @@ describe("applySaved", () => {
     // The body is whatever came back over the network; a proxy error page
     // parses to something that is not this shape at all.
     const next = applySaved(emptySaved(), {});
-    expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 
   it("tolerates a null body rather than throwing on the page", () => {
     const next = applySaved(emptySaved(), null);
-    expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 });
 
-describe("applyWatchlistResponse", () => {
+describe("applySavedSearchesResponse", () => {
   it("takes the server's list and marks the state loaded, clearing any error", () => {
-    const next = applyWatchlistResponse(loaded({ error: "old failure" }), { watchlist: ["dune"] });
-    expect(next).toEqual({ watchlist: ["dune"], library: [], loaded: true, error: null });
+    const next = applySavedSearchesResponse(loaded({ error: "old failure" }), { savedSearches: ["tin rivers"] });
+    expect(next).toEqual({
+      savedSearches: ["tin rivers"],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 
   it("keeps the existing list on a null body rather than emptying it", () => {
-    const state = loaded({ watchlist: ["dune"] });
-    expect(applyWatchlistResponse(state, null)).toEqual(state);
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, null)).toEqual(state);
   });
 
-  it("keeps the existing list when watchlist is missing or not an array", () => {
-    const state = loaded({ watchlist: ["dune"] });
-    expect(applyWatchlistResponse(state, {})).toEqual(state);
-    expect(applyWatchlistResponse(state, { watchlist: "dune" })).toEqual(state);
+  it("keeps the existing list when savedSearches is missing or not an array", () => {
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, {})).toEqual(state);
+    expect(applySavedSearchesResponse(state, { savedSearches: "tin rivers" })).toEqual(state);
   });
 
   it("keeps the existing list when the body itself is not an object", () => {
-    const state = loaded({ watchlist: ["dune"] });
-    expect(applyWatchlistResponse(state, "dune")).toEqual(state);
-    expect(applyWatchlistResponse(state, 42)).toEqual(state);
-    expect(applyWatchlistResponse(state, undefined)).toEqual(state);
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, "tin rivers")).toEqual(state);
+    expect(applySavedSearchesResponse(state, 42)).toEqual(state);
+    expect(applySavedSearchesResponse(state, undefined)).toEqual(state);
   });
 });
 
@@ -250,17 +312,17 @@ describe("applyLibraryResponse", () => {
   });
 });
 
-describe("watchlistToggleNotice", () => {
+describe("savedSearchesToggleNotice", () => {
   it("says saved when the server reports saved: true", () => {
-    expect(watchlistToggleNotice({ saved: true })).toBe("Saved to your watchlist.");
+    expect(savedSearchesToggleNotice({ saved: true })).toBe("Saved to your searches.");
   });
 
   it("says removed for saved: false and for anything malformed", () => {
-    expect(watchlistToggleNotice({ saved: false })).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice({})).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice(null)).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice(undefined)).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice("saved")).toBe("Removed from your watchlist.");
+    expect(savedSearchesToggleNotice({ saved: false })).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice({})).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice(null)).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice(undefined)).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice("saved")).toBe("Removed from your searches.");
   });
 });
 
@@ -274,5 +336,159 @@ describe("libraryToggleNotice", () => {
     expect(libraryToggleNotice({})).toBe("Removed from your library.");
     expect(libraryToggleNotice(null)).toBe("Removed from your library.");
     expect(libraryToggleNotice(undefined)).toBe("Removed from your library.");
+  });
+});
+
+describe("applyContinueWatchingResponse", () => {
+  it("takes the server's list and marks the state loaded, clearing any error", () => {
+    const next = applyContinueWatchingResponse(loaded({ error: "old failure" }), {
+      continueWatching: [base],
+    });
+    expect(next.continueWatching).toEqual([base]);
+    expect(next.loaded).toBe(true);
+    expect(next.error).toBeNull();
+  });
+
+  it("keeps the existing list on a null body rather than emptying it", () => {
+    const state = loaded({ continueWatching: [base] });
+    expect(applyContinueWatchingResponse(state, null)).toEqual(state);
+  });
+
+  it("keeps the existing list when continueWatching is missing or not an array", () => {
+    const state = loaded({ continueWatching: [base] });
+    expect(applyContinueWatchingResponse(state, {})).toEqual(state);
+    expect(applyContinueWatchingResponse(state, { continueWatching: "nope" })).toEqual(state);
+  });
+});
+
+describe("relativeAge", () => {
+  it("says just now for anything under a minute", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000)).toBe("just now");
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 59_000)).toBe("just now");
+  });
+
+  it("says 1 day ago exactly 86,400,000 ms later", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 86_400_000)).toBe("1 day ago");
+  });
+
+  it("says 2 weeks ago 14 days later", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 14 * 86_400_000)).toBe("2 weeks ago");
+  });
+});
+
+describe("continueWatchingSub", () => {
+  it("reports the last episode and the next one", () => {
+    expect(continueWatchingSub(base, A_DAY_LATER)).toBe("1 day ago · last S02E04 · next S02E05");
+  });
+
+  it("omits next when there is none to offer", () => {
+    // A season pack, or a film.
+    expect(continueWatchingSub({ ...base, next: null }, A_DAY_LATER)).toBe("1 day ago · last S02E04");
+  });
+
+  it("says only the age for a film", () => {
+    expect(
+      continueWatchingSub(
+        { ...base, type: "movie", season: undefined, episode: undefined, next: null },
+        A_DAY_LATER,
+      ),
+    ).toBe("1 day ago");
+  });
+
+  // Both fixtures above are single-digit; this is the padStart no-op path —
+  // the same two-digit case nextLabel's own suite pins.
+  it("does not corrupt season/episode numbers already two digits", () => {
+    expect(
+      continueWatchingSub(
+        { ...base, season: 12, episode: 34, next: { season: 12, episode: 35 } },
+        A_DAY_LATER,
+      ),
+    ).toBe("1 day ago · last S12E34 · next S12E35");
+  });
+});
+
+describe("continueWatchingFallbackQuery", () => {
+  it("asks for the next episode when there is one", () => {
+    // The remembered torrent is dead, so we search — and searching for the
+    // episode you have NOT seen beats searching for the one you just watched.
+    expect(continueWatchingFallbackQuery(base)).toBe("Kepler S02E05");
+  });
+
+  it("asks for the bare title when there is no next episode", () => {
+    // A season pack that named no episode.
+    expect(continueWatchingFallbackQuery({ ...base, next: null })).toBe("Kepler");
+  });
+
+  it("asks for the bare title for a film", () => {
+    expect(
+      continueWatchingFallbackQuery({
+        ...base,
+        title: "Tin Rivers",
+        type: "movie",
+        season: undefined,
+        episode: undefined,
+        next: null,
+      }),
+    ).toBe("Tin Rivers");
+  });
+
+  it("does not corrupt season/episode numbers already two digits", () => {
+    expect(
+      continueWatchingFallbackQuery({ ...base, next: { season: 12, episode: 35 } }),
+    ).toBe("Kepler S12E35");
+  });
+});
+
+// The ONLY string genuinely shared between the two front ends: the TUI's pane
+// (src/ui/components/ContinueWatching.tsx) renders nextLabel(item) verbatim
+// and nothing else from this subtitle — no age, no "last SxxExx" — so that is
+// the one fragment worth cross-checking rather than the whole line.
+describe("episodeTag agrees with nextLabel's \"next SxxExx\" fragment", () => {
+  function historyItem(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
+    return {
+      key: "k",
+      title: "Kepler",
+      type: "series",
+      rawName: "Kepler.S02E04.1080p",
+      infoHash: "a".repeat(40),
+      magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+      startedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  it("matches nextLabel for a single-digit episode", () => {
+    const item = historyItem({ season: 2, episode: 4 });
+    const next = nextEpisode(item);
+    expect(next).not.toBeNull();
+    expect(`next ${episodeTag(next!.season, next!.episode)}`).toBe(nextLabel(item));
+    expect(nextLabel(item)).toBe("next S02E05");
+  });
+
+  it("matches nextLabel for a two-digit season and episode", () => {
+    const item = historyItem({ season: 12, episode: 34 });
+    const next = nextEpisode(item);
+    expect(next).not.toBeNull();
+    expect(`next ${episodeTag(next!.season, next!.episode)}`).toBe(nextLabel(item));
+    expect(nextLabel(item)).toBe("next S12E35");
+  });
+});
+
+describe("continueWatchingStatus", () => {
+  it("says loading before the first response, not empty", () => {
+    expect(continueWatchingStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
+  });
+
+  it("explains how to fill it when empty", () => {
+    expect(continueWatchingStatus({ ...emptySaved(), loaded: true })).toEqual({
+      text: "Stream something and it will show up here.",
+      show: true,
+      tone: "dim",
+    });
+  });
+
+  it("hides once there are rows", () => {
+    const state = { ...emptySaved(), loaded: true, continueWatching: [{ ...base }] };
+    expect(continueWatchingStatus(state).show).toBe(false);
   });
 });

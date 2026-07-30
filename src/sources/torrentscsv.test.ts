@@ -7,7 +7,7 @@ const SAMPLE = {
   torrents: [
     {
       infohash: "AABBCCDDEEFF00112233445566778899AABBCCDD",
-      name: "Inception 2010 1080p BluRay x264",
+      name: "Ashfall 1999 1080p BluRay x264",
       size_bytes: 2147483648,
       seeders: 120,
       leechers: 8,
@@ -15,7 +15,7 @@ const SAMPLE = {
     },
     {
       infohash: "1111111111111111111111111111111111111111",
-      name: "Inception 2010 720p",
+      name: "Ashfall 1999 720p",
       size_bytes: 1073741824,
       seeders: null,
       leechers: null,
@@ -29,7 +29,7 @@ describe("parseTorrentsCsv", () => {
     const [first] = parseTorrentsCsv(SAMPLE);
     expect(first).toMatchObject({
       infoHash: "aabbccddeeff00112233445566778899aabbccdd",
-      name: "Inception 2010 1080p BluRay x264",
+      name: "Ashfall 1999 1080p BluRay x264",
       sizeBytes: 2147483648,
       seeders: 120,
       leechers: 8,

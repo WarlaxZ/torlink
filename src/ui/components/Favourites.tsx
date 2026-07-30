@@ -7,7 +7,7 @@ import { COLOR, GUTTER, ICON, sourceStyle } from "../theme";
 import { formatBytes, cleanText, truncate } from "../../util/format";
 
 export function Favourites() {
-  const { favourites, removeFavourite, openFavourite, region, section, contentWidth, listRows } =
+  const { favourites, removeFavourite, openFavourite, region, section, contentWidth, listRows, streamActive } =
     useStore();
   const focused = region === "content" && section === "library";
   const [cursor, setCursor] = useState(0);
@@ -20,7 +20,11 @@ export function Favourites() {
       else if (key.return) {
         const fav = favourites[clamped];
         if (fav) openFavourite(fav);
-      } else if (input === "x") {
+      } else if (input === "x" && !streamActive) {
+        // "x" is reserved globally for stopping an active stream (App.tsx); Ink
+        // fans a keypress out to every live useInput handler rather than
+        // cascading, so without this guard the same "x" would both stop the
+        // stream and delete this row. Skip our own "x" while one is live.
         const fav = favourites[clamped];
         if (fav) removeFavourite(fav.id);
       }

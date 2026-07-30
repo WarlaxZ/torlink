@@ -25,6 +25,17 @@ import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
+import {
+  forgetStreamHistory,
+  historyItemFor,
+  loadStreamHistory,
+  nextEpisode,
+  recordStream,
+  removeStreamHistory,
+  saveStreamHistory,
+  type StreamHistoryItem,
+} from "../core/streamHistory";
+import { nextEpisodeIndex } from "../util/nextEpisodeFile";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
@@ -92,8 +103,9 @@ import { TraktImportPrompt, type TraktImportView } from "./components/TraktImpor
 import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
-import { Watchlist } from "./components/Watchlist";
+import { SavedSearches } from "./components/SavedSearches";
 import { Favourites } from "./components/Favourites";
+import { ContinueWatching } from "./components/ContinueWatching";
 import { ForYou } from "./components/ForYou";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
@@ -276,6 +288,10 @@ export function App({
   // The torrent behind the open picker, so we can favourite it / persist watched
   // progress. Cleared only when the picker closes (survives keep-open replays).
   const [streamSource, setStreamSource] = useState<DownloadInput | null>(null);
+  // Which candidate the picker should open on — an index into the list handed to
+  // StreamFilePrompt, from nextEpisodeIndex. Null is the ordinary answer (a film,
+  // a pack with no episode number, or nothing matching) and means "first row".
+  const [streamPreselect, setStreamPreselect] = useState<number | null>(null);
   const [preparing, setPreparing] = useState<{
     label: string;
     phase: "caching" | "fetching";
@@ -285,6 +301,7 @@ export function App({
   const [activeStream, setActiveStream] = useState<
     { session: TorrentStreamSession; name: string; input: DownloadInput } | null
   >(null);
+  const [streamHistory, setStreamHistory] = useState<StreamHistoryItem[]>([]);
   // Confirm state for the two torrent privacy prompts.
   const [torrentPrompt, setTorrentPrompt] = useState<
     { input: DownloadInput; reason?: string } | null
@@ -337,6 +354,7 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      setStreamHistory(await loadStreamHistory());
       // Apply any custom DNS before the first network call (e.g. token check).
       setDnsServers(resolveDnsServers(cfg));
       // Restore remembered UI preferences (validated, so stale values degrade
@@ -657,7 +675,7 @@ export function App({
       void saveConfig(next);
       return next;
     });
-    setNotice("Watchlist updated.");
+    setNotice("Saved searches updated.");
   }, []);
 
   // Opens the shared RatePrompt for a For You pick (adds the "watched" action and
@@ -1119,6 +1137,55 @@ export function App({
     setNotice("Stream cancelled.");
   }, []);
 
+  // The same store the web writes, from src/core so neither front end owns it.
+  //
+  // Returns the row as STORED — which is not the row just built: recordStream
+  // keeps the high-water episode, so resuming "Harrowgate.S03" comes back with
+  // the E04 the user actually reached, and `nextEpisode` on it is the same
+  // S03E05 the Continue-watching row displays. Callers await it to decide where
+  // the file picker opens.
+  //
+  // Awaiting is safe even though a convenience list must never interrupt a
+  // stream: every failure path — the parse included — is swallowed here, so this
+  // cannot reject, and it cannot become an unhandled rejection in the TUI's Node
+  // process either (which can take the whole terminal down with it). What a
+  // caller waits for is a small JSON read and write, after a resolve that already
+  // took seconds, and both call sites have already cleared their abort handle.
+  const recordStreamHistory = useCallback(async (
+    input: DownloadInput,
+  ): Promise<StreamHistoryItem | null> => {
+    try {
+      const item = historyItemFor(input, Date.now());
+      if (!item) return null; // no title in the release name, so no row to draw
+      const current = await loadStreamHistory();
+      const next = recordStream(current, item);
+      await saveStreamHistory(next);
+      setStreamHistory(next);
+      return next.find((e) => e.key === item.key) ?? null;
+    } catch {
+      return null; // ignore — see above
+    }
+  }, []);
+
+  // Open the file picker on a resolved multi-file torrent. Both stream paths
+  // (Real-Debrid and direct torrent) end here, so the cursor's opening position
+  // is decided once. `recorded` is the stream-history row this play just wrote,
+  // whose `nextEpisode` is the same suggestion the Continue-watching pane shows.
+  const openStreamPicker = useCallback(
+    (candidates: ResolvedFile[], input: DownloadInput, recorded: StreamHistoryItem | null) => {
+      setStreamedFiles(new Set());
+      setStreamSource(input);
+      setStreamPreselect(
+        nextEpisodeIndex(candidates, {
+          next: recorded ? nextEpisode(recorded) : null,
+          watched: watchedFor(config?.favourites ?? [], input.id),
+        }),
+      );
+      setStreamFiles(candidates);
+    },
+    [config],
+  );
+
   // Stream a torrent directly (no Real-Debrid): cache metadata, spin up a
   // local HTTP server for the files, then hand off to the same player/picker
   // path the Real-Debrid flow uses.
@@ -1160,10 +1227,9 @@ export function App({
             resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
+          const recorded = await recordStreamHistory(input);
           if (candidates.length > 1) {
-            setStreamedFiles(new Set());
-            setStreamSource(input);
-            setStreamFiles(candidates);
+            openStreamPicker(candidates, input, recorded);
           } else {
             void playStream(candidates[0]!.url, input.name, () =>
               markPlayed(input.id, candidates[0]!.filename),
@@ -1177,7 +1243,7 @@ export function App({
         }
       })();
     },
-    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed],
+    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed, recordStreamHistory, openStreamPicker],
   );
 
   useEffect(() => {
@@ -1307,11 +1373,10 @@ export function App({
             resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
+          const recorded = await recordStreamHistory(input);
           if (candidates.length > 1) {
             setPreparing(null);
-            setStreamedFiles(new Set());
-            setStreamSource(input);
-            setStreamFiles(candidates);
+            openStreamPicker(candidates, input, recorded);
             return;
           }
           finishStream(candidates[0]!, input.name, () =>
@@ -1337,7 +1402,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed],
+    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed, recordStreamHistory, openStreamPicker],
   );
 
   // Reopen a favourited series: re-resolve its magnet through the same stream
@@ -1354,6 +1419,32 @@ export function App({
     },
     [streamResult],
   );
+
+  // Replay the remembered torrent. `streamResult` is the same path a search hit
+  // takes, so a dead swarm surfaces the same way it does anywhere else.
+  const openStreamHistory = useCallback(
+    (item: StreamHistoryItem) => {
+      streamResult({ id: item.infoHash, name: item.rawName, magnet: item.magnet, source: item.source });
+    },
+    [streamResult],
+  );
+
+  // Optimistic locally, re-read on disk. The row must vanish under the cursor
+  // now; the FILE must not be written from this component's snapshot, because
+  // `serve --web` is a separate process appending to it (see
+  // forgetStreamHistory). Same total swallow as recordStreamHistory above, and
+  // for the same reason: every throwable call sits inside the try, so nothing
+  // here can become an unhandled rejection in the TUI's Node process.
+  const removeStreamHistoryEntry = useCallback((key: string) => {
+    setStreamHistory((prev) => removeStreamHistory(prev, key));
+    void (async () => {
+      try {
+        setStreamHistory(await forgetStreamHistory(key));
+      } catch {
+        /* ignore — see above */
+      }
+    })();
+  }, []);
 
   const closePlayerPrompt = useCallback(() => {
     setEditingPlayer(false);
@@ -1728,6 +1819,9 @@ export function App({
       removeFavourite,
       openFavourite,
       isFavourited,
+      streamHistory,
+      openStreamHistory,
+      removeStreamHistory: removeStreamHistoryEntry,
       section,
       setSection: changeSection,
       sort,
@@ -1781,6 +1875,9 @@ export function App({
     removeFavourite,
     openFavourite,
     isFavourited,
+    streamHistory,
+    openStreamHistory,
+    removeStreamHistoryEntry,
     section,
     changeSection,
     sort,
@@ -2200,6 +2297,7 @@ export function App({
                   ? [...watchedFor(config?.favourites ?? [], streamSource.id), ...streamedFiles]
                   : [...streamedFiles]
               }
+              preselect={streamPreselect ?? undefined}
               favourited={streamSource ? isFavourited(streamSource.id) : false}
               onFavourite={
                 streamSource
@@ -2219,6 +2317,7 @@ export function App({
                 setStreamFiles(null);
                 setStreamedFiles(new Set());
                 setStreamSource(null);
+                setStreamPreselect(null);
                 // The Real-Debrid path has no activeStream (files are hosted
                 // by RD, not a local torrent session), so this only fires for
                 // the torrent-stream path — leave that path unaffected.
@@ -2499,8 +2598,11 @@ export function App({
                 onSignOutOmdb={clearOmdbKey}
               />
             </Box>
-            <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
-              <Watchlist />
+            <Box display={section === "continueWatching" ? "flex" : "none"} flexDirection="column">
+              <ContinueWatching />
+            </Box>
+            <Box display={section === "savedSearches" ? "flex" : "none"} flexDirection="column">
+              <SavedSearches />
             </Box>
             <Box display={section === "library" ? "flex" : "none"} flexDirection="column">
               <Favourites />
@@ -2532,7 +2634,14 @@ export function App({
             }
           >
             <Footer
-              hints={footerHints(region, section, downloadFocus, seedFocus, store.debridConfigured)}
+              hints={footerHints(
+                region,
+                section,
+                downloadFocus,
+                seedFocus,
+                store.debridConfigured,
+                store.streamActive,
+              )}
             />
           </Box>
         ) : null}

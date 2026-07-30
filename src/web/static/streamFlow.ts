@@ -6,15 +6,37 @@
 //
 // Bundled for the browser, so: no node:* imports, direct or transitive.
 //
-// TWO IMPORTS LEAVE THIS DIRECTORY. `../wire` is types-only and erased at build
-// time, as in dashboard.ts. `../../util/videoFiles` is a *value* import and is
+// FOUR VALUE IMPORTS LEAVE THIS DIRECTORY, all four for one reason — the piece is
+// a decision both front ends make, so it is shared rather than copied — and each
+// is argued at its own import line below: `util/videoFiles` (which files are
+// candidates), `util/nextEpisodeFile` (which one to open on),
+// `util/streamHistoryKey` (which history row a release belongs to) and
+// `util/release` (what a release name says). The type-only imports are free:
+// `../wire` and `../../util/episode` are erased at build time, as in dashboard.ts.
+//
+// `../../util/videoFiles` is the first, and it is
 // deliberate: it is the video-first heuristic the TUI's file picker uses, and
 // reimplementing it here would be the fourth instance of the copy-then-drift bug
 // this codebase keeps hitting (uploadSpeed, the byte formatter, the progress
 // unit). That module is dependency-free and stays that way — `platform:
 // "browser"` in tsup.web.config.ts fails the build if it ever isn't.
 import { streamCandidates } from "../../util/videoFiles";
-import type { PublicStreamFile, PublicStreamSession } from "../wire";
+// The second, and the same argument: which
+// file is the next episode is a decision both front ends make, so it is shared
+// rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
+// which is why it is a module of its own and not part of videoFiles.ts.
+import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
+// The third and fourth, and the same argument again: the stream-history store's
+// dedupe key decides which row a release belongs to (and `parseRelease` is what it
+// is derived from), so a second derivation of either in the browser would be the
+// fifth recorded copy-then-drift bug here. `historyKeyFor` was module-private in
+// src/core/streamHistory.ts, which imports node:fs and so cannot be reached from a
+// browser bundle; it moved down to src/util (whence src/core re-exports it) rather
+// than being copied. `release.ts` was already in this bundle via nextEpisodeFile.
+import { historyKeyFor } from "../../util/streamHistoryKey";
+import { parseRelease } from "../../util/release";
+import type { EpisodeRef } from "../../util/episode";
+import type { PublicStreamFile, PublicStreamHistoryItem, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
 
 // Re-exported for the same reason dashboard.ts re-exports the status types: one
@@ -28,6 +50,10 @@ export type {
   StartStreamResponse,
   StreamConfirmResponse,
 } from "../wire";
+// Same argument, one layer further down: app.ts holds an episode reference on its
+// way to `runPlay`, and re-exporting the one declaration is what stops it from
+// spelling `{ season, episode }` out again. See src/util/episode.ts.
+export type { EpisodeRef } from "../../util/episode";
 
 /**
  * Whether a row is worth offering a Play button on.
@@ -91,8 +117,15 @@ export function playerPath(
 export type StreamOutcome =
   /** Exactly one candidate: open the player on it, no picker. */
   | { kind: "single"; file: PublicStreamFile }
-  /** Several candidates: ask which one. */
-  | { kind: "choose"; files: PublicStreamFile[] }
+  /**
+   * Several candidates: ask which one, opening on `preselect`.
+   *
+   * `preselect` is an index into `files` — the FILTERED list the picker draws,
+   * not the session's own indexes, which differ the moment a release ships a
+   * `.nfo`. Null is the ordinary answer and means "no opinion": the picker looks
+   * exactly as it always has.
+   */
+  | { kind: "choose"; files: PublicStreamFile[]; preselect: number | null }
   /** The session failed. `message` is already worded for a human. */
   | { kind: "error"; message: string }
   /** Ready, but there is nothing in it to play. */
@@ -110,8 +143,26 @@ export type StreamOutcome =
  * A `resolving` session never reaches here — `pollDecision` owns that state —
  * but it is treated as an error rather than silently as "empty", because a
  * caller that skipped the polling loop has a bug and should see it.
+ *
+ * `next` is the episode to open the picker on: pass a Continue-watching row's
+ * own `next`, which the server computed with `nextEpisode` over the row's
+ * high-water mark. It crosses the wire already (`PublicStreamHistoryItem`), so
+ * nothing here recomputes it and no field was added to carry it.
+ *
+ * ONE HALF OF THE PRESELECTION IS TUI-ONLY, deliberately. `nextEpisodeIndex`
+ * also falls back to the first not-yet-watched file (preferring one that names
+ * some episode) when nothing parses as the episode asked for; that needs the
+ * watched FILENAMES, which `PublicFavourite` withholds on purpose (it sends a
+ * count — see wire.ts for why filenames from inside a stranger's torrent are not
+ * handed to a browser). This is neither of CLAUDE.md's two named exemptions: the
+ * browser COULD express it and is simply not given the data, by a privacy
+ * decision recorded in wire.ts. The parse-based preselection, which is the
+ * feature, is identical in both front ends.
  */
-export function streamOutcome(session: PublicStreamSession): StreamOutcome {
+export function streamOutcome(
+  session: PublicStreamSession,
+  next?: EpisodeRef | null,
+): StreamOutcome {
   if (session.state === "error") {
     // The core reuses the TUI's wording, so this is already a sentence a person
     // can act on. Only the generic case is written here.
@@ -123,7 +174,51 @@ export function streamOutcome(session: PublicStreamSession): StreamOutcome {
   const files = streamCandidates(session.files);
   if (files.length === 0) return { kind: "empty" };
   if (files.length === 1) return { kind: "single", file: files[0]! };
-  return { kind: "choose", files };
+  return { kind: "choose", files, preselect: nextEpisodeIndex(files, { next }) };
+}
+
+/**
+ * Which episode to open the picker on for a release the user pressed Play on.
+ *
+ * WHY THIS EXISTS: without it the browser preselects from ONE entry point and the
+ * terminal preselects from all of them. In the TUI every play path funnels
+ * through `openStreamPicker` with the row `recordStreamHistory` has just merged,
+ * so playing a season pack found in *search results* still opens on the episode
+ * you are up to. In the browser the only caller holding a Continue-watching row
+ * is the Continue-watching strip; a search hit and a library row hold a release
+ * name and nothing else. CLAUDE.md makes a feature that exists on one surface and
+ * not the other the default-prohibited outcome, and this is that same feature,
+ * not a second one.
+ *
+ * So the row is FOUND, by the store's own dedupe key — `historyKeyFor` over the
+ * parsed release name, the same key the server wrote. Not by info hash: the
+ * whole case is that the pack now being played is a different torrent from the
+ * single episode that was recorded.
+ *
+ * `held` is a suggestion the caller already has (`PublicStreamHistoryItem.next`,
+ * computed server-side over the stored high-water mark) and WINS when given.
+ * That is not belt-and-braces: rows written under an older key format are kept on
+ * purpose and only migrate when their title is next streamed, so a re-derived key
+ * can miss the very row that was clicked. A miss is ordinary here — null leaves
+ * the picker behaving exactly as it always has.
+ *
+ * ONE KNOWN DIFFERENCE FROM THE TUI, recorded rather than papered over: the
+ * terminal reads the row AFTER the merge, so playing something LATER than the
+ * high-water mark (S03E07 when the row says E04) preselects E08 there and E05
+ * here. Closing it would mean a second `recordStream` in the browser — the
+ * copy-then-drift bug this module keeps refusing — and the realistic instances
+ * are single-file torrents, which open no picker at all.
+ */
+export function wantedEpisodeFor(
+  name: string,
+  rows: readonly PublicStreamHistoryItem[],
+  held?: EpisodeRef | null,
+): EpisodeRef | null {
+  if (held) return held;
+  const parsed = parseRelease(name);
+  if (!parsed) return null;
+  const key = historyKeyFor(parsed);
+  return rows.find((r) => r.key === key)?.next ?? null;
 }
 
 /** How long between polls of a resolving session. */
@@ -247,12 +342,40 @@ export interface PlayEffects {
   confirm(message: string): boolean;
   /** Transient message in the dashboard's notice line. */
   notice(message: string): void;
-  /** Show the file picker. Ownership of the session passes to it. */
-  choose(sessionId: string, capability: string, name: string, files: PublicStreamFile[]): void;
+  /**
+   * Show the file picker. Ownership of the session passes to it.
+   *
+   * `preselect` is an index into `files` to open on, or null for no opinion —
+   * `streamOutcome`'s decision, not one to re-derive here.
+   */
+  choose(
+    sessionId: string,
+    capability: string,
+    name: string,
+    files: PublicStreamFile[],
+    preselect: number | null,
+  ): void;
   /** Go to a player URL. Ownership of the session passes to the player. */
   open(path: string): void;
   sleep(ms: number): Promise<void>;
   now(): number;
+  /**
+   * Called when `start` could not start a session at all — `start.kind ===
+   * "failed"` (a dead swarm, an unreachable server; `start` has already
+   * shown its own notice for this). Optional: most callers have nothing to
+   * add beyond that notice.
+   *
+   * FIRES AT MOST ONCE PER `runPlay` CALL, guaranteed by where `runPlay`
+   * calls it rather than by anything the caller has to track — `start` runs
+   * at most twice (the unconfirmed attempt, then once more after a human
+   * accepts the torrent-confirm prompt), and only one of those two calls can
+   * ever reach the "failed" branch: whichever one returns `"confirm"` is by
+   * definition not "failed", and once a `"confirm"` is followed by a second
+   * `"confirm"` `runPlay` returns before this fires at all. A caller wiring
+   * this does not need to know any of that; it is exactly why the guarantee
+   * belongs here and not as a flag re-derived in DOM code.
+   */
+  onUnresolved?(): void;
 }
 
 /**
@@ -266,8 +389,18 @@ export interface PlayEffects {
  * 2. A `resolving` session is POLLED until it settles or the deadline passes.
  *    Real-Debrid caching sits mid-percent for minutes, and a loop that gave up
  *    early would strand a session that was about to be ready.
+ *
+ * `wanted` is data, not an effect, which is why it is a parameter rather than
+ * another member of `PlayEffects`: it is the Continue-watching row's own `next`,
+ * passed straight through to `streamOutcome`. Every other caller — a search
+ * result, a queue row — has no such row and passes nothing. (Named `wanted`
+ * rather than `next` only because the polling loop below already has a `next`.)
  */
-export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
+export async function runPlay(
+  row: DashRow,
+  fx: PlayEffects,
+  wanted?: EpisodeRef | null,
+): Promise<void> {
   let start = await fx.start(row, false);
 
   if (start.kind === "confirm") {
@@ -283,7 +416,10 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
       return;
     }
   }
-  if (start.kind !== "started") return;
+  if (start.kind !== "started") {
+    if (start.kind === "failed") fx.onUnresolved?.();
+    return;
+  }
 
   const { sessionId, capability } = start;
   let session = start.session;
@@ -308,7 +444,7 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
     session = next;
   }
 
-  const outcome = streamOutcome(session);
+  const outcome = streamOutcome(session, wanted);
   if (outcome.kind === "error") {
     // Already worded for a human by the core, which reuses the TUI's strings.
     fx.notice(outcome.message);
@@ -324,5 +460,5 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
     fx.open(playerPath(sessionId, outcome.file, capability));
     return;
   }
-  fx.choose(sessionId, capability, row.name, outcome.files);
+  fx.choose(sessionId, capability, row.name, outcome.files, outcome.preselect);
 }

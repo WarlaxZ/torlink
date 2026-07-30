@@ -11,7 +11,7 @@ describe("RatePrompt", () => {
     const onDislike = vi.fn();
     const onDismiss = vi.fn();
     const { stdin } = render(
-      <RatePrompt name="The Matrix" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
+      <RatePrompt name="Ashfall" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
     );
     await flush();
     stdin.write("l");
@@ -24,7 +24,7 @@ describe("RatePrompt", () => {
     const onDislike = vi.fn();
     const onDismiss = vi.fn();
     const { stdin } = render(
-      <RatePrompt name="The Matrix" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
+      <RatePrompt name="Ashfall" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
     );
     await flush();
     stdin.write("d");
@@ -37,7 +37,7 @@ describe("RatePrompt", () => {
     const onDislike = vi.fn();
     const onDismiss = vi.fn();
     const { stdin } = render(
-      <RatePrompt name="The Matrix" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
+      <RatePrompt name="Ashfall" onLike={onLike} onDislike={onDislike} onDismiss={onDismiss} />,
     );
     await flush();
     stdin.write(ESC);
@@ -48,7 +48,7 @@ describe("RatePrompt", () => {
   it("shows the watched affordance and calls onWatched when 'w' is pressed (when onWatched given)", async () => {
     const onWatched = vi.fn();
     const { stdin, lastFrame } = render(
-      <RatePrompt name="The Matrix" onLike={vi.fn()} onDislike={vi.fn()} onWatched={onWatched} onDismiss={vi.fn()} />,
+      <RatePrompt name="Ashfall" onLike={vi.fn()} onDislike={vi.fn()} onWatched={onWatched} onDismiss={vi.fn()} />,
     );
     await flush();
     expect(lastFrame()).toContain("watched");
@@ -59,7 +59,7 @@ describe("RatePrompt", () => {
 
   it("does not render the watched affordance when onWatched is omitted", async () => {
     const { lastFrame } = render(
-      <RatePrompt name="The Matrix" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
+      <RatePrompt name="Ashfall" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
     );
     await flush();
     expect(lastFrame()).not.toContain("watched");
@@ -67,7 +67,7 @@ describe("RatePrompt", () => {
 
   it("uses a custom title when provided", async () => {
     const { lastFrame } = render(
-      <RatePrompt name="The Matrix" title="Rate this pick" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
+      <RatePrompt name="Ashfall" title="Rate this pick" onLike={vi.fn()} onDislike={vi.fn()} onDismiss={vi.fn()} />,
     );
     await flush();
     expect(lastFrame()).toContain("Rate this pick");

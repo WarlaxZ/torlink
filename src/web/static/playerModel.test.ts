@@ -22,11 +22,11 @@ const target = (over: Partial<PlayerTarget> = {}): PlayerTarget => ({
 
 describe("parsePlayerLocation", () => {
   it("reads the session, index, capability and name", () => {
-    expect(parsePlayerLocation("/play/abc/3", "?k=secret&n=Big%20Buck.mp4")).toEqual({
+    expect(parsePlayerLocation("/play/abc/3", "?k=secret&n=Copper%20Kettle.mp4")).toEqual({
       sid: "abc",
       index: 3,
       capability: "secret",
-      filename: "Big Buck.mp4",
+      filename: "Copper Kettle.mp4",
     });
   });
 

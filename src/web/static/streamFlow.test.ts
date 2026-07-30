@@ -9,6 +9,7 @@ import {
   pollDecision,
   runPlay,
   streamOutcome,
+  wantedEpisodeFor,
   type PlayEffects,
   type PublicStreamFile,
   type PublicStreamSession,
@@ -16,6 +17,7 @@ import {
 } from "./streamFlow";
 import { parsePlayerLocation } from "./playerModel";
 import type { DashRow } from "./dashboard";
+import type { PublicStreamHistoryItem } from "../wire";
 
 const file = (filename: string, index: number, bytes = 1024): PublicStreamFile => ({
   filename,
@@ -82,9 +84,9 @@ describe("playerPath", () => {
   // ?n= is the only source. Dropping it shows "Unnamed file" and, because
   // canDirectPlay("") is pessimistic, the fallback card for a playable mp4.
   it("carries the filename as ?n=", () => {
-    const url = playerPath("s1", file("Big Buck Bunny.mp4", 3), "cap");
+    const url = playerPath("s1", file("Copper Kettle Run.mp4", 3), "cap");
     const parsed = parsePlayerLocation("/play/s1/3", url.slice(url.indexOf("?")));
-    expect(parsed?.filename).toBe("Big Buck Bunny.mp4");
+    expect(parsed?.filename).toBe("Copper Kettle Run.mp4");
   });
 
   it("addresses the file by its session index, not its position in a filtered list", () => {
@@ -138,6 +140,48 @@ describe("streamOutcome", () => {
     expect(out.kind).toBe("choose");
     if (out.kind !== "choose") return;
     expect(out.files).toHaveLength(2);
+  });
+
+  // The point of the preselection: a Continue-watching row that says "next
+  // S03E05" opens the picker on S03E05. `next` is the SERVER's computation
+  // (nextEpisode, over the row's high-water mark) arriving on the wire, so the
+  // browser never adds a second "+1" of its own.
+  it("preselects the file naming the wanted episode", () => {
+    const out = streamOutcome(
+      session({
+        files: [file("Harrowgate.S03E04.1080p.mkv", 0), file("Harrowgate.S03E05.1080p.mkv", 1)],
+      }),
+      { season: 3, episode: 5 },
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.preselect).toBe(1);
+  });
+
+  // An index into the FILTERED list, because that is the list the picker draws.
+  // The session's own indexes differ the moment a release ships a .nfo.
+  it("counts the preselection over the candidates the picker shows", () => {
+    const out = streamOutcome(
+      session({
+        files: [
+          file("release.nfo", 0),
+          file("Harrowgate.S03E04.1080p.mkv", 1),
+          file("Harrowgate.S03E05.1080p.mkv", 2),
+        ],
+      }),
+      { season: 3, episode: 5 },
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.preselect).toBe(1);
+  });
+
+  it("has no preselection without a wanted episode, or when nothing matches", () => {
+    const files = [file("Harrowgate.S03E04.1080p.mkv", 0), file("Harrowgate.S03E05.1080p.mkv", 1)];
+    const noNext = streamOutcome(session({ files }));
+    const noMatch = streamOutcome(session({ files }), { season: 4, episode: 1 });
+    expect(noNext.kind === "choose" ? noNext.preselect : "not a picker").toBeNull();
+    expect(noMatch.kind === "choose" ? noMatch.preselect : "not a picker").toBeNull();
   });
 
   it("reports the session's own error message", () => {
@@ -225,6 +269,69 @@ describe("confirmFallbackMessage", () => {
   });
 });
 
+describe("wantedEpisodeFor", () => {
+  // A row as GET /api/saved sends it. Only `key` and `next` are read; the rest is
+  // here so the fixture is a real row rather than a shape invented for the test.
+  const row = (
+    key: string,
+    next: { season: number; episode: number } | null,
+  ): PublicStreamHistoryItem => ({
+    key,
+    title: "Harrowgate",
+    type: "series",
+    next,
+    rawName: "Harrowgate.S03E04.1080p.WEB-DL",
+    infoHash: "a".repeat(40),
+    startedAt: 1,
+  });
+
+  // The divergence this closes: the terminal preselects from EVERY play path,
+  // because every one of them funnels through the row `recordStreamHistory` just
+  // merged. The browser has no such row in hand when the Play button is on a
+  // search hit — so it finds one, by the store's own dedupe key.
+  it("finds the row for a release the user is part-way through", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", rows)).toEqual({
+      season: 3,
+      episode: 5,
+    });
+  });
+
+  // The point of keying on title+type rather than on the info hash: the pack
+  // being played is a DIFFERENT torrent from the single episode that was
+  // recorded, which is the ordinary case for "carry on with this show".
+  it("matches a different release of the same show", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Harrowgate.S03E01.2160p.WEB-DL-OTHERGROUP", rows)).toEqual({
+      season: 3,
+      episode: 5,
+    });
+  });
+
+  it("has no opinion about a title with no history row", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Kepler.S02E04.1080p.WEB-DL", rows)).toBeNull();
+    expect(wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", [])).toBeNull();
+  });
+
+  // Release names come from whoever uploaded the torrent. One that is only
+  // quality noise parses to no title at all.
+  it("has no opinion about a name that parses to nothing", () => {
+    expect(wantedEpisodeFor("1080p.WEB-DL.x265", [row("harrowgate|series", null)])).toBeNull();
+  });
+
+  // Continue watching passes the row's OWN `next`, and that must win: rows
+  // written under an older key format are kept on purpose (they merge into the
+  // new key the next time that title is streamed), so re-deriving the key from
+  // `rawName` can miss the very row that was clicked.
+  it("prefers the suggestion the caller already holds", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(
+      wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", rows, { season: 9, episode: 1 }),
+    ).toEqual({ season: 9, episode: 1 });
+  });
+});
+
 describe("fileLabel", () => {
   it("shows the name and a human size", () => {
     expect(fileLabel(file("movie.mkv", 0, 1536))).toBe("movie.mkv · 1.50 KB");
@@ -241,7 +348,12 @@ function harness(over: Partial<PlayEffects> = {}) {
     notices: [] as string[],
     stopped: [] as string[],
     opened: [] as string[],
-    chosen: [] as { sessionId: string; capability: string; files: PublicStreamFile[] }[],
+    chosen: [] as {
+      sessionId: string;
+      capability: string;
+      files: PublicStreamFile[];
+      preselect: number | null;
+    }[],
     polls: 0,
   };
   let clock = 0;
@@ -260,8 +372,8 @@ function harness(over: Partial<PlayEffects> = {}) {
       return false;
     },
     notice: (message) => calls.notices.push(message),
-    choose: (sessionId, capability, _name, files) =>
-      calls.chosen.push({ sessionId, capability, files }),
+    choose: (sessionId, capability, _name, files, preselect) =>
+      calls.chosen.push({ sessionId, capability, files, preselect }),
     open: (path) => calls.opened.push(path),
     sleep: async (ms) => {
       clock += ms;
@@ -346,11 +458,11 @@ describe("runPlay", () => {
         kind: "started",
         sessionId: "sess-9",
         capability: "secret-cap",
-        session: session({ id: "sess-9", files: [file("Big Buck Bunny.mp4", 2)] }),
+        session: session({ id: "sess-9", files: [file("Copper Kettle Run.mp4", 2)] }),
       }),
     });
     await runPlay(row(), fx);
-    expect(calls.opened[0]).toBe("/play/sess-9/2?k=secret-cap&n=Big+Buck+Bunny.mp4");
+    expect(calls.opened[0]).toBe("/play/sess-9/2?k=secret-cap&n=Copper+Kettle+Run.mp4");
   });
 
   // MUTATION GUARD #5. Real-Debrid caching reports a percent for minutes; a loop
@@ -412,6 +524,25 @@ describe("runPlay", () => {
     expect(calls.stopped).toEqual([]);
   });
 
+  it("hands the picker the episode to open on", async () => {
+    const { fx, calls } = harness({
+      start: async () =>
+        started({
+          files: [file("Harrowgate.S03E04.mkv", 0), file("Harrowgate.S03E05.mkv", 1)],
+        }),
+    });
+    await runPlay(row(), fx, { season: 3, episode: 5 });
+    expect(calls.chosen[0]!.preselect).toBe(1);
+  });
+
+  it("passes no preselection when the caller has no next episode", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ files: [file("a.mkv", 0), file("b.mkv", 1)] }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.chosen[0]!.preselect).toBeNull();
+  });
+
   it("surfaces the session's error and releases the session", async () => {
     const { fx, calls } = harness({
       start: async () => started({ state: "error", error: "Couldn't reach the swarm." }),
@@ -434,5 +565,72 @@ describe("runPlay", () => {
     await runPlay(row(), fx);
     expect(calls.notices).toEqual([]);
     expect(calls.opened).toEqual([]);
+  });
+
+  describe("onUnresolved", () => {
+    it("fires when start fails outright", async () => {
+      let fired = 0;
+      const { fx } = harness({ onUnresolved: () => fired++ });
+      await runPlay(row(), fx);
+      expect(fired).toBe(1);
+    });
+
+    // MUTATION GUARD. start() runs twice on the confirm-then-retry path — once
+    // unconfirmed, once after the human says yes — and only the SECOND of
+    // those two calls fails here. A caller-side latch that assumed both calls
+    // could report "failed" would be guarding against something that cannot
+    // happen; this proves the callback still fires exactly once even across
+    // both calls, with the guarantee living in runPlay rather than in app.ts.
+    it("fires exactly once, even when start is called twice on the confirm-then-fail path", async () => {
+      let fired = 0;
+      const { fx, calls } = harness({
+        start: async (_row, confirmed) => {
+          calls.starts.push(confirmed);
+          return confirmed ? { kind: "failed" } : { kind: "confirm", reason: "no premium" };
+        },
+        confirm: () => true,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(calls.starts).toEqual([false, true]);
+      expect(fired).toBe(1);
+    });
+
+    it("does not fire when the user declines the confirm prompt", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => ({ kind: "confirm", reason: "no premium" }),
+        confirm: () => false,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("does not fire when the server refuses the confirmation a second time", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => ({ kind: "confirm", reason: "no premium" }),
+        confirm: () => true,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("does not fire when the session starts successfully", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => started({ files: [file("movie.mp4", 0)] }),
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("is optional — runPlay does not require it", async () => {
+      const { fx } = harness();
+      await expect(runPlay(row(), fx)).resolves.toBeUndefined();
+    });
   });
 });

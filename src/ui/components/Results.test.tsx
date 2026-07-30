@@ -213,7 +213,7 @@ describe("Results preview pane", () => {
     searchState.current = settled(results);
     const u = renderUI(
       <StoreContext.Provider
-        value={makeTestStore({ query: "the bear", omdbApiKey: "KEY", contentWidth: 96, ...overrides })}
+        value={makeTestStore({ query: "harrowgate", omdbApiKey: "KEY", contentWidth: 96, ...overrides })}
       >
         <Results />
       </StoreContext.Provider>,
@@ -225,20 +225,20 @@ describe("Results preview pane", () => {
 
   it("shows a poster + plot preview for the selected result on a wide terminal", async () => {
     omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A great film.", posterUrl: "https://x/p.jpg" });
-    const u = wide([t("v1", "The.Bear.S01.1080p.WEB-DL.x264-GROUP")]);
+    const u = wide([t("v1", "Harrowgate.S01.1080p.WEB-DL.x264-GROUP")]);
     await vi.waitFor(() => expect(u.frame()).toContain("Preview"));
     await vi.waitFor(() => expect(u.frame()).toContain("A great film."));
     // Looked up by the parsed title, as a series (season detected).
     expect(omdb.byName).toHaveBeenCalled();
     const call = omdb.byName.mock.calls[0]!;
-    expect(call[0]).toBe("The Bear");
+    expect(call[0]).toBe("Harrowgate");
     expect(call[2].type).toBe("series");
     await vi.waitFor(() => expect(u.rawFrame()).toContain("38;2;9;9;9")); // poster rendered
   });
 
   it("toggles the preview pane off and on with p", async () => {
     omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A great film.", posterUrl: null });
-    const u = wide([t("v1", "The.Bear.S01.1080p")]);
+    const u = wide([t("v1", "Harrowgate.S01.1080p")]);
     await vi.waitFor(() => expect(u.frame()).toContain("Preview"));
     u.press("p");
     await vi.waitFor(() => expect(u.frame()).not.toContain("Preview"));
@@ -247,7 +247,7 @@ describe("Results preview pane", () => {
   });
 
   it("stays a single column with no preview when no OMDb key is set", async () => {
-    const u = wide([t("v1", "The.Bear.S01.1080p")], { omdbApiKey: "" });
+    const u = wide([t("v1", "Harrowgate.S01.1080p")], { omdbApiKey: "" });
     await vi.waitFor(() => expect(u.frame()).toContain("Results (1)"));
     expect(u.frame()).not.toContain("Preview");
     expect(omdb.byName).not.toHaveBeenCalled();
@@ -255,7 +255,7 @@ describe("Results preview pane", () => {
 
   it("opens the resolved IMDb title page on 'i' when matched", async () => {
     omdb.byName.mockResolvedValue({ ok: true, imdbId: "tt9", plot: "A resolved plot.", posterUrl: null });
-    const u = wide([t("v1", "The.Bear.S01.1080p.WEB-DL")]);
+    const u = wide([t("v1", "Harrowgate.S01.1080p.WEB-DL")]);
     // Wait for the plot to render — it lands together with the imdbId, so by now
     // the exact id is in state (rather than racing the fallback title search).
     await vi.waitFor(() => expect(u.frame()).toContain("A resolved plot."));
@@ -264,11 +264,11 @@ describe("Results preview pane", () => {
   });
 
   it("falls back to an IMDb title search on 'i' with no key (no exact id)", async () => {
-    const u = wide([t("v1", "Weapons.2025.1080p.BluRay.x264-GRP")], { omdbApiKey: "" });
+    const u = wide([t("v1", "Tollgate.2025.1080p.BluRay.x264-GRP")], { omdbApiKey: "" });
     await vi.waitFor(() => expect(u.frame()).toContain("Results (1)"));
     u.press("i");
     await vi.waitFor(() =>
-      expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/find/?q=Weapons%202025"),
+      expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/find/?q=Tollgate%202025"),
     );
   });
 });

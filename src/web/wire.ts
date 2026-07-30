@@ -18,6 +18,15 @@
 // interfaces let `progress` be read as a 0..1 fraction when the producer sends
 // an integer percent; and before this module there was no compile-time link at
 // all, so renaming a field typechecked on both sides and rendered nothing.
+//
+// THE ONE IMPORT, and why it does not break the rule above: `src/util/episode.ts`
+// declares a single interface and imports nothing itself, so this `import type`
+// is erased at build time and reaches no Node builtin and no app module — the
+// property the "imports nothing" rule exists to protect. It is here because the
+// alternative was a seventh hand-written copy of `{ season, episode }`, the
+// exact drift this file was created to stop. Anything with a runtime value in it
+// still does not belong in this module.
+import type { EpisodeRef } from "../util/episode";
 
 /**
  * One in-flight (or paused / queued / failed) download.
@@ -359,7 +368,7 @@ export interface AddResponse {
  * PARSING HAPPENS ON THE SERVER, and this field is why the browser can live
  * without it. The TUI reads a title and year out of a release name with
  * `parse-torrent-title` (via `src/util/release.ts`), and a second parser in the
- * browser would mean the two surfaces disagreed about what "Sintel.2010.1080p"
+ * browser would mean the two surfaces disagreed about what "Kestrel.2010.1080p"
  * is — a divergence with no test that could catch it, since neither side would
  * be wrong on its own. So the browser posts the raw release name and gets the
  * TUI's answer back, alongside the OMDb lookup that answer produced.
@@ -509,46 +518,73 @@ export interface PublicFavourite {
 }
 
 /**
+ * One title the user is part-way through, as `GET /api/saved` sends it.
+ *
+ * The MAGNET is absent for the reason it is absent from `PublicFavourite`:
+ * playing goes through `POST /api/stream { infoHash, name }`, which rebuilds it
+ * server-side, so shipping it would be tracker URLs on the wire to no end.
+ *
+ * `next` is computed server-side by `nextEpisode` and is a SUGGESTION — null
+ * for a film and for a season pack, which names a season but no episode.
+ */
+export interface PublicStreamHistoryItem {
+  key: string;
+  title: string;
+  year?: number;
+  type?: "movie" | "series";
+  season?: number;
+  episode?: number;
+  next: EpisodeRef | null;
+  rawName: string;
+  infoHash: string;
+  startedAt: number;
+}
+
+/**
  * The body of `GET /api/saved` — both saved lists in one response.
  *
  * One route rather than two because the `saved` pane shows both lists at once,
  * so two routes would mean two round trips for one screen.
  *
- * The names are the TUI's and are load-bearing: `watchlist` is
+ * The names are the TUI's and are load-bearing: `savedSearches` is
  * `config.savedSearches` (search query strings) and `library` is
  * `config.favourites` (pinned torrents). Both clients read and write the same
  * config file, so a browser that renamed either would show a different list
  * under the same word.
+ *
+ * `continueWatching` is the stream-history store (Task 2), newest first, each
+ * mapped by `toPublicStreamHistoryItem`.
  */
 export interface SavedResponse {
-  watchlist: string[];
+  savedSearches: string[];
   library: PublicFavourite[];
+  continueWatching: PublicStreamHistoryItem[];
 }
 
 /**
- * The body of `POST /api/watchlist`.
+ * The body of `POST /api/saved-searches`.
  *
  * `toggle` mirrors the TUI's `w` key: save this query, or unsave it if it is
  * already there. `remove` is a separate, idempotent action rather than a second
  * toggle, for the ✕ in the list — a toggle there would RE-ADD a row the user
  * just deleted if the click double-fired, which on a phone it does.
  */
-export interface WatchlistRequest {
+export interface SavedSearchesRequest {
   query: string;
   action: "toggle" | "remove";
 }
 
 /**
- * The 200 body of `POST /api/watchlist`.
+ * The 200 body of `POST /api/saved-searches`.
  *
  * The whole list comes back, not just the verdict, so the browser never has to
  * predict server state: it flips the button optimistically and then renders
  * whatever this says. `saved` is the state of THIS query afterwards, which the
  * caller would otherwise have to search the list for.
  */
-export interface WatchlistResponse {
+export interface SavedSearchesResponse {
   saved: boolean;
-  watchlist: string[];
+  savedSearches: string[];
 }
 
 /**
@@ -576,9 +612,29 @@ export interface LibraryRequest {
   filename?: string;
 }
 
-/** The 200 body of `POST /api/library`. Same contract as `WatchlistResponse`: the caller renders what comes back. */
+/** The 200 body of `POST /api/library`. Same contract as `SavedSearchesResponse`: the caller renders what comes back. */
 export interface LibraryResponse {
   /** Whether THIS torrent is in the library afterwards. */
   favourited: boolean;
   library: PublicFavourite[];
+}
+
+/**
+ * The body of `POST /api/continue-watching`.
+ *
+ * ONE ACTION, not `"toggle"`: nothing plays a title and then un-plays it, so
+ * there is nothing for a toggle to mean here. `key` rather than `infoHash`
+ * because it is `PublicStreamHistoryItem.key` — the store's own dedupe key,
+ * one row per title rather than per stream — so it identifies the row the
+ * user actually clicked remove on even if two entries somehow shared an info
+ * hash.
+ */
+export interface ContinueWatchingRequest {
+  key: string;
+  action: "remove";
+}
+
+/** The 200 body of `POST /api/continue-watching`. Same contract as `LibraryResponse`: the caller renders what comes back. */
+export interface ContinueWatchingResponse {
+  continueWatching: PublicStreamHistoryItem[];
 }

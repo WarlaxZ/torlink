@@ -55,17 +55,17 @@ describe("fetchTitleMeta (by id)", () => {
 describe("fetchTitleMetaByName", () => {
   it("builds a title lookup with year and type", async () => {
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt2", Plot: "P", Poster: "https://p.jpg" });
-    const res = await fetchTitleMetaByName("The Bear", "KEY", { year: 2022, type: "series", fetchImpl: impl });
+    const res = await fetchTitleMetaByName("Harrowgate", "KEY", { year: 2022, type: "series", fetchImpl: impl });
     expect(res).toEqual({ ok: true, imdbId: "tt2", plot: "P", posterUrl: "https://p.jpg" });
     const u = urls[0]!;
-    expect(u).toContain("t=The+Bear");
+    expect(u).toContain("t=Harrowgate");
     expect(u).toContain("y=2022");
     expect(u).toContain("type=series");
   });
 
   it("omits year/type when not given", async () => {
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt3" });
-    await fetchTitleMetaByName("Weapons", "KEY", { fetchImpl: impl });
+    await fetchTitleMetaByName("Tollgate", "KEY", { fetchImpl: impl });
     expect(urls[0]).not.toContain("&y=");
     expect(urls[0]).not.toContain("type=");
   });

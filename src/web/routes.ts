@@ -4,6 +4,15 @@ import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache"
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
 import {
+  historyItemFor,
+  loadStreamHistory,
+  nextEpisode,
+  recordStream,
+  removeStreamHistory,
+  saveStreamHistory,
+  type StreamHistoryItem,
+} from "../core/streamHistory";
+import {
   loadConfig,
   resolveAdultContent,
   resolveOmdbApiKey,
@@ -44,9 +53,11 @@ import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
 import { hintForGroup, parseRelease } from "../util/release";
+import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  ContinueWatchingResponse,
   LibraryResponse,
   PublicFavourite,
   PublicSearchResult,
@@ -54,6 +65,7 @@ import type {
   PublicSearchSnapshot,
   PublicSource,
   PublicStreamFile,
+  PublicStreamHistoryItem,
   PublicReccEventAck,
   PublicReccEventType,
   PublicRecommendations,
@@ -63,7 +75,7 @@ import type {
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
-  WatchlistResponse,
+  SavedSearchesResponse,
 } from "./wire";
 
 export interface WebDeps {
@@ -91,6 +103,9 @@ export interface WebDeps {
    * seam does not fail — it silently edits the machine it runs on.
    */
   saveConfigImpl?: (config: Config) => Promise<void>;
+  loadStreamHistoryImpl?: () => Promise<StreamHistoryItem[]>;
+  /** Injected for the reason `saveConfigImpl` is: the real one writes the developer's own data dir. */
+  saveStreamHistoryImpl?: (items: readonly StreamHistoryItem[]) => Promise<void>;
   /**
    * Last-known Real-Debrid account status for a token, or null when it can't be
    * determined. Only consulted when a token is configured (see the route).
@@ -364,10 +379,11 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
   }
 
   // begin(), not start(): a Real-Debrid cache can take minutes and the answer
-  // has to come back now, with a `resolving` session the client polls. `done`
-  // is deliberately dropped — it never rejects, and every outcome it has is
-  // written onto the session the client is already holding an id for.
-  const { session } = deps.runtime.sessions.begin({
+  // has to come back now, with a `resolving` session the client polls. The
+  // client learns every outcome from the session object it holds an id for;
+  // `done` is used below only to know WHEN that outcome landed, so the history
+  // write can wait for it instead of guessing.
+  const { session, done } = deps.runtime.sessions.begin({
     infoHash: parsed.infoHash,
     magnet: parsed.magnet,
     name,
@@ -381,7 +397,55 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
     capability: session.capability,
     session: toPublicSession(session),
   };
+  // History and the reccd `started` event, both hung off `done` — the session
+  // RESOLVING, not the request arriving. `begin()` returns a `resolving`
+  // session, so recording here would leave a permanent unplayable
+  // Continue-watching row for a dead magnet or a Real-Debrid cache that never
+  // fills. The TUI records only after `streamTorrent`/`resolveMagnet` returned
+  // files (App.tsx), and posts `started` on the same line, so this is what
+  // makes one gesture mean one thing in both front ends.
+  //
+  // `done` never rejects and this is the second reader of it (the first is the
+  // client's polling), so nothing here can delay or fail the response the
+  // browser is waiting for. The `.catch` is belt-and-braces on top of the
+  // swallow inside recordStreamStart: an unhandled rejection in the server
+  // process is not a price a convenience list gets to charge.
+  void done.then(
+    (resolved) => {
+      // `ready` with nothing to offer is not something the user can watch. The
+      // bar is the TUI's own: the same non-empty `streamCandidates` check
+      // App.tsx applies before it opens a picker. The helper is imported rather
+      // than approximated — it lives in `src/util/videoFiles.ts`, which is where
+      // both front ends reach for it, and only `src/web` -> `src/ui` is
+      // forbidden. Note it is WIDER than "has a video extension": a torrent with
+      // nothing recognisable in it hands back every file, because an unknown
+      // container is still worth handing to a player. So this is "did anything
+      // resolve", said in the terminal's words, and the two surfaces cannot
+      // drift apart on what counts as watchable.
+      if (resolved.state !== "ready" || streamCandidates(resolved.files).length === 0) return;
+      return recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
+    },
+    () => {},
+  );
   return { status: 200, json: out };
+}
+
+async function recordStreamStart(deps: WebDeps, infoHash: string, name: string): Promise<void> {
+  const item = historyItemFor({ id: infoHash, name, magnet: buildMagnet(infoHash, name) }, Date.now());
+  // No title in the release name means no row worth drawing.
+  if (item) {
+    try {
+      const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+      await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(recordStream(current, item));
+    } catch {
+      // A convenience list must never take a stream down with it.
+    }
+  }
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config);
+  if (!reccConfig.reccUrl || !name) return;
+  const event: ReccEvent = { type: "started", rawName: name, ts: Date.now(), source: "torlink" };
+  void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
 }
 
 // ---- search ------------------------------------------------------------
@@ -728,7 +792,7 @@ async function addToQueue(
 }
 
 // ---- saved lists -------------------------------------------------------
-// The watchlist (config.savedSearches) and the library (config.favourites),
+// The saved searches (config.savedSearches) and the library (config.favourites),
 // which the TUI has had all along. Both are read here and mutated by the two
 // routes below.
 //
@@ -753,14 +817,29 @@ export function toPublicFavourite(f: FavouriteItem): PublicFavourite {
   return out;
 }
 
+/** A stream-history entry as the browser sees it. Drops the magnet; adds the suggested next episode. */
+export function toPublicStreamHistoryItem(item: StreamHistoryItem): PublicStreamHistoryItem {
+  const out: PublicStreamHistoryItem = {
+    key: item.key, title: item.title, rawName: item.rawName,
+    infoHash: item.infoHash, startedAt: item.startedAt, next: nextEpisode(item),
+  };
+  if (item.year !== undefined) out.year = item.year;
+  if (item.type !== undefined) out.type = item.type;
+  if (item.season !== undefined) out.season = item.season;
+  if (item.episode !== undefined) out.episode = item.episode;
+  return out;
+}
+
 /** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
 async function savedLists(deps: WebDeps): Promise<WebResponse> {
   const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const history = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
   const out: SavedResponse = {
     // loadConfig already normalises both (junk dropped, caps applied), so these
     // coalesces are for a config object built in a test, not for disk data.
-    watchlist: config.savedSearches ?? [],
+    savedSearches: config.savedSearches ?? [],
     library: (config.favourites ?? []).map(toPublicFavourite),
+    continueWatching: history.map(toPublicStreamHistoryItem),
   };
   return { status: 200, json: out };
 }
@@ -776,7 +855,7 @@ function parseObjectBody(bodyText: string): Record<string, unknown> | null {
   }
 }
 
-async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
 
@@ -785,7 +864,7 @@ async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResp
     return { status: 400, json: { error: "invalid action" } };
   }
 
-  // Trimmed here so "  dune  " and "dune" are one entry, matching the TUI —
+  // Trimmed here so "  tin rivers  " and "tin rivers" are one entry, matching the TUI —
   // toggleSavedSearches trims too, but the emptiness check below needs the
   // trimmed value and a second trim inside the helper is not something to rely
   // on from out here.
@@ -796,12 +875,45 @@ async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResp
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const current = config.savedSearches ?? [];
-  const watchlist =
+  const savedSearches =
     action === "remove" ? current.filter((q) => q !== query) : toggleSavedSearches(current, query);
 
-  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches: watchlist });
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches });
 
-  const out: WatchlistResponse = { saved: watchlist.includes(query), watchlist };
+  const out: SavedSearchesResponse = { saved: savedSearches.includes(query), savedSearches };
+  return { status: 200, json: out };
+}
+
+/**
+ * `POST /api/continue-watching`: the row's ✕. One action, `"remove"` — nothing
+ * plays a title and then un-plays it, so there is no toggle to offer.
+ *
+ * Idempotent by construction: `removeStreamHistory` filters by key and a key
+ * that is not there filters nothing, so a double-fired click (this is the same
+ * ✕ pattern as the saved-searches remove, which exists for exactly that phone
+ * behaviour) is a no-op the second time rather than an error.
+ */
+async function continueWatchingAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  if (body.action !== "remove") return { status: 400, json: { error: "invalid action" } };
+
+  const key = typeof body.key === "string" ? body.key.trim() : "";
+  if (!key) return { status: 400, json: { error: "missing key" } };
+
+  const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+  const next = removeStreamHistory(current, key);
+  // Only write when something actually changed. removeStreamHistory always
+  // returns a new array (it is a plain `.filter`), so the write gate here is a
+  // length comparison rather than the reference check `libraryAction`'s
+  // "watched" branch uses — either way, a no-op remove (a stale page, a
+  // double-fired click) does not churn the history file.
+  if (next.length !== current.length) {
+    await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(next);
+  }
+
+  const out: ContinueWatchingResponse = { continueWatching: next.map(toPublicStreamHistoryItem) };
   return { status: 200, json: out };
 }
 
@@ -970,14 +1082,14 @@ interface TitleLookup {
  * parsed HERE with the TUI's own `parseRelease` rather than in the browser.
  * That placement is the point. `parse-torrent-title` is a Node dependency, and
  * the alternative to a round trip is a second release-name parser in the
- * browser bundle — at which point "Sintel.2010.1080p.BluRay.x264-GROUP" could
+ * browser bundle — at which point "Kestrel.2010.1080p.BluRay.x264-GROUP" could
  * mean one thing in the terminal and another in the tab, with no test able to
  * call either side wrong. One parser, server-side, and the parse comes back
  * with the answer so the UI can show the title it actually looked up.
  *
  * The cache key is built here so it cannot drift from the request it stands
  * for: it carries every parameter that changes the answer, and lowercases the
- * name so "Sintel" and "sintel" share an entry (OMDb's title match is
+ * name so "Kestrel" and "kestrel" share an entry (OMDb's title match is
  * case-insensitive, so they genuinely do have the same answer). A `?release=`
  * lookup shares that key space deliberately — fifty releases of one film parse
  * to one title and cost one OMDb call between them, which is the whole reason
@@ -1358,12 +1470,16 @@ export async function handleWebApi(
     return savedLists(deps);
   }
 
-  if (method === "POST" && urlPath === "/api/watchlist") {
-    return watchlistAction(deps, bodyText);
+  if (method === "POST" && urlPath === "/api/saved-searches") {
+    return savedSearchesAction(deps, bodyText);
   }
 
   if (method === "POST" && urlPath === "/api/library") {
     return libraryAction(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/continue-watching") {
+    return continueWatchingAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

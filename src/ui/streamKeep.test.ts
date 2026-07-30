@@ -6,11 +6,11 @@ describe("keepMovePlan", () => {
   it("moves the torrent's top-level folder from temp into downloads", () => {
     const plan = keepMovePlan({
       streamDir: "/tmp/torlink-stream-abc",
-      torrentName: "Big Buck Bunny",
+      torrentName: "Copper Kettle Run",
       downloadDir: "/home/u/Downloads",
     });
-    expect(plan.from).toBe(path.join("/tmp/torlink-stream-abc", "Big Buck Bunny"));
-    expect(plan.to).toBe(path.join("/home/u/Downloads", "Big Buck Bunny"));
+    expect(plan.from).toBe(path.join("/tmp/torlink-stream-abc", "Copper Kettle Run"));
+    expect(plan.to).toBe(path.join("/home/u/Downloads", "Copper Kettle Run"));
   });
 });
 

@@ -20,8 +20,15 @@ import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
 import type { FetchTitleMetaResult } from "../recc/omdb";
 import type { ReccEvent } from "../recc/client";
+import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
-import type { LibraryResponse, PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
+import type {
+  LibraryResponse,
+  PublicSearchSnapshot,
+  PublicStreamHistoryItem,
+  SavedResponse,
+  SourcesResponse,
+} from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -45,6 +52,16 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
     // the developer's own ~/.config/torlnk/config.json.
     saveConfigImpl: async () => {
       throw new Error("test must inject saveConfigImpl");
+    },
+    loadStreamHistoryImpl: async () => [],
+    // A THROW, for the same reason saveConfigImpl is one. NOTE it is not a
+    // tripwire on POST /api/stream: that route's history write is
+    // fire-and-forget with a `.catch` (a convenience list must never take a
+    // stream down with it), so the throw lands in a promise nobody reads. The
+    // describe that cares injects a recording seam of its own and asserts what
+    // reached it — see "records stream history" below.
+    saveStreamHistoryImpl: async () => {
+      throw new Error("test must inject saveStreamHistoryImpl");
     },
     rdStatusImpl: async () => null,
     ...over,
@@ -676,12 +693,12 @@ function parseFrames(chunks: string[]): Frame[] {
 function hit(over: Partial<TorrentResult> = {}): TorrentResult {
   return {
     infoHash: "aa".repeat(20),
-    name: "Big Buck Bunny 2008 1080p",
+    name: "Copper Kettle Run 2008 1080p",
     sizeBytes: 1024,
     seeders: 10,
     leechers: 1,
     source: "yts",
-    magnet: `magnet:?xt=urn:btih:${"aa".repeat(20)}&dn=Big+Buck+Bunny`,
+    magnet: `magnet:?xt=urn:btih:${"aa".repeat(20)}&dn=Copper+Kettle+Run`,
     ...over,
   };
 }
@@ -722,7 +739,7 @@ describe("toPublicResult", () => {
   it("picks the display fields and normalises sources to an array", () => {
     expect(toPublicResult(hit({ seeders: 7, leechers: 2, sizeBytes: 99 }))).toEqual({
       infoHash: "aa".repeat(20),
-      name: "Big Buck Bunny 2008 1080p",
+      name: "Copper Kettle Run 2008 1080p",
       sizeBytes: 99,
       seeders: 7,
       leechers: 2,
@@ -755,16 +772,16 @@ describe("toPublicResult", () => {
 
 describe("parseSearchParams", () => {
   it("accepts a query with no group as the All tab", () => {
-    expect(parseSearchParams(new URLSearchParams("q=sintel"))).toEqual({
+    expect(parseSearchParams(new URLSearchParams("q=kestrel"))).toEqual({
       ok: true,
-      params: { query: "sintel", group: null },
+      params: { query: "kestrel", group: null },
     });
   });
 
   it("trims the query and treats an explicit All as no group", () => {
-    expect(parseSearchParams(new URLSearchParams("q=%20sintel%20&group=All"))).toEqual({
+    expect(parseSearchParams(new URLSearchParams("q=%20kestrel%20&group=All"))).toEqual({
       ok: true,
-      params: { query: "sintel", group: null },
+      params: { query: "kestrel", group: null },
     });
   });
 
@@ -1199,9 +1216,9 @@ describe("sourcesResponse — omdbConfigured", () => {
 describe("GET /api/title", () => {
   const OK: FetchTitleMetaResult = {
     ok: true,
-    imdbId: "tt1727587",
+    imdbId: "tt9990001",
     plot: "A lone girl.",
-    posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+    posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
   };
 
   beforeEach(() => {
@@ -1230,7 +1247,7 @@ describe("GET /api/title", () => {
       titleDeps({ token: "secret", fetchTitleMetaByNameImpl }),
       "GET",
       "/api/title",
-      new URLSearchParams("name=Sintel"),
+      new URLSearchParams("name=Kestrel"),
       undefined,
       "",
     );
@@ -1240,22 +1257,22 @@ describe("GET /api/title", () => {
 
   it("looks a title up by name, year and type", async () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
-    const res = await title(titleDeps({ fetchTitleMetaByNameImpl }), "name=Sintel&year=2010&type=movie");
+    const res = await title(titleDeps({ fetchTitleMetaByNameImpl }), "name=Kestrel&year=2010&type=movie");
     expect(res.status).toBe(200);
     expect(res.json).toEqual({
       status: "ok",
-      imdbId: "tt1727587",
+      imdbId: "tt9990001",
       plot: "A lone girl.",
-      posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+      posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
     });
-    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Sintel", "key", { year: 2010, type: "movie" });
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Kestrel", "key", { year: 2010, type: "movie" });
   });
 
   it("looks a title up by imdb id, and prefers it over a name", async () => {
     const fetchTitleMetaImpl = vi.fn(async () => OK);
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
-    await title(titleDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }), "imdb=tt1727587&name=Wrong");
-    expect(fetchTitleMetaImpl).toHaveBeenCalledWith("tt1727587", "key");
+    await title(titleDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }), "imdb=tt9990001&name=Wrong");
+    expect(fetchTitleMetaImpl).toHaveBeenCalledWith("tt9990001", "key");
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
   });
 
@@ -1267,7 +1284,7 @@ describe("GET /api/title", () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
     const res = await title(
       titleDeps({ loadConfigImpl: async () => searchConfig(), fetchTitleMetaByNameImpl }),
-      "name=Sintel",
+      "name=Kestrel",
     );
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ status: "no-key" });
@@ -1280,7 +1297,7 @@ describe("GET /api/title", () => {
   it("distinguishes no-key from a lookup that found nothing", async () => {
     const found = await title(
       titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: null, plot: null, posterUrl: null }) }),
-      "name=Sintel",
+      "name=Kestrel",
     );
     expect(found.json).toEqual({ status: "ok", imdbId: null, plot: null, posterUrl: null });
     expect(found.json).not.toEqual({ status: "no-key" });
@@ -1302,18 +1319,18 @@ describe("GET /api/title", () => {
       loadConfigImpl: async () => searchConfig({ omdbApiKey: key }),
       fetchTitleMetaByNameImpl,
     });
-    expect((await title(d, "name=Sintel")).json).toEqual({ status: "no-key" });
+    expect((await title(d, "name=Kestrel")).json).toEqual({ status: "no-key" });
     key = "key";
-    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "ok" });
+    expect((await title(d, "name=Kestrel")).json).toMatchObject({ status: "ok" });
   });
 
   it("does not cache a failure, so a transient OMDb outage is retried", async () => {
     let answer: FetchTitleMetaResult = { ok: false, error: "couldn't reach OMDb" };
     const fetchTitleMetaByNameImpl = vi.fn(async () => answer);
     const d = titleDeps({ fetchTitleMetaByNameImpl });
-    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "error" });
+    expect((await title(d, "name=Kestrel")).json).toMatchObject({ status: "error" });
     answer = OK;
-    expect((await title(d, "name=Sintel")).json).toMatchObject({ status: "ok" });
+    expect((await title(d, "name=Kestrel")).json).toMatchObject({ status: "ok" });
     expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -1322,8 +1339,8 @@ describe("GET /api/title", () => {
     it("serves a repeat lookup without touching OMDb", async () => {
       const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
       const d = titleDeps({ fetchTitleMetaByNameImpl });
-      const first = await title(d, "name=Sintel&year=2010");
-      const second = await title(d, "name=Sintel&year=2010");
+      const first = await title(d, "name=Kestrel&year=2010");
+      const second = await title(d, "name=Kestrel&year=2010");
       expect(second.json).toEqual(first.json);
       expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(1);
     });
@@ -1331,18 +1348,18 @@ describe("GET /api/title", () => {
     it("matches a repeat lookup case-insensitively, as OMDb itself does", async () => {
       const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
       const d = titleDeps({ fetchTitleMetaByNameImpl });
-      await title(d, "name=Sintel");
-      await title(d, "name=sintel");
+      await title(d, "name=Kestrel");
+      await title(d, "name=kestrel");
       expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(1);
     });
 
     it("keys on every parameter that changes the answer", async () => {
       const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
       const d = titleDeps({ fetchTitleMetaByNameImpl });
-      await title(d, "name=Sintel");
-      await title(d, "name=Sintel&year=2010");
-      await title(d, "name=Sintel&year=2010&type=movie");
-      await title(d, "imdb=tt1727587");
+      await title(d, "name=Kestrel");
+      await title(d, "name=Kestrel&year=2010");
+      await title(d, "name=Kestrel&year=2010&type=movie");
+      await title(d, "imdb=tt9990001");
       expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(3);
     });
 
@@ -1378,7 +1395,7 @@ describe("GET /api/title", () => {
     ])("nulls a poster URL off the CDN allowlist (%s)", async (posterUrl) => {
       const res = await title(
         titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: "tt1", plot: "p", posterUrl }) }),
-        "name=Sintel",
+        "name=Kestrel",
       );
       expect(res.json).toMatchObject({ status: "ok", posterUrl: null });
     });
@@ -1390,7 +1407,7 @@ describe("GET /api/title", () => {
     ])("keeps a poster URL the /api/poster allowlist accepts (%s)", async (posterUrl) => {
       const res = await title(
         titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId: "tt1", plot: "p", posterUrl }) }),
-        "name=Sintel",
+        "name=Kestrel",
       );
       expect(res.json).toMatchObject({ posterUrl });
     });
@@ -1402,11 +1419,11 @@ describe("GET /api/title", () => {
       ["name=%20", "missing name or imdb"],
       ["imdb=tt12", "invalid imdb id"],
       ["imdb=nope1234567", "invalid imdb id"],
-      ["imdb=tt1727587%26apikey%3Dx", "invalid imdb id"],
-      ["name=Sintel&year=20x0", "invalid year"],
-      ["name=Sintel&year=2010abc", "invalid year"],
-      ["name=Sintel&year=1200", "invalid year"],
-      ["name=Sintel&type=film", "invalid type"],
+      ["imdb=tt9990001%26apikey%3Dx", "invalid imdb id"],
+      ["name=Kestrel&year=20x0", "invalid year"],
+      ["name=Kestrel&year=2010abc", "invalid year"],
+      ["name=Kestrel&year=1200", "invalid year"],
+      ["name=Kestrel&type=film", "invalid type"],
     ])("400s %s", async (qs, error) => {
       const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
       const res = await title(titleDeps({ fetchTitleMetaByNameImpl }), qs);
@@ -1420,9 +1437,9 @@ describe("GET /api/title", () => {
 describe("GET /api/title?release= — server-side release parsing", () => {
   const OK_META: FetchTitleMetaResult = {
     ok: true,
-    imdbId: "tt1727587",
+    imdbId: "tt9990001",
     plot: "A lone girl.",
-    posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+    posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
   };
 
   function releaseDeps(over: Partial<WebDeps> = {}): WebDeps {
@@ -1448,16 +1465,16 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     const res = await title(
       releaseDeps({ fetchTitleMetaByNameImpl }),
-      "release=Sintel.2010.1080p.BluRay.x264-GROUP&group=Movies",
+      "release=Kestrel.2010.1080p.BluRay.x264-GROUP&group=Movies",
     );
     expect(res.status).toBe(200);
-    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Sintel", "key", {
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalledWith("Kestrel", "key", {
       year: 2010,
       type: "movie",
     });
     expect(res.json).toMatchObject({
       status: "ok",
-      parsed: { title: "Sintel", year: 2010, type: "movie" },
+      parsed: { title: "Kestrel", year: 2010, type: "movie" },
     });
   });
 
@@ -1491,38 +1508,38 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     // key this is fifty lookups against a 1,000/day free key.
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     const d = releaseDeps({ fetchTitleMetaByNameImpl });
-    await title(d, "release=Sintel.2010.1080p.BluRay.x264-GROUP&group=Movies");
-    await title(d, "release=Sintel.2010.2160p.WEB-DL.HDR-OTHER&group=Movies");
+    await title(d, "release=Kestrel.2010.1080p.BluRay.x264-GROUP&group=Movies");
+    await title(d, "release=Kestrel.2010.2160p.WEB-DL.HDR-OTHER&group=Movies");
     expect(fetchTitleMetaByNameImpl).toHaveBeenCalledOnce();
   });
 
   it("still echoes the parse on a cache hit", async () => {
     const d = releaseDeps();
-    await title(d, "release=Sintel.2010.1080p&group=Movies");
-    const second = await title(d, "release=Sintel.2010.2160p&group=Movies");
-    expect(second.json).toMatchObject({ parsed: { title: "Sintel", year: 2010 } });
+    await title(d, "release=Kestrel.2010.1080p&group=Movies");
+    const second = await title(d, "release=Kestrel.2010.2160p&group=Movies");
+    expect(second.json).toMatchObject({ parsed: { title: "Kestrel", year: 2010 } });
   });
 
   it("does not leak one caller's parse into another's cached answer", async () => {
     const d = releaseDeps();
-    await title(d, "release=Sintel.2010.1080p&group=Movies");
+    await title(d, "release=Kestrel.2010.1080p&group=Movies");
     // A plain ?name= caller shares the cache key but asked for no parse, and
     // must get back exactly the body that route has always returned.
-    const byName = await title(d, "name=Sintel&year=2010&type=movie");
+    const byName = await title(d, "name=Kestrel&year=2010&type=movie");
     expect(byName.json).toEqual({
       status: "ok",
-      imdbId: "tt1727587",
+      imdbId: "tt9990001",
       plot: "A lone girl.",
-      posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
+      posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
     });
   });
 
   it("carries the parse through the no-key answer so the pane still has a heading", async () => {
     const res = await title(
       releaseDeps({ loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }) }),
-      "release=Sintel.2010.1080p&group=Movies",
+      "release=Kestrel.2010.1080p&group=Movies",
     );
-    expect(res.json).toEqual({ status: "no-key", parsed: { title: "Sintel", year: 2010, type: "movie" } });
+    expect(res.json).toEqual({ status: "no-key", parsed: { title: "Kestrel", year: 2010, type: "movie" } });
   });
 
   it("prefers an explicit imdb id over a release name", async () => {
@@ -1530,7 +1547,7 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     await title(
       releaseDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }),
-      "imdb=tt1727587&release=Sintel.2010.1080p",
+      "imdb=tt9990001&release=Kestrel.2010.1080p",
     );
     expect(fetchTitleMetaImpl).toHaveBeenCalledOnce();
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
@@ -1563,10 +1580,10 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
     // server takes the name from the magnet's `dn`, which a hash-only magnet
     // has none of, and the queue row is called "abcdef01…".
     const { runtime: rt, add } = addRuntime();
-    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel 2010", via: "p2p" });
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel 2010", via: "p2p" });
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ ok: true, outcome: "added" });
-    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Sintel 2010" }), "/tmp/dl");
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Kestrel 2010" }), "/tmp/dl");
     expect(add.mock.calls[0]![0].name).not.toBe(HASH);
   });
 
@@ -1577,10 +1594,10 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
         runtime: rt,
         loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", realDebridToken: "rd-tok" }),
       }),
-      { infoHash: HASH, name: "Sintel", via: "debrid" },
+      { infoHash: HASH, name: "Kestrel", via: "debrid" },
     );
     expect(res.status).toBe(200);
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Sintel" }), "/tmp/dl", "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), "/tmp/dl", "rd-tok");
     expect(add).not.toHaveBeenCalled();
   });
 
@@ -1588,7 +1605,7 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
     // A silent P2P fallback would put the user's IP in a public swarm right
     // after they asked for the thing that keeps it out of one.
     const { runtime: rt, add, addDebrid } = addRuntime();
-    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "debrid" });
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel", via: "debrid" });
     expect(res.status).toBe(400);
     expect(res.json).toMatchObject({ error: expect.stringContaining("Real-Debrid token") });
     expect(add).not.toHaveBeenCalled();
@@ -1597,20 +1614,20 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
 
   it("passes a known size through", async () => {
     const { runtime: rt, add } = addRuntime();
-    await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "p2p", sizeBytes: 4096 });
+    await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel", via: "p2p", sizeBytes: 4096 });
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ sizeBytes: 4096 }), "/tmp/dl");
   });
 
   it("rejects an unknown `via` instead of guessing a network", async () => {
     const { runtime: rt, add } = addRuntime();
-    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Sintel", via: "carrier-pigeon" });
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel", via: "carrier-pigeon" });
     expect(res.status).toBe(400);
     expect(add).not.toHaveBeenCalled();
   });
 
   it("rejects an unresolvable hash", async () => {
     const { runtime: rt, add } = addRuntime();
-    const res = await post(deps({ runtime: rt }), { infoHash: "nope", name: "Sintel", via: "p2p" });
+    const res = await post(deps({ runtime: rt }), { infoHash: "nope", name: "Kestrel", via: "p2p" });
     expect(res.status).toBe(400);
     expect(res.json).toMatchObject({ error: "invalid magnet or info hash" });
     expect(add).not.toHaveBeenCalled();
@@ -1618,7 +1635,7 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
 
   it("rejects a request with a name but nothing to add", async () => {
     const { runtime: rt, add } = addRuntime();
-    const res = await post(deps({ runtime: rt }), { name: "Sintel", via: "p2p" });
+    const res = await post(deps({ runtime: rt }), { name: "Kestrel", via: "p2p" });
     expect(res.status).toBe(400);
     expect(res.json).toMatchObject({ error: "missing magnet or info hash" });
     expect(add).not.toHaveBeenCalled();
@@ -1659,11 +1676,11 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
 
 describe("GET /api/recommendations", () => {
   const PICK = {
-    imdbId: "tt0133093",
-    title: "The Matrix",
+    imdbId: "tt1",
+    title: "Ashfall",
     year: 1999,
     score: 0.91,
-    reasons: ["because you liked Blade Runner"],
+    reasons: ["because you liked Harrowgate"],
   };
 
   beforeEach(() => {
@@ -1796,7 +1813,7 @@ describe("POST /api/recc-event", () => {
       "/api/recc-event",
       new URLSearchParams(),
       undefined,
-      JSON.stringify({ type: "liked", rawName: "The Matrix" }),
+      JSON.stringify({ type: "liked", rawName: "Ashfall" }),
     );
     expect(res.status).toBe(401);
     expect(postEventImpl).not.toHaveBeenCalled();
@@ -1806,12 +1823,12 @@ describe("POST /api/recc-event", () => {
     "forwards a %s event with the server's clock and source",
     async (type) => {
       const postEventImpl = vi.fn(async () => {});
-      const res = await post(eventDeps({ postEventImpl }), { type, rawName: "The Matrix" });
+      const res = await post(eventDeps({ postEventImpl }), { type, rawName: "Ashfall" });
       expect(res.status).toBe(200);
       expect(res.json).toEqual({ status: "accepted" });
       expect(postEventImpl).toHaveBeenCalledWith(
         { reccUrl: "http://recc.local", reccToken: "t" },
-        { type, rawName: "The Matrix", ts: expect.any(Number), source: "torlink" },
+        { type, rawName: "Ashfall", ts: expect.any(Number), source: "torlink" },
       );
     },
   );
@@ -1820,7 +1837,7 @@ describe("POST /api/recc-event", () => {
   // it from a button would let a browser fabricate watch history.
   it("refuses to forward a started event", async () => {
     const postEventImpl = vi.fn(async () => {});
-    const res = await post(eventDeps({ postEventImpl }), { type: "started", rawName: "The Matrix" });
+    const res = await post(eventDeps({ postEventImpl }), { type: "started", rawName: "Ashfall" });
     expect(res.status).toBe(400);
     expect(postEventImpl).not.toHaveBeenCalled();
   });
@@ -1845,7 +1862,7 @@ describe("POST /api/recc-event", () => {
     const before = Date.now();
     await post(eventDeps({ postEventImpl }), {
       type: "liked",
-      rawName: "The Matrix",
+      rawName: "Ashfall",
       ts: 1924992000000,
       source: "somebody-else",
     });
@@ -1859,7 +1876,7 @@ describe("POST /api/recc-event", () => {
     const postEventImpl = vi.fn(async () => {});
     const res = await post(eventDeps({ loadConfigImpl: async () => searchConfig(), postEventImpl }), {
       type: "liked",
-      rawName: "The Matrix",
+      rawName: "Ashfall",
     });
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ status: "not-configured" });
@@ -1881,7 +1898,7 @@ describe("POST /api/recc-event", () => {
           settle = () => reject(new Error("reccd exploded"));
         }),
     );
-    const res = await post(eventDeps({ postEventImpl }), { type: "watched", rawName: "The Matrix" });
+    const res = await post(eventDeps({ postEventImpl }), { type: "watched", rawName: "Ashfall" });
     // Answered while the post is still in flight — nothing awaited it.
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ status: "accepted" });
@@ -1900,11 +1917,11 @@ describe("handleWebApi — GET /api/saved", () => {
         loadConfigImpl: async () => ({
           ...defaultConfig,
           downloadDir: "/tmp/dl",
-          savedSearches: ["dune part two", "the bear s03"],
+          savedSearches: ["tin rivers", "harrowgate s03"],
           favourites: [
             {
               id: "a".repeat(40),
-              name: "Severance.S02.1080p.WEB-DL",
+              name: "Kepler.S02.1080p.WEB-DL",
               magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
               source: "eztv" as SourceId,
               sizeBytes: 24_000_000_000,
@@ -1923,11 +1940,11 @@ describe("handleWebApi — GET /api/saved", () => {
 
     expect(res.status).toBe(200);
     const body = res.json as SavedResponse;
-    expect(body.watchlist).toEqual(["dune part two", "the bear s03"]);
+    expect(body.savedSearches).toEqual(["tin rivers", "harrowgate s03"]);
     expect(body.library).toEqual([
       {
         id: "a".repeat(40),
-        name: "Severance.S02.1080p.WEB-DL",
+        name: "Kepler.S02.1080p.WEB-DL",
         source: "eztv",
         sizeBytes: 24_000_000_000,
         addedAt: 1_700_000_000_000,
@@ -1955,7 +1972,7 @@ describe("handleWebApi — GET /api/saved", () => {
           favourites: [
             {
               id: "a".repeat(40),
-              name: "Severance",
+              name: "Kepler",
               magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
               sizeBytes: 0,
               addedAt: 1_700_000_000_000,
@@ -1983,7 +2000,7 @@ describe("handleWebApi — GET /api/saved", () => {
       "",
     );
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ watchlist: [], library: [] });
+    expect(res.json).toEqual({ savedSearches: [], library: [], continueWatching: [] });
   });
 
   it("requires the token when one is configured", async () => {
@@ -1999,7 +2016,134 @@ describe("handleWebApi — GET /api/saved", () => {
   });
 });
 
-describe("handleWebApi — POST /api/watchlist", () => {
+describe("GET /api/saved — continueWatching", () => {
+  it("reports titles with their next episode, and no magnets", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [
+          { key: "kepler||series", title: "Kepler", type: "series", season: 2, episode: 4,
+            rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`, startedAt: 1_700_000_000_000 },
+          { key: "harrowgate||series", title: "Harrowgate", type: "series", season: 3,
+            rawName: "Harrowgate.S03.1080p", infoHash: "b".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`, startedAt: 1_600_000_000_000 },
+        ],
+      }),
+      "GET", "/api/saved", new URLSearchParams(), undefined, "",
+    );
+
+    const body = res.json as SavedResponse;
+    expect(body.continueWatching).toHaveLength(2);
+    expect(body.continueWatching[0]).toEqual({
+      key: "kepler||series", title: "Kepler", type: "series",
+      season: 2, episode: 4, next: { season: 2, episode: 5 },
+      rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+      startedAt: 1_700_000_000_000,
+    });
+    // A season pack names no episode, so there is no honest next to offer.
+    expect(body.continueWatching[1]?.next).toBeNull();
+    // Same exclusion as PublicFavourite: playing goes through
+    // POST /api/stream { infoHash, name }, which rebuilds the magnet.
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+  });
+
+  // `SavedResponse.continueWatching` documents "newest first", and the browser
+  // deliberately does not re-sort. Ordering is guaranteed by construction
+  // (recordStream prepends), so this pins that the route passes the store's
+  // order STRAIGHT THROUGH. The fixture's stored order is the reverse of its
+  // alphabetical and of its startedAt-ascending order, so any re-sort fails.
+  it("passes the store's newest-first order through untouched", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [
+          { key: "kepler|series", title: "Kepler", type: "series", season: 2, episode: 4,
+            rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`, startedAt: 1_700_000_000_000 },
+          { key: "ashfall|1999|movie", title: "Ashfall", type: "movie", year: 1999,
+            rawName: "Ashfall.1999.1080p", infoHash: "b".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`, startedAt: 1_600_000_000_000 },
+          { key: "harrowgate|series", title: "Harrowgate", type: "series", season: 3,
+            rawName: "Harrowgate.S03.1080p", infoHash: "c".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"c".repeat(40)}`, startedAt: 1_500_000_000_000 },
+        ],
+      }),
+      "GET", "/api/saved", new URLSearchParams(), undefined, "",
+    );
+    expect((res.json as SavedResponse).continueWatching.map((e) => e.key)).toEqual([
+      "kepler|series",
+      "ashfall|1999|movie",
+      "harrowgate|series",
+    ]);
+  });
+
+  it("answers an empty list when nothing has been streamed", async () => {
+    const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
+    expect((res.json as SavedResponse).continueWatching).toEqual([]);
+  });
+});
+
+describe("handleWebApi — POST /api/continue-watching", () => {
+  function item(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
+    return {
+      key: "kepler||series",
+      title: "Kepler",
+      type: "series",
+      season: 2,
+      episode: 4,
+      rawName: "Kepler.S02E04.1080p",
+      infoHash: "a".repeat(40),
+      magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+      startedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/continue-watching", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("removes the matching entry and returns the rest, dropped magnets included", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    const d = deps({
+      loadStreamHistoryImpl: async () => [item(), item({ key: "harrowgate||series", title: "Harrowgate" })],
+      saveStreamHistoryImpl: async (items) => {
+        saved.push([...items]);
+      },
+    });
+    const res = await post(d, { key: "kepler||series", action: "remove" });
+    expect(res.status).toBe(200);
+    const body = res.json as { continueWatching: PublicStreamHistoryItem[] };
+    expect(body.continueWatching).toHaveLength(1);
+    expect(body.continueWatching[0]?.key).toBe("harrowgate||series");
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+    expect(saved[0]).toHaveLength(1);
+  });
+
+  it("is idempotent — removing a key that is not there changes nothing", async () => {
+    const d = deps({
+      loadStreamHistoryImpl: async () => [item()],
+      saveStreamHistoryImpl: async () => {
+        throw new Error("must not be called for a no-op remove");
+      },
+    });
+    const res = await post(d, { key: "no-such-key", action: "remove" });
+    expect(res.status).toBe(200);
+    expect((res.json as { continueWatching: PublicStreamHistoryItem[] }).continueWatching).toHaveLength(1);
+  });
+
+  it("rejects a body missing the key", async () => {
+    const d = deps({ loadStreamHistoryImpl: async () => [item()] });
+    const res = await post(d, { action: "remove" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an unknown action", async () => {
+    const d = deps({ loadStreamHistoryImpl: async () => [item()] });
+    const res = await post(d, { key: "kepler||series", action: "toggle" });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("handleWebApi — POST /api/saved-searches", () => {
   // A fresh capture per test: the route must WRITE, and asserting on what it
   // wrote is the only way to know it persisted rather than answered from memory.
   function capture(config: Partial<Config> = {}) {
@@ -2014,36 +2158,36 @@ describe("handleWebApi — POST /api/watchlist", () => {
   }
 
   const post = (d: WebDeps, body: unknown) =>
-    handleWebApi(d, "POST", "/api/watchlist", new URLSearchParams(), undefined, JSON.stringify(body));
+    handleWebApi(d, "POST", "/api/saved-searches", new URLSearchParams(), undefined, JSON.stringify(body));
 
   it("adds a query, most-recent first, and persists it", async () => {
-    const { deps: d, saved } = capture({ savedSearches: ["the bear s03"] });
-    const res = await post(d, { query: "dune part two", action: "toggle" });
+    const { deps: d, saved } = capture({ savedSearches: ["harrowgate s03"] });
+    const res = await post(d, { query: "tin rivers", action: "toggle" });
 
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ saved: true, watchlist: ["dune part two", "the bear s03"] });
+    expect(res.json).toEqual({ saved: true, savedSearches: ["tin rivers", "harrowgate s03"] });
     expect(saved).toHaveLength(1);
-    expect(saved[0]?.savedSearches).toEqual(["dune part two", "the bear s03"]);
+    expect(saved[0]?.savedSearches).toEqual(["tin rivers", "harrowgate s03"]);
   });
 
   it("toggle removes a query that is already saved", async () => {
-    const { deps: d, saved } = capture({ savedSearches: ["dune part two", "the bear s03"] });
-    const res = await post(d, { query: "dune part two", action: "toggle" });
+    const { deps: d, saved } = capture({ savedSearches: ["tin rivers", "harrowgate s03"] });
+    const res = await post(d, { query: "tin rivers", action: "toggle" });
 
-    expect(res.json).toEqual({ saved: false, watchlist: ["the bear s03"] });
-    expect(saved[0]?.savedSearches).toEqual(["the bear s03"]);
+    expect(res.json).toEqual({ saved: false, savedSearches: ["harrowgate s03"] });
+    expect(saved[0]?.savedSearches).toEqual(["harrowgate s03"]);
   });
 
   it("trims the query, so the same search cannot be saved twice", async () => {
-    const { deps: d } = capture({ savedSearches: ["dune part two"] });
-    const res = await post(d, { query: "  dune part two  ", action: "toggle" });
-    expect(res.json).toEqual({ saved: false, watchlist: [] });
+    const { deps: d } = capture({ savedSearches: ["tin rivers"] });
+    const res = await post(d, { query: "  tin rivers  ", action: "toggle" });
+    expect(res.json).toEqual({ saved: false, savedSearches: [] });
   });
 
   it("remove is idempotent — a double-fired click must not re-add", async () => {
-    const { deps: d } = capture({ savedSearches: ["dune part two"] });
-    const first = await post(d, { query: "dune part two", action: "remove" });
-    expect(first.json).toEqual({ saved: false, watchlist: [] });
+    const { deps: d } = capture({ savedSearches: ["tin rivers"] });
+    const first = await post(d, { query: "tin rivers", action: "remove" });
+    expect(first.json).toEqual({ saved: false, savedSearches: [] });
 
     // The SAME query again, on the SAME fixture. loadConfigImpl is a fixed
     // closure over the original config (not the "saved" array from the first
@@ -2052,16 +2196,16 @@ describe("handleWebApi — POST /api/watchlist", () => {
     // "toggle") does not flip a *present* entry off and back on twice — see
     // the case below for the one that actually catches remove silently
     // becoming toggle.
-    const second = await post(d, { query: "dune part two", action: "remove" });
-    expect(second.json).toEqual({ saved: false, watchlist: [] });
+    const second = await post(d, { query: "tin rivers", action: "remove" });
+    expect(second.json).toEqual({ saved: false, savedSearches: [] });
 
     // The state a genuinely second-in-line click reads: the entry is already
     // gone. remove() is a no-op here; if it were toggleSavedSearches (i.e.
-    // "remove" secretly meant "toggle"), this would ADD "dune part two" back —
+    // "remove" secretly meant "toggle"), this would ADD "tin rivers" back —
     // which is the actual "must not re-add" this test is named for.
     const { deps: gone } = capture({ savedSearches: [] });
-    const third = await post(gone, { query: "dune part two", action: "remove" });
-    expect(third.json).toEqual({ saved: false, watchlist: [] });
+    const third = await post(gone, { query: "tin rivers", action: "remove" });
+    expect(third.json).toEqual({ saved: false, savedSearches: [] });
   });
 
   it("rejects a blank query rather than answering 200 to a no-op", async () => {
@@ -2074,14 +2218,14 @@ describe("handleWebApi — POST /api/watchlist", () => {
 
   it("rejects an unknown action and an unparseable body", async () => {
     const { deps: d } = capture();
-    const bad = await post(d, { query: "dune", action: "explode" });
+    const bad = await post(d, { query: "tin rivers", action: "explode" });
     expect(bad.status).toBe(400);
     expect(bad.json).toEqual({ error: "invalid action" });
 
     const junk = await handleWebApi(
       d,
       "POST",
-      "/api/watchlist",
+      "/api/saved-searches",
       new URLSearchParams(),
       undefined,
       "not json",
@@ -2096,7 +2240,7 @@ describe("handleWebApi — POST /api/watchlist", () => {
       sort: "seeders:desc",
       disabledSources: ["eztv"],
     });
-    await post(d, { query: "dune", action: "toggle" });
+    await post(d, { query: "tin rivers", action: "toggle" });
     expect(saved[0]?.realDebridToken).toBe("rd-token");
     expect(saved[0]?.sort).toBe("seeders:desc");
     expect(saved[0]?.disabledSources).toEqual(["eztv"]);
@@ -2106,10 +2250,10 @@ describe("handleWebApi — POST /api/watchlist", () => {
     const res = await handleWebApi(
       deps({ token: "secret" }),
       "POST",
-      "/api/watchlist",
+      "/api/saved-searches",
       new URLSearchParams(),
       undefined,
-      JSON.stringify({ query: "dune", action: "toggle" }),
+      JSON.stringify({ query: "tin rivers", action: "toggle" }),
     );
     expect(res.status).toBe(401);
   });
@@ -2129,7 +2273,7 @@ describe("handleWebApi — POST /api/library", () => {
   function fav(over: Partial<FavouriteItem> = {}): FavouriteItem {
     return {
       id: HASH,
-      name: "Severance.S02.1080p.WEB-DL",
+      name: "Kepler.S02.1080p.WEB-DL",
       magnet: `magnet:?xt=urn:btih:${HASH}`,
       addedAt: 1_700_000_000_000,
       ...over,
@@ -2158,7 +2302,7 @@ describe("handleWebApi — POST /api/library", () => {
     const { deps: d, saved } = capture();
     const res = await post(d, {
       infoHash: HASH,
-      name: "Severance.S02.1080p.WEB-DL",
+      name: "Kepler.S02.1080p.WEB-DL",
       sizeBytes: 24_000_000_000,
       source: "eztv",
       action: "toggle",
@@ -2168,7 +2312,7 @@ describe("handleWebApi — POST /api/library", () => {
     const body = res.json as LibraryResponse;
     expect(body.favourited).toBe(true);
     expect(body.library).toHaveLength(1);
-    expect(body.library[0]?.name).toBe("Severance.S02.1080p.WEB-DL");
+    expect(body.library[0]?.name).toBe("Kepler.S02.1080p.WEB-DL");
     expect(body.library[0]?.watched).toBe(0);
 
     // The stored entry MUST carry a magnet: a search result has none on the
@@ -2176,13 +2320,13 @@ describe("handleWebApi — POST /api/library", () => {
     // buildMagnet this favourite would vanish on the next loadConfig.
     const stored = saved[0]?.favourites?.[0];
     expect(stored?.magnet).toContain(`xt=urn:btih:${HASH}`);
-    expect(stored?.magnet).toContain("dn=Severance.S02.1080p.WEB-DL");
+    expect(stored?.magnet).toContain("dn=Kepler.S02.1080p.WEB-DL");
     expect(stored?.magnet).toContain("tr=");
   });
 
   it("omits a zero sizeBytes rather than storing it as a known-and-empty size", async () => {
     const { deps: d, saved } = capture();
-    await post(d, { infoHash: HASH, name: "Severance", sizeBytes: 0, action: "toggle" });
+    await post(d, { infoHash: HASH, name: "Kepler", sizeBytes: 0, action: "toggle" });
     const stored = saved[0]?.favourites?.[0];
     expect(stored && "sizeBytes" in stored).toBe(false);
   });
@@ -2190,7 +2334,7 @@ describe("handleWebApi — POST /api/library", () => {
   it("stamps addedAt with the server clock, never the browser's", async () => {
     const { deps: d, saved } = capture();
     const before = Date.now();
-    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    await post(d, { infoHash: HASH, name: "Kepler", action: "toggle" });
     const stored = saved[0]?.favourites?.[0];
     expect(stored?.addedAt).toBeGreaterThanOrEqual(before);
     expect(stored?.addedAt).toBeLessThanOrEqual(Date.now());
@@ -2198,7 +2342,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("toggle unfavourites a torrent already in the library", async () => {
     const { deps: d, saved } = capture({ favourites: [fav()] });
-    const res = await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    const res = await post(d, { infoHash: HASH, name: "Kepler", action: "toggle" });
 
     expect((res.json as LibraryResponse).favourited).toBe(false);
     expect((res.json as LibraryResponse).library).toEqual([]);
@@ -2207,7 +2351,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("remove is idempotent", async () => {
     const { deps: d } = capture({ favourites: [fav()] });
-    const gone = await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    const gone = await post(d, { infoHash: HASH, name: "Kepler", action: "remove" });
     expect((gone.json as LibraryResponse).library).toEqual([]);
 
     const again = await post(d, { infoHash: "c".repeat(40), name: "Other", action: "remove" });
@@ -2217,20 +2361,20 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("posts favourited / unfavourited to reccd, so the taste profile matches the TUI", async () => {
     const on = capture({ reccUrl: "http://localhost:4100" });
-    await post(on.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    await post(on.deps, { infoHash: HASH, name: "Kepler.S02", action: "toggle" });
     expect(on.events).toEqual([
-      expect.objectContaining({ type: "favourited", rawName: "Severance.S02", source: "torlink" }),
+      expect.objectContaining({ type: "favourited", rawName: "Kepler.S02", source: "torlink" }),
     ]);
 
     const off = capture({ reccUrl: "http://localhost:4100", favourites: [fav()] });
-    await post(off.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    await post(off.deps, { infoHash: HASH, name: "Kepler.S02", action: "toggle" });
     expect(off.events).toEqual([expect.objectContaining({ type: "unfavourited" })]);
   });
 
   it("uses the server clock for the event ts, not a browser's", async () => {
     const { deps: d, events } = capture({ reccUrl: "http://localhost:4100" });
     const before = Date.now();
-    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    await post(d, { infoHash: HASH, name: "Kepler", action: "toggle" });
     expect(events[0]?.ts).toBeGreaterThanOrEqual(before);
   });
 
@@ -2239,13 +2383,13 @@ describe("handleWebApi — POST /api/library", () => {
       reccUrl: "http://localhost:4100",
       favourites: [fav()],
     });
-    await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    await post(d, { infoHash: HASH, name: "Kepler", action: "remove" });
     expect(events).toEqual([]);
   });
 
   it("succeeds with reccd unconfigured, and when the event post rejects", async () => {
     const quiet = capture(); // no reccUrl
-    const ok = await post(quiet.deps, { infoHash: HASH, name: "Severance", action: "toggle" });
+    const ok = await post(quiet.deps, { infoHash: HASH, name: "Kepler", action: "toggle" });
     expect(ok.status).toBe(200);
     expect(quiet.events).toEqual([]);
 
@@ -2260,7 +2404,7 @@ describe("handleWebApi — POST /api/library", () => {
         throw new Error("reccd is down");
       },
     });
-    const survives = await post(broken, { infoHash: HASH, name: "Severance", action: "toggle" });
+    const survives = await post(broken, { infoHash: HASH, name: "Kepler", action: "toggle" });
     // reccd must never take a favourite with it: the event is fire-and-forget.
     expect(survives.status).toBe(200);
   });
@@ -2285,7 +2429,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("preserves unrelated config fields", async () => {
     const { deps: d, saved } = capture({ realDebridToken: "rd-token", trackers: ["udp://x/announce"] });
-    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    await post(d, { infoHash: HASH, name: "Kepler", action: "toggle" });
     expect(saved[0]?.realDebridToken).toBe("rd-token");
     expect(saved[0]?.trackers).toEqual(["udp://x/announce"]);
   });
@@ -2304,7 +2448,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("normalizes an uppercase hex hash to lowercase before storing, matching the TUI's dedupe key", async () => {
     const { deps: d, saved } = capture();
-    const res = await post(d, { infoHash: HASH.toUpperCase(), name: "Severance", action: "toggle" });
+    const res = await post(d, { infoHash: HASH.toUpperCase(), name: "Kepler", action: "toggle" });
     expect(res.status).toBe(200);
     const stored = saved[0]?.favourites?.[0];
     expect(stored?.id).toBe(HASH);
@@ -2316,7 +2460,7 @@ describe("handleWebApi — POST /api/library", () => {
     const { deps: d, saved } = capture();
     const res = await post(d, {
       infoHash: "XO53XO53XO53XO53XO53XO53XO53XO53",
-      name: "Severance",
+      name: "Kepler",
       action: "toggle",
     });
     expect(res.status).toBe(200);
@@ -2327,7 +2471,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("stores an entry that survives loadConfig's own validation", async () => {
     const { deps: d, saved } = capture();
-    await post(d, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    await post(d, { infoHash: HASH, name: "Kepler.S02", action: "toggle" });
     const stored = saved[0]?.favourites?.[0];
     // isFavouriteItem's three requirements, which is what would silently drop
     // this entry on the next boot if buildMagnet were ever removed.
@@ -2341,7 +2485,7 @@ describe("handleWebApi — POST /api/library", () => {
     const { deps: d, saved } = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
     const res = await post(d, {
       infoHash: HASH,
-      name: "Severance",
+      name: "Kepler",
       action: "watched",
       filename: "ep2.mkv",
     });
@@ -2356,7 +2500,7 @@ describe("handleWebApi — POST /api/library", () => {
     // writing anyway would churn the config file every time a user re-watched
     // an episode.
     const dupe = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
-    await post(dupe.deps, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    await post(dupe.deps, { infoHash: HASH, name: "Kepler", action: "watched", filename: "ep1.mkv" });
     expect(dupe.saved).toHaveLength(0);
 
     // Not favourited at all: there is nothing to record against. Still a 200 —
@@ -2365,7 +2509,7 @@ describe("handleWebApi — POST /api/library", () => {
     const absent = capture();
     const res = await post(absent.deps, {
       infoHash: HASH,
-      name: "Severance",
+      name: "Kepler",
       action: "watched",
       filename: "ep1.mkv",
     });
@@ -2376,7 +2520,7 @@ describe("handleWebApi — POST /api/library", () => {
 
   it("rejects watched without a filename", async () => {
     const { deps: d, saved } = capture({ favourites: [fav()] });
-    const res = await post(d, { infoHash: HASH, name: "Severance", action: "watched" });
+    const res = await post(d, { infoHash: HASH, name: "Kepler", action: "watched" });
     expect(res.status).toBe(400);
     expect(res.json).toEqual({ error: "missing filename" });
     expect(saved).toHaveLength(0);
@@ -2392,7 +2536,219 @@ describe("handleWebApi — POST /api/library", () => {
       reccUrl: "http://localhost:4100",
       favourites: [fav()],
     });
-    await post(d, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    await post(d, { infoHash: HASH, name: "Kepler", action: "watched", filename: "ep1.mkv" });
     expect(events).toEqual([]);
+  });
+});
+
+describe("POST /api/stream — records stream history", () => {
+  const HASH = "c".repeat(40);
+
+  // Recording hangs off the session's own resolution, so every test here drives
+  // a FAKE registry: with the default one these would each join a real swarm.
+  //
+  // THE WRITE SEAM IS ALWAYS INJECTED, and every write is captured in `writes`,
+  // so no test here can forget it. Enforced by COMPOSITION rather than by
+  // convention: the recorder is installed after `over` is spread and delegates to
+  // whatever the caller passed, so a test may decide what happens after a write
+  // (one deliberately rejects) but cannot decide whether it is counted. Spreading
+  // `over` last, as this once did, silently disarms the recorder — and a silently
+  // empty `writes` is how the next vacuous `expect(writes).toHaveLength(0)` gets
+  // written and believed.
+  // deps()'s default seam throws so a forgotten one fails loudly — but on THIS
+  // route the throw is swallowed by the fire-and-forget history write (a
+  // convenience list must never take a stream down with it), so it is no
+  // tripwire here: a test that forgot to inject would pass having recorded
+  // nothing, anywhere. Recording unconditionally and asserting `writes` is the
+  // loud version of the same check, and it cannot reach real state either way.
+  //
+  // Scoped to this describe on purpose. A module-wide version was tried and is
+  // wrong: the write lands a tick or more after the request, so the test running
+  // when it arrives is not the test that caused it, and every attribution — and
+  // therefore every failure message — names the wrong test.
+  function streamDeps(over: Partial<WebDeps> = {}, sessionsOver = {}) {
+    const sessions = registry(sessionsOver);
+    const writes: StreamHistoryItem[][] = [];
+    const alsoSave = over.saveStreamHistoryImpl;
+    const d = deps({
+      runtime: runtime(sessions),
+      ...over,
+      // Record first, then delegate: a caller's own impl still runs (and may
+      // still reject, which is a test in here), and the record already happened.
+      saveStreamHistoryImpl: async (items) => {
+        writes.push([...items]);
+        if (alsoSave) await alsoSave(items);
+      },
+    });
+    return { d, sessions, writes };
+  }
+
+  it("records the title and posts started to reccd once the session resolves", async () => {
+    const events: ReccEvent[] = [];
+    const { d, writes } = streamDeps({
+      loadConfigImpl: async () => ({
+        ...defaultConfig, downloadDir: "/tmp/dl", reccUrl: "http://localhost:4100",
+      }),
+      loadStreamHistoryImpl: async () => [],
+      postEventImpl: async (_c, e) => { events.push(e); },
+    });
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+
+    expect(res.status).toBeLessThan(500);
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]?.[0]?.title).toBe("Kepler");
+    expect(writes[0]?.[0]?.episode).toBe(4);
+    // The web posted NO started event before this change — a browser stream
+    // taught reccd nothing about having begun.
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    expect(events).toEqual([
+      expect.objectContaining({ type: "started", rawName: "Kepler.S02E04.1080p.WEB-DL" }),
+    ]);
+  });
+
+  // The finding this fixes: begin() hands back a `resolving` session, so
+  // recording at request time left a permanent unplayable Continue-watching row
+  // for a dead magnet. The TUI records only AFTER the resolve returns files, so
+  // the same gesture in a terminal wrote nothing. Two front ends, one gesture.
+  it("writes nothing when the session never resolves", async () => {
+    let loadCalls = 0;
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => { loadCalls += 1; return []; } },
+      { streamTorrentImpl: async () => { throw new Error("dead swarm"); } },
+    );
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("error"));
+    expect(writes).toHaveLength(0);
+    // As in the no-title case below: an untouched load seam is what separates a
+    // clean skip from a crash the catch swallowed.
+    expect(loadCalls).toBe(0);
+  });
+
+  it("writes exactly one row for one resolved stream", async () => {
+    const { d, sessions, writes } = streamDeps({ loadStreamHistoryImpl: async () => [] });
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toHaveLength(1);
+  });
+
+  // The bar for "watchable" is streamCandidates, the TUI's own helper — and the
+  // point of pinning it here is that the helper is WIDER than "has a video
+  // extension": with nothing playable in the torrent it hands back every file, so
+  // a single unrecognised container is still offered to a player rather than
+  // silently dropped. A gate that filtered on extension instead would give the
+  // browser a stricter rule than the terminal, which is the divergence this pair
+  // of tests exists to prevent in either direction.
+  it("still records a torrent whose only file is not obviously video", async () => {
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => [] },
+      {
+        streamTorrentImpl: async () => ({
+          name: "Swarm Name",
+          files: [{ url: LOCAL_URL, filename: "Kestrel.2010.1080p.BluRay.bin", bytes: 900 }],
+          dir: "/tmp/x",
+          isComplete: () => false,
+          stop: vi.fn(async () => {}),
+        }),
+      },
+    );
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kestrel.2010.1080p.BluRay.x264", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+  });
+
+  it("writes nothing when the session resolves with no files at all", async () => {
+    let loadCalls = 0;
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => { loadCalls += 1; return []; } },
+      {
+        streamTorrentImpl: async () => ({
+          name: "Swarm Name",
+          files: [],
+          dir: "/tmp/x",
+          isComplete: () => false,
+          stop: vi.fn(async () => {}),
+        }),
+      },
+    );
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    expect(writes).toHaveLength(0);
+    expect(loadCalls).toBe(0);
+  });
+
+  it("does not write history for a name with no title in it", async () => {
+    let loadCalls = 0;
+    const { d, sessions, writes } = streamDeps({
+      loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
+    });
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "1080p.WEB-DL.x265", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    expect(writes).toHaveLength(0);
+    // `writes` staying empty alone doesn't distinguish "the null guard worked"
+    // from "recordStream threw on a null item and the try/catch swallowed
+    // it" — both leave `writes` empty. Asserting the persistence seams were
+    // never even reached is what actually pins the guard: a clean early
+    // return never calls loadStreamHistoryImpl; a crash-and-swallow would
+    // have called it first.
+    expect(loadCalls).toBe(0);
+  });
+
+  // The seam's whole value is that it CANNOT be lost, so that a future
+  // `expect(writes).toHaveLength(0)` cannot pass for the wrong reason. Spreading
+  // a caller's overrides last made the recorder replaceable, and the test below
+  // ("survives a history write that rejects") already replaces it — so the
+  // invariant this helper's comment claims has to be enforced, not asserted.
+  it("records a write even when the caller brings its own write impl", async () => {
+    const own: StreamHistoryItem[][] = [];
+    const { d, writes } = streamDeps({
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async (items) => { own.push([...items]); },
+    });
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    expect(res.status).toBeLessThan(500);
+    // Both see it: the recorder is composed with the override, not replaced by it.
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(own).toHaveLength(1);
+  });
+
+  it("survives a history write that rejects", async () => {
+    // History is a convenience. It must never take a stream down with it.
+    // Now that the write happens AFTER the response, "survives" is about the
+    // process: the rejection lands in a promise nobody awaits, so vitest would
+    // report an unhandled rejection if either the inner try/catch or the outer
+    // .catch were removed.
+    const { d, sessions } = streamDeps({
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async () => { throw new Error("disk full"); },
+    });
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p", confirm: true }),
+    );
+    expect(res.status).toBeLessThan(500);
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
   });
 });

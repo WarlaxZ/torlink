@@ -30,7 +30,7 @@ describe("parseSection", () => {
     expect(parseSection("downloads")).toBe("downloads");
     expect(parseSection("seeding")).toBe("seeding");
     expect(parseSection("forYou")).toBe("forYou");
-    expect(parseSection("watchlist")).toBe("watchlist");
+    expect(parseSection("savedSearches")).toBe("savedSearches");
     expect(parseSection("accounts")).toBe("accounts");
   });
 
@@ -44,7 +44,7 @@ describe("parseSection", () => {
 describe("isCategory", () => {
   it("excludes the downloads/seeding/accounts sections", () => {
     expect(isCategory("accounts")).toBe(false);
-    expect(isCategory("watchlist")).toBe(false);
+    expect(isCategory("savedSearches")).toBe(false);
     expect(isCategory("downloads")).toBe(false);
     expect(isCategory("seeding")).toBe(false);
   });

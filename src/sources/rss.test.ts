@@ -96,11 +96,11 @@ describe("fetchWordpressRss", () => {
       .mockResolvedValueOnce(page(feed(...hashes(10, "a").map(item))))
       .mockResolvedValueOnce(page(feed()))
       .mockResolvedValueOnce(page(feed()));
-    await fetchWordpressRss("https://x.site", "fitgirl", "elden ring");
+    await fetchWordpressRss("https://x.site", "fitgirl", "copper kettle");
     expect(mockFetch.mock.calls.map((c) => c[0])).toEqual([
-      "https://x.site/?s=elden%20ring&feed=rss2",
-      "https://x.site/?s=elden%20ring&feed=rss2&paged=2",
-      "https://x.site/?s=elden%20ring&feed=rss2&paged=3",
+      "https://x.site/?s=copper%20kettle&feed=rss2",
+      "https://x.site/?s=copper%20kettle&feed=rss2&paged=2",
+      "https://x.site/?s=copper%20kettle&feed=rss2&paged=3",
     ]);
   });
 });

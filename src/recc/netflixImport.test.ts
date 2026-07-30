@@ -6,9 +6,9 @@ const HEADER = "Title,Date";
 
 describe("chunkNetflixCsv", () => {
   it("returns one chunk containing the header and all rows when under budget", () => {
-    const csv = `${HEADER}\nThe Matrix,1/2/20\nHeat,3/4/21`;
+    const csv = `${HEADER}\nThe Ashfall,1/2/20\nHeat,3/4/21`;
     const chunks = chunkNetflixCsv(csv);
-    expect(chunks).toEqual([`${HEADER}\nThe Matrix,1/2/20\nHeat,3/4/21`]);
+    expect(chunks).toEqual([`${HEADER}\nThe Ashfall,1/2/20\nHeat,3/4/21`]);
   });
 
   it("returns [] when there are no data rows", () => {
@@ -17,8 +17,8 @@ describe("chunkNetflixCsv", () => {
   });
 
   it("skips blank data lines", () => {
-    const csv = `${HEADER}\nThe Matrix,1/2/20\n\n\nHeat,3/4/21\n`;
-    expect(chunkNetflixCsv(csv)).toEqual([`${HEADER}\nThe Matrix,1/2/20\nHeat,3/4/21`]);
+    const csv = `${HEADER}\nThe Ashfall,1/2/20\n\n\nHeat,3/4/21\n`;
+    expect(chunkNetflixCsv(csv)).toEqual([`${HEADER}\nThe Ashfall,1/2/20\nHeat,3/4/21`]);
   });
 
   it("splits into multiple chunks that each re-include the header, honoring the byte budget", () => {
@@ -45,8 +45,8 @@ describe("chunkNetflixCsv", () => {
   });
 
   it("tolerates CRLF line endings", () => {
-    const csv = `${HEADER}\r\nThe Matrix,1/2/20\r\nHeat,3/4/21\r\n`;
-    expect(chunkNetflixCsv(csv)).toEqual([`${HEADER}\nThe Matrix,1/2/20\nHeat,3/4/21`]);
+    const csv = `${HEADER}\r\nThe Ashfall,1/2/20\r\nHeat,3/4/21\r\n`;
+    expect(chunkNetflixCsv(csv)).toEqual([`${HEADER}\nThe Ashfall,1/2/20\nHeat,3/4/21`]);
   });
 });
 
@@ -63,7 +63,7 @@ function jsonRes(status: number, body: unknown = {}) {
 }
 
 const CONFIG = { reccUrl: "http://host:4100", reccToken: "tok" };
-const CSV = "Title,Date\nThe Matrix,1/2/20\nHeat,3/4/21";
+const CSV = "Title,Date\nThe Ashfall,1/2/20\nHeat,3/4/21";
 
 describe("uploadNetflixCsv", () => {
   it("POSTs multipart to /import/netflix with a bearer token and returns the aggregated result", async () => {
@@ -89,7 +89,7 @@ describe("uploadNetflixCsv", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 1, unresolved: 1, unresolvedTitles: ["Heat"] }))
-      .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 0, unresolved: 2, unresolvedTitles: ["Heat", "Dune"] }));
+      .mockResolvedValueOnce(jsonRes(202, { imported: 1, resolved: 0, unresolved: 2, unresolvedTitles: ["Heat", "Tin Rivers"] }));
     const outcome = await uploadNetflixCsv(CONFIG, CSV, {
       fetchImpl: fetchImpl as unknown as FetchImpl,
       budgetBytes: 25,
@@ -98,7 +98,7 @@ describe("uploadNetflixCsv", () => {
     if (outcome.ok) {
       expect(outcome.result.imported).toBe(2);
       expect(outcome.result.unresolved).toBe(3);
-      expect(outcome.result.unresolvedTitles).toEqual(["Heat", "Dune"]);
+      expect(outcome.result.unresolvedTitles).toEqual(["Heat", "Tin Rivers"]);
       expect(outcome.result.chunks).toBe(2);
     }
     expect(fetchImpl).toHaveBeenCalledTimes(2);

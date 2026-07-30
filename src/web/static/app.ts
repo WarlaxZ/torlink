@@ -19,6 +19,8 @@ import {
   isPlayable,
   playerPath,
   runPlay,
+  wantedEpisodeFor,
+  type EpisodeRef,
   type PublicStreamFile,
   type PublicStreamSession,
   type StartResult,
@@ -70,6 +72,7 @@ import {
   createReccController,
   dismissesPick,
   actionNotice,
+  isRatingAction,
   pickSub,
   reasonLine,
   reasonTitle,
@@ -80,7 +83,9 @@ import {
   reccStatus,
   recommendationsUrl,
   RECC_ACTIONS,
+  saveSearchBlockedNotice,
   searchGroupForType,
+  titleToSave,
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccAction,
@@ -89,9 +94,14 @@ import {
   type ReccType,
 } from "./reccModel";
 import {
+  applyContinueWatchingResponse,
   applyLibraryResponse,
   applySaved,
-  applyWatchlistResponse,
+  applySavedSearchesResponse,
+  continueWatchingBody,
+  continueWatchingFallbackQuery,
+  continueWatchingStatus,
+  continueWatchingSub,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
@@ -99,11 +109,12 @@ import {
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
-  watchlistBody,
-  watchlistStatus,
-  watchlistToggleNotice,
+  savedSearchesBody,
+  savedSearchesStatus,
+  savedSearchesToggleNotice,
   type LibraryInput,
   type PublicFavourite,
+  type PublicStreamHistoryItem,
   type SavedState,
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
@@ -148,10 +159,12 @@ const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
 const paneSaved = el<HTMLElement>("pane-saved");
 const paneQueue = el<HTMLElement>("pane-queue");
-const watchlistStatusLine = el<HTMLParagraphElement>("watchlist-status");
-const watchlistRows = el<HTMLUListElement>("watchlist-rows");
+const savedSearchesStatusLine = el<HTMLParagraphElement>("saved-searches-status");
+const savedSearchesRows = el<HTMLUListElement>("saved-searches-rows");
 const libraryStatusLine = el<HTMLParagraphElement>("library-status");
 const libraryRows = el<HTMLUListElement>("library-rows");
+const continueStatusLine = el<HTMLParagraphElement>("continue-status");
+const continueRows = el<HTMLUListElement>("continue-rows");
 
 const reccTypeSelect = el<HTMLSelectElement>("recc-type");
 const reccGenreInput = el<HTMLInputElement>("recc-genre");
@@ -528,23 +541,39 @@ function hidePicker(): void {
 // its filename as watched against the SECOND torrent's favourite. Closing over
 // the hash at the call site (see play()) makes that impossible: each picker's
 // callbacks carry the hash they were opened with, for good.
+//
+// `preselect` is streamOutcome's decision (streamFlow.ts), never one made here:
+// which file is the next episode is shared with the TUI's picker, and app.ts is
+// wiring. All this does with it is mark the row, say so in a word, and put the
+// keyboard on it — pressing Enter then plays the episode the Continue-watching
+// row promised, which is the browser's equivalent of the TUI's opening cursor.
 function showPicker(
   infoHash: string,
   sessionId: string,
   capability: string,
   name: string,
   files: PublicStreamFile[],
+  preselect: number | null,
 ): void {
   pickerSession = sessionId;
   pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
   pickerFiles.replaceChildren(
-    ...files.map((file) => {
+    ...files.map((file, index) => {
       const li = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
       button.className = "picker-file";
       button.textContent = fileLabel(file);
       button.title = file.filename;
+      if (index === preselect) {
+        button.classList.add("picker-file-next");
+        button.setAttribute("aria-current", "true");
+        // createElement + textContent, as everywhere on this page.
+        const tag = document.createElement("span");
+        tag.className = "picker-next";
+        tag.textContent = "next";
+        button.append(tag);
+      }
       button.addEventListener("click", () => {
         // hidePicker() clears pickerSession, so the Cancel handler can no longer
         // stop the session we are about to hand to the player.
@@ -564,6 +593,12 @@ function showPicker(
     }),
   );
   picker.hidden = false;
+  // After un-hiding, and read back out of the DOM rather than closed over: a
+  // focus() on a hidden element does nothing at all.
+  if (preselect !== null) {
+    const target = pickerFiles.children[preselect]?.firstElementChild;
+    if (target instanceof HTMLElement) target.focus();
+  }
 }
 
 pickerCancel.addEventListener("click", () => {
@@ -579,9 +614,28 @@ pickerCancel.addEventListener("click", () => {
 // `confirm` is the native dialog, deliberately, for the same reason the delete
 // gate uses it. Synchronous and unmissable are the right properties for a
 // decision whose consequence (your IP in a public swarm) cannot be taken back.
-async function play(row: DashRow): Promise<void> {
+//
+// `onUnresolved`, when given, is `runPlay`'s own effect for "start could not
+// start a session at all" (a dead swarm, an unreachable server) — the
+// at-most-once guarantee is runPlay's, not re-derived here (see PlayEffects'
+// doc comment in streamFlow.ts). The one caller that needs to react to it is
+// Continue watching, whose "remembered torrent won't resolve" fallback is a
+// search, not just the notice `startSession` already showed. Every other
+// caller passes nothing and behaves exactly as before.
+// `next`, when given, is a Continue-watching row's own suggested episode — the
+// server's `nextEpisode` over that row's high-water mark. Callers that have no
+// row (a search hit, a library entry, a queue row) pass nothing, and
+// wantedEpisodeFor looks one up by title so EVERY play path preselects, as every
+// TUI play path does. Both the lookup and the precedence are its decision; the
+// only thing here is which two values to hand it.
+async function play(
+  row: DashRow,
+  onUnresolved?: () => void,
+  next?: EpisodeRef | null,
+): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
+  const wanted = wantedEpisodeFor(row.name, savedState.continueWatching, next);
   try {
     await runPlay(row, {
       start: startSession,
@@ -591,12 +645,13 @@ async function play(row: DashRow): Promise<void> {
       notice: showNotice,
       // Closes over THIS row's hash, not a module-level variable — see
       // showPicker's comment for why that distinction is load-bearing.
-      choose: (sessionId, capability, name, files) =>
-        showPicker(row.id, sessionId, capability, name, files),
+      choose: (sessionId, capability, name, files, preselect) =>
+        showPicker(row.id, sessionId, capability, name, files, preselect),
       open: (path) => openPlayer(path),
       sleep,
       now: () => Date.now(),
-    });
+      onUnresolved,
+    }, wanted);
   } finally {
     playing.delete(row.id);
   }
@@ -792,7 +847,7 @@ saveSearchButton.addEventListener("click", () => {
     showNotice("Type a search to save it.");
     return;
   }
-  void toggleWatchlist(query);
+  void toggleSavedSearch(query);
 });
 
 sortSelect.addEventListener("change", () => {
@@ -1429,6 +1484,16 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
 async function actOnPick(action: ReccAction, item: PublicRecommendation): Promise<void> {
+  // The local action never reaches reccd.
+  if (!isRatingAction(action)) {
+    const title = titleToSave(item);
+    if (!title) {
+      showNotice(saveSearchBlockedNotice());
+      return;
+    }
+    await toggleSavedSearch(title);
+    return;
+  }
   // Optimistic, exactly as the TUI is: the event is fire-and-forget on both
   // sides of the wire, so there is nothing to wait for before the card goes.
   if (dismissesPick(action)) recc.dismiss(item.imdbId);
@@ -1587,7 +1652,7 @@ reccExploreCheck.addEventListener("change", () => recc.setExplore(reccExploreChe
 reccRefreshButton.addEventListener("click", () => recc.refresh());
 
 // ---- saved ------------------------------------------------------------
-// The watchlist and the library. Decisions — which body each button sends, what
+// Saved searches and the library. Decisions — which body each button sends, what
 // an empty or broken list says — are savedModel.ts's; what is here is fetch and
 // DOM.
 
@@ -1609,8 +1674,8 @@ async function loadSaved(): Promise<void> {
 }
 
 // Both mutators post, then render the list the SERVER returned rather than a
-// list predicted here — applyWatchlistResponse/applyLibraryResponse own that
-// fold, and watchlistToggleNotice/libraryToggleNotice own the notice text, both
+// list predicted here — applySavedSearchesResponse/applyLibraryResponse own that
+// fold, and savedSearchesToggleNotice/libraryToggleNotice own the notice text, both
 // in savedModel.ts where they can be unit-tested against a malformed body.
 async function postSaved(path: string, body: unknown): Promise<Record<string, unknown> | null> {
   let res: Response;
@@ -1634,18 +1699,18 @@ async function postSaved(path: string, body: unknown): Promise<Record<string, un
 }
 
 // Called by the save-search button beside the search box.
-async function toggleWatchlist(query: string): Promise<void> {
-  const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
+async function toggleSavedSearch(query: string): Promise<void> {
+  const body = await postSaved("/api/saved-searches", savedSearchesBody(query, "toggle"));
   if (!body) return;
-  savedState = applyWatchlistResponse(savedState, body);
-  showNotice(watchlistToggleNotice(body));
+  savedState = applySavedSearchesResponse(savedState, body);
+  showNotice(savedSearchesToggleNotice(body));
   renderSaved();
 }
 
-async function removeFromWatchlist(query: string): Promise<void> {
-  const body = await postSaved("/api/watchlist", watchlistBody(query, "remove"));
+async function removeSavedSearch(query: string): Promise<void> {
+  const body = await postSaved("/api/saved-searches", savedSearchesBody(query, "remove"));
   if (!body) return;
-  savedState = applyWatchlistResponse(savedState, body);
+  savedState = applySavedSearchesResponse(savedState, body);
   renderSaved();
 }
 
@@ -1668,11 +1733,39 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
   renderResults();
 }
 
+async function removeContinueWatching(key: string): Promise<void> {
+  const body = await postSaved("/api/continue-watching", continueWatchingBody(key));
+  if (!body) return;
+  savedState = applyContinueWatchingResponse(savedState, body);
+  renderSaved();
+}
+
+// Play the remembered torrent; if it will not resolve (a dead swarm, most
+// often), fall back to a search rather than leaving the user at a notice and
+// nothing else to do. continueWatchingFallbackQuery (savedModel.ts) is the
+// decision of WHAT to search for; this is only the DOM effect of switching to
+// it, the same shape renderSavedSearchRow's click handler already uses.
+async function playContinueWatching(item: PublicStreamHistoryItem): Promise<void> {
+  // The at-most-once guarantee is runPlay's (see streamFlow.ts's PlayEffects
+  // doc comment) — this is only the DOM effect of switching to a search, the
+  // same shape renderSavedSearchRow's click handler already uses.
+  // item.next is the server's own nextEpisode over this row's high-water mark —
+  // the same value continueWatchingSub renders — so the picker opens on the
+  // episode the row promised. Null (a film, a pack with no episode number) simply
+  // means no preselection.
+  await play(dashRowForPlay(item.infoHash, item.rawName), () => {
+    const query = continueWatchingFallbackQuery(item);
+    queryInput.value = query;
+    showView("search");
+    startSearch(query);
+  }, item.next);
+}
+
 // createElement + textContent, as everywhere else on this page. A saved query is
 // the user's own typing, but a favourite's name is a release name from whoever
 // uploaded the torrent — so this list is as much an XSS surface as the results
 // list is.
-function renderWatchlistRow(query: string): HTMLLIElement {
+function renderSavedSearchRow(query: string): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row";
 
@@ -1692,7 +1785,7 @@ function renderWatchlistRow(query: string): HTMLLIElement {
   const remove = document.createElement("button");
   remove.type = "button";
   remove.textContent = "remove";
-  remove.addEventListener("click", () => void removeFromWatchlist(query));
+  remove.addEventListener("click", () => void removeSavedSearch(query));
   actions.append(remove);
 
   li.append(run, actions);
@@ -1739,14 +1832,61 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   return li;
 }
 
+// createElement + textContent throughout: `title` and `rawName` both come from
+// a release name written by whoever uploaded the torrent, the same stranger's
+// string `renderLibraryRow`'s `name` is.
+function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+  const name = document.createElement("span");
+  name.className = "row-name";
+  name.textContent = item.title;
+  name.title = item.rawName;
+  head.append(name);
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  // Read at render time, not cached at module load, so the age is always
+  // relative to now rather than to whenever the page happened to start.
+  meta.textContent = continueWatchingSub(item, Date.now());
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void playContinueWatching(item));
+  actions.append(playButton);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeContinueWatching(item.key));
+  actions.append(remove);
+
+  li.append(head, meta, actions);
+  return li;
+}
+
 function renderSaved(): void {
-  watchlistRows.replaceChildren(...savedState.watchlist.map(renderWatchlistRow));
+  continueRows.replaceChildren(...savedState.continueWatching.map(renderContinueRow));
+  savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
   libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
 
-  const wl = watchlistStatus(savedState);
-  watchlistStatusLine.textContent = wl.text;
-  watchlistStatusLine.classList.toggle("error", wl.tone === "error");
-  watchlistStatusLine.hidden = !wl.show;
+  const cw = continueWatchingStatus(savedState);
+  continueStatusLine.textContent = cw.text;
+  continueStatusLine.classList.toggle("error", cw.tone === "error");
+  continueStatusLine.hidden = !cw.show;
+
+  const wl = savedSearchesStatus(savedState);
+  savedSearchesStatusLine.textContent = wl.text;
+  savedSearchesStatusLine.classList.toggle("error", wl.tone === "error");
+  savedSearchesStatusLine.hidden = !wl.show;
 
   const lib = libraryStatus(savedState);
   libraryStatusLine.textContent = lib.text;

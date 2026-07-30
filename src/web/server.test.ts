@@ -791,7 +791,7 @@ describe("/api/sources and /api/title over HTTP", () => {
       const base = await start({
         webDeps: { loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }) },
       });
-      const res = await fetch(`${base}/api/title?name=Sintel&year=2010`);
+      const res = await fetch(`${base}/api/title?name=Kestrel&year=2010`);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ status: "no-key" });
     } finally {

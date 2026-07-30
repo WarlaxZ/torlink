@@ -17,6 +17,24 @@ interface StreamFilePromptProps {
   maxRows?: number;
   // Filenames already watched (this session ∪ persisted favourite) — marked ✓.
   watched?: string[];
+  /**
+   * Where to open the cursor: an index into `files` AS GIVEN, from
+   * `nextEpisodeIndex` (src/util/nextEpisodeFile.ts). Omitted, or pointing at
+   * nothing, means the first row — exactly today's behaviour.
+   *
+   * Resolved to the file's own `url` and looked up in the sorted list, because
+   * the list is REORDERED for display and an index into `files` is therefore not
+   * a row on screen.
+   *
+   * That lookup happens on every render while the cursor is untouched rather than
+   * once in a `useState` initialiser. In today's call graph the two are
+   * equivalent — `openStreamPicker` sets `streamPreselect` and `streamFiles` in
+   * one synchronous batch, so a preselect can never arrive after mount — and this
+   * form is preferred only because it has no stale-initialisation failure mode if
+   * that ever stops being true. No test covers a late arrival, deliberately:
+   * nothing can produce one.
+   */
+  preselect?: number;
   // Toggle the current torrent as a favourite (the `b` key).
   onFavourite?: () => void;
   // Whether the current torrent is already favourited (drives the star glyph).
@@ -50,11 +68,19 @@ export function StreamFilePrompt({
   watched = [],
   onFavourite,
   favourited = false,
+  preselect,
 }: StreamFilePromptProps) {
-  const [cursor, setCursor] = useState(0);
+  // null means "wherever the preselection says", so a re-sort cannot strand the
+  // highlight. Any keypress makes the cursor a number and the preselection stops
+  // being consulted.
+  const [cursor, setCursor] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const sorted = useMemo(() => sortFiles(files, sortMode), [files, sortMode]);
-  const clamped = Math.min(cursor, Math.max(0, sorted.length - 1));
+  const preselectUrl = preselect !== undefined ? files[preselect]?.url : undefined;
+  const opening = preselectUrl !== undefined
+    ? Math.max(0, sorted.findIndex((f) => f.url === preselectUrl))
+    : 0;
+  const clamped = Math.min(cursor ?? opening, Math.max(0, sorted.length - 1));
   const watchedSet = useMemo(() => new Set(watched), [watched]);
 
   useInput((input, key) => {

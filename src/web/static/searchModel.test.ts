@@ -30,7 +30,7 @@ import { isPlayable } from "./streamFlow";
 function result(over: Partial<PublicSearchResult> = {}): PublicSearchResult {
   return {
     infoHash: "a".repeat(40),
-    name: "Sintel.2010.1080p.BluRay.x264-GROUP",
+    name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
     sizeBytes: 1024 * 1024 * 1024,
     seeders: 10,
     leechers: 2,
@@ -51,7 +51,7 @@ function snapshot(results: PublicSearchResult[], over: Partial<PublicSearchSnaps
 }
 
 function view(over: Partial<SearchView> = {}): SearchView {
-  return { ...emptyView(), query: "sintel", mode: "search", ...over };
+  return { ...emptyView(), query: "kestrel", mode: "search", ...over };
 }
 
 /** A view mid-browse: the blank query the TUI sends on an empty submit. */
@@ -184,9 +184,9 @@ describe("visibleResults", () => {
   });
 
   it("applies the text filter", () => {
-    const results = [result({ infoHash: "1", name: "Sintel 2010" }), result({ infoHash: "2", name: "Big Buck Bunny" })];
+    const results = [result({ infoHash: "1", name: "Kestrel 2010" }), result({ infoHash: "2", name: "Copper Kettle Run" })];
     const shown = visibleResults(
-      view({ snapshot: snapshot(results), textFilter: "bunny" }),
+      view({ snapshot: snapshot(results), textFilter: "kettle" }),
       ALWAYS_HEALTHY,
     );
     expect(shown.map((r) => r.infoHash)).toEqual(["2"]);
@@ -218,7 +218,7 @@ describe("searchStatus", () => {
     expect(failed.tone).toBe("error");
 
     const nothing = searchStatus(view({ snapshot: snapshot([], { total: 2, done: 2 }) }), 0);
-    expect(nothing.text).toBe("No results for “sintel”.");
+    expect(nothing.text).toBe("No results for “kestrel”.");
     expect(nothing.tone).toBe("dim");
   });
 
@@ -298,7 +298,7 @@ describe("searchStatus", () => {
 
   it("does not blame an active filter for an upstream that returned nothing while searching", () => {
     const v = view({ hideDead: true, snapshot: snapshot([], { total: 2, done: 2 }) });
-    expect(searchStatus(v, 0).text).toBe("No results for “sintel”.");
+    expect(searchStatus(v, 0).text).toBe("No results for “kestrel”.");
   });
 
   it("uses the singular for exactly one browse result", () => {
@@ -340,7 +340,7 @@ describe("statusLineHidden", () => {
 
 describe("modeForQuery", () => {
   it("is search for real text", () => {
-    expect(modeForQuery("sintel")).toBe("search");
+    expect(modeForQuery("kestrel")).toBe("search");
   });
 
   it("is browse for an empty string", () => {
@@ -372,8 +372,8 @@ describe("progressLabel / erroredSources", () => {
 
 describe("searchUrl", () => {
   it("carries the query, the group and the token", () => {
-    expect(searchUrl("the matrix", "Movies", "sekrit")).toBe(
-      "/api/search?q=the+matrix&group=Movies&k=sekrit",
+    expect(searchUrl("ashfall", "Movies", "sekrit")).toBe(
+      "/api/search?q=ashfall&group=Movies&k=sekrit",
     );
   });
 
@@ -406,9 +406,9 @@ describe("resultMeta / sourceLabel", () => {
 describe("dashRowForPlay", () => {
   it("builds a playable row from just an id and a name — rowForPlay's own shape", () => {
     // The one definition rowForPlay and the library row in app.ts both call.
-    const row = dashRowForPlay("beef", "Sintel 2010");
+    const row = dashRowForPlay("beef", "Kestrel 2010");
     expect(row.id).toBe("beef");
-    expect(row.name).toBe("Sintel 2010");
+    expect(row.name).toBe("Kestrel 2010");
     expect(row.status).toBe("queued");
     expect(isPlayable(row)).toBe(true);
   });
@@ -420,8 +420,8 @@ describe("rowForPlay", () => {
     // the Real-Debrid prompt, the progress line, the picker heading and the
     // stream session — a row named after its hash works end to end and shows
     // the user 40 hex characters at every one of those points.
-    const row = rowForPlay(result({ infoHash: "beef", name: "Sintel 2010" }));
-    expect(row.name).toBe("Sintel 2010");
+    const row = rowForPlay(result({ infoHash: "beef", name: "Kestrel 2010" }));
+    expect(row.name).toBe("Kestrel 2010");
     expect(row.name).not.toBe(row.id);
     expect(row.id).toBe("beef");
   });
@@ -433,11 +433,11 @@ describe("rowForPlay", () => {
 
 describe("addPlan", () => {
   it("adds straight away when Real-Debrid is not configured", () => {
-    expect(addPlan("p2p", false, "Sintel")).toEqual({ kind: "add", via: "p2p" });
+    expect(addPlan("p2p", false, "Kestrel")).toEqual({ kind: "add", via: "p2p" });
   });
 
   it("prompts before a P2P add when Real-Debrid is configured", () => {
-    const plan = addPlan("p2p", true, "Sintel");
+    const plan = addPlan("p2p", true, "Kestrel");
     expect(plan.kind).toBe("confirm");
     expect(plan.via).toBe("p2p");
     if (plan.kind !== "confirm") throw new Error("unreachable");
@@ -447,7 +447,7 @@ describe("addPlan", () => {
   });
 
   it("never prompts for an explicit Real-Debrid add", () => {
-    expect(addPlan("debrid", true, "Sintel")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Kestrel")).toEqual({ kind: "add", via: "debrid" });
   });
 
   it("clips a very long release name out of the prompt", () => {
@@ -463,8 +463,8 @@ describe("addBody", () => {
     // MUTATION GUARD (the add path losing the name). Search results carry no
     // magnet, so the server has no `dn` to read a name out of: drop this field
     // and every browser add is a queue row called "3f2a1c…".
-    const body = addBody(result({ infoHash: "3f2a", name: "Sintel 2010" }), "p2p");
-    expect(body).toEqual({ infoHash: "3f2a", name: "Sintel 2010", via: "p2p", sizeBytes: 1073741824 });
+    const body = addBody(result({ infoHash: "3f2a", name: "Kestrel 2010" }), "p2p");
+    expect(body).toEqual({ infoHash: "3f2a", name: "Kestrel 2010", via: "p2p", sizeBytes: 1073741824 });
     expect(body.name).not.toBe(body.infoHash);
   });
 
@@ -523,12 +523,12 @@ describe("tabClickPlan", () => {
   });
 
   it("returns the box's current value when it holds typed-but-unsubmitted text", () => {
-    // User types "dune" without pressing Enter, then clicks a different tab.
+    // User types "tin rivers" without pressing Enter, then clicks a different tab.
     // tabClickPlan hands back the box's own value rather than "", so a
     // handler that renders plan.query keeps it on screen.
-    expect(tabClickPlan(emptyView(), "Movies", "dune")).toEqual({
+    expect(tabClickPlan(emptyView(), "Movies", "tin rivers")).toEqual({
       action: "run",
-      query: "dune",
+      query: "tin rivers",
     });
   });
 
@@ -537,10 +537,10 @@ describe("tabClickPlan", () => {
     // neither view.mode nor view.query, so the same plan comes back whether
     // the view was mid-search or mid-browse; the box's own value is what gets
     // used for the run.
-    const searching: SearchView = { ...emptyView(), query: "sintel", mode: "search", group: "All" };
-    expect(tabClickPlan(searching, "Movies", "sintel")).toEqual({
+    const searching: SearchView = { ...emptyView(), query: "kestrel", mode: "search", group: "All" };
+    expect(tabClickPlan(searching, "Movies", "kestrel")).toEqual({
       action: "run",
-      query: "sintel",
+      query: "kestrel",
     });
     const browsing: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
     expect(tabClickPlan(browsing, "TV", "")).toEqual({
@@ -551,8 +551,8 @@ describe("tabClickPlan", () => {
 
   it("ignores a click on the already-selected tab", () => {
     // Clicking the current tab restarts a 23-source fan-out. Don't do that.
-    const view: SearchView = { ...emptyView(), mode: "search", query: "dune", group: "Movies" };
-    expect(tabClickPlan(view, "Movies", "dune")).toEqual({ action: "ignore" });
+    const view: SearchView = { ...emptyView(), mode: "search", query: "tin rivers", group: "Movies" };
+    expect(tabClickPlan(view, "Movies", "tin rivers")).toEqual({ action: "ignore" });
     expect(tabClickPlan(emptyView(), "All", "")).toEqual({ action: "ignore" });
   });
 });

@@ -83,3 +83,32 @@ describe("downloads/seeding key vocabulary", () => {
     for (const row of rows) expect(rowWidth(row)).toBeLessThanOrEqual(78);
   });
 });
+
+// The footer is a promise about the next keypress. While a stream is running,
+// App.tsx intercepts "x" to stop it and the three list panes deliberately skip
+// their own handler, so "x Remove" was a promise the app would not keep. The
+// key still does something, so the label changes rather than disappearing.
+describe("footerHints while a stream is active", () => {
+  const LIST_SECTIONS = ["continueWatching", "savedSearches", "library"] as const;
+
+  it("offers x as Remove in the list panes when no stream is running", () => {
+    for (const section of LIST_SECTIONS) {
+      const hints = footerHints("content", section, null, null, false, false);
+      expect(hints.find((h) => h.keys === "x")?.label).toBe("Remove");
+    }
+  });
+
+  it("relabels x as stopping the stream in the list panes while one is running", () => {
+    for (const section of LIST_SECTIONS) {
+      const hints = footerHints("content", section, null, null, false, true);
+      expect(hints.find((h) => h.keys === "x")?.label).toBe("Stop stream");
+    }
+  });
+
+  it("keeps both variants of those rows inside the 80-col budget", () => {
+    for (const section of LIST_SECTIONS) {
+      expect(rowWidth(footerHints("content", section, null, null, false, false))).toBeLessThanOrEqual(78);
+      expect(rowWidth(footerHints("content", section, null, null, false, true))).toBeLessThanOrEqual(78);
+    }
+  });
+});

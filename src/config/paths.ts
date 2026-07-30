@@ -22,6 +22,12 @@ export const queueFile = path.join(dataDir, "queue.json");
 
 export const historyFile = path.join(dataDir, "history.json");
 
+// Streams, not downloads. history.json is completed DOWNLOADS; this is what the
+// user watched. Separate files because they are different facts — someone who
+// downloads a season pack once and watches it over three weeks would otherwise
+// see one list misreport the other.
+export const streamHistoryFile = path.join(dataDir, "stream-history.json");
+
 export const seedsFile = path.join(dataDir, "seeds.json");
 
 export const rutrackerFile = path.join(dataDir, "rutracker.json");

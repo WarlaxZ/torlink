@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ACTION_EVENT,
+  ACTION_LABEL,
+  actionNotice,
   createReccController,
   DEFAULT_FILTERS,
   dismissesPick,
+  isRatingAction,
   pickSub,
   reasonLine,
   reasonTitle,
+  RECC_ACTIONS,
   reccEventBody,
   reccItems,
   reccPosterHint,
@@ -14,7 +18,9 @@ import {
   reccStatus,
   recommendationsUrl,
   sameFilters,
+  saveSearchBlockedNotice,
   searchGroupForType,
+  titleToSave,
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccFilters,
@@ -31,11 +37,11 @@ import type { SourcesResponse } from "./searchModel";
 
 function pick(over: Partial<PublicRecommendation> = {}): PublicRecommendation {
   return {
-    imdbId: "tt0133093",
-    title: "The Matrix",
+    imdbId: "tt1",
+    title: "Ashfall",
     year: 1999,
     score: 0.91,
-    reasons: ["because you liked Blade Runner", "sci-fi"],
+    reasons: ["because you liked Harrowgate", "sci-fi"],
     ...over,
   };
 }
@@ -218,7 +224,7 @@ describe("createReccController — the request counter", () => {
     expect(h.pending).toBe(2);
 
     // The newer (tv) request answers first…
-    const tvPick = pick({ imdbId: "tt0903747", title: "Breaking Bad" });
+    const tvPick = pick({ imdbId: "tt2", title: "Harrowgate" });
     const first = h.calls[0]!;
     h.resolve(OK([pick()])); // resolves the FIRST (all) request
     await Promise.resolve();
@@ -303,10 +309,10 @@ describe("createReccController — dismiss", () => {
   it("removes a rated pick without a round trip", async () => {
     const h = harness();
     h.ctl.open();
-    h.resolve(OK([pick(), pick({ imdbId: "tt0903747", title: "Breaking Bad" })]));
+    h.resolve(OK([pick(), pick({ imdbId: "tt2", title: "Harrowgate" })]));
     await Promise.resolve();
-    h.ctl.dismiss("tt0133093");
-    expect(reccItems(h.ctl.state()).map((i) => i.title)).toEqual(["Breaking Bad"]);
+    h.ctl.dismiss("tt1");
+    expect(reccItems(h.ctl.state()).map((i) => i.title)).toEqual(["Harrowgate"]);
     expect(h.calls).toHaveLength(1);
   });
 
@@ -321,39 +327,67 @@ describe("createReccController — dismiss", () => {
   });
 });
 
-describe("the action → event mapping", () => {
-  /**
-   * A swap here is invisible on screen — the button highlights, the card leaves
-   * the list — and teaches the recommender the opposite of what the user said.
-   */
-  it("maps each button to the event it means", () => {
-    expect(ACTION_EVENT).toEqual({
-      watched: "watched",
-      like: "liked",
-      dislike: "disliked",
-      watchlist: "favourited",
-    });
+describe("the card's actions", () => {
+  it("maps only the three ratings to reccd events", () => {
+    expect(ACTION_EVENT.watched).toBe("watched");
+    expect(ACTION_EVENT.like).toBe("liked");
+    expect(ACTION_EVENT.dislike).toBe("disliked");
+    // A swap in this table is invisible on screen and teaches the recommender
+    // the opposite of what the user said, which is why it is asserted.
+    expect(Object.keys(ACTION_EVENT)).toHaveLength(3);
   });
 
-  it("posts the pick's own title as the name", () => {
-    expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "The Matrix" });
-    expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "The Matrix" });
-    expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "The Matrix" });
-    expect(reccEventBody("watchlist", pick())).toEqual({ type: "favourited", rawName: "The Matrix" });
+  it("narrows rating actions and excludes the local one", () => {
+    expect(isRatingAction("watched")).toBe(true);
+    expect(isRatingAction("like")).toBe(true);
+    expect(isRatingAction("dislike")).toBe(true);
+    // saveSearch is local: it writes config.savedSearches and tells reccd
+    // nothing. If it reached reccEventBody it would post `type: undefined`.
+    expect(isRatingAction("saveSearch")).toBe(false);
   });
 
-  it("drops a rated pick from the feed but keeps a watchlisted one", () => {
+  it("still offers four actions, with saveSearch last", () => {
+    expect(RECC_ACTIONS).toEqual(["watched", "like", "dislike", "saveSearch"]);
+  });
+
+  it("captions saveSearch as save search", () => {
+    expect(ACTION_LABEL.saveSearch).toBe("save search");
+  });
+
+  it("does not dismiss the pick when saving a search", () => {
+    // Saving a search should no more remove a pick from the feed than the old
+    // Library action did.
+    expect(dismissesPick("saveSearch")).toBe(false);
     expect(dismissesPick("watched")).toBe(true);
     expect(dismissesPick("like")).toBe(true);
     expect(dismissesPick("dislike")).toBe(true);
-    expect(dismissesPick("watchlist")).toBe(false);
+  });
+
+  it("posts the pick's own title as the name", () => {
+    expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "Ashfall" });
+    expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "Ashfall" });
+    expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "Ashfall" });
+  });
+
+  it("tells the user a rating was noted", () => {
+    expect(actionNotice("like", pick())).toBe("Thanks — noted “Ashfall” as liked.");
+  });
+
+  it("gives back the pick's trimmed title to save, or null with nothing usable", () => {
+    expect(titleToSave(pick({ title: "  Ashfall  " }))).toBe("Ashfall");
+    expect(titleToSave(pick({ title: "   " }))).toBeNull();
+    expect(titleToSave(pick({ title: "" }))).toBeNull();
+  });
+
+  it("pins the wording for a pick with no title to save", () => {
+    expect(saveSearchBlockedNotice()).toBe("That pick has no title to save.");
   });
 });
 
 describe("card copy", () => {
   it("shows reccd's strongest reason, with the rest as hover text", () => {
-    expect(reasonLine(pick())).toBe("because you liked Blade Runner");
-    expect(reasonTitle(pick())).toBe("because you liked Blade Runner · sci-fi");
+    expect(reasonLine(pick())).toBe("because you liked Harrowgate");
+    expect(reasonTitle(pick())).toBe("because you liked Harrowgate · sci-fi");
   });
 
   it("has no reason line when reccd gave none", () => {
@@ -501,9 +535,9 @@ describe("the no-key wording is shared with the search preview", () => {
   it("uses previewCopy's own sentence and frame label, not a second copy", () => {
     // This project has been bitten repeatedly by a second copy of something
     // drifting. The feed must fail here if the preview's wording changes.
-    const copy = previewCopy("Sintel.2010", {
+    const copy = previewCopy("Kestrel.2010", {
       status: "no-key",
-      parsed: { title: "Sintel", year: 2010, type: "movie" },
+      parsed: { title: "Kestrel", year: 2010, type: "movie" },
     });
     expect(reccPosterHint([{ kind: "no-key" }])).toBe(copy.body);
     expect(reccPosterNote({ kind: "no-key" })).toBe(copy.posterNote);

@@ -54,12 +54,21 @@ When something the user can't control goes wrong, degrade gracefully and say so.
 
 Non-trivial logic gets a vitest test. Pure functions are easy, see `src/util/format.test.ts`. For code that shells out or leans on a platform, mock the node built-in, see `src/util/clipboard.test.ts` from #6 mocking `node:child_process`. Run the suite with `npm test`.
 
+### A feature ships in both front ends
+
+torlink has two: the terminal UI (`src/ui`, Ink) and the browser UI (`src/web`, served by `torlnk serve --web`). They are two front ends over one core, not a primary and a port — both read and write the same `config.json`, so a list edited in one shows up in the other. **Build user-facing work in both, in the same PR.** A feature that lands in one is a bug report waiting to happen: someone opens the other surface, the thing they saved isn't there, and nothing on screen explains why.
+
+Two reasons genuinely excuse one surface, and they go in the PR body: **configuration** is TUI-only on purpose (the browser is a client of that config, and `/api/sources` reports capability flags like `debridConfigured` so it can adapt without offering to change settings), and **a surface that can't express it** (the terminal has no posters; the browser has no keybindings). "I ran out of time" isn't one — half a feature is worse than a filed issue.
+
+`src/web` must not import from `src/ui`; eslint enforces it. When both need the same helper, move it *down* into `src/util/` or `src/core/` rather than copying it — `resultSort.ts`, `resultFilter.ts`, `favouriteList.ts` and `savedSearchList.ts` all made that move, and this codebase has four copy-then-drift bugs on record to explain why.
+
 ### Wire the UI surface, and keep it minimal
 
-torlink shows one contextual footer plus a `?` cheatsheet, never a wall of commands. Two rules when you add to it:
+torlink shows one contextual footer plus a `?` cheatsheet, never a wall of commands. Three rules when you add to it:
 
 - A new key means updating both halves of `src/ui/keymap.ts`: `HELP_GROUPS` (the `?` sheet) and `footerHints` (the footer). #6 did both for `y`.
 - A new `Store` field means adding a matching entry to `makeStore` in `scripts/render-previews-impl.tsx`, or `npm run previews` (the README screenshots) breaks. #6's `copyMagnet` sits in there as a noop for exactly this reason.
+- On the browser side there is no jsdom, deliberately. So decisions live in pure modules beside `src/web/static/app.ts` (`searchModel.ts`, `savedModel.ts`, `resultPosters.ts`, …) where a vitest test can reach them, and `app.ts` stays DOM wiring. If you're writing a conditional in `app.ts` that decides *what to show* or *what to send*, it belongs in a pure module. `npm run build` is the only thing that checks `static/` imports no `node:*` — run it.
 
 ### Respect the calm theme
 

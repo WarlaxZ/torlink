@@ -7,16 +7,31 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 import { formatBytes } from "./dashboard";
-import type { LibraryRequest, PublicFavourite, WatchlistRequest } from "../wire";
+import type {
+  ContinueWatchingRequest,
+  LibraryRequest,
+  PublicFavourite,
+  PublicStreamHistoryItem,
+  SavedSearchesRequest,
+} from "../wire";
 
-export type { PublicFavourite, SavedResponse } from "../wire";
+export type { PublicFavourite, PublicStreamHistoryItem, SavedResponse } from "../wire";
 
 /** Everything the pane renders from. */
 export interface SavedState {
-  /** Saved search queries, most-recent first. The TUI's `watchlist`. */
-  watchlist: string[];
+  /** Saved search queries, most-recent first. The TUI's `savedSearches`. */
+  savedSearches: string[];
   /** Favourited torrents, most-recent first. The TUI's `library`. */
   library: PublicFavourite[];
+  /**
+   * Titles part-way through, most-recent first. The TUI's `streamHistory`.
+   *
+   * NOT re-sorted here: `recordStream` (src/core/streamHistory.ts) prepends on
+   * every stream, so the server's array already arrives newest-first. Sorting
+   * again would be redundant at best and, if the tie-break ever disagreed with
+   * the store's own order, a silent divergence from the TUI's list.
+   */
+  continueWatching: PublicStreamHistoryItem[];
   /**
    * Whether a response has ever arrived.
    *
@@ -31,12 +46,20 @@ export interface SavedState {
 }
 
 export function emptySaved(): SavedState {
-  return { watchlist: [], library: [], loaded: false, error: null };
+  return { savedSearches: [], library: [], continueWatching: [], loaded: false, error: null };
 }
 
-/** The `POST /api/watchlist` body. Trimmed here so the box's stray spaces cannot create a second entry. */
-export function watchlistBody(query: string, action: "toggle" | "remove"): WatchlistRequest {
+/** The `POST /api/saved-searches` body. Trimmed here so the box's stray spaces cannot create a second entry. */
+export function savedSearchesBody(query: string, action: "toggle" | "remove"): SavedSearchesRequest {
   return { query: query.trim(), action };
+}
+
+/**
+ * The `POST /api/continue-watching` body. One action, `"remove"` — nothing
+ * plays a title and then un-plays it, so there is no toggle to send.
+ */
+export function continueWatchingBody(key: string): ContinueWatchingRequest {
+  return { key, action: "remove" };
 }
 
 /** What a caller must know about a torrent to favourite it. A search result satisfies this. */
@@ -124,8 +147,8 @@ function statusFor(state: SavedState, count: number, empty: string): SavedStatus
   return { text: empty, show: count === 0, tone: "dim" };
 }
 
-export function watchlistStatus(state: SavedState): SavedStatus {
-  return statusFor(state, state.watchlist.length, "Save a search to keep it here.");
+export function savedSearchesStatus(state: SavedState): SavedStatus {
+  return statusFor(state, state.savedSearches.length, "Save a search to keep it here.");
 }
 
 export function libraryStatus(state: SavedState): SavedStatus {
@@ -143,38 +166,45 @@ export function libraryStatus(state: SavedState): SavedStatus {
  * error line, which is what those guards are for.
  */
 export function applySaved(state: SavedState, body: unknown): SavedState {
-  const watchlist = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+  const savedSearches =
+    body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
   const library = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
+  const continueWatching =
+    body && typeof body === "object"
+      ? (body as { continueWatching?: unknown }).continueWatching
+      : undefined;
   return {
     ...state,
-    watchlist: Array.isArray(watchlist) ? (watchlist as string[]) : [],
+    savedSearches: Array.isArray(savedSearches) ? (savedSearches as string[]) : [],
     library: Array.isArray(library) ? (library as PublicFavourite[]) : [],
+    continueWatching: Array.isArray(continueWatching) ? (continueWatching as PublicStreamHistoryItem[]) : [],
     loaded: true,
     error: null,
   };
 }
 
 /**
- * Fold a `POST /api/watchlist` response into the state.
+ * Fold a `POST /api/saved-searches` response into the state.
  *
- * `body` is `unknown`, not `WatchlistResponse`, because it is whatever came
- * back over the network — `null`, an array, an object whose `watchlist` field
- * is not an array — and this is the one place that guard belongs rather than
- * four copies of it in app.ts. On a malformed body the existing list is kept
- * rather than emptied — a request that came back garbled is not evidence the
- * list is now empty.
+ * `body` is `unknown`, not `SavedSearchesResponse`, because it is whatever
+ * came back over the network — `null`, an array, an object whose
+ * `savedSearches` field is not an array — and this is the one place that
+ * guard belongs rather than four copies of it in app.ts. On a malformed body
+ * the existing list is kept rather than emptied — a request that came back
+ * garbled is not evidence the list is now empty.
  */
-export function applyWatchlistResponse(state: SavedState, body: unknown): SavedState {
-  const list = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+export function applySavedSearchesResponse(state: SavedState, body: unknown): SavedState {
+  const list =
+    body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
   return {
     ...state,
-    watchlist: Array.isArray(list) ? (list as string[]) : state.watchlist,
+    savedSearches: Array.isArray(list) ? (list as string[]) : state.savedSearches,
     loaded: true,
     error: null,
   };
 }
 
-/** The same fold as {@link applyWatchlistResponse}, for `POST /api/library`. */
+/** The same fold as {@link applySavedSearchesResponse}, for `POST /api/library`. */
 export function applyLibraryResponse(state: SavedState, body: unknown): SavedState {
   const list = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
   return {
@@ -185,19 +215,31 @@ export function applyLibraryResponse(state: SavedState, body: unknown): SavedSta
   };
 }
 
+/** The same fold as {@link applySavedSearchesResponse}, for `POST /api/continue-watching`. */
+export function applyContinueWatchingResponse(state: SavedState, body: unknown): SavedState {
+  const list =
+    body && typeof body === "object" ? (body as { continueWatching?: unknown }).continueWatching : undefined;
+  return {
+    ...state,
+    continueWatching: Array.isArray(list) ? (list as PublicStreamHistoryItem[]) : state.continueWatching,
+    loaded: true,
+    error: null,
+  };
+}
+
 /**
- * The notice shown after a watchlist toggle.
+ * The notice shown after a saved-searches toggle.
  *
  * Reads `body.saved` rather than trusting the button's own optimistic label,
  * so a request that reached the server but flipped the opposite way (a race
  * with another tab, say) still reports what actually happened.
  */
-export function watchlistToggleNotice(body: unknown): string {
+export function savedSearchesToggleNotice(body: unknown): string {
   const saved = !!(body && typeof body === "object" && (body as { saved?: unknown }).saved === true);
-  return saved ? "Saved to your watchlist." : "Removed from your watchlist.";
+  return saved ? "Saved to your searches." : "Removed from your searches.";
 }
 
-/** The same choice as {@link watchlistToggleNotice}, for a library toggle. */
+/** The same choice as {@link savedSearchesToggleNotice}, for a library toggle. */
 export function libraryToggleNotice(body: unknown): string {
   const favourited = !!(
     body &&
@@ -205,4 +247,89 @@ export function libraryToggleNotice(body: unknown): string {
     (body as { favourited?: unknown }).favourited === true
   );
   return favourited ? "Added to your library." : "Removed from your library.";
+}
+
+/**
+ * "just now" / "N minutes ago" / … / "N weeks ago", for a continue-watching
+ * row's age. `now` is a parameter rather than `Date.now()` read inside so the
+ * three boundary tests (`savedModel.test.ts`) are arithmetic, not a race
+ * against the clock.
+ */
+export function relativeAge(then: number, now: number): string {
+  const diffMs = Math.max(0, now - then);
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  const WEEK = 7 * DAY;
+
+  const minutes = Math.floor(diffMs / MIN);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+
+  const hours = Math.floor(diffMs / HOUR);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+  const days = Math.floor(diffMs / DAY);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+
+  const weeks = Math.floor(diffMs / WEEK);
+  return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * "S02E04", zero-padded to two digits each — the same shape `nextLabel`
+ * (src/core/streamHistory.ts) uses for its `"next S02E05"`.
+ *
+ * EXPORTED SO A TEST CAN CROSS-CHECK IT AGAINST `nextLabel` DIRECTLY, not just
+ * trust that this comment is still true. This module cannot *import*
+ * `nextLabel` (it pulls in `node:fs` via `src/core/streamHistory.ts`, which
+ * would break the browser build — see the module header), so a hand-copied
+ * format string is exactly the copy-then-drift shape this codebase has hit
+ * four times before. `savedModel.test.ts`'s "agrees with nextLabel" case
+ * imports `nextLabel` itself (fine in a test file, which is never bundled)
+ * and asserts the two produce the same `"next SxxExx"` fragment — the only
+ * string actually shared between the two front ends, since the TUI's pane
+ * renders no age and no "last SxxExx" of its own.
+ */
+export function episodeTag(season: number, episode: number): string {
+  return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
+}
+
+/**
+ * A continue-watching row's subtitle: age, the last episode watched (when this
+ * is a series), and the next one to offer (when the server computed one).
+ *
+ * `item.next` — not a local re-derivation — is what decides whether "next …"
+ * appears: it is computed server-side by `nextEpisode`
+ * (src/core/streamHistory.ts) and is null for a film and for a season pack, so
+ * trusting it here is what keeps this string identical to the TUI's, without
+ * importing `src/core/streamHistory.ts` (which pulls in `node:fs`) into this
+ * browser bundle.
+ */
+export function continueWatchingSub(item: PublicStreamHistoryItem, now: number): string {
+  const parts = [relativeAge(item.startedAt, now)];
+  if (item.season !== undefined && item.episode !== undefined) {
+    parts.push(`last ${episodeTag(item.season, item.episode)}`);
+  }
+  if (item.next) {
+    parts.push(`next ${episodeTag(item.next.season, item.next.episode)}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * What to search for when the remembered torrent will not resolve.
+ *
+ * The next episode when there is one — searching for the episode you have NOT
+ * seen beats searching for the one you just watched — else the bare title
+ * (a film, or a season pack that named no episode).
+ */
+export function continueWatchingFallbackQuery(item: PublicStreamHistoryItem): string {
+  if (item.next) return `${item.title} ${episodeTag(item.next.season, item.next.episode)}`;
+  return item.title;
+}
+
+/** The continue-watching strip's status line. Reuses {@link statusFor}, the same helper the two lists share. */
+export function continueWatchingStatus(state: SavedState): SavedStatus {
+  return statusFor(state, state.continueWatching.length, "Stream something and it will show up here.");
 }

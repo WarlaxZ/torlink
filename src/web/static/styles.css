@@ -266,6 +266,20 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+/* The file the Continue-watching row said was next. It is also focused, so the
+   keyboard is already on it; this is the same information for eyes. */
+.picker-file-next {
+  border-color: var(--accent);
+}
+
+.picker-next {
+  margin-left: 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
 .empty,
 .notice,
 .error {
@@ -713,6 +727,10 @@ select:focus-visible {
    phone, using .rows and .row from the search pane rather than a third row
    style — a saved search and a favourite are both list rows, and the only thing
    new here is the pair of headings. */
+.saved-strip {
+  margin-bottom: 1rem;
+}
+
 .saved-split {
   display: grid;
   /* minmax(0, …) for the reason .rows uses it: a long release name must
@@ -739,7 +757,7 @@ select:focus-visible {
   color: var(--dim);
 }
 
-/* A watchlist row is a button spanning the row: the whole thing re-runs that
+/* A saved-search row is a button spanning the row: the whole thing re-runs that
    search, so a small hit target inside a wide row would be a phone-hostile
    near-miss. */
 .saved-query {

@@ -7,7 +7,7 @@ describe("mapBittorrentedResults", () => {
       [
         {
           torrent_infohash: "4E60BE2D0B87C93EA6FC20D123D74BF9E9379999",
-          torrent_name: "Old School (2003)",
+          torrent_name: "Kestrel (2010)",
           torrent_total_size: 733698385,
           torrent_seeders: 41,
           torrent_leechers: 5,
@@ -19,7 +19,7 @@ describe("mapBittorrentedResults", () => {
     );
     expect(r).toMatchObject({
       infoHash: "4e60be2d0b87c93ea6fc20d123d74bf9e9379999",
-      name: "Old School (2003)",
+      name: "Kestrel (2010)",
       sizeBytes: 733698385,
       seeders: 41,
       leechers: 5,
