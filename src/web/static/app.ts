@@ -35,7 +35,6 @@ import {
   dashRowForPlay,
   debridAddedNotice,
   debridAddLabel,
-  debridProviderLabel,
   emptyView,
   modeForQuery,
   parseLayout,
@@ -1212,13 +1211,11 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
   // The prompt-or-go decision is addPlan's, not this function's: it is a
   // decision about whether the user's IP is about to enter a public swarm, and
   // it belongs somewhere a test can reach.
-  const provider = sources?.debridProvider ?? undefined;
   const plan = addPlan(
     via,
     sources?.debridConfigured === true,
     result.name,
-    provider ? debridProviderLabel(provider) : undefined,
-    provider ? debridAddLabel(provider) : undefined,
+    sources?.debridProvider ?? undefined,
   );
   if (plan.kind === "confirm" && !confirm(plan.message)) {
     showNotice("Nothing was added.");

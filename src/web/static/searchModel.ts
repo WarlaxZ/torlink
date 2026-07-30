@@ -350,22 +350,20 @@ export function debridAddedNotice(provider: WireDebridProvider): string {
  * configured to avoid). An explicit debrid add never prompts — the user
  * already said which network they wanted.
  *
- * `providerLabel` is the full display name ("Real-Debrid" / "TorBox"), used in
- * the "…is configured" clause. `addLabel` defaults to the generic "add via
- * ${providerLabel}" but callers that know the actual button text (from
- * {@link debridAddLabel}) should pass it explicitly — the button for
- * Real-Debrid reads "add via RD", not "add via Real-Debrid", and the prompt
- * must reference the button the user is actually looking at.
+ * Takes the provider id, not a caller-derived label — both strings in the
+ * message come from the same {@link DEBRID_LABELS} table the button itself
+ * reads, via {@link debridProviderLabel} and {@link debridAddLabel}, so the
+ * prompt can never name a button label that is not the one on screen.
  */
 export function addPlan(
   via: AddVia,
   debridConfigured: boolean,
   name: string,
-  providerLabel: string | undefined,
-  addLabel: string = `add via ${providerLabel ?? "your debrid provider"}`,
+  provider: WireDebridProvider | undefined,
 ): AddPlan {
   if (via === "debrid" || !debridConfigured) return { kind: "add", via };
-  const label = providerLabel ?? "your debrid provider";
+  const label = provider ? debridProviderLabel(provider) : "your debrid provider";
+  const addLabel = provider ? debridAddLabel(provider) : "the debrid add button";
   return {
     kind: "confirm",
     via: "p2p",

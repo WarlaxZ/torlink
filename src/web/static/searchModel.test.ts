@@ -442,7 +442,7 @@ describe("addPlan", () => {
   });
 
   it("prompts before a P2P add when Real-Debrid is configured", () => {
-    const plan = addPlan("p2p", true, "Kestrel", "Real-Debrid", "add via RD");
+    const plan = addPlan("p2p", true, "Kestrel", "realdebrid");
     expect(plan.kind).toBe("confirm");
     expect(plan.via).toBe("p2p");
     if (plan.kind !== "confirm") throw new Error("unreachable");
@@ -456,11 +456,11 @@ describe("addPlan", () => {
   });
 
   it("never prompts for an explicit Real-Debrid add", () => {
-    expect(addPlan("debrid", true, "Kestrel", "Real-Debrid")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Kestrel", "realdebrid")).toEqual({ kind: "add", via: "debrid" });
   });
 
   it("clips a very long release name out of the prompt", () => {
-    const plan = addPlan("p2p", true, "x".repeat(200), "Real-Debrid");
+    const plan = addPlan("p2p", true, "x".repeat(200), "realdebrid");
     if (plan.kind !== "confirm") throw new Error("unreachable");
     expect(plan.message).toContain("…");
     expect(plan.message).not.toContain("x".repeat(70));
@@ -479,17 +479,30 @@ describe("debrid copy", () => {
   });
 
   it("names the provider in the swarm-exposure prompt", () => {
-    const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", "TorBox");
+    const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", "torbox");
     expect(plan.kind).toBe("confirm");
     expect(plan.kind === "confirm" && plan.message).toContain("TorBox");
   });
 
   it("still never prompts for an explicit debrid add", () => {
-    expect(addPlan("debrid", true, "Ashfall.1999.1080p", "TorBox")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Ashfall.1999.1080p", "torbox")).toEqual({ kind: "add", via: "debrid" });
   });
 
   it("still never prompts when no debrid is configured", () => {
     expect(addPlan("p2p", false, "Ashfall.1999.1080p", undefined)).toEqual({ kind: "add", via: "p2p" });
+  });
+
+  // This is the assertion that makes the two-sources-for-one-fact bug
+  // impossible to reintroduce: the prompt's quoted button text must equal
+  // debridAddLabel(provider) for BOTH providers, not just coincidentally
+  // match one of them.
+  it("names the exact button text on screen, for every provider", () => {
+    for (const provider of ["realdebrid", "torbox"] as const) {
+      const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", provider);
+      if (plan.kind !== "confirm") throw new Error("unreachable");
+      expect(plan.message).toContain(`“${debridAddLabel(provider)}”`);
+      expect(plan.message).toContain(debridProviderLabel(provider));
+    }
   });
 
   it("provides the full display label for wiring into app.ts", () => {
