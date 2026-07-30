@@ -265,34 +265,6 @@ export function pickBestRelease<T extends PickableResult>(
  * gave way. Shared so the terminal and the browser say the same thing — the
  * copy-then-drift bug this codebase has hit four times.
  */
-/** What OMDb says a title is. Mirrors `OmdbType` without importing it: this
- *  module's only import is `./release`, and `src/recc/omdb.ts` is not on that
- *  list. `release.ts` already re-states the same two values for the same reason. */
-export type ReccMedium = "movie" | "series";
-/** The For You pane's type filter, in both front ends. */
-export type ReccFilter = "all" | "movie" | "tv";
-
-/**
- * Whether a For You row can be auto-played. Only a film has an unambiguous
- * intent — a show needs the season/episode picker (spec D).
- *
- * `omdbType` is per-item and wins when known. The pane's filter is the
- * fallback for when there is no OMDb key, and it can only ever say "yes,
- * film": "all" means the medium is genuinely unknown, because reccd sends no
- * per-item type (`useRecommendations.ts:38` starts the filter at "all").
- *
- * HERE rather than in either front end because both need it and `src/web`
- * may not import `src/ui` (eslint.config.js:78). Two copies of one rule is
- * the copy-then-drift bug this codebase has hit four times.
- */
-export function autoPlayableFilm(
-  omdbType: ReccMedium | null | undefined,
-  filter: ReccFilter,
-): boolean {
-  if (omdbType) return omdbType === "movie";
-  return filter === "movie";
-}
-
 export function pickStatusLine<T extends PickableResult>(
   pick: Pick<T>,
   maxResolution?: MaxResolution,
