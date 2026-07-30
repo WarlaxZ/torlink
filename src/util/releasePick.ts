@@ -259,3 +259,23 @@ export function pickBestRelease<T extends PickableResult>(
 ): Pick<T> | null {
   return rankReleases(candidates, prefs, intent)[0] ?? null;
 }
+
+/**
+ * One line naming what was chosen and, when the preference was not met, what
+ * gave way. Shared so the terminal and the browser say the same thing — the
+ * copy-then-drift bug this codebase has hit four times.
+ */
+export function pickStatusLine<T extends PickableResult>(
+  pick: Pick<T>,
+  maxResolution?: MaxResolution,
+): string {
+  const notes: string[] = [];
+  if (pick.overCap) {
+    notes.push(
+      maxResolution ? `nothing at ${maxResolution} or below` : "nothing under your resolution limit",
+    );
+  }
+  for (const id of pick.relaxed) notes.push(`no ${FEATURES[id].label} release`);
+  const head = `Playing ${pick.chosen.name}`;
+  return notes.length ? `${head} — ${notes.join(", ")}` : head;
+}

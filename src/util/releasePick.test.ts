@@ -277,3 +277,27 @@ describe("rankReleases", () => {
     expect(pickBestRelease(list, NO_PREFS, FILM)).toEqual(ranked[0]);
   });
 });
+
+import { pickStatusLine } from "./releasePick";
+
+describe("pickStatusLine", () => {
+  it("names the release when the preference was met", () => {
+    const pick = pickBestRelease([c("Kestrel.2010.1080p.BluRay.x264")], NO_PREFS, FILM)!;
+    expect(pickStatusLine(pick)).toBe("Playing Kestrel.2010.1080p.BluRay.x264");
+  });
+
+  it("says which requirement gave way", () => {
+    const pick = pickBestRelease([c("Kestrel.2010.1080p.BluRay.x264")], prefs({ require: ["atmos"] }), FILM)!;
+    expect(pickStatusLine(pick)).toContain("no Atmos release");
+  });
+
+  it("names the cap it could not meet", () => {
+    const pick = pickBestRelease([c("Kestrel.2010.2160p.WEB-DL")], prefs({ maxResolution: "720p" }), FILM)!;
+    expect(pickStatusLine(pick, "720p")).toContain("nothing at 720p or below");
+  });
+
+  it("falls back to generic wording when the cap is not passed", () => {
+    const pick = pickBestRelease([c("Kestrel.2010.2160p.WEB-DL")], prefs({ maxResolution: "720p" }), FILM)!;
+    expect(pickStatusLine(pick)).toContain("your resolution limit");
+  });
+});
