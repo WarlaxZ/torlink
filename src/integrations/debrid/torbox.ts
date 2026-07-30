@@ -1,6 +1,6 @@
 import { fetchResilient, HttpError, USER_AGENT } from "../../util/net";
 import { log } from "../../util/logger";
-import type { DebridStatus, RequestOptions, ResolveOptions } from "./types";
+import type { DebridProvider, DebridStatus, RequestOptions, ResolveOptions } from "./types";
 import type { StreamFile } from "../../util/player";
 
 const BASE = "https://api.torbox.app/v1";
@@ -408,3 +408,48 @@ export async function resolveMagnet(
   }
   return out;
 }
+
+/**
+ * Which of `hashes` TorBox already has cached. Real-Debrid has no equivalent —
+ * it withdrew /torrents/instantAvailability in 2024 — which is why this is
+ * optional on `DebridProvider`.
+ *
+ * TorBox answers with an empty object OR an empty list when nothing is cached,
+ * so both shapes parse to an empty set.
+ */
+export async function checkCached(
+  token: string,
+  hashes: string[],
+  opts: RequestOptions = {},
+): Promise<Set<string>> {
+  if (hashes.length === 0) return new Set();
+  const query = new URLSearchParams({ hash: hashes.join(","), format: "list" });
+  const data = await request<unknown>(
+    token,
+    "GET",
+    `/api/torrents/checkcached?${query.toString()}`,
+    undefined,
+    { ...opts, retries: opts.retries ?? 1 },
+  );
+  const rows = Array.isArray(data) ? data : [];
+  const out = new Set<string>();
+  for (const row of rows) {
+    const hash = (row as { hash?: unknown } | null)?.hash;
+    if (typeof hash === "string" && hash) out.add(hash.toLowerCase());
+  }
+  return out;
+}
+
+export const torBoxProvider: DebridProvider = {
+  id: "torbox",
+  label: "TorBox",
+  shortLabel: "TB",
+  homepage: "torbox.app",
+  tokenUrl: "https://torbox.app/settings",
+  tokenEnvVar: "TORBOX_API_TOKEN",
+  validateToken,
+  resolveMagnet,
+  checkCached,
+  isTransient,
+  isTokenRejection,
+};

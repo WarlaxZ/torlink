@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isTokenRejection, isTransient, resolveMagnet, TOKEN_REJECTED_MESSAGE, validateToken } from "./torbox";
+import {
+  checkCached,
+  isTokenRejection,
+  isTransient,
+  resolveMagnet,
+  TOKEN_REJECTED_MESSAGE,
+  TorBoxError,
+  validateToken,
+} from "./torbox";
 import { log } from "../../util/logger";
 
 const TOKEN = "tb-secret-token-abc123";
@@ -133,11 +141,18 @@ describe("TorBox logging", () => {
   it("never writes the token to the log, even for a failing call", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({ "/v1/api/user/me": jsonRes(500, { success: false, error: "OOPS" }) }, calls);
-    await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 }).catch(() => {});
+    const err = await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 }).catch(
+      (e: unknown) => e,
+    );
     const logged = spies.flatMap((s) => s.mock.calls.flat()).join("\n");
     expect(logged).not.toContain(TOKEN);
     // Proves the assertion above is not vacuous — something WAS logged.
     expect(logged).toContain("torbox");
+    // The real HttpError → mapFailure path: a 500 with no recognised slug
+    // produces a TorBoxError carrying the status and mapFailure's generic message.
+    expect(err).toBeInstanceOf(TorBoxError);
+    expect((err as TorBoxError).status).toBe(500);
+    expect((err as TorBoxError).message).toBe("TorBox error: OOPS.");
   });
 });
 
@@ -380,5 +395,50 @@ describe("TorBox resolveMagnet", () => {
     expect(message).not.toContain(TOKEN);
     // Not vacuous: the rest of the network error detail survives redaction.
     expect(message).toContain("ECONNRESET");
+  });
+});
+
+const CHECKCACHED = "/v1/api/torrents/checkcached";
+const HASH_B = "ffeeddccbbaa99887766554433221100ffeeddcc";
+
+describe("TorBox checkCached", () => {
+  it("returns the cached hashes, lowercased", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CHECKCACHED]: jsonRes(200, {
+          success: true,
+          data: [{ hash: HASH.toUpperCase(), name: "Kestrel.2010.1080p.BluRay.x264", size: 1 }],
+        }),
+      },
+      calls,
+    );
+    const cached = await checkCached(TOKEN, [HASH, HASH_B], { fetchImpl, sleepImpl: noSleep });
+    expect(cached.has(HASH)).toBe(true);
+    expect(cached.has(HASH_B)).toBe(false);
+    expect(calls[0]!.url).toContain(`hash=${HASH}%2C${HASH_B}`);
+    expect(calls[0]!.url).toContain("format=list");
+  });
+
+  it("treats an empty object as nothing cached", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router({ [CHECKCACHED]: jsonRes(200, { success: true, data: {} }) }, calls);
+    const cached = await checkCached(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
+    expect(cached.size).toBe(0);
+  });
+
+  it("treats an empty list as nothing cached", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router({ [CHECKCACHED]: jsonRes(200, { success: true, data: [] }) }, calls);
+    const cached = await checkCached(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
+    expect(cached.size).toBe(0);
+  });
+
+  it("makes no request for an empty hash list", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router({}, calls);
+    const cached = await checkCached(TOKEN, [], { fetchImpl, sleepImpl: noSleep });
+    expect(cached.size).toBe(0);
+    expect(calls).toHaveLength(0);
   });
 });

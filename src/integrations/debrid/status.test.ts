@@ -96,8 +96,15 @@ describe("the debrid provider registry", () => {
     expect(getDebridProvider("realdebrid").checkCached).toBeUndefined();
   });
 
-  it("lists every provider this build carries", () => {
-    // TorBox joins this list in Task 5, when its client is real.
-    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid"]);
+  it("lists every provider id", () => {
+    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid", "torbox"]);
+  });
+
+  it("returns the TorBox provider, which can check cached availability", () => {
+    const p = getDebridProvider("torbox");
+    expect(p.label).toBe("TorBox");
+    expect(p.shortLabel).toBe("TB");
+    expect(p.tokenEnvVar).toBe("TORBOX_API_TOKEN");
+    expect(p.checkCached).toBeDefined();
   });
 });
