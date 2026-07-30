@@ -31,7 +31,8 @@ import {
   type ReccEventType,
   type RecommendationQuery,
 } from "../recc/client";
-import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
+import { debridStatusFromRealDebridUser } from "../integrations/realdebrid";
+import type { DebridStatus } from "../integrations/debrid/types";
 import { validateToken } from "../integrations/realdebrid";
 import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
 import {
@@ -119,7 +120,7 @@ export interface WebDeps {
    * the RD attempt proceed and fail with its own message rather than
    * downgrading to a swarm because a status probe timed out.
    */
-  rdStatusImpl?: (token: string) => Promise<RdStatus | null>;
+  rdStatusImpl?: (token: string) => Promise<DebridStatus | null>;
   /**
    * How one source is queried during `/api/search`. Passed straight through to
    * `runSearch`, so the default (`cachedSearch`) and every behaviour around it —
@@ -225,13 +226,13 @@ export function toPublicSession(session: StreamSession): PublicStreamSession {
 // failure — never a silent downgrade to a swarm because a probe timed out.
 const RD_STATUS_PROBE_MS = 4000;
 
-async function fetchRdStatus(token: string): Promise<RdStatus | null> {
+async function fetchRdStatus(token: string): Promise<DebridStatus | null> {
   try {
     const user = await validateToken(token, {
       retries: 0,
       signal: AbortSignal.timeout(RD_STATUS_PROBE_MS),
     });
-    return rdStatusFromUser(user, new Date());
+    return debridStatusFromRealDebridUser(user, new Date());
   } catch {
     return null;
   }

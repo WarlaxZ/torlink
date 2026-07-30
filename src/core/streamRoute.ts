@@ -1,5 +1,5 @@
 import { type Config, resolveRealDebridToken } from "../config/config";
-import type { RdStatus } from "../integrations/rdStatus";
+import type { DebridStatus } from "../integrations/debrid/types";
 
 export type StreamRoute =
   | { kind: "realdebrid" }
@@ -10,9 +10,9 @@ export type StreamRoute =
 // "Not configured" (no token) auto-routes to torrent; a present-but-non-premium
 // token is "configured but not working" and requires an explicit confirm so we
 // never silently expose the user's IP after they set RD up.
-export function classifyStreamRoute(config: Config, rdStatus: RdStatus | null): StreamRoute {
+export function classifyStreamRoute(config: Config, rdStatus: DebridStatus | null): StreamRoute {
   if (!resolveRealDebridToken(config)) return { kind: "torrent-auto" };
-  if (rdStatus && !rdStatus.premium) {
+  if (rdStatus && !rdStatus.active) {
     return { kind: "torrent-confirm", reason: "your Real-Debrid premium isn't active" };
   }
   return { kind: "realdebrid" };

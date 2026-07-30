@@ -4,7 +4,7 @@ import type { DownloadQueue } from "../download/queue";
 import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
-import type { RdStatus } from "../integrations/rdStatus";
+import type { DebridStatus } from "../integrations/debrid/types";
 import type { Sort } from "./sort";
 import type { StreamHistoryItem } from "../core/streamHistory";
 
@@ -181,7 +181,7 @@ export interface Store {
   // handler (clear history, sign out) must ignore it.
   streamActive: boolean;
   // The validated Real-Debrid account, or null when unknown/not connected.
-  rdStatus: RdStatus | null;
+  rdStatus: DebridStatus | null;
   // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.
   copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;

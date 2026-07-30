@@ -3,12 +3,13 @@ import { TextField } from "./TextField";
 import { Panel } from "./Panel";
 import { COLOR, ICON } from "../theme";
 import { hyperlink } from "../../util/terminal";
-import { formatAccountStatus, type RdStatus } from "../../integrations/rdStatus";
+import { formatAccountStatus } from "../../integrations/debrid/status";
+import type { DebridStatus } from "../../integrations/debrid/types";
 
 interface TokenPromptProps {
   width: number;
   value: string;
-  status: RdStatus | null;
+  status: DebridStatus | null;
   onSubmit: (value: string) => void;
   onClear: () => void;
   onCancel: () => void;

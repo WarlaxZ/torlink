@@ -17,7 +17,8 @@ import {
 import { setDnsServers } from "../util/dns";
 import { expandHome, normalizeDownloadDir } from "../config/folder";
 import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
-import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
+import { debridStatusFromRealDebridUser } from "../integrations/realdebrid";
+import type { DebridStatus } from "../integrations/debrid/types";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
@@ -280,7 +281,7 @@ export function App({
   const [lastDownloadToDir, setLastDownloadToDir] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
+  const [rdStatus, setRdStatus] = useState<DebridStatus | null>(null);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   // Episodes streamed from the current picker session (marked ✓, cleared when
   // the picker opens/closes). Union with the favourite's persisted watched list.
@@ -364,7 +365,7 @@ export function App({
       if (launchToken) {
         void validateToken(launchToken)
           .then((u) => {
-            if (alive) setRdStatus(rdStatusFromUser(u, new Date()));
+            if (alive) setRdStatus(debridStatusFromRealDebridUser(u, new Date()));
           })
           .catch(() => {
             /* offline or bad token at launch: leave the badge hidden, no toast */
@@ -845,7 +846,7 @@ export function App({
       void (async () => {
         try {
           const user = await validateToken(token);
-          setRdStatus(rdStatusFromUser(user, new Date()));
+          setRdStatus(debridStatusFromRealDebridUser(user, new Date()));
           if (!isPremiumActive(user)) {
             setNotice(`Real-Debrid: ${user.username}'s account isn't premium — torrents need premium.`);
             return;

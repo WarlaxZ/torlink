@@ -5,12 +5,13 @@ import { Panel } from "./Panel";
 import { wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { truncate } from "../../util/format";
-import { formatAccountStatus, type RdStatus } from "../../integrations/rdStatus";
+import { formatAccountStatus } from "../../integrations/debrid/status";
+import type { DebridStatus } from "../../integrations/debrid/types";
 import { formatReccStatus, type ReccStatus } from "../../recc/status";
 
 interface AccountsProps {
   rdToken: string;
-  rdStatus: RdStatus | null;
+  rdStatus: DebridStatus | null;
   rutrackerUser?: string;
   reccConfigured: boolean;
   reccStatus: ReccStatus | null;

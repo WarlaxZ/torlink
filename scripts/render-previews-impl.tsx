@@ -28,7 +28,7 @@ import type { DownloadQueue } from "../src/download/queue";
 import type { QueueItem, SeedItem } from "../src/download/types";
 import type { HistoryItem } from "../src/download/history";
 import type { SourceId, TorrentResult } from "../src/sources/types";
-import type { RdStatus } from "../src/integrations/rdStatus";
+import type { DebridStatus } from "../src/integrations/debrid/types";
 
 const COLS = 80;
 const CONTENT_WIDTH = Math.max(24, COLS - RAIL_WIDTH - 3);
@@ -65,10 +65,12 @@ const SEEDS: SeedItem[] = [
   { id: "h2", name: "Fedora Workstation 40 x86_64 Live", magnet: "", dir: "", sizeBytes: 2.1e9, status: "paused", uploadSpeed: 0, uploaded: 4.1e8, peers: 0 },
 ];
 
-const RD_STATUS: RdStatus = {
+const RD_STATUS: DebridStatus = {
+  provider: "realdebrid",
   username: "you",
-  premium: true,
-  premiumUntil: new Date(NOW_MS + 60 * 86_400_000),
+  active: true,
+  planLabel: "premium",
+  expiresAt: new Date(NOW_MS + 60 * 86_400_000),
 };
 
 function fakeQueue(

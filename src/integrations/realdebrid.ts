@@ -1,6 +1,7 @@
 import { fetchResilient, HttpError, USER_AGENT, type FetchImpl } from "../util/net";
 import { log } from "../util/logger";
 import type { StreamFile } from "../util/player";
+import type { DebridStatus } from "./debrid/types";
 
 export type RealDebridFetch = FetchImpl;
 
@@ -421,4 +422,26 @@ export async function resolveMagnet(
     files.push(await unrestrictLink(token, link, opts));
   }
   return files;
+}
+
+/** `RealDebridUser` → the provider-blind `DebridStatus`. */
+export function debridStatusFromRealDebridUser(user: RealDebridUser, now: Date): DebridStatus {
+  const active = isPremiumActive(user);
+  let expiresAt: Date | null = null;
+  if (active) {
+    const fromSeconds = new Date(now.getTime() + (user.premium ?? 0) * 1000);
+    if (user.expiration) {
+      const parsed = new Date(user.expiration);
+      expiresAt = Number.isNaN(parsed.getTime()) ? fromSeconds : parsed;
+    } else {
+      expiresAt = fromSeconds;
+    }
+  }
+  return {
+    provider: "realdebrid",
+    username: user.username,
+    active,
+    planLabel: active ? "premium" : "free",
+    expiresAt,
+  };
 }

@@ -435,7 +435,13 @@ describe("POST /api/stream", () => {
       deps({
         runtime: runtime(sessions),
         loadConfigImpl: async () => ({ ...defaultConfig, realDebridToken: "rd-token" }),
-        rdStatusImpl: async () => ({ username: "u", premium: true, premiumUntil: null }),
+        rdStatusImpl: async () => ({
+          provider: "realdebrid",
+          username: "u",
+          active: true,
+          planLabel: "premium",
+          expiresAt: null,
+        }),
       }),
       { magnet: MAGNET },
     );
@@ -459,7 +465,13 @@ describe("POST /api/stream — torrent-confirm", () => {
   function confirmDeps(over: Partial<WebDeps> = {}) {
     return deps({
       loadConfigImpl: async () => ({ ...defaultConfig, realDebridToken: "rd-token" }),
-      rdStatusImpl: async () => ({ username: "u", premium: false, premiumUntil: null }),
+      rdStatusImpl: async () => ({
+        provider: "realdebrid",
+        username: "u",
+        active: false,
+        planLabel: "free",
+        expiresAt: null,
+      }),
       ...over,
     });
   }
