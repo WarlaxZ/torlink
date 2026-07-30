@@ -4,10 +4,12 @@ import {
   applyLibraryResponse,
   applySaved,
   applySavedSearchesResponse,
+  continueWatchingBody,
   continueWatchingFallbackQuery,
   continueWatchingStatus,
   continueWatchingSub,
   emptySaved,
+  episodeTag,
   favouriteLabel,
   favouriteMeta,
   isInLibrary,
@@ -21,6 +23,11 @@ import {
   type SavedState,
 } from "./savedModel";
 import type { PublicFavourite, PublicStreamHistoryItem } from "../wire";
+// Fine to import here even though `src/core/streamHistory.ts` pulls in
+// `node:fs`: this is a test file, never bundled for the browser (only
+// app.ts/player.ts are, per tsup.web.config.ts) — the node:* restriction is on
+// the shipped bundle, not on the test that guards against it drifting.
+import { nextEpisode, nextLabel, type StreamHistoryItem } from "../../core/streamHistory";
 
 const HASH = "b".repeat(40);
 
@@ -75,6 +82,15 @@ describe("savedSearchesBody", () => {
 
   it("trims, so the box's stray spaces cannot create a second entry", () => {
     expect(savedSearchesBody("  tin rivers  ", "toggle").query).toBe("tin rivers");
+  });
+});
+
+describe("continueWatchingBody", () => {
+  it("sends the key and the remove action — there is no toggle to send", () => {
+    expect(continueWatchingBody("kepler||series")).toEqual({
+      key: "kepler||series",
+      action: "remove",
+    });
   });
 });
 
@@ -378,6 +394,17 @@ describe("continueWatchingSub", () => {
       ),
     ).toBe("1 day ago");
   });
+
+  // Both fixtures above are single-digit; this is the padStart no-op path —
+  // the same two-digit case nextLabel's own suite pins.
+  it("does not corrupt season/episode numbers already two digits", () => {
+    expect(
+      continueWatchingSub(
+        { ...base, season: 12, episode: 34, next: { season: 12, episode: 35 } },
+        A_DAY_LATER,
+      ),
+    ).toBe("1 day ago · last S12E34 · next S12E35");
+  });
 });
 
 describe("continueWatchingFallbackQuery", () => {
@@ -403,6 +430,47 @@ describe("continueWatchingFallbackQuery", () => {
         next: null,
       }),
     ).toBe("Tin Rivers");
+  });
+
+  it("does not corrupt season/episode numbers already two digits", () => {
+    expect(
+      continueWatchingFallbackQuery({ ...base, next: { season: 12, episode: 35 } }),
+    ).toBe("Kepler S12E35");
+  });
+});
+
+// The ONLY string genuinely shared between the two front ends: the TUI's pane
+// (src/ui/components/ContinueWatching.tsx) renders nextLabel(item) verbatim
+// and nothing else from this subtitle — no age, no "last SxxExx" — so that is
+// the one fragment worth cross-checking rather than the whole line.
+describe("episodeTag agrees with nextLabel's \"next SxxExx\" fragment", () => {
+  function historyItem(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
+    return {
+      key: "k",
+      title: "Kepler",
+      type: "series",
+      rawName: "Kepler.S02E04.1080p",
+      infoHash: "a".repeat(40),
+      magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+      startedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  it("matches nextLabel for a single-digit episode", () => {
+    const item = historyItem({ season: 2, episode: 4 });
+    const next = nextEpisode(item);
+    expect(next).not.toBeNull();
+    expect(`next ${episodeTag(next!.season, next!.episode)}`).toBe(nextLabel(item));
+    expect(nextLabel(item)).toBe("next S02E05");
+  });
+
+  it("matches nextLabel for a two-digit season and episode", () => {
+    const item = historyItem({ season: 12, episode: 34 });
+    const next = nextEpisode(item);
+    expect(next).not.toBeNull();
+    expect(`next ${episodeTag(next!.season, next!.episode)}`).toBe(nextLabel(item));
+    expect(nextLabel(item)).toBe("next S12E35");
   });
 });
 

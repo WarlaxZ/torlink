@@ -435,4 +435,71 @@ describe("runPlay", () => {
     expect(calls.notices).toEqual([]);
     expect(calls.opened).toEqual([]);
   });
+
+  describe("onUnresolved", () => {
+    it("fires when start fails outright", async () => {
+      let fired = 0;
+      const { fx } = harness({ onUnresolved: () => fired++ });
+      await runPlay(row(), fx);
+      expect(fired).toBe(1);
+    });
+
+    // MUTATION GUARD. start() runs twice on the confirm-then-retry path — once
+    // unconfirmed, once after the human says yes — and only the SECOND of
+    // those two calls fails here. A caller-side latch that assumed both calls
+    // could report "failed" would be guarding against something that cannot
+    // happen; this proves the callback still fires exactly once even across
+    // both calls, with the guarantee living in runPlay rather than in app.ts.
+    it("fires exactly once, even when start is called twice on the confirm-then-fail path", async () => {
+      let fired = 0;
+      const { fx, calls } = harness({
+        start: async (_row, confirmed) => {
+          calls.starts.push(confirmed);
+          return confirmed ? { kind: "failed" } : { kind: "confirm", reason: "no premium" };
+        },
+        confirm: () => true,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(calls.starts).toEqual([false, true]);
+      expect(fired).toBe(1);
+    });
+
+    it("does not fire when the user declines the confirm prompt", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => ({ kind: "confirm", reason: "no premium" }),
+        confirm: () => false,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("does not fire when the server refuses the confirmation a second time", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => ({ kind: "confirm", reason: "no premium" }),
+        confirm: () => true,
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("does not fire when the session starts successfully", async () => {
+      let fired = 0;
+      const { fx } = harness({
+        start: async () => started({ files: [file("movie.mp4", 0)] }),
+        onUnresolved: () => fired++,
+      });
+      await runPlay(row(), fx);
+      expect(fired).toBe(0);
+    });
+
+    it("is optional — runPlay does not require it", async () => {
+      const { fx } = harness();
+      await expect(runPlay(row(), fx)).resolves.toBeUndefined();
+    });
+  });
 });

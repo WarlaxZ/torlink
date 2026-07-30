@@ -96,6 +96,7 @@ import {
   applyLibraryResponse,
   applySaved,
   applySavedSearchesResponse,
+  continueWatchingBody,
   continueWatchingFallbackQuery,
   continueWatchingStatus,
   continueWatchingSub,
@@ -590,22 +591,19 @@ pickerCancel.addEventListener("click", () => {
 // gate uses it. Synchronous and unmissable are the right properties for a
 // decision whose consequence (your IP in a public swarm) cannot be taken back.
 //
-// `onUnresolved`, when given, fires when `startSession` could not start a
-// session at all (a dead swarm, an unreachable server) — the one caller that
-// needs to react to that is Continue watching, whose "remembered torrent
-// won't resolve" fallback is a search, not just the notice `startSession`
-// already showed. Every other caller passes nothing and behaves exactly as
-// before.
+// `onUnresolved`, when given, is `runPlay`'s own effect for "start could not
+// start a session at all" (a dead swarm, an unreachable server) — the
+// at-most-once guarantee is runPlay's, not re-derived here (see PlayEffects'
+// doc comment in streamFlow.ts). The one caller that needs to react to it is
+// Continue watching, whose "remembered torrent won't resolve" fallback is a
+// search, not just the notice `startSession` already showed. Every other
+// caller passes nothing and behaves exactly as before.
 async function play(row: DashRow, onUnresolved?: () => void): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
   try {
     await runPlay(row, {
-      start: async (r, confirmed) => {
-        const result = await startSession(r, confirmed);
-        if (result.kind === "failed") onUnresolved?.();
-        return result;
-      },
+      start: startSession,
       poll: pollSession,
       stop: stopSession,
       confirm: (message) => confirm(message),
@@ -617,6 +615,7 @@ async function play(row: DashRow, onUnresolved?: () => void): Promise<void> {
       open: (path) => openPlayer(path),
       sleep,
       now: () => Date.now(),
+      onUnresolved,
     });
   } finally {
     playing.delete(row.id);
@@ -1700,7 +1699,7 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
 }
 
 async function removeContinueWatching(key: string): Promise<void> {
-  const body = await postSaved("/api/continue-watching", { key, action: "remove" });
+  const body = await postSaved("/api/continue-watching", continueWatchingBody(key));
   if (!body) return;
   savedState = applyContinueWatchingResponse(savedState, body);
   renderSaved();
@@ -1712,12 +1711,10 @@ async function removeContinueWatching(key: string): Promise<void> {
 // decision of WHAT to search for; this is only the DOM effect of switching to
 // it, the same shape renderSavedSearchRow's click handler already uses.
 async function playContinueWatching(item: PublicStreamHistoryItem): Promise<void> {
-  let fellBack = false;
+  // The at-most-once guarantee is runPlay's (see streamFlow.ts's PlayEffects
+  // doc comment) — this is only the DOM effect of switching to a search, the
+  // same shape renderSavedSearchRow's click handler already uses.
   await play(dashRowForPlay(item.infoHash, item.rawName), () => {
-    // start is called a second time after a Real-Debrid confirm prompt; only
-    // the first failure should trigger the fallback.
-    if (fellBack) return;
-    fellBack = true;
     const query = continueWatchingFallbackQuery(item);
     queryInput.value = query;
     showView("search");

@@ -2095,7 +2095,7 @@ describe("handleWebApi — POST /api/continue-watching", () => {
     expect((res.json as { continueWatching: PublicStreamHistoryItem[] }).continueWatching).toHaveLength(1);
   });
 
-  it("rejects a missing or malformed body", async () => {
+  it("rejects a body missing the key", async () => {
     const d = deps({ loadStreamHistoryImpl: async () => [item()] });
     const res = await post(d, { action: "remove" });
     expect(res.status).toBe(400);

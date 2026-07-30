@@ -8,6 +8,7 @@
 // Bundled for the browser: no node:* imports, direct or transitive.
 import { formatBytes } from "./dashboard";
 import type {
+  ContinueWatchingRequest,
   LibraryRequest,
   PublicFavourite,
   PublicStreamHistoryItem,
@@ -51,6 +52,14 @@ export function emptySaved(): SavedState {
 /** The `POST /api/saved-searches` body. Trimmed here so the box's stray spaces cannot create a second entry. */
 export function savedSearchesBody(query: string, action: "toggle" | "remove"): SavedSearchesRequest {
   return { query: query.trim(), action };
+}
+
+/**
+ * The `POST /api/continue-watching` body. One action, `"remove"` — nothing
+ * plays a title and then un-plays it, so there is no toggle to send.
+ */
+export function continueWatchingBody(key: string): ContinueWatchingRequest {
+  return { key, action: "remove" };
 }
 
 /** What a caller must know about a torrent to favourite it. A search result satisfies this. */
@@ -267,8 +276,22 @@ export function relativeAge(then: number, now: number): string {
   return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
 }
 
-/** "S02E04", zero-padded to two digits each — the same shape `nextLabel` (src/core/streamHistory.ts) uses. */
-function episodeTag(season: number, episode: number): string {
+/**
+ * "S02E04", zero-padded to two digits each — the same shape `nextLabel`
+ * (src/core/streamHistory.ts) uses for its `"next S02E05"`.
+ *
+ * EXPORTED SO A TEST CAN CROSS-CHECK IT AGAINST `nextLabel` DIRECTLY, not just
+ * trust that this comment is still true. This module cannot *import*
+ * `nextLabel` (it pulls in `node:fs` via `src/core/streamHistory.ts`, which
+ * would break the browser build — see the module header), so a hand-copied
+ * format string is exactly the copy-then-drift shape this codebase has hit
+ * four times before. `savedModel.test.ts`'s "agrees with nextLabel" case
+ * imports `nextLabel` itself (fine in a test file, which is never bundled)
+ * and asserts the two produce the same `"next SxxExx"` fragment — the only
+ * string actually shared between the two front ends, since the TUI's pane
+ * renders no age and no "last SxxExx" of its own.
+ */
+export function episodeTag(season: number, episode: number): string {
   return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }
 

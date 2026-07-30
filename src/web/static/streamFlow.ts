@@ -253,6 +253,23 @@ export interface PlayEffects {
   open(path: string): void;
   sleep(ms: number): Promise<void>;
   now(): number;
+  /**
+   * Called when `start` could not start a session at all — `start.kind ===
+   * "failed"` (a dead swarm, an unreachable server; `start` has already
+   * shown its own notice for this). Optional: most callers have nothing to
+   * add beyond that notice.
+   *
+   * FIRES AT MOST ONCE PER `runPlay` CALL, guaranteed by where `runPlay`
+   * calls it rather than by anything the caller has to track — `start` runs
+   * at most twice (the unconfirmed attempt, then once more after a human
+   * accepts the torrent-confirm prompt), and only one of those two calls can
+   * ever reach the "failed" branch: whichever one returns `"confirm"` is by
+   * definition not "failed", and once a `"confirm"` is followed by a second
+   * `"confirm"` `runPlay` returns before this fires at all. A caller wiring
+   * this does not need to know any of that; it is exactly why the guarantee
+   * belongs here and not as a flag re-derived in DOM code.
+   */
+  onUnresolved?(): void;
 }
 
 /**
@@ -283,7 +300,10 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
       return;
     }
   }
-  if (start.kind !== "started") return;
+  if (start.kind !== "started") {
+    if (start.kind === "failed") fx.onUnresolved?.();
+    return;
+  }
 
   const { sessionId, capability } = start;
   let session = start.session;
