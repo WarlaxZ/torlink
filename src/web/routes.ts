@@ -63,7 +63,7 @@ import type {
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
-  WatchlistResponse,
+  SavedSearchesResponse,
 } from "./wire";
 
 export interface WebDeps {
@@ -728,7 +728,7 @@ async function addToQueue(
 }
 
 // ---- saved lists -------------------------------------------------------
-// The watchlist (config.savedSearches) and the library (config.favourites),
+// The saved searches (config.savedSearches) and the library (config.favourites),
 // which the TUI has had all along. Both are read here and mutated by the two
 // routes below.
 //
@@ -759,7 +759,7 @@ async function savedLists(deps: WebDeps): Promise<WebResponse> {
   const out: SavedResponse = {
     // loadConfig already normalises both (junk dropped, caps applied), so these
     // coalesces are for a config object built in a test, not for disk data.
-    watchlist: config.savedSearches ?? [],
+    savedSearches: config.savedSearches ?? [],
     library: (config.favourites ?? []).map(toPublicFavourite),
   };
   return { status: 200, json: out };
@@ -776,7 +776,7 @@ function parseObjectBody(bodyText: string): Record<string, unknown> | null {
   }
 }
 
-async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
 
@@ -796,12 +796,12 @@ async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResp
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const current = config.savedSearches ?? [];
-  const watchlist =
+  const savedSearches =
     action === "remove" ? current.filter((q) => q !== query) : toggleSavedSearches(current, query);
 
-  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches: watchlist });
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches });
 
-  const out: WatchlistResponse = { saved: watchlist.includes(query), watchlist };
+  const out: SavedSearchesResponse = { saved: savedSearches.includes(query), savedSearches };
   return { status: 200, json: out };
 }
 
@@ -1358,8 +1358,8 @@ export async function handleWebApi(
     return savedLists(deps);
   }
 
-  if (method === "POST" && urlPath === "/api/watchlist") {
-    return watchlistAction(deps, bodyText);
+  if (method === "POST" && urlPath === "/api/saved-searches") {
+    return savedSearchesAction(deps, bodyText);
   }
 
   if (method === "POST" && urlPath === "/api/library") {

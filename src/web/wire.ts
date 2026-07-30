@@ -514,41 +514,41 @@ export interface PublicFavourite {
  * One route rather than two because the `saved` pane shows both lists at once,
  * so two routes would mean two round trips for one screen.
  *
- * The names are the TUI's and are load-bearing: `watchlist` is
+ * The names are the TUI's and are load-bearing: `savedSearches` is
  * `config.savedSearches` (search query strings) and `library` is
  * `config.favourites` (pinned torrents). Both clients read and write the same
  * config file, so a browser that renamed either would show a different list
  * under the same word.
  */
 export interface SavedResponse {
-  watchlist: string[];
+  savedSearches: string[];
   library: PublicFavourite[];
 }
 
 /**
- * The body of `POST /api/watchlist`.
+ * The body of `POST /api/saved-searches`.
  *
  * `toggle` mirrors the TUI's `w` key: save this query, or unsave it if it is
  * already there. `remove` is a separate, idempotent action rather than a second
  * toggle, for the ✕ in the list — a toggle there would RE-ADD a row the user
  * just deleted if the click double-fired, which on a phone it does.
  */
-export interface WatchlistRequest {
+export interface SavedSearchesRequest {
   query: string;
   action: "toggle" | "remove";
 }
 
 /**
- * The 200 body of `POST /api/watchlist`.
+ * The 200 body of `POST /api/saved-searches`.
  *
  * The whole list comes back, not just the verdict, so the browser never has to
  * predict server state: it flips the button optimistically and then renders
  * whatever this says. `saved` is the state of THIS query afterwards, which the
  * caller would otherwise have to search the list for.
  */
-export interface WatchlistResponse {
+export interface SavedSearchesResponse {
   saved: boolean;
-  watchlist: string[];
+  savedSearches: string[];
 }
 
 /**
@@ -576,7 +576,7 @@ export interface LibraryRequest {
   filename?: string;
 }
 
-/** The 200 body of `POST /api/library`. Same contract as `WatchlistResponse`: the caller renders what comes back. */
+/** The 200 body of `POST /api/library`. Same contract as `SavedSearchesResponse`: the caller renders what comes back. */
 export interface LibraryResponse {
   /** Whether THIS torrent is in the library afterwards. */
   favourited: boolean;

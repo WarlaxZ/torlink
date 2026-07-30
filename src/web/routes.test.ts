@@ -1923,7 +1923,7 @@ describe("handleWebApi — GET /api/saved", () => {
 
     expect(res.status).toBe(200);
     const body = res.json as SavedResponse;
-    expect(body.watchlist).toEqual(["tin rivers", "harrowgate s03"]);
+    expect(body.savedSearches).toEqual(["tin rivers", "harrowgate s03"]);
     expect(body.library).toEqual([
       {
         id: "a".repeat(40),
@@ -1983,7 +1983,7 @@ describe("handleWebApi — GET /api/saved", () => {
       "",
     );
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ watchlist: [], library: [] });
+    expect(res.json).toEqual({ savedSearches: [], library: [] });
   });
 
   it("requires the token when one is configured", async () => {
@@ -1999,7 +1999,7 @@ describe("handleWebApi — GET /api/saved", () => {
   });
 });
 
-describe("handleWebApi — POST /api/watchlist", () => {
+describe("handleWebApi — POST /api/saved-searches", () => {
   // A fresh capture per test: the route must WRITE, and asserting on what it
   // wrote is the only way to know it persisted rather than answered from memory.
   function capture(config: Partial<Config> = {}) {
@@ -2014,14 +2014,14 @@ describe("handleWebApi — POST /api/watchlist", () => {
   }
 
   const post = (d: WebDeps, body: unknown) =>
-    handleWebApi(d, "POST", "/api/watchlist", new URLSearchParams(), undefined, JSON.stringify(body));
+    handleWebApi(d, "POST", "/api/saved-searches", new URLSearchParams(), undefined, JSON.stringify(body));
 
   it("adds a query, most-recent first, and persists it", async () => {
     const { deps: d, saved } = capture({ savedSearches: ["harrowgate s03"] });
     const res = await post(d, { query: "tin rivers", action: "toggle" });
 
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ saved: true, watchlist: ["tin rivers", "harrowgate s03"] });
+    expect(res.json).toEqual({ saved: true, savedSearches: ["tin rivers", "harrowgate s03"] });
     expect(saved).toHaveLength(1);
     expect(saved[0]?.savedSearches).toEqual(["tin rivers", "harrowgate s03"]);
   });
@@ -2030,20 +2030,20 @@ describe("handleWebApi — POST /api/watchlist", () => {
     const { deps: d, saved } = capture({ savedSearches: ["tin rivers", "harrowgate s03"] });
     const res = await post(d, { query: "tin rivers", action: "toggle" });
 
-    expect(res.json).toEqual({ saved: false, watchlist: ["harrowgate s03"] });
+    expect(res.json).toEqual({ saved: false, savedSearches: ["harrowgate s03"] });
     expect(saved[0]?.savedSearches).toEqual(["harrowgate s03"]);
   });
 
   it("trims the query, so the same search cannot be saved twice", async () => {
     const { deps: d } = capture({ savedSearches: ["tin rivers"] });
     const res = await post(d, { query: "  tin rivers  ", action: "toggle" });
-    expect(res.json).toEqual({ saved: false, watchlist: [] });
+    expect(res.json).toEqual({ saved: false, savedSearches: [] });
   });
 
   it("remove is idempotent — a double-fired click must not re-add", async () => {
     const { deps: d } = capture({ savedSearches: ["tin rivers"] });
     const first = await post(d, { query: "tin rivers", action: "remove" });
-    expect(first.json).toEqual({ saved: false, watchlist: [] });
+    expect(first.json).toEqual({ saved: false, savedSearches: [] });
 
     // The SAME query again, on the SAME fixture. loadConfigImpl is a fixed
     // closure over the original config (not the "saved" array from the first
@@ -2053,7 +2053,7 @@ describe("handleWebApi — POST /api/watchlist", () => {
     // the case below for the one that actually catches remove silently
     // becoming toggle.
     const second = await post(d, { query: "tin rivers", action: "remove" });
-    expect(second.json).toEqual({ saved: false, watchlist: [] });
+    expect(second.json).toEqual({ saved: false, savedSearches: [] });
 
     // The state a genuinely second-in-line click reads: the entry is already
     // gone. remove() is a no-op here; if it were toggleSavedSearches (i.e.
@@ -2061,7 +2061,7 @@ describe("handleWebApi — POST /api/watchlist", () => {
     // which is the actual "must not re-add" this test is named for.
     const { deps: gone } = capture({ savedSearches: [] });
     const third = await post(gone, { query: "tin rivers", action: "remove" });
-    expect(third.json).toEqual({ saved: false, watchlist: [] });
+    expect(third.json).toEqual({ saved: false, savedSearches: [] });
   });
 
   it("rejects a blank query rather than answering 200 to a no-op", async () => {
@@ -2081,7 +2081,7 @@ describe("handleWebApi — POST /api/watchlist", () => {
     const junk = await handleWebApi(
       d,
       "POST",
-      "/api/watchlist",
+      "/api/saved-searches",
       new URLSearchParams(),
       undefined,
       "not json",
@@ -2106,7 +2106,7 @@ describe("handleWebApi — POST /api/watchlist", () => {
     const res = await handleWebApi(
       deps({ token: "secret" }),
       "POST",
-      "/api/watchlist",
+      "/api/saved-searches",
       new URLSearchParams(),
       undefined,
       JSON.stringify({ query: "tin rivers", action: "toggle" }),
