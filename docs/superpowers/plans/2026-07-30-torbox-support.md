@@ -455,7 +455,26 @@ Then change each of those five files' import to `import type { StreamFile } from
 
 - [ ] **Step 6: Fix the remaining import paths**
 
-In `src/core/streamSession.ts:3-4`, `src/download/queue.ts:19`, `src/web/routes.ts:35`, `src/ui/App.tsx:19,22`, `src/daemon/runtime.test.ts:124`, change `"../integrations/realdebrid"` → `"../integrations/debrid/realdebrid"` (adjust depth per file).
+The move breaks every importer of the old path. Find them all rather than
+working from a list — Task 1 already turned up three consumers its own brief
+had missed:
+
+```bash
+grep -rn "integrations/realdebrid\|\"\.\./realdebrid\"\|\"\./realdebrid\"" src scripts \
+  --include='*.ts' --include='*.tsx' | cut -c1-140
+```
+
+Known at time of writing: `src/core/streamSession.ts:3-4`, `src/download/queue.ts:19`,
+`src/web/routes.ts:34-35`, `src/ui/App.tsx:19-22`, `src/daemon/runtime.test.ts:124`,
+`src/download/http.ts`, `src/ui/components/StreamFilePrompt.tsx` — all become
+`"../integrations/debrid/realdebrid"`, depth-adjusted per file.
+
+**One goes the other way.** `src/integrations/debrid/status.test.ts:4` currently
+imports `debridStatusFromRealDebridUser` from `"../realdebrid"` (Task 1 had to
+reach *up* out of `debrid/`, because the client had not moved yet). After the
+move it is a sibling, so that import becomes `"./realdebrid"`. Missing this is a
+compile error, not a silent bug — but it is the one import in the codebase whose
+path gets *shorter*, so it is easy to skip when sweeping for the long form.
 
 - [ ] **Step 7: Verify**
 
