@@ -1135,9 +1135,12 @@ export function App({
   // The same store the web writes, from src/core so neither front end owns it.
   // Fire-and-forget: a convenience list must never interrupt a stream.
   const recordStreamHistory = useCallback(async (input: DownloadInput) => {
-    const item = historyItemFor(input, Date.now());
-    if (!item) return; // no title in the release name, so no row to draw
+    // historyItemFor is inside the try too: a total swallow means nothing this
+    // function does — parsing included — may become an unhandled rejection in
+    // the TUI's Node process, which can take the whole terminal down with it.
     try {
+      const item = historyItemFor(input, Date.now());
+      if (!item) return; // no title in the release name, so no row to draw
       const current = await loadStreamHistory();
       const next = recordStream(current, item);
       await saveStreamHistory(next);

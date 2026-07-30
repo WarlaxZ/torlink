@@ -2433,19 +2433,30 @@ describe("POST /api/stream — records stream history", () => {
 
   it("does not write history for a name with no title in it", async () => {
     const saved: StreamHistoryItem[][] = [];
+    let loadCalls = 0;
     await handleWebApi(
       deps({
-        loadStreamHistoryImpl: async () => [],
+        loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
         saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
       }),
       "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "1080p.WEB-DL.x265", confirm: true }),
     );
     expect(saved).toHaveLength(0);
+    // `saved` staying empty alone doesn't distinguish "the null guard worked"
+    // from "recordStream threw on a null item and the try/catch swallowed
+    // it" — both leave `saved` empty. Asserting the persistence seams were
+    // never even reached is what actually pins the guard: a clean early
+    // return never calls loadStreamHistoryImpl; a crash-and-swallow would
+    // have called it first.
+    expect(loadCalls).toBe(0);
   });
 
   it("survives a history write that rejects", async () => {
     // History is a convenience. It must never take a stream down with it.
+    // Note: this only proves the RESPONSE survives — the outer .catch on
+    // recordStreamStart would absorb this too even if the inner try/catch
+    // were removed, so it doesn't pin the inner catch specifically.
     const res = await handleWebApi(
       deps({
         loadStreamHistoryImpl: async () => [],
