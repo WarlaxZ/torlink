@@ -34,26 +34,31 @@ useful on its own.
 A ships alone because it needs nothing from B or C. B without A is a list that still
 makes you choose manually. C without A has nothing to constrain.
 
-### Two consequences of A's trigger being For You alone
+### Why there are two triggers, not one
 
-Both were found in review of this document, and neither is a reason to change the
-decision — but they must not be discovered during implementation.
+A drives auto-play from **For You** and **Continue Watching**. The second was added after
+review found two problems with For You alone, both of which it fixes:
 
-**For You is gated on reccd, so A does nothing for users without it.** `App.tsx:399`
-falls back to the `all` section when `resolveReccConfig(cfg).reccUrl` is absent, and the
-web returns `{status: "not-configured"}`. For anyone who has not stood up a self-hosted
-reccd, spec A ships a settings block wired to no action at all. That is acceptable for a
-first slice — B and the later "play best match" action both remove the gate — but it does
-mean A cannot be justified as "improving the surface people already use", and the PR body
-should say so rather than implying broader reach.
+**For You is gated on reccd.** `App.tsx:399` falls back to the `all` section when
+`resolveReccConfig(cfg).reccUrl` is absent, and the web returns
+`{status: "not-configured"}`. With For You as the only trigger, anyone who has not stood
+up a self-hosted reccd would get a settings block wired to no action at all. Continue
+Watching has no such gate — it reads local stream history — so A is useful to everyone
+on day one.
 
-**The episode banding has no live caller in A.** For You surfaces titles the user has
-*not* watched, so `nextEpisode()` finds no history and the intent is almost always season
-1, episode 1. Bands 1–3, `fromPack`, and the `nextEpisodeIndex()` handoff are therefore
-specified and tested here but exercised by nothing that ships. They are deliberate
-scaffolding, in the same sense as `rankReleases` below: the first caller that needs them
-is Continue Watching, which already holds both the title and the next episode. Labelled
-so a reviewer reading the banding tests does not go looking for the caller.
+**For You cannot exercise the episode logic.** It surfaces titles the user has *not*
+watched, so `nextEpisode()` finds no history and the intent is always season 1, episode 1.
+The banding rules and the `nextEpisodeIndex()` handoff would ship specified, tested, and
+called by nothing. Continue Watching is precisely the surface where `nextEpisode()` is
+live, so the pack-versus-resolution ranking runs against real intent rather than a
+constant.
+
+It is a small addition: `nextEpisode(item)` is already computed server-side and sent over
+the wire as `next` (`src/web/routes.ts:824`), and the TUI already renders `nextLabel(item)`
+(`src/ui/components/ContinueWatching.tsx:41`). Neither surface needs new data — only a new
+action over data it already has. The browser must keep taking `next` from the wire and
+must not import `streamHistory`, which pulls in `node:fs`; `savedModel.ts:285` documents
+that constraint and the four copy-then-drift bugs behind it.
 
 ### Explicitly not in this spec
 
@@ -62,9 +67,10 @@ so a reviewer reading the banding tests does not go looking for the caller.
   learned about Real-Debrid" below: both need a retry loop that mutates the user's RD
   account, and folding that in here would stall A. A's current behaviour on a dead or
   flagged torrent is unchanged: the action fails with the existing message.
-- A "play best match" action on ordinary search results. It is a natural follow-up,
-  but For You is the only surface that names a *title* rather than a *release*, and
-  a picker needs a set of candidates for one title.
+- A "play best match" action on ordinary search results. It is a natural follow-up, but
+  a picker needs a set of candidates for one title, and For You and Continue Watching are
+  the two surfaces that name a *title* rather than a *release*. Search rows are already
+  individual releases, so the pick has been made by the time you are looking at one.
 - Auto-download. This spec plays; it does not queue. The picker is reusable for a
   download action later, and its signature does not assume streaming.
 
@@ -394,21 +400,50 @@ The one hard rule is the exclusion list, for the reason above.
 
 ### Terminal UI
 
-`src/ui/components/ForYou.tsx` — Enter changes meaning:
+Both panes gain the same pair of bindings, so the vocabulary is identical wherever
+auto-play appears:
 
-| Key | Before | After |
-| --- | --- | --- |
-| `Enter` | `setSection(TYPE_SECTION[type])` + `submitQuery(item.title)` | search the title, pick, play |
-| `s` | — | today's Enter: jump to the results list for that title |
+| Pane | Key | Before | After |
+| --- | --- | --- | --- |
+| `ForYou.tsx` | `Enter` | `setSection(TYPE_SECTION[type])` + `submitQuery(item.title)` | search the title, pick, play |
+| `ForYou.tsx` | `s` | — | today's Enter: jump to the results list for that title |
+| `ContinueWatching.tsx` | `Enter` | resume the stored torrent | search the title, pick, play the next episode |
+| `ContinueWatching.tsx` | `s` | — | jump to the results list for that title |
 
-`s` is added to **both** halves of `src/ui/keymap.ts` — `HELP_GROUPS` and `footerHints`.
+`s` is free in both panes — key handling is per-component (`Results.tsx:389`,
+`Downloads.tsx:143`), and the only global letters in `App.tsx` are `?`, `o` and `S`. It
+already means different things in different panes (Sort in results, Export in the
+torrent prompt), so a third sense here follows the existing convention rather than
+breaking one. Both new bindings go in **both** halves of `src/ui/keymap.ts` —
+`HELP_GROUPS` and `footerHints`.
 
-The auto-play path: run the existing search for `item.title`, wait for the snapshot,
-build a `PickIntent` (for a series, `nextEpisode()` from `src/core/streamHistory.ts:116`
-against the user's history for that title; `{ kind: "film" }` otherwise, and for a series
-with no history, episode 1 of season 1), call `pickBestRelease`, then hand the winner to
-the existing stream launch path unchanged. Nothing about streaming, Real-Debrid, or
-player launch is modified.
+The auto-play path, shared by both panes: run the existing search for the title, wait for
+the snapshot, build a `PickIntent`, call `pickBestRelease`, hand the winner to the
+existing stream launch path. Nothing about streaming, Real-Debrid, or player launch is
+modified.
+
+The intent differs only in where it comes from:
+
+- **Continue Watching** — `nextEpisode(item)` (`src/core/streamHistory.ts:116`) gives the
+  season and episode directly. This is the live case, and the one that exercises the
+  banding.
+- **For You** — a film picked by `type` is `{ kind: "film" }`; a series has no history, so
+  it is season 1, episode 1.
+
+**`nextEpisode` returning null means Enter does not change at all.** It is null for a film
+*and* for a series watched via a season pack, because `Harrowgate.S03` parses to a season
+with no episode and guessing episode 1 would point at something already watched
+(`streamHistory.ts:111-114`). In both cases there is no honest thing to search *for*, so
+Enter keeps today's behaviour exactly: resume the stored torrent. Auto-pick applies only
+to rows that name a real next episode.
+
+Inventing an intent for those rows would undo a deliberate piece of existing design, so
+this is a constraint on the implementation, not a gap in it.
+
+**Where `next` is non-null, Enter is a widening, not a replacement.** It searches for the
+best release of that episode; when the search returns nothing usable, it falls back to
+resuming the stored torrent rather than failing. That keeps the pane working offline and
+when a title has aged out of every source.
 
 Status copy while this runs, on the existing status line: `Finding a release for
 Tin Rivers…` → the pick's outcome. When `relaxed` is non-empty or `overCap` is set, the
@@ -424,9 +459,15 @@ lists, built from `FEATURES` so the terminal and browser cannot drift.
 
 ### Browser UI
 
-`src/web/static/` — the For You card's primary click becomes play; a secondary button
-keeps today's "search this title" behaviour.
+`src/web/static/` — on both the For You card and the Continue Watching row, the primary
+click becomes play and a secondary button keeps today's behaviour ("search this title",
+and on Continue Watching also "resume this torrent").
 
+- **The episode ref comes from the wire, not from a local import.** Continue Watching
+  rows already carry `next: nextEpisode(item)` (`src/web/routes.ts:824`), which is what
+  builds the `PickIntent`. `src/web/static/` must not import `src/core/streamHistory.ts`
+  — it pulls in `node:fs` and would break the browser bundle. `savedModel.ts:285`
+  records this and the copy-then-drift bugs behind it.
 - **Route.** `PUT /api/preferences` in `src/web/routes.ts`, read-modify-write per
   request. `GET` of the current preference joins the existing config payload rather
   than getting its own endpoint.
@@ -476,6 +517,17 @@ Cases that must exist:
   (step 5), and is chosen when it is the only one.
 - **`rankReleases` returns every survivor in order**, and `pickBestRelease` equals its
   head — the property C depends on.
+
+Intent construction gets its own cases, since it is where the two triggers differ:
+
+- Continue Watching builds `{ kind: "episode" }` from the row's `next`.
+- **A Continue Watching row whose `next` is null never reaches the picker** — asserted
+  for both a film and a series watched via a season pack, since `nextEpisode` returns
+  null for each. The existing resume path runs and `pickBestRelease` is not called.
+- For You builds `{ kind: "film" }` for a film and season 1 episode 1 for a series.
+- **Continue Watching falls back to resuming the stored torrent** when the search
+  returns no usable candidate — asserted by a case where `pickBestRelease` returns
+  `null` and the existing resume path is still invoked.
 - **Exclusion is hard**: excluding `dv` with only `Tin.Rivers…DV…` available returns
   `null`, not a fallback.
 - **Requirement is soft**: requiring `atmos` with none available returns the best
@@ -503,17 +555,24 @@ the browser bundle — it must be run.
 
 ## 5. Documentation
 
-- `README.md`: the preference, what Enter now does on For You, and the season-pack
-  consequence named under Risks.
+- `README.md`: the preference, what Enter now does on **both** For You and Continue
+  Watching, and the season-pack consequence named under Risks.
 - The web UI's own limitations list — confirm it is still true once settings are
   web-editable.
 
 ## Risks
 
-**Enter changing meaning on For You** is the only behavioural regression here. Someone
-used to Enter-then-browse now gets a player. Mitigated by `s` / the secondary button
-being visible in the footer hints and on the card, but it is a real change and belongs in
-the PR body rather than buried.
+**Enter changes meaning in two panes**, and this is the only behavioural regression here.
+On For You, someone used to Enter-then-browse now gets a player. On Continue Watching the
+change is subtler and therefore easier to get wrong: on a row that names a next episode,
+Enter used to resume *the torrent you already had* and now searches for the *next
+episode*. Someone who wanted to finish what they were part-way through will find it starts
+the following one instead.
+
+Mitigated by `s` and the secondary buttons being visible in the footer hints and on the
+rows, by Continue Watching keeping an explicit "resume this torrent" action, and by the
+fallback to resume when nothing is found. Both changes belong in the PR body rather than
+buried.
 
 **One episode can fetch a whole season.** Resolution ranks above intent, so a 2160p
 season pack beats a 720p single episode. Chosen deliberately (see "Why resolution
