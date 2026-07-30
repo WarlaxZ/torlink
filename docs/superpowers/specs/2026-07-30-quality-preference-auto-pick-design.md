@@ -31,9 +31,29 @@ useful on its own.
 | B — New Releases | A title-grouped tree list over the browse feeds, sorted by recency | later; reuses A's picker |
 | C — Debrid-aware picking | Walk the ranking until one resolves: skip releases that are uncached, dead, or taken down | later; loops over A's ranking |
 
-A ships alone because it needs nothing from B or C, and because it improves the surface
-people already use. B without A is a list that still makes you choose manually. C without
-A has nothing to constrain.
+A ships alone because it needs nothing from B or C. B without A is a list that still
+makes you choose manually. C without A has nothing to constrain.
+
+### Two consequences of A's trigger being For You alone
+
+Both were found in review of this document, and neither is a reason to change the
+decision — but they must not be discovered during implementation.
+
+**For You is gated on reccd, so A does nothing for users without it.** `App.tsx:399`
+falls back to the `all` section when `resolveReccConfig(cfg).reccUrl` is absent, and the
+web returns `{status: "not-configured"}`. For anyone who has not stood up a self-hosted
+reccd, spec A ships a settings block wired to no action at all. That is acceptable for a
+first slice — B and the later "play best match" action both remove the gate — but it does
+mean A cannot be justified as "improving the surface people already use", and the PR body
+should say so rather than implying broader reach.
+
+**The episode banding has no live caller in A.** For You surfaces titles the user has
+*not* watched, so `nextEpisode()` finds no history and the intent is almost always season
+1, episode 1. Bands 1–3, `fromPack`, and the `nextEpisodeIndex()` handoff are therefore
+specified and tested here but exercised by nothing that ships. They are deliberate
+scaffolding, in the same sense as `rankReleases` below: the first caller that needs them
+is Continue Watching, which already holds both the title and the next episode. Labelled
+so a reviewer reading the banding tests does not go looking for the caller.
 
 ### Explicitly not in this spec
 
@@ -294,6 +314,13 @@ the sorted list.
    those sources entirely. If every candidate is over the cap, the cap is dropped and
    `overCap` is set — the fail-soft choice, so the action still plays something.
 
+   **When `overCap` is set, step 5 ranks resolution *ascending* instead**, so the
+   closest thing above the ceiling wins. Someone who capped at 1080p and is offered
+   only 2160p and 4320p should get the 2160p; handing them the largest file in the
+   list is the opposite of what the setting asked for. This inversion applies only to
+   the over-cap pass — with any candidate under the cap, ranking is descending as
+   normal.
+
 4. **Required features. Soft.** Keep only candidates matching *all* required features.
    If none do, drop the least-satisfied requirement and retry, recording each dropped
    id in `relaxed`. Ordering is by how many candidates satisfy each requirement — the
@@ -304,8 +331,9 @@ the sorted list.
    Atmos release wins over a 2160p one without it. A requirement the user ticked is a
    stronger signal than a resolution they did not.
 
-5. **Resolution, highest first.** The primary ranker, not merely a filter. This is what
-   makes a 2160p season pack beat a 720p single episode.
+5. **Resolution, highest first** (ascending when `overCap`, per step 3). The primary
+   ranker, not merely a filter. This is what makes a 2160p season pack beat a 720p
+   single episode.
 
    A candidate whose resolution did not parse **ranks last** among known resolutions.
    Note the deliberate asymmetry with step 3: unknown is optimistic for the cap (kept)
@@ -438,7 +466,11 @@ Cases that must exist:
 - **Size only breaks a resolution tie.** Two 2160p releases, the larger wins.
 - **A requirement outranks resolution.** `require: ["atmos"]`, with a 1080p Atmos release
   and a 2160p release without it: the **1080p wins**, and `relaxed` is empty.
-- **Cap respected**, and **cap ignored with `overCap` set** when nothing is under it.
+- **Cap respected.**
+- **Over-cap relaxation picks the closest, not the biggest.** `maxResolution: "1080p"`
+  with only a 2160p and a 4320p release available returns the **2160p**, with `overCap`
+  set. The regression this guards against is the descending rank handing a capped user
+  the largest file in the list.
 - **Unparseable resolution is asymmetric** — a candidate with no resolution token is not
   dropped by a `1080p` cap (step 3), but loses to any candidate with a stated resolution
   (step 5), and is chosen when it is the only one.
@@ -450,7 +482,13 @@ Cases that must exist:
   candidate and `relaxed: ["atmos"]`.
 - **Rarest requirement drops first** when two are set and neither is fully satisfiable.
 - **Deterministic tiebreak** on equal size and seeders.
-- **`dd` matches both `DD5.1` and `DDP5.1`**, and does not match a group named `RED-DD`.
+- **`dd` matches both `DD5.1` and `DDP5.1`.**
+- **`dd` is not fooled by a release group.** `require: ["dd"]` against only
+  `Kestrel.2010.1080p.BluRay.x264-REDDD` returns that release with
+  `relaxed: ["dd"]` — the requirement was dropped, not satisfied. Asserting on
+  `relaxed` rather than on which release came back is what makes this test real: with
+  one candidate the winner is the same either way, so a test that only checked the
+  chosen release would pass against a naive substring implementation.
 
 Config: sanitisation tests for unknown ids, non-string entries, an invalid
 `maxResolution`, and the require/exclude collision resolving in favour of exclude.
