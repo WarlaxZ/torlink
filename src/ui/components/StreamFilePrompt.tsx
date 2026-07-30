@@ -22,11 +22,17 @@ interface StreamFilePromptProps {
    * `nextEpisodeIndex` (src/util/nextEpisodeFile.ts). Omitted, or pointing at
    * nothing, means the first row — exactly today's behaviour.
    *
-   * Resolved to the file's own `url` and looked up in the sorted list on every
-   * render while the cursor is untouched, for two reasons. The list is REORDERED
-   * for display, so an index into `files` is not a row on screen. And this can
-   * arrive a tick after mount (the history read that computes it is async), which
-   * an initial `useState` value would miss.
+   * Resolved to the file's own `url` and looked up in the sorted list, because
+   * the list is REORDERED for display and an index into `files` is therefore not
+   * a row on screen.
+   *
+   * That lookup happens on every render while the cursor is untouched rather than
+   * once in a `useState` initialiser. In today's call graph the two are
+   * equivalent — `openStreamPicker` sets `streamPreselect` and `streamFiles` in
+   * one synchronous batch, so a preselect can never arrive after mount — and this
+   * form is preferred only because it has no stale-initialisation failure mode if
+   * that ever stops being true. No test covers a late arrival, deliberately:
+   * nothing can produce one.
    */
   preselect?: number;
   // Toggle the current torrent as a favourite (the `b` key).
@@ -64,9 +70,9 @@ export function StreamFilePrompt({
   favourited = false,
   preselect,
 }: StreamFilePromptProps) {
-  // null means "wherever the preselection says", so a preselection that lands
-  // late still moves the highlight, and a re-sort cannot strand it. Any keypress
-  // makes the cursor a number and the preselection stops being consulted.
+  // null means "wherever the preselection says", so a re-sort cannot strand the
+  // highlight. Any keypress makes the cursor a number and the preselection stops
+  // being consulted.
   const [cursor, setCursor] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const sorted = useMemo(() => sortFiles(files, sortMode), [files, sortMode]);

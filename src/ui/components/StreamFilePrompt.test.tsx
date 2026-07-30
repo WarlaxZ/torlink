@@ -62,8 +62,14 @@ describe("StreamFilePrompt", () => {
     );
   });
 
-  // Preselecting a POSITION would move the highlight to a different file the
-  // moment the user pressed `s`; preselecting the FILE cannot.
+  // What this pins, precisely: pressing `s` does not lose the preselection, so
+  // the two mechanisms that resolve it — the per-render lookup here and the `s`
+  // handler's own — compose rather than fight. It is NOT evidence that
+  // preselecting a POSITION would break on the re-sort: the `s` handler has
+  // re-resolved the highlighted file by `url` since before this change
+  // (StreamFilePrompt.tsx), so the re-sort itself survives either
+  // representation. Under an index-based implementation this fails for the same
+  // reason the test above it does — the row it opens on is already wrong.
   it("keeps the preselected file highlighted across a re-sort", async () => {
     const onSelect = vi.fn();
     const { stdin } = render(
