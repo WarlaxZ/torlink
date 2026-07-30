@@ -30,7 +30,12 @@ for (const file of ['index.html', 'player.html', 'styles.css']) {
 // in tsup.web.config.ts). `node:*` is the same failure with a different cause,
 // and the same fix does not apply: that one means the wrong code moved into
 // `static/`. Fail the build rather than print success over a broken dashboard.
-const BARE_IMPORT = /\b(?:from|import)\s*\(?\s*["'](?![./])([^"']+)["']/g;
+// The lookbehind is load-bearing: `\b` alone matches the `from` in
+// `Array.from("abc")` and fails the build advising you to add `abc` to
+// `noExternal`. A guard that cries wolf gets deleted, which costs more than the
+// bug it was watching for. `.`, a word character, or `$` before the keyword
+// means it is a property access, not an import.
+const BARE_IMPORT = /(?<![.\w$])(?:from|import)\s*\(?\s*["'](?![./])([^"']+)["']/g;
 const stowaways = new Map();
 for (const file of readdirSync(webOut).filter((f) => f.endsWith('.js'))) {
   const code = readFileSync(resolve(webOut, file), 'utf8');
