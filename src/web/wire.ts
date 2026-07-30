@@ -19,14 +19,18 @@
 // an integer percent; and before this module there was no compile-time link at
 // all, so renaming a field typechecked on both sides and rendered nothing.
 //
-// THE ONE IMPORT, and why it does not break the rule above: `src/util/episode.ts`
-// declares a single interface and imports nothing itself, so this `import type`
-// is erased at build time and reaches no Node builtin and no app module — the
-// property the "imports nothing" rule exists to protect. It is here because the
-// alternative was a seventh hand-written copy of `{ season, episode }`, the
-// exact drift this file was created to stop. Anything with a runtime value in it
+// THE IMPORTS, and why neither breaks the rule above: both are `import type`,
+// which TypeScript guarantees is erased at build time — the specifier never
+// reaches the emitted output, so it does not matter that `../util/releasePick`
+// itself has a runtime import of its own. Only a *value* import would drag
+// that in. `src/util/episode.ts` declares a single interface and imports
+// nothing itself, so it is erased for the simpler reason of having nothing to
+// erase. Both are here because the alternative was a hand-written copy of the
+// picker's shapes — `{ season, episode }` had already drifted once — the exact
+// drift this file was created to stop. Anything with a runtime value in it
 // still does not belong in this module.
 import type { EpisodeRef } from "../util/episode";
+import type { FeatureId, MaxResolution } from "../util/releasePick";
 
 /**
  * One in-flight (or paused / queued / failed) download.
@@ -285,6 +289,28 @@ export interface PublicSourceGroup {
   sourceIds: string[];
 }
 
+/**
+ * The viewing preference, over the wire. `maxResolution` is `null` rather than
+ * absent so the browser round-trips "no limit" explicitly — the same reason
+ * `/api/recommendations` sends `type=all` rather than omitting it.
+ */
+export interface PublicQualityPrefs {
+  maxResolution: MaxResolution | null;
+  require: FeatureId[];
+  exclude: FeatureId[];
+}
+
+/** The body of `POST /api/preferences`. One action: replace the whole preference. */
+export interface PreferencesRequest {
+  action: "set";
+  preferences: PublicQualityPrefs;
+}
+
+/** The 200 body of `POST /api/preferences` — the sanitised value actually stored. */
+export interface PreferencesResponse {
+  preferences: PublicQualityPrefs;
+}
+
 /** The body of `GET /api/sources`. */
 export interface SourcesResponse {
   groups: PublicSourceGroup[];
@@ -336,6 +362,16 @@ export interface SourcesResponse {
    * That difference IS the graceful degradation.
    */
   omdbConfigured: boolean;
+  /**
+   * The stored viewing preference — quality-picker state the TUI has always
+   * had. It rides on this response rather than getting its own `GET` route for
+   * the same reason `debridConfigured` and `omdbConfigured` do: this is the one
+   * payload the browser fetches before it can render anything, so folding the
+   * preference in costs no extra round trip. Writing is still its own route,
+   * `POST /api/preferences`, because a write needs its own request body and
+   * status code independent of what else this response reports.
+   */
+  preferences: PublicQualityPrefs;
 }
 
 /**
@@ -422,6 +458,14 @@ export interface PublicTitleParse {
  * rather than always-present so an `?imdb=` or `?name=` request (which parsed
  * nothing) answers with the same body it always did, and so a client cannot
  * mistake "you didn't ask me to parse" for "that name has no title in it".
+ *
+ * `type` is the medium OMDb itself reported for an `"ok"` answer — distinct
+ * from `parsed.type`, which is what the *caller* asked OMDb to narrow the
+ * search to. It is optional for the same reason every other field on this type
+ * that can be absent is: several tests construct a `PublicTitleMeta` directly,
+ * and a required field would break all of them for no benefit. This is the
+ * only place the browser can learn a title's medium (Task 14 gates the Play
+ * button on it), so it belongs on this route rather than a new one.
  */
 export type PublicTitleMeta =
   | {
@@ -429,6 +473,7 @@ export type PublicTitleMeta =
       imdbId: string | null;
       plot: string | null;
       posterUrl: string | null;
+      type?: "movie" | "series" | null;
       parsed?: PublicTitleParse;
     }
   | { status: "no-key"; parsed?: PublicTitleParse }
