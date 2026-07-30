@@ -449,7 +449,7 @@ export function App({
       const selecting = queue.getItems().find((it) => it.status === "selecting");
       setFileSelection(selecting ? { ...selecting } : null);
       for (const it of queue.getItems()) {
-        if (it.status !== "failed" || it.via !== "realdebrid" || !it.error) continue;
+        if (it.status !== "failed" || it.via !== "debrid" || !it.error) continue;
         if (reauthSeen.current.has(it.id)) continue;
         if (isTokenRejection(it.error)) {
           reauthSeen.current.add(it.id);

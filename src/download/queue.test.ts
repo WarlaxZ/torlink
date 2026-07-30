@@ -161,7 +161,8 @@ describe("DownloadQueue Real-Debrid path", () => {
     const it = q.getItems().find((i) => i.id === "rd1");
     expect(it?.status).toBe("failed");
     expect(it?.error).toContain("dead torrent");
-    expect(it?.via).toBe("realdebrid");
+    expect(it?.via).toBe("debrid");
+    expect(it?.provider).toBe("realdebrid");
     q.suspend();
   });
 });

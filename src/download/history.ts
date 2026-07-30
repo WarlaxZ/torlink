@@ -3,7 +3,8 @@ import path from "node:path";
 import { historyFile } from "../config/paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import type { SourceId } from "../sources/types";
-import type { DownloadVia } from "./types";
+import type { DebridProviderId } from "../integrations/debrid/types";
+import { normalizeVia, type DownloadVia } from "./types";
 
 export const HISTORY_CAP = 500;
 
@@ -14,6 +15,9 @@ export interface HistoryItem {
   // Delivery method of the completed download, so the history row can show
   // RD vs P2P. Optional: entries written before this existed load as undefined.
   via?: DownloadVia;
+  // Which debrid service fetched this, when `via` is "debrid". Absent on a
+  // debrid item means it predates the provider field, i.e. Real-Debrid.
+  provider?: DebridProviderId;
   sizeBytes: number;
   magnet: string;
   dir: string;
@@ -50,7 +54,12 @@ export async function loadHistory(): Promise<HistoryItem[]> {
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter(isHistoryItem).slice(0, HISTORY_CAP) : [];
+    return Array.isArray(parsed)
+      ? parsed
+          .filter(isHistoryItem)
+          .map((it) => ({ ...it, ...normalizeVia((it as { via?: unknown }).via) }))
+          .slice(0, HISTORY_CAP)
+      : [];
   } catch {
     return [];
   }

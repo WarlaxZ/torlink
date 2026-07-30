@@ -7,6 +7,7 @@ import { StreamSessionRegistry } from "../core/streamSession";
 import { TorrentEngine } from "../download/engine";
 import { saveConfig } from "../config/config";
 import { saveQueue, saveSeeds } from "../download/persist";
+import type { QueueItem } from "../download/types";
 import { saveHistory } from "../download/history";
 import { disarmBootMarker } from "../download/bootguard";
 import { configFile, historyFile, queueFile, seedsFile } from "../config/paths";
@@ -181,11 +182,12 @@ describe("startRuntime — applied config", () => {
   it("applies the resolved Real-Debrid token, so a restored paused RD item resumes", async () => {
     await saveConfig({ downloadDir: dir, trackers: [], realDebridToken: "cfg-token" });
     await saveQueue([
+      // Legacy on-disk shape (pre-provider): via is the bare string "realdebrid".
       {
         id: HASH, name: "Example", magnet: MAGNET, dir, via: "realdebrid",
         status: "paused", progress: 40, totalBytes: 1000, downloadedBytes: 400,
         speed: 0, peers: 0, addedAt: Date.now(),
-      },
+      } as unknown as QueueItem,
     ]);
     const runtime = await startRuntime();
     expect(runtime.queue.getItems()[0]?.status).toBe("paused");
@@ -201,11 +203,12 @@ describe("startRuntime — applied config", () => {
     vi.stubEnv("REALDEBRID_API_TOKEN", "env-token");
     await saveConfig({ downloadDir: dir, trackers: [] });
     await saveQueue([
+      // Legacy on-disk shape (pre-provider): via is the bare string "realdebrid".
       {
         id: HASH, name: "Example", magnet: MAGNET, dir, via: "realdebrid",
         status: "paused", progress: 0, totalBytes: 1000, downloadedBytes: 0,
         speed: 0, peers: 0, addedAt: Date.now(),
-      },
+      } as unknown as QueueItem,
     ]);
     const runtime = await startRuntime();
     runtime.queue.resume(HASH);

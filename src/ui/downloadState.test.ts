@@ -30,9 +30,12 @@ describe("downloadStateFor", () => {
 });
 
 describe("deliveryMethod", () => {
-  it("labels realdebrid as RD and everything else as P2P", () => {
-    expect(deliveryMethod("realdebrid")).toBe("RD");
-    expect(deliveryMethod("p2p")).toBe("P2P");
-    expect(deliveryMethod(undefined)).toBe("P2P");
+  it("badges each delivery method, including the legacy RD default", () => {
+    expect(deliveryMethod("p2p", undefined)).toBe("P2P");
+    expect(deliveryMethod(undefined, undefined)).toBe("P2P");
+    expect(deliveryMethod("debrid", "realdebrid")).toBe("RD");
+    expect(deliveryMethod("debrid", "torbox")).toBe("TB");
+    // A debrid item with no recorded provider predates the provider field.
+    expect(deliveryMethod("debrid", undefined)).toBe("RD");
   });
 });

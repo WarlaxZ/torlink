@@ -8,6 +8,7 @@ import {
   saveTorrentMeta,
   torrentExportName,
 } from "./persist";
+import { normalizeVia } from "./types";
 
 describe("torrent metadata export", () => {
   it("builds a safe .torrent filename from a torrent name", () => {
@@ -41,5 +42,24 @@ describe("torrent metadata export", () => {
     } finally {
       await fs.rm(outDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("normalizeVia", () => {
+  it('maps a legacy "realdebrid" item onto via+provider', () => {
+    expect(normalizeVia("realdebrid")).toEqual({ via: "debrid", provider: "realdebrid" });
+  });
+
+  it('leaves a current "debrid" value alone and names no provider', () => {
+    expect(normalizeVia("debrid")).toEqual({ via: "debrid" });
+  });
+
+  it("passes p2p through", () => {
+    expect(normalizeVia("p2p")).toEqual({ via: "p2p" });
+  });
+
+  it("treats an absent or unrecognised value as p2p, the pre-debrid default", () => {
+    expect(normalizeVia(undefined)).toEqual({ via: "p2p" });
+    expect(normalizeVia("nonsense")).toEqual({ via: "p2p" });
   });
 });

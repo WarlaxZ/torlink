@@ -2,7 +2,7 @@ import { promises as fs, mkdirSync, writeFileSync, renameSync, existsSync, rmSyn
 import path from "node:path";
 import { queueFile, seedsFile, torrentsDir } from "../config/paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
-import type { QueueItem } from "./types";
+import { normalizeVia, type QueueItem } from "./types";
 
 const write = serializeWrites();
 
@@ -34,7 +34,9 @@ export async function loadQueue(): Promise<QueueItem[]> {
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter(isQueueItem) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(isQueueItem).map((it) => ({ ...it, ...normalizeVia((it as { via?: unknown }).via) }))
+      : [];
   } catch {
     return [];
   }

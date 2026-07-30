@@ -299,7 +299,8 @@ export class DownloadQueue extends EventEmitter {
       source: input.source,
       magnet: input.magnet,
       dir,
-      via: "realdebrid",
+      via: "debrid",
+      provider: "realdebrid",
       phase: "queued",
       status: "downloading",
       progress: 0,
@@ -605,7 +606,7 @@ export class DownloadQueue extends EventEmitter {
       if (it.status !== "downloading") continue;
       // Real-Debrid items have no webtorrent engine; they push their own
       // progress through the resolve/download callbacks, so leave them alone.
-      if (it.via === "realdebrid") continue;
+      if (it.via === "debrid") continue;
       const s = this.engine.stats(it.id);
       if (!s) continue;
       it.progress = Math.min(100, Math.round(s.progress * 100));
@@ -683,7 +684,7 @@ export class DownloadQueue extends EventEmitter {
 
   pause(id: string): void {
     const it = this.items.get(id);
-    if (it?.via === "realdebrid") {
+    if (it?.via === "debrid") {
       if (it.status !== "downloading") return;
       // Abort the in-flight pipeline with a "pause" reason so downloadFiles keeps
       // the partial file(s); driveDebrid sees the paused status and won't fail it.
@@ -720,7 +721,7 @@ export class DownloadQueue extends EventEmitter {
   resume(id: string): void {
     const it = this.items.get(id);
     if (!it || it.status !== "paused") return;
-    if (it.via === "realdebrid") {
+    if (it.via === "debrid") {
       if (!this.debridToken) {
         it.status = "failed";
         it.error = "Set a Real-Debrid token, then download again.";
@@ -759,7 +760,7 @@ export class DownloadQueue extends EventEmitter {
 
   killP2P(): void {
     for (const item of this.items.values()) {
-      if (item.via === "realdebrid" || item.status !== "downloading") continue;
+      if (item.via === "debrid" || item.status !== "downloading") continue;
       item.status = "paused";
       item.speed = 0;
       item.peers = 0;
@@ -781,7 +782,7 @@ export class DownloadQueue extends EventEmitter {
   // Delete a Real-Debrid item's partial files on disk (used when cancelling a
   // paused item whose pipeline has already unwound). Best-effort; never throws.
   private cleanupDebridFiles(it: QueueItem): void {
-    if (it.via !== "realdebrid" || !it.paths || it.paths.length === 0) return;
+    if (it.via !== "debrid" || !it.paths || it.paths.length === 0) return;
     const paths = it.paths;
     void (async () => {
       for (const p of paths) await fs.rm(p, { force: true }).catch(() => {});
@@ -856,7 +857,7 @@ export class DownloadQueue extends EventEmitter {
     const it = this.items.get(id);
     if (!it || it.status !== "failed") return;
     it.error = undefined;
-    if (it.via === "realdebrid") {
+    if (it.via === "debrid") {
       // No token (e.g. retried after a restart): can't re-run, tell the user.
       if (!this.debridToken) {
         it.status = "failed";
@@ -1038,7 +1039,7 @@ export class DownloadQueue extends EventEmitter {
       // links, possibly no token), so surface it as a retryable failure rather
       // than handing its magnet to webtorrent (which would silently switch it
       // to P2P).
-      if (raw.via === "realdebrid" && raw.status === "downloading") {
+      if (raw.via === "debrid" && raw.status === "downloading") {
         raw.status = "failed";
         raw.error = "Interrupted — download again via Real-Debrid.";
         raw.phase = undefined;
@@ -1084,6 +1085,7 @@ export class DownloadQueue extends EventEmitter {
       magnet: it.magnet,
       dir: it.dir,
       via: it.via ?? "p2p",
+      provider: it.provider,
       completedAt: Date.now(),
     };
     this.history = [rec, ...this.history.filter((h) => h.id !== it.id)].slice(0, HISTORY_MAX);
