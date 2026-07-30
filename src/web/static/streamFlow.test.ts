@@ -9,6 +9,7 @@ import {
   pollDecision,
   runPlay,
   streamOutcome,
+  wantedEpisodeFor,
   type PlayEffects,
   type PublicStreamFile,
   type PublicStreamSession,
@@ -16,6 +17,7 @@ import {
 } from "./streamFlow";
 import { parsePlayerLocation } from "./playerModel";
 import type { DashRow } from "./dashboard";
+import type { PublicStreamHistoryItem } from "../wire";
 
 const file = (filename: string, index: number, bytes = 1024): PublicStreamFile => ({
   filename,
@@ -264,6 +266,69 @@ describe("confirmFallbackMessage", () => {
     // The whole point of the prompt: the user has to be told what proceeding
     // costs them, which is their IP address in a public swarm.
     expect(msg).toContain("IP address");
+  });
+});
+
+describe("wantedEpisodeFor", () => {
+  // A row as GET /api/saved sends it. Only `key` and `next` are read; the rest is
+  // here so the fixture is a real row rather than a shape invented for the test.
+  const row = (
+    key: string,
+    next: { season: number; episode: number } | null,
+  ): PublicStreamHistoryItem => ({
+    key,
+    title: "Harrowgate",
+    type: "series",
+    next,
+    rawName: "Harrowgate.S03E04.1080p.WEB-DL",
+    infoHash: "a".repeat(40),
+    startedAt: 1,
+  });
+
+  // The divergence this closes: the terminal preselects from EVERY play path,
+  // because every one of them funnels through the row `recordStreamHistory` just
+  // merged. The browser has no such row in hand when the Play button is on a
+  // search hit — so it finds one, by the store's own dedupe key.
+  it("finds the row for a release the user is part-way through", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", rows)).toEqual({
+      season: 3,
+      episode: 5,
+    });
+  });
+
+  // The point of keying on title+type rather than on the info hash: the pack
+  // being played is a DIFFERENT torrent from the single episode that was
+  // recorded, which is the ordinary case for "carry on with this show".
+  it("matches a different release of the same show", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Harrowgate.S03E01.2160p.WEB-DL-OTHERGROUP", rows)).toEqual({
+      season: 3,
+      episode: 5,
+    });
+  });
+
+  it("has no opinion about a title with no history row", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(wantedEpisodeFor("Kepler.S02E04.1080p.WEB-DL", rows)).toBeNull();
+    expect(wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", [])).toBeNull();
+  });
+
+  // Release names come from whoever uploaded the torrent. One that is only
+  // quality noise parses to no title at all.
+  it("has no opinion about a name that parses to nothing", () => {
+    expect(wantedEpisodeFor("1080p.WEB-DL.x265", [row("harrowgate|series", null)])).toBeNull();
+  });
+
+  // Continue watching passes the row's OWN `next`, and that must win: rows
+  // written under an older key format are kept on purpose (they merge into the
+  // new key the next time that title is streamed), so re-deriving the key from
+  // `rawName` can miss the very row that was clicked.
+  it("prefers the suggestion the caller already holds", () => {
+    const rows = [row("harrowgate|series", { season: 3, episode: 5 })];
+    expect(
+      wantedEpisodeFor("Harrowgate.S03.1080p.WEB-DL", rows, { season: 9, episode: 1 }),
+    ).toEqual({ season: 9, episode: 1 });
   });
 });
 

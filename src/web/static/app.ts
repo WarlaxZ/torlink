@@ -19,6 +19,7 @@ import {
   isPlayable,
   playerPath,
   runPlay,
+  wantedEpisodeFor,
   type EpisodeRef,
   type PublicStreamFile,
   type PublicStreamSession,
@@ -621,8 +622,12 @@ pickerCancel.addEventListener("click", () => {
 // Continue watching, whose "remembered torrent won't resolve" fallback is a
 // search, not just the notice `startSession` already showed. Every other
 // caller passes nothing and behaves exactly as before.
-// `next`, when given, is a Continue-watching row's own suggested episode, passed
-// through to runPlay for the file picker to open on. Nothing here computes it.
+// `next`, when given, is a Continue-watching row's own suggested episode — the
+// server's `nextEpisode` over that row's high-water mark. Callers that have no
+// row (a search hit, a library entry, a queue row) pass nothing, and
+// wantedEpisodeFor looks one up by title so EVERY play path preselects, as every
+// TUI play path does. Both the lookup and the precedence are its decision; the
+// only thing here is which two values to hand it.
 async function play(
   row: DashRow,
   onUnresolved?: () => void,
@@ -630,6 +635,7 @@ async function play(
 ): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
+  const wanted = wantedEpisodeFor(row.name, savedState.continueWatching, next);
   try {
     await runPlay(row, {
       start: startSession,
@@ -645,7 +651,7 @@ async function play(
       sleep,
       now: () => Date.now(),
       onUnresolved,
-    }, next);
+    }, wanted);
   } finally {
     playing.delete(row.id);
   }

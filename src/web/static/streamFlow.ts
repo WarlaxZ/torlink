@@ -19,8 +19,16 @@ import { streamCandidates } from "../../util/videoFiles";
 // rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
 // which is why it is a module of its own and not part of videoFiles.ts.
 import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
+// The third value import, and the same argument again: the stream-history store's
+// dedupe key decides which row a release belongs to, and a second derivation of
+// it in the browser would be the fifth recorded copy-then-drift bug here. It was
+// module-private in src/core/streamHistory.ts, which imports node:fs and so
+// cannot be reached from a browser bundle; it moved down to src/util (whence
+// src/core re-exports it) rather than being copied.
+import { historyKeyFor } from "../../util/streamHistoryKey";
+import { parseRelease } from "../../util/release";
 import type { EpisodeRef } from "../../util/episode";
-import type { PublicStreamFile, PublicStreamSession } from "../wire";
+import type { PublicStreamFile, PublicStreamHistoryItem, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
 
 // Re-exported for the same reason dashboard.ts re-exports the status types: one
@@ -159,6 +167,50 @@ export function streamOutcome(
   if (files.length === 0) return { kind: "empty" };
   if (files.length === 1) return { kind: "single", file: files[0]! };
   return { kind: "choose", files, preselect: nextEpisodeIndex(files, { next }) };
+}
+
+/**
+ * Which episode to open the picker on for a release the user pressed Play on.
+ *
+ * WHY THIS EXISTS: without it the browser preselects from ONE entry point and the
+ * terminal preselects from all of them. In the TUI every play path funnels
+ * through `openStreamPicker` with the row `recordStreamHistory` has just merged,
+ * so playing a season pack found in *search results* still opens on the episode
+ * you are up to. In the browser the only caller holding a Continue-watching row
+ * is the Continue-watching strip; a search hit and a library row hold a release
+ * name and nothing else. CLAUDE.md makes a feature that exists on one surface and
+ * not the other the default-prohibited outcome, and this is that same feature,
+ * not a second one.
+ *
+ * So the row is FOUND, by the store's own dedupe key — `historyKeyFor` over the
+ * parsed release name, the same key the server wrote. Not by info hash: the
+ * whole case is that the pack now being played is a different torrent from the
+ * single episode that was recorded.
+ *
+ * `held` is a suggestion the caller already has (`PublicStreamHistoryItem.next`,
+ * computed server-side over the stored high-water mark) and WINS when given.
+ * That is not belt-and-braces: rows written under an older key format are kept on
+ * purpose and only migrate when their title is next streamed, so a re-derived key
+ * can miss the very row that was clicked. A miss is ordinary here — null leaves
+ * the picker behaving exactly as it always has.
+ *
+ * ONE KNOWN DIFFERENCE FROM THE TUI, recorded rather than papered over: the
+ * terminal reads the row AFTER the merge, so playing something LATER than the
+ * high-water mark (S03E07 when the row says E04) preselects E08 there and E05
+ * here. Closing it would mean a second `recordStream` in the browser — the
+ * copy-then-drift bug this module keeps refusing — and the realistic instances
+ * are single-file torrents, which open no picker at all.
+ */
+export function wantedEpisodeFor(
+  name: string,
+  rows: readonly PublicStreamHistoryItem[],
+  held?: EpisodeRef | null,
+): EpisodeRef | null {
+  if (held) return held;
+  const parsed = parseRelease(name);
+  if (!parsed) return null;
+  const key = historyKeyFor(parsed);
+  return rows.find((r) => r.key === key)?.next ?? null;
 }
 
 /** How long between polls of a resolving session. */
