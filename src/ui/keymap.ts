@@ -36,6 +36,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "↵", label: "Sign in / switch account" },
       { keys: "x", label: "Sign out" },
       { keys: "i", label: "Import history — Netflix or Trakt (reccd)" },
+      { keys: "a", label: "Make the highlighted debrid provider active" },
     ],
   },
   {
@@ -52,7 +53,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "w", label: "Save or remove current search" },
       { keys: "d", label: "Download (P2P)" },
       { keys: "shift+d", label: "Download to a chosen folder" },
-      { keys: "r", label: "Download via Real-Debrid" },
+      { keys: "r", label: "Download via debrid (Real-Debrid / TorBox)" },
       { keys: "v", label: "Stream" },
       { keys: "b", label: "Favourite a video (detail view / stream picker)" },
       { keys: "y", label: "Copy magnet" },
@@ -115,7 +116,7 @@ export function footerHints(
   section: Section,
   downloadFocus?: DownloadFocus | null,
   seedFocus?: SeedFocus | null,
-  debridConfigured = false,
+  debridLabel?: string,
   streamActive = false,
 ): Hint[] {
   if (region === "sidebar") {
@@ -138,6 +139,7 @@ export function footerHints(
       { keys: "↵", label: "Sign in" },
       { keys: "x", label: "Sign out" },
       { keys: "i", label: "Import" },
+      { keys: "a", label: "Use" },
       SWITCH,
       ALWAYS,
     ];
@@ -207,7 +209,7 @@ export function footerHints(
     // The footer advertises only the default download key; D (download to a
     // chosen folder) stays bound but lives in the `?` sheet alone.
     { keys: "d", label: "Download" },
-    ...(debridConfigured ? [{ keys: "r", label: "Real-Debrid" }] : []),
+    ...(debridLabel ? [{ keys: "r", label: debridLabel }] : []),
     { keys: "v", label: "Stream" },
     { keys: "y", label: "Copy" },
     { keys: "s", label: "Sort" },

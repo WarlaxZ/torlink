@@ -12,6 +12,7 @@ import { PreviewPane } from "./PreviewPane";
 import { parseRelease, hintForSection } from "../../util/release";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
+import { getDebridProvider } from "../../integrations/debrid";
 import { wrapStep, windowStart, resultsPanelOuter } from "../move";
 import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../sort";
 import { filterResults } from "../filter";
@@ -57,14 +58,15 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
 function Detail({
   r,
   width,
-  debridConfigured,
+  debridLabel,
   mark,
   favourited,
   onFavourite,
 }: {
   r: TorrentResult;
   width: number;
-  debridConfigured: boolean;
+  // The active provider's display name, or undefined when none is configured.
+  debridLabel?: string;
   mark: { icon: string; color?: string; dim?: boolean } | null;
   favourited?: boolean;
   onFavourite?: () => void;
@@ -155,13 +157,13 @@ function Detail({
           f
         </Text>
         <Text color={COLOR.text}> Download to</Text>
-        {debridConfigured ? (
+        {debridLabel ? (
           <>
             <Text dimColor>{`     ${ICON.dot}     `}</Text>
             <Text color={COLOR.accent} bold>
               r
             </Text>
-            <Text color={COLOR.text}> Real-Debrid</Text>
+            <Text color={COLOR.text}>{` ${debridLabel}`}</Text>
             <Text dimColor>{`     ${ICON.dot}     `}</Text>
             <Text color={COLOR.accent} bold>
               v
@@ -205,7 +207,7 @@ export function Results() {
     requestDownloadTo,
     startDebridDownload,
     streamResult,
-    debridConfigured,
+    debridProvider,
     copyMagnet,
     contentWidth,
     listRows,
@@ -219,6 +221,7 @@ export function Results() {
     omdbApiKey,
   } = useStore();
   const [previewOn, setPreviewOn] = useState(true);
+  const debridLabel = debridProvider ? getDebridProvider(debridProvider).label : undefined;
 
   const search = useConcurrentSearch(query, disabledSources, adultEnabled);
   const enabled = useMemo(
@@ -597,7 +600,7 @@ export function Results() {
             <Detail
               r={detail}
               width={Math.max(10, contentWidth - 4)}
-              debridConfigured={debridConfigured}
+              debridLabel={debridLabel}
               mark={stateMark(stateFor(detail.infoHash))}
               favourited={canFavourite(detail) ? isFavourited(detail.infoHash) : false}
               onFavourite={canFavourite(detail) ? () => toggleFavourite(favInput(detail)) : undefined}

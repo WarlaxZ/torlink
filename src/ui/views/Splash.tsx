@@ -6,6 +6,7 @@ import { LOGO_WIDTH } from "../logo";
 import { useStore } from "../store";
 import { sourcesByGroup } from "../../sources/registry";
 import { withoutToken } from "../../web/links";
+import { getDebridProvider } from "../../integrations/debrid";
 import { COLOR, ICON } from "../theme";
 
 const categoryLine = (adultEnabled: boolean): string =>
@@ -30,9 +31,24 @@ export function Splash({
   recovered?: boolean;
   webStatus?: SplashWebStatus | null;
 } = {}) {
-  const { submitQuery, searchHistory, quitAll, cols, rows, debridConfigured, rdStatus, setView, setRegion, adultEnabled } = useStore();
+  const {
+    submitQuery,
+    searchHistory,
+    quitAll,
+    cols,
+    rows,
+    debridConfigured,
+    debridProvider,
+    debridStatus,
+    setView,
+    setRegion,
+    adultEnabled,
+  } = useStore();
   const { isRawModeSupported } = useStdin();
   const categories = categoryLine(adultEnabled);
+  // Only rendered when debridConfigured, which implies debridProvider is set —
+  // the fallback never actually reaches the screen, but stays neutral anyway.
+  const debridLabel = debridProvider ? getDebridProvider(debridProvider).label : "a debrid service";
 
   useInput(
     (input, key) => {
@@ -80,10 +96,10 @@ export function Splash({
       <Box marginTop={1}>
         {debridConfigured ? (
           <Text dimColor>
-            {`Real-Debrid: connected${rdStatus?.username ? ` as ${rdStatus.username}` : ""}`}
+            {`${debridLabel}: connected${debridStatus?.username ? ` as ${debridStatus.username}` : ""}`}
           </Text>
         ) : (
-          <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid for instant, private streaming.</Text>
+          <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid or TorBox for instant, private streaming.</Text>
         )}
       </Box>
 

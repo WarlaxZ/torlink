@@ -14,6 +14,7 @@ import {
   truncate,
 } from "../../util/format";
 import { deliveryMethod } from "../downloadState";
+import { getDebridProvider } from "../../integrations/debrid";
 import type { QueueItem } from "../../download/types";
 import type { HistoryItem } from "../../download/history";
 import type { SourceId } from "../../sources/types";
@@ -42,10 +43,10 @@ function rightStats(it: QueueItem): string {
     // A debrid provider first caches the torrent on its cloud (resolving), then
     // we pull it over HTTP — no swarm, so no peer count.
     if (it.via === "debrid" && it.phase === "queued") {
-      return "queued — waiting for Real-Debrid";
+      return `queued — waiting for ${getDebridProvider(it.provider ?? "realdebrid").label}`;
     }
     if (it.via === "debrid" && it.phase === "resolving") {
-      return `preparing on Real-Debrid… ${it.progress}%`;
+      return `preparing on ${getDebridProvider(it.provider ?? "realdebrid").label}… ${it.progress}%`;
     }
     const speed = formatBytesPerSec(it.speed) || "…";
     const eta = it.eta ? `  ${formatEtaShort(it.eta)}` : "";
@@ -111,7 +112,7 @@ export function Downloads() {
 
   const total = active.length + recent.length;
   const [cursor, setCursor] = useState(0);
-  // An active Real-Debrid item whose direct link the user asked to copy before
+  // An active debrid item whose direct link the user asked to copy before
   // it had resolved — we copy it automatically the moment it's ready.
   const [copyWhenReady, setCopyWhenReady] = useState<string | null>(null);
 
@@ -158,7 +159,7 @@ export function Downloads() {
           if (it.directUrl) copyLink(it.directUrl, it.name);
           else if (it.via === "debrid") {
             setCopyWhenReady(it.id);
-            setNotice("Will copy the link once Real-Debrid is ready…");
+            setNotice(`Will copy the link once ${getDebridProvider(it.provider ?? "realdebrid").label} is ready…`);
           } else setNotice("No direct link — that's a peer-to-peer download.");
         }
       } else {
