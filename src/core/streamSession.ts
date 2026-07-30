@@ -118,7 +118,7 @@ export class StreamSessionRegistry {
    * rejects, so a caller that drops it cannot produce an unhandled rejection.
    */
   begin(input: StartStreamInput): { session: StreamSession; done: Promise<StreamSession> } {
-    const viaDebrid = input.route.kind === "realdebrid";
+    const viaDebrid = input.route.kind === "debrid";
     const session: StreamSession = {
       id: this.idFactory(),
       capability: this.capabilityFactory(),
@@ -144,7 +144,7 @@ export class StreamSessionRegistry {
     input: StartStreamInput,
     abort: AbortController,
   ): Promise<StreamSession> {
-    const viaDebrid = input.route.kind === "realdebrid";
+    const viaDebrid = input.route.kind === "debrid";
     try {
       if (viaDebrid) {
         if (!input.debridToken) throw new Error(NO_DEBRID_TOKEN);

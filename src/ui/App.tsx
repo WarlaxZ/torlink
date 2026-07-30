@@ -1344,7 +1344,7 @@ export function App({
         setTorrentPrompt({ input, reason: route.reason }); // always warn
         return;
       }
-      // route.kind === "realdebrid": fall through to the existing RD flow.
+      // route.kind === "debrid": fall through to the existing RD flow.
       const token = resolveRealDebridToken(config);
       if (!token) {
         setNotice("Set a Real-Debrid token first — open the Accounts tab.");

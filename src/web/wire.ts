@@ -167,7 +167,7 @@ export interface StartStreamResponse {
  */
 export interface StreamConfirmResponse {
   route: "torrent-confirm";
-  /** Human-readable, e.g. "your Real-Debrid premium isn't active". */
+  /** Human-readable, e.g. "your Real-Debrid plan isn't active". */
   reason: string;
 }
 

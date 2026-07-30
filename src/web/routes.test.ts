@@ -488,7 +488,7 @@ describe("POST /api/stream — torrent-confirm", () => {
     expect(res.status).toBe(409);
     expect(res.json).toEqual({
       route: "torrent-confirm",
-      reason: "your Real-Debrid premium isn't active",
+      reason: "your Real-Debrid plan isn't active",
     });
     expect(streamTorrentImpl).not.toHaveBeenCalled();
     expect(sessions.list()).toEqual([]);

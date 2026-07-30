@@ -532,7 +532,7 @@ describe("stream handle — Real-Debrid", () => {
       infoHash: "0".repeat(40),
       magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
       name: "Movie",
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "rd-token",
     });
     expect(s.state).toBe("ready");
@@ -864,7 +864,7 @@ describe("GET /stream/:sid/:idx.m3u", () => {
       infoHash: "0".repeat(40),
       magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
       name: "Movie",
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "rd-token",
     });
     await start(reg);

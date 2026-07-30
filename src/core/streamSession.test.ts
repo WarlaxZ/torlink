@@ -242,7 +242,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
 
     const session = await registry.start({
       ...INPUT,
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "tok",
     });
 
@@ -256,7 +256,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     const resolveDebridImpl = vi.fn(async () => RD_FILES);
     const registry = new StreamSessionRegistry({ resolveDebridImpl });
 
-    await registry.start({ ...INPUT, route: { kind: "realdebrid" }, debridToken: "tok" });
+    await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" }, debridToken: "tok" });
 
     expect(resolveDebridImpl).toHaveBeenCalledWith(
       "tok",
@@ -270,7 +270,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     const streamTorrentImpl = vi.fn(async () => fakeTorrentSession());
     const registry = new StreamSessionRegistry({ resolveDebridImpl, streamTorrentImpl });
 
-    const session = await registry.start({ ...INPUT, route: { kind: "realdebrid" } });
+    const session = await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" } });
 
     expect(session.state).toBe("error");
     // By identity, not by shape: the constant is exported so the web layer can
@@ -288,7 +288,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
       idFactory: () => "sess1",
     });
 
-    await registry.start({ ...INPUT, route: { kind: "realdebrid" }, debridToken: "tok" });
+    await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" }, debridToken: "tok" });
     await expect(registry.stop("sess1")).resolves.toBeUndefined();
 
     expect(registry.get("sess1")).toBeNull();
@@ -314,7 +314,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
 
     const starting = registry.start({
       ...INPUT,
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "tok",
     });
     await Promise.resolve();
