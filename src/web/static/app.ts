@@ -162,6 +162,7 @@ const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 
+const prefsBlock = el<HTMLElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
 const prefsFeaturesBox = el<HTMLDivElement>("pref-features");
 
@@ -2262,8 +2263,12 @@ async function probe(): Promise<Probe> {
 function showAuth(message?: string): void {
   app.hidden = true;
   // The pane switch is meaningless with nothing behind it, and leaving it up
-  // over the token form invites a click that does nothing visible.
+  // over the token form invites a click that does nothing visible. The
+  // preferences disclosure is the same story, plus a sharper failure mode:
+  // touching it before unlocking would fire an unauthenticated POST
+  // /api/preferences and get a 401 for its trouble.
   viewsNav.hidden = true;
+  prefsBlock.hidden = true;
   authForm.hidden = false;
   if (message === undefined) {
     authError.hidden = true;
@@ -2282,6 +2287,7 @@ function showUnreachable(detail: string): void {
   authForm.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
+  prefsBlock.hidden = false;
   // On the queue pane, because that is where the explanation goes — a search
   // box over an unreachable server is an invitation to a second failure.
   showView("queue");
@@ -2297,6 +2303,7 @@ function openApp(payload: StatusPayload): void {
   authError.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
+  prefsBlock.hidden = false;
   showView(view);
   renderTabs();
   layoutSelect.value = layout;
