@@ -6,7 +6,7 @@ import { log } from "../util/logger";
 // their own free API key. reccd deliberately carries none of this — see the For
 // You / search preview panes. A field is null when OMDb has no value ("N/A").
 export type FetchTitleMetaResult =
-  | { ok: true; imdbId: string | null; plot: string | null; posterUrl: string | null }
+  | { ok: true; type?: OmdbType | null; imdbId: string | null; plot: string | null; posterUrl: string | null }
   | { ok: false; error: string };
 
 // Narrow a search to the right medium when we know it (e.g. the TV vs Movies
@@ -16,6 +16,7 @@ export type OmdbType = "movie" | "series";
 interface OmdbResponse {
   Response: string;
   imdbID?: string;
+  Type?: string;
   Plot?: string;
   Poster?: string;
   Error?: string;
@@ -53,7 +54,11 @@ async function request(
     if (!isOmdbResponse(body)) return { ok: false, error: "unexpected response from OMDb" };
     // OMDb signals "not found" / bad key with 200 + { Response: "False" }.
     if (body.Response !== "True") return { ok: false, error: body.Error || "not found" };
-    return { ok: true, imdbId: clean(body.imdbID), plot: clean(body.Plot), posterUrl: clean(body.Poster) };
+    // OMDb also returns "episode" and "game"; anything but the two we model
+    // becomes null rather than being coerced into one of them.
+    const type: OmdbType | null =
+      body.Type === "movie" || body.Type === "series" ? body.Type : null;
+    return { ok: true, type, imdbId: clean(body.imdbID), plot: clean(body.Plot), posterUrl: clean(body.Poster) };
   } catch (err) {
     log.debug(`omdb ${ctx}: failed to reach OMDb: ${err instanceof Error ? err.message : String(err)}`);
     return { ok: false, error: "couldn't reach OMDb" };

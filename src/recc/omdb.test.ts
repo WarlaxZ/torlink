@@ -20,7 +20,7 @@ describe("fetchTitleMeta (by id)", () => {
       Poster: "https://img/poster.jpg",
     });
     const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
-    expect(res).toEqual({ ok: true, imdbId: "tt1", plot: "A nuclear disaster unfolds.", posterUrl: "https://img/poster.jpg" });
+    expect(res).toEqual({ ok: true, type: null, imdbId: "tt1", plot: "A nuclear disaster unfolds.", posterUrl: "https://img/poster.jpg" });
     expect(urls[0]).toContain("i=tt1");
     expect(urls[0]).toContain("apikey=KEY");
   });
@@ -28,7 +28,20 @@ describe("fetchTitleMeta (by id)", () => {
   it("maps 'N/A' fields to null but still succeeds", async () => {
     const { impl } = jsonImpl(200, { Response: "True", imdbID: "tt1", Plot: "N/A", Poster: "N/A" });
     const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
-    expect(res).toEqual({ ok: true, imdbId: "tt1", plot: null, posterUrl: null });
+    expect(res).toEqual({ ok: true, type: null, imdbId: "tt1", plot: null, posterUrl: null });
+  });
+
+  it("reports the medium OMDb returned", async () => {
+    const { impl } = jsonImpl(200, { Response: "True", imdbID: "tt1", Type: "movie", Plot: "x", Poster: "N/A" });
+    const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
+    expect(res).toEqual({ ok: true, type: "movie", imdbId: "tt1", plot: "x", posterUrl: null });
+  });
+
+  it("reports null when OMDb sends a medium it does not model", async () => {
+    // OMDb also returns "episode" and "game"; neither is one of ours.
+    const { impl } = jsonImpl(200, { Response: "True", imdbID: "tt1", Type: "game" });
+    const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
+    expect(res).toEqual({ ok: true, type: null, imdbId: "tt1", plot: null, posterUrl: null });
   });
 
   it("skips the request entirely when no key is configured", async () => {
@@ -56,7 +69,7 @@ describe("fetchTitleMetaByName", () => {
   it("builds a title lookup with year and type", async () => {
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt2", Plot: "P", Poster: "https://p.jpg" });
     const res = await fetchTitleMetaByName("Harrowgate", "KEY", { year: 2022, type: "series", fetchImpl: impl });
-    expect(res).toEqual({ ok: true, imdbId: "tt2", plot: "P", posterUrl: "https://p.jpg" });
+    expect(res).toEqual({ ok: true, type: null, imdbId: "tt2", plot: "P", posterUrl: "https://p.jpg" });
     const u = urls[0]!;
     expect(u).toContain("t=Harrowgate");
     expect(u).toContain("y=2022");
