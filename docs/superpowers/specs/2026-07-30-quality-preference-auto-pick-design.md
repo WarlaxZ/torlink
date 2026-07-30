@@ -30,6 +30,7 @@ useful on its own.
 | **A — this spec** | Quality preference + `pickBestRelease` + auto-play from For You | ships first |
 | B — New Releases | A title-grouped tree list over the browse feeds, sorted by recency | later; reuses A's picker |
 | C — Debrid-aware picking | Walk the ranking until one resolves: skip releases that are uncached, dead, or taken down | later; loops over A's ranking |
+| D — Season/episode picker | Show → seasons → episodes, defaulted to where you are up to; OMDb's Season endpoint when a key is configured, parsed release names otherwise | later; unlocks TV for A and B |
 
 A ships alone because it needs nothing from B or C. B without A is a list that still
 makes you choose manually. C without A has nothing to constrain.
@@ -47,11 +48,30 @@ Watching has no such gate — it reads local stream history — so A is useful t
 on day one.
 
 **For You cannot exercise the episode logic.** It surfaces titles the user has *not*
-watched, so `nextEpisode()` finds no history and the intent is always season 1, episode 1.
-The banding rules and the `nextEpisodeIndex()` handoff would ship specified, tested, and
+watched, so `nextEpisode()` finds no history and there is no honest episode to infer. The
+banding rules and the `nextEpisodeIndex()` handoff would ship specified, tested, and
 called by nothing. Continue Watching is precisely the surface where `nextEpisode()` is
 live, so the pack-versus-resolution ranking runs against real intent rather than a
 constant.
+
+### A only auto-plays where the intent is certain
+
+There are three cases, and A deliberately covers two:
+
+| Surface | Intent | A's behaviour |
+| --- | --- | --- |
+| For You, film | unambiguous | search, pick, play |
+| Continue Watching, row with a `next` episode | unambiguous | search, pick, play that episode |
+| For You, series | **unknown** | unchanged — jump to the results list |
+
+An earlier draft of this spec had a For You series auto-play season 1, episode 1. That is
+a guess, and usually a wrong one: the user may be several seasons in on another device, or
+want to start somewhere else. Spec D exists to answer that question properly — show the
+seasons, then the episodes, defaulted to where the user is up to — and A shipping a guess
+would mean users see a behaviour introduced and then reversed one release later.
+
+So A leaves the TV-from-For-You path exactly as it is today. This is not a gap to be
+filled during implementation; it is the deliverable.
 
 It is a small addition: `nextEpisode(item)` is already computed server-side and sent over
 the wire as `next` (`src/web/routes.ts:824`), and the TUI already renders `nextLabel(item)`
@@ -63,6 +83,9 @@ that constraint and the four copy-then-drift bugs behind it.
 ### Explicitly not in this spec
 
 - The New Releases tree. No grouping of results by title.
+- **Auto-play of a TV title from For You.** See "A only auto-plays where the intent is
+  certain" below — that case needs D's picker, and A must not ship a guess that D would
+  immediately reverse.
 - Any Real-Debrid awareness — neither cache-checking nor takedown recovery. See "What we
   learned about Real-Debrid" below: both need a retry loop that mutates the user's RD
   account, and folding that in here would stall A. A's current behaviour on a dead or
@@ -405,7 +428,8 @@ auto-play appears:
 
 | Pane | Key | Before | After |
 | --- | --- | --- | --- |
-| `ForYou.tsx` | `Enter` | `setSection(TYPE_SECTION[type])` + `submitQuery(item.title)` | search the title, pick, play |
+| `ForYou.tsx` (film) | `Enter` | `setSection(TYPE_SECTION[type])` + `submitQuery(item.title)` | search the title, pick, play |
+| `ForYou.tsx` (series) | `Enter` | as above | **unchanged** — jump to the results list |
 | `ForYou.tsx` | `s` | — | today's Enter: jump to the results list for that title |
 | `ContinueWatching.tsx` | `Enter` | resume the stored torrent | search the title, pick, play the next episode |
 | `ContinueWatching.tsx` | `s` | — | jump to the results list for that title |
@@ -427,8 +451,10 @@ The intent differs only in where it comes from:
 - **Continue Watching** — `nextEpisode(item)` (`src/core/streamHistory.ts:116`) gives the
   season and episode directly. This is the live case, and the one that exercises the
   banding.
-- **For You** — a film picked by `type` is `{ kind: "film" }`; a series has no history, so
-  it is season 1, episode 1.
+- **For You** — always `{ kind: "film" }`, because a series row never reaches the picker
+  at all (see "A only auto-plays where the intent is certain"). On a series row `Enter`
+  and `s` therefore do the same thing; `s` is still bound, so the key means the same
+  thing on every row.
 
 **`nextEpisode` returning null means Enter does not change at all.** It is null for a film
 *and* for a series watched via a season pack, because `Harrowgate.S03` parses to a season
@@ -459,9 +485,11 @@ lists, built from `FEATURES` so the terminal and browser cannot drift.
 
 ### Browser UI
 
-`src/web/static/` — on both the For You card and the Continue Watching row, the primary
-click becomes play and a secondary button keeps today's behaviour ("search this title",
-and on Continue Watching also "resume this torrent").
+`src/web/static/` — on a For You **film** card and on a Continue Watching row that names a
+next episode, the primary click becomes play, with a secondary button keeping today's
+behaviour ("search this title", and on Continue Watching also "resume this torrent"). A
+For You **series** card is unchanged: no play button, click still searches. The same rule
+as the terminal, decided in the same place — `pickModel.ts`, not in `app.ts`.
 
 - **The episode ref comes from the wire, not from a local import.** Continue Watching
   rows already carry `next: nextEpisode(item)` (`src/web/routes.ts:824`), which is what
@@ -524,7 +552,12 @@ Intent construction gets its own cases, since it is where the two triggers diffe
 - **A Continue Watching row whose `next` is null never reaches the picker** — asserted
   for both a film and a series watched via a season pack, since `nextEpisode` returns
   null for each. The existing resume path runs and `pickBestRelease` is not called.
-- For You builds `{ kind: "film" }` for a film and season 1 episode 1 for a series.
+- For You builds `{ kind: "film" }` for a film.
+- **A For You series row never reaches the picker** — asserted by a case where the row's
+  type is `series` and `pickBestRelease` is not called, the existing
+  `setSection` + `submitQuery` path running instead. This is the guard against
+  reintroducing the season-1-episode-1 guess, so it must assert on the picker *not*
+  being called rather than only on what was shown.
 - **Continue Watching falls back to resuming the stored torrent** when the search
   returns no usable candidate — asserted by a case where `pickBestRelease` returns
   `null` and the existing resume path is still invoked.
@@ -560,10 +593,40 @@ the browser bundle — it must be run.
 - The web UI's own limitations list — confirm it is still true once settings are
   web-editable.
 
+## Notes carried forward to spec D
+
+Found while scoping A, recorded so D starts from evidence rather than repeating the work.
+
+**OMDb can list a season.** `?i=tt…&Season=1` (or `t=…&Season=1`) returns a season's
+episodes, and series lookups carry `totalSeasons`. `src/recc/omdb.ts` does not use it
+today — it only has `fetchTitleMeta` (by id) and `fetchTitleMetaByName`, both of which
+hard-code `plot=short` and parse a single title out of the response, so the season call
+needs its own parse path rather than a parameter on `request()`.
+
+**The response fields for a season query are not documented** on omdbapi.com. D must
+verify the actual shape against a live key before relying on it, not assume the
+conventional `Episodes: [{ Title, Released, Episode, imdbID }]`.
+
+**"Where I am up to" has two existing sources and they disagree.** `streamHistory` stores
+season and episode *numbers* per title (`src/core/streamHistory.ts`); `FavouriteItem.watched`
+(`src/config/config.ts:18`) stores episode *filenames*. They are keyed differently, they
+are written by different paths, and neither is a superset of the other. D has to pick one
+as authoritative or reconcile them explicitly — quietly preferring whichever is non-empty
+would make the default cursor position depend on which action the user happened to use
+last.
+
+**`nextEpisode()` is a suggestion, not an availability claim** (`streamHistory.ts:111`) —
+nothing has asked a tracker. D's picker shows real availability per episode, so it should
+mark an episode with no release found rather than hiding it, and must not conflate that
+with an episode that has not aired.
+
 ## Risks
 
 **Enter changes meaning in two panes**, and this is the only behavioural regression here.
-On For You, someone used to Enter-then-browse now gets a player. On Continue Watching the
+On For You, someone used to Enter-then-browse now gets a player — on film rows only, which
+makes the pane's own behaviour inconsistent between rows until D lands. That is the price
+of not shipping a guess for TV, and the row itself should make it obvious which it is
+(a play affordance on films, not on series) rather than leaving Enter to surprise people. On Continue Watching the
 change is subtler and therefore easier to get wrong: on a row that names a next episode,
 Enter used to resume *the torrent you already had* and now searches for the *next
 episode*. Someone who wanted to finish what they were part-way through will find it starts
