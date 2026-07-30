@@ -55,8 +55,11 @@ describe("hasFeature", () => {
     expect(hasFeature(p("Ashfall.1999.720p.BRRip.DTS-HD.MA"), "dts")).toBe(true);
   });
 
-  it("matches hevc under either spelling", () => {
+  it("matches hevc under every spelling the parser produces", () => {
+    // x265 stays "x265"; HEVC, h265 and H.265 all normalise to "h265".
     expect(hasFeature(p("Harrowgate.S03.1080p.WEB-DL.DDP5.1.x265"), "hevc")).toBe(true);
+    expect(hasFeature(p("Kestrel.2010.1080p.BluRay.HEVC-GROUP"), "hevc")).toBe(true);
+    expect(hasFeature(p("Kestrel.2010.1080p.BluRay.h265-GROUP"), "hevc")).toBe(true);
     expect(hasFeature(plain, "hevc")).toBe(false);
   });
 

@@ -56,7 +56,10 @@ export const FEATURES: Record<FeatureId, { label: string; test: (p: ParsedReleas
   dts: { label: "DTS", test: (p) => (p.audioList ?? []).some((a) => a.toLowerCase().startsWith("dts")) },
   truehd: { label: "TrueHD", test: (p) => inList(p.audioList, "truehd") },
   remux: { label: "Remux", test: (p) => p.remux === true },
-  hevc: { label: "HEVC / x265", test: (p) => p.codec === "x265" || p.codec === "hevc" },
+  // "hevc" is NOT a value the parser produces: it normalises HEVC, h265 and
+  // H.265 all to "h265", and leaves x265 as "x265". Testing for "hevc" would
+  // be dead code that silently missed the commonest spelling.
+  hevc: { label: "HEVC / x265", test: (p) => p.codec === "x265" || p.codec === "h265" },
   tenbit: { label: "10-bit", test: (p) => p.bitdepth === 10 },
 };
 
