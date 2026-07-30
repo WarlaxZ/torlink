@@ -2555,7 +2555,20 @@ function addHistoryPlay(row: HTMLElement, item: PublicStreamHistoryItem): void {
 
 **There is no `posterMetaFor` helper, and you must not build a metadata cache to create one.** Verified: recc cards get their metadata from `fetchReccPoster(imdbId)` (`app.ts:1415`), which fetches `/api/title?imdb=…`, reads `PublicTitleMeta`, uses `posterUrl`, and **discards the rest of the response**. `resultPosters.ts`'s cache is keyed by *release name* and serves search results, not recc cards — it is the wrong structure and the wrong key.
 
-So the minimal, correct change: have `fetchReccPoster` carry `meta.type` out alongside its existing outcome (widen `ReccPosterOutcome`, or return it beside), and hand it to `addReccPlay` when the card paints. Task 12 already added `type` to `PublicTitleMeta`, so the field is on the response — this task only reads it, and must not touch `wire.ts` or `routes.ts`.
+So the minimal, correct change: have `fetchReccPoster` carry `meta.type` out alongside its existing outcome, and hand it to `addReccPlay` when the card paints. Task 12 already added `type` to `PublicTitleMeta`, so the field is on the response — this task only reads it, and must not touch `wire.ts` or `routes.ts`.
+
+**A sibling field, not a fourth variant.** `ReccPosterOutcome` (`src/web/static/reccModel.ts:372`) is a three-way union — `{kind:"poster",url}` | `{kind:"no-key"}` | `{kind:"none"}` — and it describes *what happened to the artwork*. The medium is orthogonal: a title with no poster still has a type, and a `no-key` response has neither. Adding `medium` to each variant, or a fourth variant, would conflate two independent facts. Widen the return instead:
+
+```ts
+async function fetchReccPoster(imdbId: string): Promise<{
+  poster: ReccPosterOutcome;
+  medium: ReccMedium | null;
+}>
+```
+
+`medium` is `null` on every early return (`!metaRes.ok`, `no-key`, a thrown fetch) — those genuinely learned nothing — and `meta.type ?? null` once the response parsed. Update the call sites, which currently destructure the outcome directly.
+
+`ReccMedium` comes from `src/util/autoPlayableFilm.ts`. `reccPosterNote` and `reccPosterHint` still take a plain `ReccPosterOutcome` and must not change.
 
 **Before that fetch resolves, pass `undefined`.** `autoPlayableFilm` falls back to the filter, exactly as the terminal does with its debounce race. Never block a click on a network round trip, and do not add a synchronous cache just so the button can render a moment earlier — a Play button that appears when the poster does is fine.
 
