@@ -101,6 +101,65 @@ h1 {
   margin: 0;
 }
 
+/* The playback-preference disclosure. Overrides .card's row layout the same
+   way .picker does — it is a heading (summary) above a form, not a strip of
+   controls — and stays block-level whether open or closed: <details> hides
+   its own content natively, independent of the display value set here. */
+.prefs {
+  display: block;
+}
+
+.prefs summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.prefs[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+.prefs .control {
+  margin-bottom: 0.6rem;
+}
+
+/* One button per feature (releasePick.ts's FEATURE_IDS), not a checkbox list:
+   off/require/exclude is a three-state cell, matching the terminal's. */
+.pref-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.pref-feature {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.55rem;
+  color: var(--dim);
+}
+
+.pref-feature:hover {
+  color: var(--accent);
+}
+
+.pref-feature[data-state="require"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.pref-feature[data-state="exclude"] {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.hint {
+  color: var(--dim);
+  font-size: 0.75rem;
+  margin: 0.5rem 0 0;
+  flex: 1 0 100%;
+}
+
 input {
   flex: 1;
   min-width: 12rem;

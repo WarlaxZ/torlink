@@ -293,7 +293,9 @@ A **continue watching** strip sits above the saved pane's two columns: whatever 
 
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
 - **No subtitles, no scrubber, no automatic next-episode playback.** Continue watching (above) remembers *what* you were watching and, when it can, names what's next — it cannot resume *where* you left off, or start that next episode for you unasked, because nothing here reads back from mpv, iina, vlc, or a browser tab; none of them report a position. (When a torrent holds several files, the picker does open on that next episode — one keypress, not none — for any release of a show you're part-way through, not only the remembered one.)
-- **No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write three things: your saved searches, your library, and your continue-watching list (the same searches, favourites and stream history the TUI's `w`, `b`, and Continue-watching pane create), all guarded by the same Origin check as `add` and `control`.
+- **No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write four things: your saved searches, your library, your continue-watching list (the same searches, favourites and stream history the TUI's `w`, `b`, and Continue-watching pane create), and your playback preference — the header's **playback preferences** disclosure, the same max-resolution cap and feature require/exclude toggles the TUI's quality picker sets — all guarded by the same Origin check as `add` and `control`.
+
+The same disclosure is also what puts a **Play** button on a For You film card and a **Play next** button on a Continue-watching row with a next episode: one click searches every source, ranks the results against that preference, and starts the winner — the browser's equivalent of the terminal's Enter on a For You pick.
 
 ### Working on the web UI
 
