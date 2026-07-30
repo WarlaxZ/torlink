@@ -11,9 +11,9 @@ describe("hintForSection", () => {
 
 describe("parseRelease", () => {
   it("pulls a clean title and year out of a movie release", () => {
-    const r = parseRelease("Weapons.2025.2160p.UHD.BluRay.x265-TERMINAL");
+    const r = parseRelease("Tollgate.2025.2160p.UHD.BluRay.x265-TERMINAL");
     expect(r).not.toBeNull();
-    expect(r!.title).toBe("Weapons");
+    expect(r!.title).toBe("Tollgate");
     expect(r!.year).toBe(2025);
     expect(r!.type).toBe("movie"); // year, no season → movie
   });
@@ -31,7 +31,7 @@ describe("parseRelease", () => {
   });
 
   it("lets a parsed season override a movie hint", () => {
-    expect(parseRelease("Chernobyl.S01E01.1080p", "movie")!.type).toBe("series");
+    expect(parseRelease("Windmere.S01E01.1080p", "movie")!.type).toBe("series");
   });
 
   it("returns null when no title can be parsed", () => {
@@ -39,8 +39,8 @@ describe("parseRelease", () => {
   });
 
   it("exposes a cache key that ignores quality/group noise", () => {
-    const a = parseRelease("Weapons.2025.2160p.UHD.BluRay.x265-TERMINAL");
-    const b = parseRelease("Weapons.2025.1080p.WEB-DL.x264-OTHER");
+    const a = parseRelease("Tollgate.2025.2160p.UHD.BluRay.x265-TERMINAL");
+    const b = parseRelease("Tollgate.2025.1080p.WEB-DL.x264-OTHER");
     expect(a!.key).toBe(b!.key); // same film → one OMDb lookup
   });
 });

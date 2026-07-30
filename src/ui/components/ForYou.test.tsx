@@ -39,7 +39,7 @@ const flush = async (): Promise<void> => {
 };
 const ESC = String.fromCharCode(27);
 
-const REC = { imdbId: "tt1", title: "Chernobyl", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
+const REC = { imdbId: "tt1", title: "Windmere", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
 const CONFIG = { reccUrl: "http://host:4100", reccToken: "tok" };
 
 function fetchStub(): { impl: FetchImpl; urls: string[] } {
@@ -108,7 +108,7 @@ describe("ForYou", () => {
       <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
-    expect(lastFrame()).toContain("Chernobyl");
+    expect(lastFrame()).toContain("Windmere");
     expect(lastFrame()).toContain("2019");
   });
 
@@ -142,7 +142,7 @@ describe("ForYou", () => {
     await flush();
     stdin.write("\r");
     await flush();
-    expect(submitQuery).toHaveBeenCalledWith("Chernobyl");
+    expect(submitQuery).toHaveBeenCalledWith("Windmere");
     expect(setSection).toHaveBeenCalledWith("all");
   });
 
@@ -226,12 +226,12 @@ describe("ForYou", () => {
     await flush();
     stdin.write("f");
     await flush();
-    expect(onRatePick).toHaveBeenCalledWith("Chernobyl", expect.any(Function));
+    expect(onRatePick).toHaveBeenCalledWith("Windmere", expect.any(Function));
     // Invoking the provided callback dismisses the pick from the list.
     const onRated = onRatePick.mock.calls[0]![1] as () => void;
     onRated();
     await flush();
-    expect(lastFrame()).not.toContain("Chernobyl");
+    expect(lastFrame()).not.toContain("Windmere");
   });
 
   it("renders the title with the year inline", async () => {
@@ -240,7 +240,7 @@ describe("ForYou", () => {
       <ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />,
     );
     await flush();
-    expect(lastFrame()).toContain("Chernobyl (2019)");
+    expect(lastFrame()).toContain("Windmere (2019)");
   });
 
   it("opens the selected pick's IMDb page on 'i'", async () => {
@@ -345,7 +345,7 @@ describe("ForYou", () => {
     await flush();
     stdin.write("w");
     await flush();
-    expect(toggleSavedSearch).toHaveBeenCalledWith("Chernobyl");
-    expect(lastFrame()).toContain("Chernobyl"); // stays in the list
+    expect(toggleSavedSearch).toHaveBeenCalledWith("Windmere");
+    expect(lastFrame()).toContain("Windmere"); // stays in the list
   });
 });

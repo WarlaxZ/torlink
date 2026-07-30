@@ -152,7 +152,7 @@ function registry(deps: StreamSessionDeps): StreamSessionRegistry {
 
 function fakeHandle(files: StreamFile[]): TorrentStreamSession {
   return {
-    name: "Big Buck Bunny",
+    name: "Copper Kettle Run",
     files,
     dir: "/tmp/none",
     isComplete: () => true,
@@ -174,7 +174,7 @@ async function torrentSession(
   const session = await reg.start({
     infoHash: "0".repeat(40),
     magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
-    name: "Big Buck Bunny",
+    name: "Copper Kettle Run",
     route: { kind: "torrent-auto" },
   });
   expect(session.state).toBe("ready");
@@ -707,7 +707,7 @@ describe("requestOrigin", () => {
 
 describe("playlistFilename", () => {
   it("swaps the media extension for .m3u", () => {
-    expect(playlistFilename("Big.Buck.Bunny.mp4")).toBe("Big.Buck.Bunny.m3u");
+    expect(playlistFilename("Copper.Kettle.Run.mp4")).toBe("Copper.Kettle.Run.m3u");
   });
 
   // The filename comes out of a torrent and lands in a response header and then
@@ -735,8 +735,8 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     upstream = await startUpstream();
     const { reg, id, capability } = await torrentSession([
       {
-        url: `${upstream.base}/webtorrent/hash/Big.Buck.Bunny.mp4`,
-        filename: "Big.Buck.Bunny.mp4",
+        url: `${upstream.base}/webtorrent/hash/Copper.Kettle.Run.mp4`,
+        filename: "Copper.Kettle.Run.mp4",
         bytes: MEDIA.length,
       },
     ]);
@@ -750,7 +750,7 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toBe("audio/x-mpegurl");
     expect(res.headers["content-disposition"]).toBe(
-      'attachment; filename="Big.Buck.Bunny.m3u"',
+      'attachment; filename="Copper.Kettle.Run.m3u"',
     );
     expect(res.headers["cache-control"]).toBe("no-store");
     const lines = res.body.trim().split("\n");
@@ -943,13 +943,13 @@ describe("GET /play/:sid/:idx", () => {
    */
   it("serves the player HTML", async () => {
     const base = await serve();
-    const res = await fetch(`${base}/play/sid-one/0?k=cap-one&n=Big%20Buck.mkv`);
+    const res = await fetch(`${base}/play/sid-one/0?k=cap-one&n=Copper%20Kettle.mkv`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     const body = await res.text();
     expect(body).toContain("<title>player</title>");
     // Whatever was in the URL is not reflected into the response.
-    expect(body).not.toContain("Big Buck");
+    expect(body).not.toContain("Copper Kettle");
     expect(body).not.toContain("cap-one");
   });
 

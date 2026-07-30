@@ -87,10 +87,19 @@ If you ever bulk-rename fixtures, the full suite is the only thing that will tel
 - **Match on word boundaries.** A plain `s/the bear/harrowgate/` also rewrites **"the bearer token"**
   — it corrupted ten files and the auth docs before the suite caught it. Use `perl -pi -e` with `\b`,
   not `sed` with bare strings.
-- **`\b` does not save you from URL encoding.** `%20sintel%20` has no boundary between `0` and `s`
-  (both are word characters), and `the+matrix` matches only its second half — so a test's input and
+- **`\b` does not save you from URL encoding.** `%20name%20` has no boundary between `0` and `n`
+  (both are word characters), and `the+title` matches only its second half — so a test's input and
   its expected string drift apart and the failure looks unrelated. Grep for `%20` and `+`-joined
-  forms separately.
+  forms separately, and for truncated variants (`Big%20Buck.mkv` where the full name is three words).
+- **A filter or search test may reference a fixture by SUBSTRING.** `textFilter: "bunny"` against a
+  fixture named `Big Buck Bunny` silently stops matching when the fixture is renamed, and the failure
+  reads as a filter bug rather than a rename miss.
+- **Renaming can make a negative assertion vacuous, and the suite stays green.** `stream.test.ts`
+  asserted `expect(body).not.toContain("Big Buck")` to prove a filename from the URL is never
+  reflected into the player HTML — a real XSS check. Rename the URL but not the assertion and it
+  passes because *nothing* contains the old string any more. After any rename, grep
+  `not.toContain` / `not.toBe` for the old names and confirm each still names something the test
+  actually puts in play.
 
 ## Before you say it's done
 

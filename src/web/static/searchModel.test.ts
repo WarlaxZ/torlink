@@ -184,9 +184,9 @@ describe("visibleResults", () => {
   });
 
   it("applies the text filter", () => {
-    const results = [result({ infoHash: "1", name: "Kestrel 2010" }), result({ infoHash: "2", name: "Big Buck Bunny" })];
+    const results = [result({ infoHash: "1", name: "Kestrel 2010" }), result({ infoHash: "2", name: "Copper Kettle Run" })];
     const shown = visibleResults(
-      view({ snapshot: snapshot(results), textFilter: "bunny" }),
+      view({ snapshot: snapshot(results), textFilter: "kettle" }),
       ALWAYS_HEALTHY,
     );
     expect(shown.map((r) => r.infoHash)).toEqual(["2"]);

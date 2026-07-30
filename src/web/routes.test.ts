@@ -676,12 +676,12 @@ function parseFrames(chunks: string[]): Frame[] {
 function hit(over: Partial<TorrentResult> = {}): TorrentResult {
   return {
     infoHash: "aa".repeat(20),
-    name: "Big Buck Bunny 2008 1080p",
+    name: "Copper Kettle Run 2008 1080p",
     sizeBytes: 1024,
     seeders: 10,
     leechers: 1,
     source: "yts",
-    magnet: `magnet:?xt=urn:btih:${"aa".repeat(20)}&dn=Big+Buck+Bunny`,
+    magnet: `magnet:?xt=urn:btih:${"aa".repeat(20)}&dn=Copper+Kettle+Run`,
     ...over,
   };
 }
@@ -722,7 +722,7 @@ describe("toPublicResult", () => {
   it("picks the display fields and normalises sources to an array", () => {
     expect(toPublicResult(hit({ seeders: 7, leechers: 2, sizeBytes: 99 }))).toEqual({
       infoHash: "aa".repeat(20),
-      name: "Big Buck Bunny 2008 1080p",
+      name: "Copper Kettle Run 2008 1080p",
       sizeBytes: 99,
       seeders: 7,
       leechers: 2,

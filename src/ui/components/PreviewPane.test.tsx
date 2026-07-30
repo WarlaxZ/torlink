@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { PreviewPane } from "./PreviewPane";
 
-const base = { width: 40, height: 24, focused: true, title: "Chernobyl", year: 2019 };
+const base = { width: 40, height: 24, focused: true, title: "Windmere", year: 2019 };
 
 describe("PreviewPane", () => {
   it("renders the title, year, plot and reason", () => {
     const f = render(
       <PreviewPane {...base} plot="A nuclear disaster." posterRows={null} note="because you liked Paradise" />,
     ).lastFrame() ?? "";
-    expect(f).toContain("Chernobyl (2019)");
+    expect(f).toContain("Windmere (2019)");
     expect(f).toContain("A nuclear disaster.");
     expect(f).toContain("because you liked Paradise");
   });

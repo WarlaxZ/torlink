@@ -82,9 +82,9 @@ describe("playerPath", () => {
   // ?n= is the only source. Dropping it shows "Unnamed file" and, because
   // canDirectPlay("") is pessimistic, the fallback card for a playable mp4.
   it("carries the filename as ?n=", () => {
-    const url = playerPath("s1", file("Big Buck Bunny.mp4", 3), "cap");
+    const url = playerPath("s1", file("Copper Kettle Run.mp4", 3), "cap");
     const parsed = parsePlayerLocation("/play/s1/3", url.slice(url.indexOf("?")));
-    expect(parsed?.filename).toBe("Big Buck Bunny.mp4");
+    expect(parsed?.filename).toBe("Copper Kettle Run.mp4");
   });
 
   it("addresses the file by its session index, not its position in a filtered list", () => {
@@ -346,11 +346,11 @@ describe("runPlay", () => {
         kind: "started",
         sessionId: "sess-9",
         capability: "secret-cap",
-        session: session({ id: "sess-9", files: [file("Big Buck Bunny.mp4", 2)] }),
+        session: session({ id: "sess-9", files: [file("Copper Kettle Run.mp4", 2)] }),
       }),
     });
     await runPlay(row(), fx);
-    expect(calls.opened[0]).toBe("/play/sess-9/2?k=secret-cap&n=Big+Buck+Bunny.mp4");
+    expect(calls.opened[0]).toBe("/play/sess-9/2?k=secret-cap&n=Copper+Kettle+Run.mp4");
   });
 
   // MUTATION GUARD #5. Real-Debrid caching reports a percent for minutes; a loop

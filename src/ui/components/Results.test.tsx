@@ -264,11 +264,11 @@ describe("Results preview pane", () => {
   });
 
   it("falls back to an IMDb title search on 'i' with no key (no exact id)", async () => {
-    const u = wide([t("v1", "Weapons.2025.1080p.BluRay.x264-GRP")], { omdbApiKey: "" });
+    const u = wide([t("v1", "Tollgate.2025.1080p.BluRay.x264-GRP")], { omdbApiKey: "" });
     await vi.waitFor(() => expect(u.frame()).toContain("Results (1)"));
     u.press("i");
     await vi.waitFor(() =>
-      expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/find/?q=Weapons%202025"),
+      expect(openUrl).toHaveBeenCalledWith("https://www.imdb.com/find/?q=Tollgate%202025"),
     );
   });
 });

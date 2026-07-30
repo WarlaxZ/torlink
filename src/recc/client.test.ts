@@ -85,7 +85,7 @@ function fakeFetch(
 }
 
 const CONFIG = { reccUrl: "http://host:4100", reccToken: "tok" };
-const REC = { imdbId: "tt1", title: "Chernobyl", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
+const REC = { imdbId: "tt1", title: "Windmere", year: 2019, score: 33.4, reasons: ["highly rated classic"] };
 
 describe("fetchRecommendations", () => {
   it("returns ok with parsed items on 200", async () => {

@@ -65,7 +65,7 @@ describe("fetchTitleMetaByName", () => {
 
   it("omits year/type when not given", async () => {
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt3" });
-    await fetchTitleMetaByName("Weapons", "KEY", { fetchImpl: impl });
+    await fetchTitleMetaByName("Tollgate", "KEY", { fetchImpl: impl });
     expect(urls[0]).not.toContain("&y=");
     expect(urls[0]).not.toContain("type=");
   });
