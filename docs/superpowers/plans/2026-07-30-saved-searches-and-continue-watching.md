@@ -1412,6 +1412,32 @@ describe("continueWatchingSub", () => {
   });
 });
 
+describe("continueWatchingFallbackQuery", () => {
+  it("asks for the next episode when there is one", () => {
+    // The remembered torrent is dead, so we search — and searching for the
+    // episode you have NOT seen beats searching for the one you just watched.
+    expect(continueWatchingFallbackQuery(base)).toBe("Severance S02E05");
+  });
+
+  it("asks for the bare title when there is no next episode", () => {
+    // A season pack that named no episode.
+    expect(continueWatchingFallbackQuery({ ...base, next: null })).toBe("Severance");
+  });
+
+  it("asks for the bare title for a film", () => {
+    expect(
+      continueWatchingFallbackQuery({
+        ...base,
+        title: "Dune Part Two",
+        type: "movie",
+        season: undefined,
+        episode: undefined,
+        next: null,
+      }),
+    ).toBe("Dune Part Two");
+  });
+});
+
 describe("continueWatchingStatus", () => {
   it("says loading before the first response, not empty", () => {
     expect(continueWatchingStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
