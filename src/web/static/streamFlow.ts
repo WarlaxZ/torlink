@@ -6,25 +6,33 @@
 //
 // Bundled for the browser, so: no node:* imports, direct or transitive.
 //
-// TWO IMPORTS LEAVE THIS DIRECTORY. `../wire` is types-only and erased at build
-// time, as in dashboard.ts. `../../util/videoFiles` is a *value* import and is
+// FOUR VALUE IMPORTS LEAVE THIS DIRECTORY, all four for one reason — the piece is
+// a decision both front ends make, so it is shared rather than copied — and each
+// is argued at its own import line below: `util/videoFiles` (which files are
+// candidates), `util/nextEpisodeFile` (which one to open on),
+// `util/streamHistoryKey` (which history row a release belongs to) and
+// `util/release` (what a release name says). The type-only imports are free:
+// `../wire` and `../../util/episode` are erased at build time, as in dashboard.ts.
+//
+// `../../util/videoFiles` is the first, and it is
 // deliberate: it is the video-first heuristic the TUI's file picker uses, and
 // reimplementing it here would be the fourth instance of the copy-then-drift bug
 // this codebase keeps hitting (uploadSpeed, the byte formatter, the progress
 // unit). That module is dependency-free and stays that way — `platform:
 // "browser"` in tsup.web.config.ts fails the build if it ever isn't.
 import { streamCandidates } from "../../util/videoFiles";
-// The second value import out of this directory, and the same argument: which
+// The second, and the same argument: which
 // file is the next episode is a decision both front ends make, so it is shared
 // rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
 // which is why it is a module of its own and not part of videoFiles.ts.
 import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
-// The third value import, and the same argument again: the stream-history store's
-// dedupe key decides which row a release belongs to, and a second derivation of
-// it in the browser would be the fifth recorded copy-then-drift bug here. It was
-// module-private in src/core/streamHistory.ts, which imports node:fs and so
-// cannot be reached from a browser bundle; it moved down to src/util (whence
-// src/core re-exports it) rather than being copied.
+// The third and fourth, and the same argument again: the stream-history store's
+// dedupe key decides which row a release belongs to (and `parseRelease` is what it
+// is derived from), so a second derivation of either in the browser would be the
+// fifth recorded copy-then-drift bug here. `historyKeyFor` was module-private in
+// src/core/streamHistory.ts, which imports node:fs and so cannot be reached from a
+// browser bundle; it moved down to src/util (whence src/core re-exports it) rather
+// than being copied. `release.ts` was already in this bundle via nextEpisodeFile.
 import { historyKeyFor } from "../../util/streamHistoryKey";
 import { parseRelease } from "../../util/release";
 import type { EpisodeRef } from "../../util/episode";
