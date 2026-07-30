@@ -37,7 +37,7 @@ import type { SourcesResponse } from "./searchModel";
 
 function pick(over: Partial<PublicRecommendation> = {}): PublicRecommendation {
   return {
-    imdbId: "tt0133093",
+    imdbId: "tt1",
     title: "Ashfall",
     year: 1999,
     score: 0.91,
@@ -224,7 +224,7 @@ describe("createReccController — the request counter", () => {
     expect(h.pending).toBe(2);
 
     // The newer (tv) request answers first…
-    const tvPick = pick({ imdbId: "tt0903747", title: "Breaking Bad" });
+    const tvPick = pick({ imdbId: "tt2", title: "Harrowgate" });
     const first = h.calls[0]!;
     h.resolve(OK([pick()])); // resolves the FIRST (all) request
     await Promise.resolve();
@@ -309,10 +309,10 @@ describe("createReccController — dismiss", () => {
   it("removes a rated pick without a round trip", async () => {
     const h = harness();
     h.ctl.open();
-    h.resolve(OK([pick(), pick({ imdbId: "tt0903747", title: "Breaking Bad" })]));
+    h.resolve(OK([pick(), pick({ imdbId: "tt2", title: "Harrowgate" })]));
     await Promise.resolve();
-    h.ctl.dismiss("tt0133093");
-    expect(reccItems(h.ctl.state()).map((i) => i.title)).toEqual(["Breaking Bad"]);
+    h.ctl.dismiss("tt1");
+    expect(reccItems(h.ctl.state()).map((i) => i.title)).toEqual(["Harrowgate"]);
     expect(h.calls).toHaveLength(1);
   });
 

@@ -5,7 +5,7 @@ import type { PublicTitleMeta } from "../wire";
 
 const OK = (posterUrl: string | null): PublicTitleMeta => ({
   status: "ok",
-  imdbId: "tt1160419",
+  imdbId: "tt3",
   plot: "Sand.",
   posterUrl,
 });

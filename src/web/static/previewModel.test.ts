@@ -12,7 +12,7 @@ import {
 
 const OK: PublicTitleMeta = {
   status: "ok",
-  imdbId: "tt1727587",
+  imdbId: "tt9990001",
   plot: "A lonely young woman befriends a dragon.",
   posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
   parsed: { title: "Kestrel", year: 2010, type: "movie" },
@@ -197,7 +197,7 @@ describe("previewCopy", () => {
     expect(copy.heading).toBe("Kestrel");
     expect(copy.sub).toBe("2010");
     expect(copy.body).toBe("A lonely young woman befriends a dragon.");
-    expect(copy.imdbUrl).toBe("https://www.imdb.com/title/tt1727587/");
+    expect(copy.imdbUrl).toBe("https://www.imdb.com/title/tt9990001/");
     expect(copy.posterUrl).toBe("https://m.media-amazon.com/images/M/kestrel.jpg");
   });
 
@@ -223,7 +223,7 @@ describe("previewCopy", () => {
   it("degrades a poster-less hit to the placeholder, never a broken image", () => {
     const copy = previewCopy("Kestrel.2010", {
       status: "ok",
-      imdbId: "tt1727587",
+      imdbId: "tt9990001",
       plot: "Something.",
       posterUrl: null,
     });

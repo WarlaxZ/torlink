@@ -1210,7 +1210,7 @@ describe("sourcesResponse — omdbConfigured", () => {
 describe("GET /api/title", () => {
   const OK: FetchTitleMetaResult = {
     ok: true,
-    imdbId: "tt1727587",
+    imdbId: "tt9990001",
     plot: "A lone girl.",
     posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
   };
@@ -1255,7 +1255,7 @@ describe("GET /api/title", () => {
     expect(res.status).toBe(200);
     expect(res.json).toEqual({
       status: "ok",
-      imdbId: "tt1727587",
+      imdbId: "tt9990001",
       plot: "A lone girl.",
       posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
     });
@@ -1265,8 +1265,8 @@ describe("GET /api/title", () => {
   it("looks a title up by imdb id, and prefers it over a name", async () => {
     const fetchTitleMetaImpl = vi.fn(async () => OK);
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK);
-    await title(titleDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }), "imdb=tt1727587&name=Wrong");
-    expect(fetchTitleMetaImpl).toHaveBeenCalledWith("tt1727587", "key");
+    await title(titleDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }), "imdb=tt9990001&name=Wrong");
+    expect(fetchTitleMetaImpl).toHaveBeenCalledWith("tt9990001", "key");
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
   });
 
@@ -1353,7 +1353,7 @@ describe("GET /api/title", () => {
       await title(d, "name=Kestrel");
       await title(d, "name=Kestrel&year=2010");
       await title(d, "name=Kestrel&year=2010&type=movie");
-      await title(d, "imdb=tt1727587");
+      await title(d, "imdb=tt9990001");
       expect(fetchTitleMetaByNameImpl).toHaveBeenCalledTimes(3);
     });
 
@@ -1413,7 +1413,7 @@ describe("GET /api/title", () => {
       ["name=%20", "missing name or imdb"],
       ["imdb=tt12", "invalid imdb id"],
       ["imdb=nope1234567", "invalid imdb id"],
-      ["imdb=tt1727587%26apikey%3Dx", "invalid imdb id"],
+      ["imdb=tt9990001%26apikey%3Dx", "invalid imdb id"],
       ["name=Kestrel&year=20x0", "invalid year"],
       ["name=Kestrel&year=2010abc", "invalid year"],
       ["name=Kestrel&year=1200", "invalid year"],
@@ -1431,7 +1431,7 @@ describe("GET /api/title", () => {
 describe("GET /api/title?release= — server-side release parsing", () => {
   const OK_META: FetchTitleMetaResult = {
     ok: true,
-    imdbId: "tt1727587",
+    imdbId: "tt9990001",
     plot: "A lone girl.",
     posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
   };
@@ -1522,7 +1522,7 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     const byName = await title(d, "name=Kestrel&year=2010&type=movie");
     expect(byName.json).toEqual({
       status: "ok",
-      imdbId: "tt1727587",
+      imdbId: "tt9990001",
       plot: "A lone girl.",
       posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
     });
@@ -1541,7 +1541,7 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     await title(
       releaseDeps({ fetchTitleMetaImpl, fetchTitleMetaByNameImpl }),
-      "imdb=tt1727587&release=Kestrel.2010.1080p",
+      "imdb=tt9990001&release=Kestrel.2010.1080p",
     );
     expect(fetchTitleMetaImpl).toHaveBeenCalledOnce();
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
@@ -1670,7 +1670,7 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
 
 describe("GET /api/recommendations", () => {
   const PICK = {
-    imdbId: "tt0133093",
+    imdbId: "tt1",
     title: "Ashfall",
     year: 1999,
     score: 0.91,

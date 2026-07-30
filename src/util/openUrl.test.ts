@@ -27,7 +27,7 @@ function onPlatform(platform: string): () => void {
 describe("imdbTitleUrl", () => {
   it("builds the canonical IMDb title page URL", async () => {
     const { imdbTitleUrl } = await import("./openUrl");
-    expect(imdbTitleUrl("tt26581740")).toBe("https://www.imdb.com/title/tt26581740/");
+    expect(imdbTitleUrl("tt9990002")).toBe("https://www.imdb.com/title/tt9990002/");
   });
 });
 
