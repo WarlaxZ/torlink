@@ -91,7 +91,7 @@ import {
 import {
   applyLibraryResponse,
   applySaved,
-  applyWatchlistResponse,
+  applySavedSearchesResponse,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
@@ -99,9 +99,9 @@ import {
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
-  watchlistBody,
-  watchlistStatus,
-  watchlistToggleNotice,
+  savedSearchesBody,
+  savedSearchesStatus,
+  savedSearchesToggleNotice,
   type LibraryInput,
   type PublicFavourite,
   type SavedState,
@@ -148,8 +148,8 @@ const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
 const paneSaved = el<HTMLElement>("pane-saved");
 const paneQueue = el<HTMLElement>("pane-queue");
-const watchlistStatusLine = el<HTMLParagraphElement>("watchlist-status");
-const watchlistRows = el<HTMLUListElement>("watchlist-rows");
+const savedSearchesStatusLine = el<HTMLParagraphElement>("saved-searches-status");
+const savedSearchesRows = el<HTMLUListElement>("saved-searches-rows");
 const libraryStatusLine = el<HTMLParagraphElement>("library-status");
 const libraryRows = el<HTMLUListElement>("library-rows");
 
@@ -792,7 +792,7 @@ saveSearchButton.addEventListener("click", () => {
     showNotice("Type a search to save it.");
     return;
   }
-  void toggleWatchlist(query);
+  void toggleSavedSearch(query);
 });
 
 sortSelect.addEventListener("change", () => {
@@ -1587,7 +1587,7 @@ reccExploreCheck.addEventListener("change", () => recc.setExplore(reccExploreChe
 reccRefreshButton.addEventListener("click", () => recc.refresh());
 
 // ---- saved ------------------------------------------------------------
-// The watchlist and the library. Decisions — which body each button sends, what
+// Saved searches and the library. Decisions — which body each button sends, what
 // an empty or broken list says — are savedModel.ts's; what is here is fetch and
 // DOM.
 
@@ -1609,8 +1609,8 @@ async function loadSaved(): Promise<void> {
 }
 
 // Both mutators post, then render the list the SERVER returned rather than a
-// list predicted here — applyWatchlistResponse/applyLibraryResponse own that
-// fold, and watchlistToggleNotice/libraryToggleNotice own the notice text, both
+// list predicted here — applySavedSearchesResponse/applyLibraryResponse own that
+// fold, and savedSearchesToggleNotice/libraryToggleNotice own the notice text, both
 // in savedModel.ts where they can be unit-tested against a malformed body.
 async function postSaved(path: string, body: unknown): Promise<Record<string, unknown> | null> {
   let res: Response;
@@ -1634,18 +1634,18 @@ async function postSaved(path: string, body: unknown): Promise<Record<string, un
 }
 
 // Called by the save-search button beside the search box.
-async function toggleWatchlist(query: string): Promise<void> {
-  const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
+async function toggleSavedSearch(query: string): Promise<void> {
+  const body = await postSaved("/api/saved-searches", savedSearchesBody(query, "toggle"));
   if (!body) return;
-  savedState = applyWatchlistResponse(savedState, body);
-  showNotice(watchlistToggleNotice(body));
+  savedState = applySavedSearchesResponse(savedState, body);
+  showNotice(savedSearchesToggleNotice(body));
   renderSaved();
 }
 
-async function removeFromWatchlist(query: string): Promise<void> {
-  const body = await postSaved("/api/watchlist", watchlistBody(query, "remove"));
+async function removeSavedSearch(query: string): Promise<void> {
+  const body = await postSaved("/api/saved-searches", savedSearchesBody(query, "remove"));
   if (!body) return;
-  savedState = applyWatchlistResponse(savedState, body);
+  savedState = applySavedSearchesResponse(savedState, body);
   renderSaved();
 }
 
@@ -1672,7 +1672,7 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
 // the user's own typing, but a favourite's name is a release name from whoever
 // uploaded the torrent — so this list is as much an XSS surface as the results
 // list is.
-function renderWatchlistRow(query: string): HTMLLIElement {
+function renderSavedSearchRow(query: string): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row";
 
@@ -1692,7 +1692,7 @@ function renderWatchlistRow(query: string): HTMLLIElement {
   const remove = document.createElement("button");
   remove.type = "button";
   remove.textContent = "remove";
-  remove.addEventListener("click", () => void removeFromWatchlist(query));
+  remove.addEventListener("click", () => void removeSavedSearch(query));
   actions.append(remove);
 
   li.append(run, actions);
@@ -1740,13 +1740,13 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
 }
 
 function renderSaved(): void {
-  watchlistRows.replaceChildren(...savedState.watchlist.map(renderWatchlistRow));
+  savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
   libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
 
-  const wl = watchlistStatus(savedState);
-  watchlistStatusLine.textContent = wl.text;
-  watchlistStatusLine.classList.toggle("error", wl.tone === "error");
-  watchlistStatusLine.hidden = !wl.show;
+  const wl = savedSearchesStatus(savedState);
+  savedSearchesStatusLine.textContent = wl.text;
+  savedSearchesStatusLine.classList.toggle("error", wl.tone === "error");
+  savedSearchesStatusLine.hidden = !wl.show;
 
   const lib = libraryStatus(savedState);
   libraryStatusLine.textContent = lib.text;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyLibraryResponse,
   applySaved,
-  applyWatchlistResponse,
+  applySavedSearchesResponse,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
@@ -10,9 +10,9 @@ import {
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
-  watchlistBody,
-  watchlistStatus,
-  watchlistToggleNotice,
+  savedSearchesBody,
+  savedSearchesStatus,
+  savedSearchesToggleNotice,
   type SavedState,
 } from "./savedModel";
 import type { PublicFavourite } from "../wire";
@@ -31,24 +31,24 @@ describe("emptySaved", () => {
   it("opens unloaded with no error, so the pane can say 'loading' rather than 'empty'", () => {
     // These are different sentences to a user: an empty library and a library
     // that has not arrived yet must not read the same.
-    expect(emptySaved()).toEqual({ watchlist: [], library: [], loaded: false, error: null });
+    expect(emptySaved()).toEqual({ savedSearches: [], library: [], loaded: false, error: null });
   });
 });
 
-describe("watchlistBody", () => {
+describe("savedSearchesBody", () => {
   it("sends the query and the action", () => {
-    expect(watchlistBody("tin rivers", "toggle")).toEqual({
+    expect(savedSearchesBody("tin rivers", "toggle")).toEqual({
       query: "tin rivers",
       action: "toggle",
     });
-    expect(watchlistBody("tin rivers", "remove")).toEqual({
+    expect(savedSearchesBody("tin rivers", "remove")).toEqual({
       query: "tin rivers",
       action: "remove",
     });
   });
 
   it("trims, so the box's stray spaces cannot create a second entry", () => {
-    expect(watchlistBody("  tin rivers  ", "toggle").query).toBe("tin rivers");
+    expect(savedSearchesBody("  tin rivers  ", "toggle").query).toBe("tin rivers");
   });
 });
 
@@ -130,14 +130,14 @@ describe("favouriteMeta", () => {
   });
 });
 
-describe("watchlistStatus / libraryStatus", () => {
+describe("savedSearchesStatus / libraryStatus", () => {
   it("says loading before the first response, not empty", () => {
-    expect(watchlistStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
+    expect(savedSearchesStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
     expect(libraryStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
   });
 
   it("explains how to fill each list when it is empty", () => {
-    expect(watchlistStatus(loaded())).toEqual({
+    expect(savedSearchesStatus(loaded())).toEqual({
       text: "Save a search to keep it here.",
       show: true,
       tone: "dim",
@@ -150,15 +150,15 @@ describe("watchlistStatus / libraryStatus", () => {
   });
 
   it("hides the line once there are rows to look at", () => {
-    expect(watchlistStatus(loaded({ watchlist: ["tin rivers"] })).show).toBe(false);
+    expect(savedSearchesStatus(loaded({ savedSearches: ["tin rivers"] })).show).toBe(false);
     expect(libraryStatus(loaded({ library: [favourite()] })).show).toBe(false);
   });
 
   it("shows an error over both lists, and outranks having rows", () => {
     // A stale list next to no explanation is worse than a stale list with one:
     // the user needs to know these rows may not reflect the server.
-    const broken = loaded({ watchlist: ["tin rivers"], error: "Can't reach torlnk." });
-    expect(watchlistStatus(broken)).toEqual({
+    const broken = loaded({ savedSearches: ["tin rivers"], error: "Can't reach torlnk." });
+    expect(savedSearchesStatus(broken)).toEqual({
       text: "Can't reach torlnk.",
       show: true,
       tone: "error",
@@ -172,7 +172,7 @@ describe("watchlistStatus / libraryStatus", () => {
     // the order of the error check and the !loaded check left every other
     // test green.
     const brokenBeforeLoad = { ...emptySaved(), error: "Can't reach torlnk." };
-    expect(watchlistStatus(brokenBeforeLoad)).toEqual({
+    expect(savedSearchesStatus(brokenBeforeLoad)).toEqual({
       text: "Can't reach torlnk.",
       show: true,
       tone: "error",
@@ -183,10 +183,10 @@ describe("watchlistStatus / libraryStatus", () => {
 describe("applySaved", () => {
   it("takes the server's lists and marks the state loaded, clearing any error", () => {
     const next = applySaved(loaded({ error: "old failure" }), {
-      watchlist: ["tin rivers"],
+      savedSearches: ["tin rivers"],
       library: [favourite()],
     });
-    expect(next.watchlist).toEqual(["tin rivers"]);
+    expect(next.savedSearches).toEqual(["tin rivers"]);
     expect(next.library).toHaveLength(1);
     expect(next.loaded).toBe(true);
     expect(next.error).toBeNull();
@@ -196,37 +196,37 @@ describe("applySaved", () => {
     // The body is whatever came back over the network; a proxy error page
     // parses to something that is not this shape at all.
     const next = applySaved(emptySaved(), {});
-    expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({ savedSearches: [], library: [], loaded: true, error: null });
   });
 
   it("tolerates a null body rather than throwing on the page", () => {
     const next = applySaved(emptySaved(), null);
-    expect(next).toEqual({ watchlist: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({ savedSearches: [], library: [], loaded: true, error: null });
   });
 });
 
-describe("applyWatchlistResponse", () => {
+describe("applySavedSearchesResponse", () => {
   it("takes the server's list and marks the state loaded, clearing any error", () => {
-    const next = applyWatchlistResponse(loaded({ error: "old failure" }), { watchlist: ["tin rivers"] });
-    expect(next).toEqual({ watchlist: ["tin rivers"], library: [], loaded: true, error: null });
+    const next = applySavedSearchesResponse(loaded({ error: "old failure" }), { savedSearches: ["tin rivers"] });
+    expect(next).toEqual({ savedSearches: ["tin rivers"], library: [], loaded: true, error: null });
   });
 
   it("keeps the existing list on a null body rather than emptying it", () => {
-    const state = loaded({ watchlist: ["tin rivers"] });
-    expect(applyWatchlistResponse(state, null)).toEqual(state);
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, null)).toEqual(state);
   });
 
-  it("keeps the existing list when watchlist is missing or not an array", () => {
-    const state = loaded({ watchlist: ["tin rivers"] });
-    expect(applyWatchlistResponse(state, {})).toEqual(state);
-    expect(applyWatchlistResponse(state, { watchlist: "tin rivers" })).toEqual(state);
+  it("keeps the existing list when savedSearches is missing or not an array", () => {
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, {})).toEqual(state);
+    expect(applySavedSearchesResponse(state, { savedSearches: "tin rivers" })).toEqual(state);
   });
 
   it("keeps the existing list when the body itself is not an object", () => {
-    const state = loaded({ watchlist: ["tin rivers"] });
-    expect(applyWatchlistResponse(state, "tin rivers")).toEqual(state);
-    expect(applyWatchlistResponse(state, 42)).toEqual(state);
-    expect(applyWatchlistResponse(state, undefined)).toEqual(state);
+    const state = loaded({ savedSearches: ["tin rivers"] });
+    expect(applySavedSearchesResponse(state, "tin rivers")).toEqual(state);
+    expect(applySavedSearchesResponse(state, 42)).toEqual(state);
+    expect(applySavedSearchesResponse(state, undefined)).toEqual(state);
   });
 });
 
@@ -250,17 +250,17 @@ describe("applyLibraryResponse", () => {
   });
 });
 
-describe("watchlistToggleNotice", () => {
+describe("savedSearchesToggleNotice", () => {
   it("says saved when the server reports saved: true", () => {
-    expect(watchlistToggleNotice({ saved: true })).toBe("Saved to your watchlist.");
+    expect(savedSearchesToggleNotice({ saved: true })).toBe("Saved to your searches.");
   });
 
   it("says removed for saved: false and for anything malformed", () => {
-    expect(watchlistToggleNotice({ saved: false })).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice({})).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice(null)).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice(undefined)).toBe("Removed from your watchlist.");
-    expect(watchlistToggleNotice("saved")).toBe("Removed from your watchlist.");
+    expect(savedSearchesToggleNotice({ saved: false })).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice({})).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice(null)).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice(undefined)).toBe("Removed from your searches.");
+    expect(savedSearchesToggleNotice("saved")).toBe("Removed from your searches.");
   });
 });
 

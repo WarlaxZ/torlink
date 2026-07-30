@@ -739,7 +739,7 @@ select:focus-visible {
   color: var(--dim);
 }
 
-/* A watchlist row is a button spanning the row: the whole thing re-runs that
+/* A saved-search row is a button spanning the row: the whole thing re-runs that
    search, so a small hit target inside a wide row would be a phone-hostile
    near-miss. */
 .saved-query {

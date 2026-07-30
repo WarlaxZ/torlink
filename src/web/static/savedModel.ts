@@ -7,14 +7,14 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 import { formatBytes } from "./dashboard";
-import type { LibraryRequest, PublicFavourite, WatchlistRequest } from "../wire";
+import type { LibraryRequest, PublicFavourite, SavedSearchesRequest } from "../wire";
 
 export type { PublicFavourite, SavedResponse } from "../wire";
 
 /** Everything the pane renders from. */
 export interface SavedState {
-  /** Saved search queries, most-recent first. The TUI's `watchlist`. */
-  watchlist: string[];
+  /** Saved search queries, most-recent first. The TUI's `savedSearches`. */
+  savedSearches: string[];
   /** Favourited torrents, most-recent first. The TUI's `library`. */
   library: PublicFavourite[];
   /**
@@ -31,11 +31,11 @@ export interface SavedState {
 }
 
 export function emptySaved(): SavedState {
-  return { watchlist: [], library: [], loaded: false, error: null };
+  return { savedSearches: [], library: [], loaded: false, error: null };
 }
 
-/** The `POST /api/watchlist` body. Trimmed here so the box's stray spaces cannot create a second entry. */
-export function watchlistBody(query: string, action: "toggle" | "remove"): WatchlistRequest {
+/** The `POST /api/saved-searches` body. Trimmed here so the box's stray spaces cannot create a second entry. */
+export function savedSearchesBody(query: string, action: "toggle" | "remove"): SavedSearchesRequest {
   return { query: query.trim(), action };
 }
 
@@ -124,8 +124,8 @@ function statusFor(state: SavedState, count: number, empty: string): SavedStatus
   return { text: empty, show: count === 0, tone: "dim" };
 }
 
-export function watchlistStatus(state: SavedState): SavedStatus {
-  return statusFor(state, state.watchlist.length, "Save a search to keep it here.");
+export function savedSearchesStatus(state: SavedState): SavedStatus {
+  return statusFor(state, state.savedSearches.length, "Save a search to keep it here.");
 }
 
 export function libraryStatus(state: SavedState): SavedStatus {
@@ -143,11 +143,12 @@ export function libraryStatus(state: SavedState): SavedStatus {
  * error line, which is what those guards are for.
  */
 export function applySaved(state: SavedState, body: unknown): SavedState {
-  const watchlist = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+  const savedSearches =
+    body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
   const library = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
   return {
     ...state,
-    watchlist: Array.isArray(watchlist) ? (watchlist as string[]) : [],
+    savedSearches: Array.isArray(savedSearches) ? (savedSearches as string[]) : [],
     library: Array.isArray(library) ? (library as PublicFavourite[]) : [],
     loaded: true,
     error: null,
@@ -155,26 +156,27 @@ export function applySaved(state: SavedState, body: unknown): SavedState {
 }
 
 /**
- * Fold a `POST /api/watchlist` response into the state.
+ * Fold a `POST /api/saved-searches` response into the state.
  *
- * `body` is `unknown`, not `WatchlistResponse`, because it is whatever came
- * back over the network — `null`, an array, an object whose `watchlist` field
- * is not an array — and this is the one place that guard belongs rather than
- * four copies of it in app.ts. On a malformed body the existing list is kept
- * rather than emptied — a request that came back garbled is not evidence the
- * list is now empty.
+ * `body` is `unknown`, not `SavedSearchesResponse`, because it is whatever
+ * came back over the network — `null`, an array, an object whose
+ * `savedSearches` field is not an array — and this is the one place that
+ * guard belongs rather than four copies of it in app.ts. On a malformed body
+ * the existing list is kept rather than emptied — a request that came back
+ * garbled is not evidence the list is now empty.
  */
-export function applyWatchlistResponse(state: SavedState, body: unknown): SavedState {
-  const list = body && typeof body === "object" ? (body as { watchlist?: unknown }).watchlist : undefined;
+export function applySavedSearchesResponse(state: SavedState, body: unknown): SavedState {
+  const list =
+    body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
   return {
     ...state,
-    watchlist: Array.isArray(list) ? (list as string[]) : state.watchlist,
+    savedSearches: Array.isArray(list) ? (list as string[]) : state.savedSearches,
     loaded: true,
     error: null,
   };
 }
 
-/** The same fold as {@link applyWatchlistResponse}, for `POST /api/library`. */
+/** The same fold as {@link applySavedSearchesResponse}, for `POST /api/library`. */
 export function applyLibraryResponse(state: SavedState, body: unknown): SavedState {
   const list = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
   return {
@@ -186,18 +188,18 @@ export function applyLibraryResponse(state: SavedState, body: unknown): SavedSta
 }
 
 /**
- * The notice shown after a watchlist toggle.
+ * The notice shown after a saved-searches toggle.
  *
  * Reads `body.saved` rather than trusting the button's own optimistic label,
  * so a request that reached the server but flipped the opposite way (a race
  * with another tab, say) still reports what actually happened.
  */
-export function watchlistToggleNotice(body: unknown): string {
+export function savedSearchesToggleNotice(body: unknown): string {
   const saved = !!(body && typeof body === "object" && (body as { saved?: unknown }).saved === true);
-  return saved ? "Saved to your watchlist." : "Removed from your watchlist.";
+  return saved ? "Saved to your searches." : "Removed from your searches.";
 }
 
-/** The same choice as {@link watchlistToggleNotice}, for a library toggle. */
+/** The same choice as {@link savedSearchesToggleNotice}, for a library toggle. */
 export function libraryToggleNotice(body: unknown): string {
   const favourited = !!(
     body &&

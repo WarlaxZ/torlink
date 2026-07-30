@@ -15,7 +15,7 @@
            bookmarked mid-search would promise a restored search it cannot
            deliver (the stream is not replayable).
 
-           Saved holds both of the TUI's lists — the watchlist (saved search
+           Saved holds both of the TUI's lists — saved searches (saved search
            queries) and the library (favourited torrents) — in one pane rather
            than two tabs. Five tabs across the top of a phone is where this nav
            stops working. -->
@@ -169,7 +169,7 @@
       </section>
 
       <!-- ---- saved ------------------------------------------------------- -->
-      <!-- Both lists the TUI has: the watchlist (config.savedSearches) and the
+      <!-- Both lists the TUI has: saved searches (config.savedSearches) and the
            library (config.favourites). Every row is built by app.ts with
            createElement — a favourite's name is a release name written by
            whoever uploaded the torrent, the same stranger's string a search row
@@ -177,9 +177,9 @@
       <section id="pane-saved" hidden>
         <div class="saved-split">
           <div class="saved-list">
-            <h2 class="saved-heading">watchlist</h2>
-            <p id="watchlist-status" class="empty">Loading…</p>
-            <ul id="watchlist-rows" class="rows"></ul>
+            <h2 class="saved-heading">saved searches</h2>
+            <p id="saved-searches-status" class="empty">Loading…</p>
+            <ul id="saved-searches-rows" class="rows"></ul>
           </div>
           <div class="saved-list">
             <h2 class="saved-heading">library</h2>
