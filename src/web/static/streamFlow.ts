@@ -134,11 +134,14 @@ export type StreamOutcome =
  * nothing here recomputes it and no field was added to carry it.
  *
  * ONE HALF OF THE PRESELECTION IS TUI-ONLY, deliberately. `nextEpisodeIndex`
- * also falls back to "the first file you haven't watched" when no filename
- * parses; that needs the watched FILENAMES, which `PublicFavourite` withholds on
- * purpose (it sends a count — see wire.ts for why filenames from inside a
- * stranger's torrent are not handed to a browser). The parse-based preselection,
- * which is the feature, is identical in both front ends.
+ * also falls back to the first not-yet-watched file (preferring one that names
+ * some episode) when nothing parses as the episode asked for; that needs the
+ * watched FILENAMES, which `PublicFavourite` withholds on purpose (it sends a
+ * count — see wire.ts for why filenames from inside a stranger's torrent are not
+ * handed to a browser). This is neither of CLAUDE.md's two named exemptions: the
+ * browser COULD express it and is simply not given the data, by a privacy
+ * decision recorded in wire.ts. The parse-based preselection, which is the
+ * feature, is identical in both front ends.
  */
 export function streamOutcome(
   session: PublicStreamSession,

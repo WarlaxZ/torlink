@@ -30,6 +30,58 @@ describe("nextEpisodeIndex", () => {
     expect(nextEpisodeIndex(files, { next: { season: 3, episode: 5 } })).toBe(1);
   });
 
+  // The layout the doc comment's "basename first" promise is about, with more
+  // than one file per folder — which is what a scene season pack actually ships.
+  // Read per-file (basename then folder, one file at a time) the folder-derived
+  // match on `sample.mkv` wins, and the picker moves the cursor OFF the episode
+  // the title sort had already put first. Basename-first has to be two passes
+  // over the whole list, not one pass over both spellings.
+  it("prefers a basename match anywhere in the list over an earlier folder match", () => {
+    const files = [
+      f("Harrowgate.S03E05/sample.mkv"),
+      f("Harrowgate.S03E05/Harrowgate.S03E05.1080p.mkv"),
+    ];
+    expect(nextEpisodeIndex(files, { next: { season: 3, episode: 5 } })).toBe(1);
+  });
+
+  // The other half of the same bug, on the other code path: the wanted episode
+  // is simply not in this pack, so the watched fallback fires — and "the first
+  // file you haven't watched" in torrent order is `sample.mkv`. A file that
+  // names SOME episode is a better guess than one that names none.
+  it("skips a file that names no episode at all when falling back on watched", () => {
+    const files = [
+      f("sample.mkv"),
+      f("Harrowgate.S03E01.mkv"),
+      f("Harrowgate.S03E04.mkv"),
+    ];
+    expect(
+      nextEpisodeIndex(files, {
+        next: { season: 3, episode: 5 },
+        watched: ["Harrowgate.S03E04.mkv"],
+      }),
+    ).toBe(1);
+    // Same list, no wanted episode at all: the fallback is the only signal
+    // there is, and it must not hand back the sample either.
+    expect(
+      nextEpisodeIndex(files, { next: null, watched: ["Harrowgate.S03E04.mkv"] }),
+    ).toBe(1);
+  });
+
+  // The fallback still fires when NOTHING parses. `watched` and `next` are
+  // independent signals: the wanted episode being absent from the pack says
+  // nothing about whether the watched list is informative, and a picker that
+  // opened on `video1.mkv` here would sit on a file the user has watched — the
+  // bug this whole feature exists to fix.
+  it("falls back on watched even when a wanted episode was named", () => {
+    const files = [f("video1.mkv"), f("video2.mkv"), f("video3.mkv")];
+    expect(
+      nextEpisodeIndex(files, {
+        next: { season: 3, episode: 5 },
+        watched: ["video1.mkv"],
+      }),
+    ).toBe(1);
+  });
+
   it("handles Windows separators", () => {
     const files = [f("Kepler.S02\\Kepler.S02E04.mkv"), f("Kepler.S02\\Kepler.S02E05.mkv")];
     expect(nextEpisodeIndex(files, { next: { season: 2, episode: 5 } })).toBe(1);

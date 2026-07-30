@@ -49,24 +49,31 @@ function basename(path: string): string {
   return i >= 0 ? path.slice(i + 1) : path;
 }
 
+/** The whole path with its separators read as dots, so a folder can be parsed. */
+function flattened(path: string): string {
+  return path.replace(/[\\/]+/g, ".");
+}
+
 /**
- * Whether a filename names the wanted episode.
+ * The episode one spelling of a filename names, or null.
  *
- * Filenames are not release names, so two spellings are tried: the basename
- * ("Harrowgate.S03/Harrowgate.S03E05.1080p.mkv"), then the whole path with its
- * separators read as dots, which catches the layout that puts the episode in the
- * directory and nothing in the file ("Harrowgate.S03E05/video.mkv"). Basename
- * first, so a file's own numbering always beats its folder's.
+ * A season with no episode is null, not a half-answer: a file inside
+ * "Harrowgate.S03/" has named a season and committed to no episode, and treating
+ * that as episode 1 is the guess `nextEpisode` deliberately refuses to make.
  */
-function namesEpisode(filename: string, next: { season: number; episode: number }): boolean {
-  const spellings = [basename(filename)];
-  const flattened = filename.replace(/[\\/]+/g, ".");
-  if (flattened !== spellings[0]) spellings.push(flattened);
-  for (const spelling of spellings) {
-    const parsed = parseRelease(spelling);
-    if (parsed && parsed.season === next.season && parsed.episode === next.episode) return true;
-  }
-  return false;
+function episodeIn(spelling: string): EpisodeRef | null {
+  const parsed = parseRelease(spelling);
+  if (!parsed || parsed.season === undefined || parsed.episode === undefined) return null;
+  return { season: parsed.season, episode: parsed.episode };
+}
+
+/** Whether a filename names an episode at all, under either spelling. */
+function namesAnyEpisode(filename: string): boolean {
+  return episodeIn(basename(filename)) !== null || episodeIn(flattened(filename)) !== null;
+}
+
+function isEpisode(found: EpisodeRef | null, next: EpisodeRef): boolean {
+  return found !== null && found.season === next.season && found.episode === next.episode;
 }
 
 /**
@@ -84,14 +91,40 @@ export function nextEpisodeIndex<T extends NamedFile>(
   if (files.length === 0) return null;
   const next = hint.next;
   if (next) {
-    const parsed = files.findIndex((file) => namesEpisode(file.filename, next));
-    if (parsed >= 0) return parsed;
+    // TWO PASSES OVER THE WHOLE LIST, not one pass over both spellings per file.
+    // Filenames are not release names, so two spellings are tried: a file's own
+    // basename ("Harrowgate.S03/Harrowgate.S03E05.1080p.mkv"), then its whole
+    // path, which catches the layout that puts the episode in the directory and
+    // nothing in the file ("Harrowgate.S03E05/video.mkv").
+    //
+    // Basename first is a rule about the LIST, and reading it per file inverts
+    // it: "Harrowgate.S03E05/sample.mkv" matches on its folder, so a per-file
+    // loop returns the sample and never looks at the real episode sitting next
+    // to it — a cursor the picker's title sort had already got right.
+    const byName = files.findIndex((file) => isEpisode(episodeIn(basename(file.filename)), next));
+    if (byName >= 0) return byName;
+    const byPath = files.findIndex((file) => isEpisode(episodeIn(flattened(file.filename)), next));
+    if (byPath >= 0) return byPath;
   }
-  // Nothing parsed. If we know what has been watched, the first thing that
-  // hasn't is a better guess than the first thing overall. An empty watched list
-  // says nothing, and every file watched says nothing either.
+  // Nothing parsed as the wanted episode — which happens both when no episode
+  // was wanted (a film, a pack naming no episode) and when the wanted one is
+  // simply not in this torrent. Either way `watched` is an INDEPENDENT signal
+  // and still worth reading: the first thing not yet watched beats the first
+  // thing overall. An empty watched list says nothing, and every file watched
+  // says nothing either.
+  //
+  // In two passes for the same reason as above. "The first file you haven't
+  // watched" in torrent order is `sample.mkv` as readily as it is an episode,
+  // and a file that names SOME episode is the better guess even when it is not
+  // the episode asked for. The second pass keeps the case where nothing in the
+  // torrent is numbered at all — a film in parts, an unrecognised naming
+  // scheme — behaving as it did.
   if (hint.watched && hint.watched.length > 0) {
     const seen = new Set(hint.watched);
+    const numbered = files.findIndex(
+      (file) => !seen.has(file.filename) && namesAnyEpisode(file.filename),
+    );
+    if (numbered >= 0) return numbered;
     const unwatched = files.findIndex((file) => !seen.has(file.filename));
     if (unwatched >= 0) return unwatched;
   }
