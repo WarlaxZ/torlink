@@ -6,6 +6,7 @@ import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
 import type { RdStatus } from "../integrations/rdStatus";
 import type { Sort } from "./sort";
+import type { StreamHistoryItem } from "../core/streamHistory";
 
 export type View = "splash" | "browser";
 
@@ -13,6 +14,7 @@ export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "
 
 export type Section =
   | Category
+  | "continueWatching"
   | "savedSearches"
   | "library"
   | "downloads"
@@ -24,6 +26,7 @@ export type Section =
 // as opposed to the downloads/seeding/accounts views.
 export function isCategory(section: Section): boolean {
   return (
+    section !== "continueWatching" &&
     section !== "savedSearches" &&
     section !== "library" &&
     section !== "downloads" &&
@@ -55,6 +58,7 @@ export function parseCategory(raw: string | undefined): Category {
 const SECTIONS: Section[] = [
   ...CATEGORIES.map((c) => c.key),
   "forYou",
+  "continueWatching",
   "savedSearches",
   "library",
   "downloads",
@@ -95,6 +99,11 @@ export interface Store {
   removeFavourite: (id: string) => void;
   openFavourite: (fav: FavouriteItem) => void;
   isFavourited: (id: string) => boolean;
+  // What the user is part-way through, newest-first (the store guarantees
+  // ordering; the pane must not re-sort it).
+  streamHistory: StreamHistoryItem[];
+  openStreamHistory: (item: StreamHistoryItem) => void;
+  removeStreamHistory: (key: string) => void;
 
   section: Section;
   setSection: (s: Section) => void;

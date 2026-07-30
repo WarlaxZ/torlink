@@ -141,6 +141,9 @@ export function footerHints(
       ALWAYS,
     ];
   }
+  if (section === "continueWatching") {
+    return [NAVIGATE, { keys: "↵", label: "Play" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
+  }
   if (section === "savedSearches") {
     return [NAVIGATE, { keys: "↵", label: "Run" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
   }

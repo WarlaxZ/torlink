@@ -29,6 +29,7 @@ import {
   historyItemFor,
   loadStreamHistory,
   recordStream,
+  removeStreamHistory,
   saveStreamHistory,
   type StreamHistoryItem,
 } from "../core/streamHistory";
@@ -101,6 +102,7 @@ import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
 import { SavedSearches } from "./components/SavedSearches";
 import { Favourites } from "./components/Favourites";
+import { ContinueWatching } from "./components/ContinueWatching";
 import { ForYou } from "./components/ForYou";
 import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
@@ -292,10 +294,6 @@ export function App({
   const [activeStream, setActiveStream] = useState<
     { session: TorrentStreamSession; name: string; input: DownloadInput } | null
   >(null);
-  // Read by Task 9's Continue-watching pane (Store.streamHistory, store.ts) —
-  // that wiring lands in that task, not this one, so `streamHistory` is
-  // unread here.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [streamHistory, setStreamHistory] = useState<StreamHistoryItem[]>([]);
   // Confirm state for the two torrent privacy prompts.
   const [torrentPrompt, setTorrentPrompt] = useState<
@@ -1388,6 +1386,23 @@ export function App({
     [streamResult],
   );
 
+  // Replay the remembered torrent. `streamResult` is the same path a search hit
+  // takes, so a dead swarm surfaces the same way it does anywhere else.
+  const openStreamHistory = useCallback(
+    (item: StreamHistoryItem) => {
+      streamResult({ id: item.infoHash, name: item.rawName, magnet: item.magnet, source: item.source });
+    },
+    [streamResult],
+  );
+
+  const removeStreamHistoryEntry = useCallback((key: string) => {
+    setStreamHistory((prev) => {
+      const next = removeStreamHistory(prev, key);
+      void saveStreamHistory(next);
+      return next;
+    });
+  }, []);
+
   const closePlayerPrompt = useCallback(() => {
     setEditingPlayer(false);
     setPendingStream(null);
@@ -1761,6 +1776,9 @@ export function App({
       removeFavourite,
       openFavourite,
       isFavourited,
+      streamHistory,
+      openStreamHistory,
+      removeStreamHistory: removeStreamHistoryEntry,
       section,
       setSection: changeSection,
       sort,
@@ -1814,6 +1832,9 @@ export function App({
     removeFavourite,
     openFavourite,
     isFavourited,
+    streamHistory,
+    openStreamHistory,
+    removeStreamHistoryEntry,
     section,
     changeSection,
     sort,
@@ -2531,6 +2552,9 @@ export function App({
                 onManageOmdb={openOmdbPrompt}
                 onSignOutOmdb={clearOmdbKey}
               />
+            </Box>
+            <Box display={section === "continueWatching" ? "flex" : "none"} flexDirection="column">
+              <ContinueWatching />
             </Box>
             <Box display={section === "savedSearches" ? "flex" : "none"} flexDirection="column">
               <SavedSearches />
