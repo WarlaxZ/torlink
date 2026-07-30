@@ -49,6 +49,12 @@ export function hintForGroup(group: string | null | undefined): SectionHint {
 // substring-matched: a short real title can legitimately appear *inside* an
 // unrelated metadata token ("Up" is a substring of "GROUP"), and joining
 // before matching wrongly condemned it. Token-for-token comparison does not.
+//
+// Some flags come back as bare booleans rather than strings ("PROPER" ->
+// {proper: true, title: "PROPER"}), so they never reach the string/array
+// branches below. Fold `true`-valued keys in too, using the key's own name —
+// still the parser's own vocabulary, not a hand-rolled word list. `false`
+// values are not a recognised word and are left out.
 function isNoiseOnly(title: string, parsed: Record<string, unknown>): boolean {
   const tokensOf = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const titleTokens = tokensOf(title);
@@ -62,6 +68,8 @@ function isNoiseOnly(title: string, parsed: Record<string, unknown>): boolean {
       for (const v of value) {
         if (typeof v === "string") for (const t of tokensOf(v)) recognised.add(t);
       }
+    } else if (value === true) {
+      recognised.add(key.toLowerCase());
     }
   }
   return recognised.size > 0 && titleTokens.every((t) => recognised.has(t));

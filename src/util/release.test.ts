@@ -61,6 +61,23 @@ describe("parseRelease", () => {
     expect(parseRelease("Her.2013.1080p.BluRay-RARBG")?.title).toBe("Her");
   });
 
+  it("returns null when the title is only a boolean flag word", () => {
+    // parse-torrent-title represents some flags as booleans, not strings
+    // ("PROPER" -> {proper: true, title: "PROPER"}), so they never reach the
+    // string/array token harvest unless the boolean keys are folded in too.
+    expect(parseRelease("PROPER")).toBeNull();
+    expect(parseRelease("REPACK")).toBeNull();
+    expect(parseRelease("REMUX")).toBeNull();
+    expect(parseRelease("PROPER.1080p")).toBeNull();
+    expect(parseRelease("REPACK.1080p.WEB-DL")).toBeNull();
+  });
+
+  it("keeps a real title that merely contains a flag word", () => {
+    // "proper" is a recognised boolean flag, but "lady" is not, so the title
+    // is not wholly accounted for by parser metadata.
+    expect(parseRelease("Proper.Lady.2011.1080p.BluRay")?.title).toBe("Proper Lady");
+  });
+
   it("still parses a real title that itself contains a resolution-like token", () => {
     // The noise check must not over-fire on a genuine title just because a
     // recognised token (here "1080p") also appears in the release name.

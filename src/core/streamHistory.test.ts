@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   historyItemFor,
   nextEpisode,
@@ -9,6 +12,25 @@ import {
 } from "./streamHistory";
 
 const HASH = "a".repeat(40);
+
+// loadStreamHistory/saveStreamHistory resolve their file path from
+// TORLINK_STATE_DIR at module load (via src/config/paths.ts), so exercising
+// them for real means giving each test a private state dir and a fresh module
+// instance — the same seam src/download/bootguard.test.ts uses — rather than
+// writing to the developer's real data directory.
+async function isolated() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-streamhistory-"));
+  vi.stubEnv("TORLINK_STATE_DIR", dir);
+  vi.resetModules();
+  const paths = await import("../config/paths");
+  const mod = await import("./streamHistory");
+  return { dir, paths, mod };
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 function item(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
   return {
@@ -125,5 +147,71 @@ describe("removeStreamHistory", () => {
     const current = [item({ key: "a" }), item({ key: "b" })];
     expect(removeStreamHistory(current, "a")).toHaveLength(1);
     expect(removeStreamHistory(current, "nope")).toHaveLength(2);
+  });
+});
+
+describe("loadStreamHistory / saveStreamHistory", () => {
+  it("returns [] when the file does not exist", async () => {
+    const { dir, mod } = await isolated();
+    try {
+      expect(await mod.loadStreamHistory()).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns [] for corrupt JSON", async () => {
+    const { dir, paths, mod } = await isolated();
+    try {
+      await fs.mkdir(path.dirname(paths.streamHistoryFile), { recursive: true });
+      await fs.writeFile(paths.streamHistoryFile, "{not json", "utf8");
+      expect(await mod.loadStreamHistory()).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns [] when the JSON is valid but not an array", async () => {
+    const { dir, paths, mod } = await isolated();
+    try {
+      await fs.mkdir(path.dirname(paths.streamHistoryFile), { recursive: true });
+      await fs.writeFile(paths.streamHistoryFile, JSON.stringify({ not: "an array" }), "utf8");
+      expect(await mod.loadStreamHistory()).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops hand-edited junk entries and keeps the good one", async () => {
+    const { dir, paths, mod } = await isolated();
+    try {
+      const good = item();
+      const junk = [
+        good,
+        { title: "no key or infoHash" },
+        { key: "b", title: "", infoHash: HASH, startedAt: 1 }, // empty title
+        { key: "c", title: "C", infoHash: "", startedAt: 1 }, // empty infoHash
+        { key: "d", title: "D", infoHash: HASH, startedAt: "not a number" },
+      ];
+      await fs.mkdir(path.dirname(paths.streamHistoryFile), { recursive: true });
+      await fs.writeFile(paths.streamHistoryFile, JSON.stringify(junk), "utf8");
+      const loaded = await mod.loadStreamHistory();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0]?.key).toBe(good.key);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips through save and load", async () => {
+    const { dir, mod } = await isolated();
+    try {
+      await mod.saveStreamHistory([item()]);
+      const loaded = await mod.loadStreamHistory();
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0]?.title).toBe("Kepler");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
