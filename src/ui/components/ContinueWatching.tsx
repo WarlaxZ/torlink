@@ -4,15 +4,8 @@ import { useStore } from "../store";
 import { Panel } from "./Panel";
 import { wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
-import { nextEpisode, type StreamHistoryItem } from "../../core/streamHistory";
+import { nextLabel } from "../../core/streamHistory";
 import { cleanText, truncate } from "../../util/format";
-
-/** "next S02E05", or "" when there is nothing honest to offer. */
-function nextLabel(item: StreamHistoryItem): string {
-  const next = nextEpisode(item);
-  if (!next) return "";
-  return `next S${String(next.season).padStart(2, "0")}E${String(next.episode).padStart(2, "0")}`;
-}
 
 export function ContinueWatching() {
   const { streamHistory, openStreamHistory, removeStreamHistory, region, section, contentWidth, listRows, streamActive } = useStore();

@@ -112,6 +112,18 @@ export function nextEpisode(item: StreamHistoryItem): { season: number; episode:
   return { season: item.season, episode: item.episode + 1 };
 }
 
+/**
+ * "next S02E05", or "" when there is nothing honest to offer (see
+ * `nextEpisode`). Shared by both front ends' Continue-watching UI so the
+ * label is identical everywhere — `src/web` cannot import `src/ui`, and this
+ * is the front-end-agnostic middle both may import instead.
+ */
+export function nextLabel(item: StreamHistoryItem): string {
+  const next = nextEpisode(item);
+  if (!next) return "";
+  return `next S${String(next.season).padStart(2, "0")}E${String(next.episode).padStart(2, "0")}`;
+}
+
 export function removeStreamHistory(
   current: readonly StreamHistoryItem[],
   key: string,

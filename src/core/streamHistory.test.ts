@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   historyItemFor,
   nextEpisode,
+  nextLabel,
   recordStream,
   removeStreamHistory,
   STREAM_HISTORY_CAP,
@@ -139,6 +140,24 @@ describe("nextEpisode", () => {
     // "Harrowgate.S03" parses to season 3 with no episode. Guessing episode 1
     // would tell the user to watch something they may already have seen.
     expect(nextEpisode(item({ season: 3, episode: undefined }))).toBeNull();
+  });
+});
+
+describe("nextLabel", () => {
+  it("formats the next episode, zero-padded", () => {
+    expect(nextLabel(item({ season: 2, episode: 4 }))).toBe("next S02E05");
+  });
+
+  it("returns '' for a season pack, which names no episode", () => {
+    expect(nextLabel(item({ season: 3, episode: undefined }))).toBe("");
+  });
+
+  it("returns '' for a film", () => {
+    expect(nextLabel(item({ type: "movie", season: undefined, episode: undefined }))).toBe("");
+  });
+
+  it("does not corrupt season/episode numbers already two digits", () => {
+    expect(nextLabel(item({ season: 12, episode: 34 }))).toBe("next S12E35");
   });
 });
 
