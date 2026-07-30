@@ -62,6 +62,36 @@ Nothing in `src/web/static/app.ts` is reachable by a unit test. So:
   `serve --web` is a separate process from any running TUI, so writing back a stale whole file would
   silently revert the user's token, sort, or disabled sources.
 
+## Test fixtures name invented films and shows, never real ones
+
+This is a torrent client. Fixtures that name real films read badly whatever the intent, so
+**never introduce a real title** into a test, a helper, a doc comment, an example, or
+user-facing copy. Reuse this cast rather than inventing more — a shared cast is greppable, and
+each of these is verified to parse the way the title it replaced did:
+
+| Title | Shape | Use it for |
+| --- | --- | --- |
+| `Kestrel.2010.1080p.BluRay.x264` | one-word title + year | a plain film |
+| `Ashfall.1999.1080p` | one-word title + year | a second film, when you need two |
+| `Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP` | two-word title, 4K, features | quality/feature ranking |
+| `Kepler.S02E04.1080p.WEB-DL` | series, season **and** episode | a single episode |
+| `Harrowgate.S03.1080p.WEB-DL` | series, season, **no episode** | a season pack — the edge case that catches "next episode" bugs |
+
+For user-facing copy, prefer naming nothing at all: the web search placeholder says
+"a film or show", not an invented title, because an invented one just prompts "what's that?"
+
+### Two traps, both of which have already bitten
+
+If you ever bulk-rename fixtures, the full suite is the only thing that will tell you it worked.
+
+- **Match on word boundaries.** A plain `s/the bear/harrowgate/` also rewrites **"the bearer token"**
+  — it corrupted ten files and the auth docs before the suite caught it. Use `perl -pi -e` with `\b`,
+  not `sed` with bare strings.
+- **`\b` does not save you from URL encoding.** `%20sintel%20` has no boundary between `0` and `s`
+  (both are word characters), and `the+matrix` matches only its second half — so a test's input and
+  its expected string drift apart and the failure looks unrelated. Grep for `%20` and `+`-joined
+  forms separately.
+
 ## Before you say it's done
 
 `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`. There is one known pre-existing
