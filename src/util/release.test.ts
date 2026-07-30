@@ -38,6 +38,24 @@ describe("parseRelease", () => {
     expect(parseRelease("")).toBeNull();
   });
 
+  it("returns null when the name is only quality/codec/source noise", () => {
+    // parse-torrent-title always returns *some* title, even for these — it
+    // leaves the residual token it could not classify ("1080p", "x264", "WEB").
+    // None of that is a title worth looking up.
+    expect(parseRelease("1080p.WEB-DL.x265")).toBeNull();
+    expect(parseRelease("2160p")).toBeNull();
+    expect(parseRelease("x264-GROUP")).toBeNull();
+    expect(parseRelease("WEB-DL")).toBeNull();
+  });
+
+  it("still parses a real title that itself contains a resolution-like token", () => {
+    // The noise check must not over-fire on a genuine title just because a
+    // recognised token (here "1080p") also appears in the release name.
+    const r = parseRelease("Kepler.S02E04.1080p.WEB-DL.x265-GROUP");
+    expect(r).not.toBeNull();
+    expect(r!.title).toBe("Kepler");
+  });
+
   it("exposes a cache key that ignores quality/group noise", () => {
     const a = parseRelease("Tollgate.2025.2160p.UHD.BluRay.x265-TERMINAL");
     const b = parseRelease("Tollgate.2025.1080p.WEB-DL.x264-OTHER");

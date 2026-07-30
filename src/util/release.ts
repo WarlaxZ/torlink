@@ -35,6 +35,35 @@ export function hintForGroup(group: string | null | undefined): SectionHint {
   return hintForSection((group ?? "").toLowerCase());
 }
 
+// parse-torrent-title always returns *some* title, even for a name that is
+// pure quality/codec/source noise — it leaves the unclassified residue behind
+// as `title` ("1080p.WEB-DL.x265" -> title "1080p", "x264-GROUP" -> title
+// "x264", "WEB-DL" -> title "WEB"). Rather than hand-maintain a list of
+// resolution/codec/source words (which rots as new release formats appear),
+// ask the parser itself: it already classified every token it recognised into
+// resolution/source/codec/group/etc. If the title, once separators are
+// stripped, is wholly contained in the metadata it recognised, there is no
+// title left over — it is noise.
+function isNoiseOnly(title: string, parsed: Record<string, unknown>): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const titleNorm = normalize(title);
+  if (!titleNorm) return true;
+  const noise = Object.entries(parsed)
+    .filter(([key]) => key !== "title" && key !== "year" && key !== "season" && key !== "episode")
+    .map(([, value]) => {
+      if (typeof value === "string") return normalize(value);
+      if (Array.isArray(value)) {
+        return value
+          .filter((v): v is string => typeof v === "string")
+          .map(normalize)
+          .join("");
+      }
+      return "";
+    })
+    .join("");
+  return noise.length > 0 && noise.includes(titleNorm);
+}
+
 // Extract a clean title (+ year, + medium) from a raw torrent release name so
 // it can be looked up on OMDb. Returns null when no usable title survives
 // (e.g. the name was only quality/codec noise). A parsed season/episode always
@@ -42,7 +71,7 @@ export function hintForGroup(group: string | null | undefined): SectionHint {
 export function parseRelease(name: string, hint?: SectionHint): ParsedRelease | null {
   const p = parse(name);
   const title = (p.title ?? "").trim();
-  if (!title) return null;
+  if (!title || isNoiseOnly(title, p as unknown as Record<string, unknown>)) return null;
   const year = typeof p.year === "number" ? p.year : undefined;
   const isSeries = p.season != null || p.episode != null;
   // Season/episode is decisive; otherwise trust the section the user is in;

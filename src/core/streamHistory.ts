@@ -51,10 +51,6 @@ export function historyItemFor(
 ): StreamHistoryItem | null {
   const parsed = parseRelease(input.name);
   if (!parsed) return null;
-  // parse-torrent-title has no notion of "no title": given only quality noise
-  // it hands back the leftover token as the title ("1080p.WEB-DL.x265" ->
-  // "1080p"). A title that is just a resolution marker is not a title.
-  if (/^\d{3,4}p$/i.test(parsed.title)) return null;
   const out: StreamHistoryItem = {
     key: parsed.key,
     title: parsed.title,
