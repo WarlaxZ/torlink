@@ -4,6 +4,13 @@ import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache"
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
 import {
+  historyItemFor,
+  loadStreamHistory,
+  recordStream,
+  saveStreamHistory,
+  type StreamHistoryItem,
+} from "../core/streamHistory";
+import {
   loadConfig,
   resolveAdultContent,
   resolveOmdbApiKey,
@@ -91,6 +98,9 @@ export interface WebDeps {
    * seam does not fail — it silently edits the machine it runs on.
    */
   saveConfigImpl?: (config: Config) => Promise<void>;
+  loadStreamHistoryImpl?: () => Promise<StreamHistoryItem[]>;
+  /** Injected for the reason `saveConfigImpl` is: the real one writes the developer's own data dir. */
+  saveStreamHistoryImpl?: (items: readonly StreamHistoryItem[]) => Promise<void>;
   /**
    * Last-known Real-Debrid account status for a token, or null when it can't be
    * determined. Only consulted when a token is configured (see the route).
@@ -381,7 +391,34 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
     capability: session.capability,
     session: toPublicSession(session),
   };
+  // History and the reccd `started` event. The TUI has posted `started` from
+  // its two stream branches all along; the web posted nothing, so a browser
+  // stream taught the recommender nothing about having begun. Recorded when
+  // the session RESOLVES — the moment the user asked to watch something —
+  // not when a file is picked. Awaited so both writes are ordered before the
+  // response goes out (both are local/fast); errors from either are swallowed
+  // inside recordStreamStart and the reccd dispatch itself is fire-and-forget,
+  // so neither can take the stream response down with it.
+  await recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
   return { status: 200, json: out };
+}
+
+async function recordStreamStart(deps: WebDeps, infoHash: string, name: string): Promise<void> {
+  const item = historyItemFor({ id: infoHash, name, magnet: buildMagnet(infoHash, name) }, Date.now());
+  // No title in the release name means no row worth drawing.
+  if (item) {
+    try {
+      const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+      await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(recordStream(current, item));
+    } catch {
+      // A convenience list must never take a stream down with it.
+    }
+  }
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config);
+  if (!reccConfig.reccUrl || !name) return;
+  const event: ReccEvent = { type: "started", rawName: name, ts: Date.now(), source: "torlink" };
+  void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
 }
 
 // ---- search ------------------------------------------------------------

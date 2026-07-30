@@ -25,6 +25,13 @@ import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
+import {
+  historyItemFor,
+  loadStreamHistory,
+  recordStream,
+  saveStreamHistory,
+  type StreamHistoryItem,
+} from "../core/streamHistory";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
@@ -285,6 +292,11 @@ export function App({
   const [activeStream, setActiveStream] = useState<
     { session: TorrentStreamSession; name: string; input: DownloadInput } | null
   >(null);
+  // Read by Task 9's Continue-watching pane (Store.streamHistory, store.ts) —
+  // that wiring lands in that task, not this one, so `streamHistory` is
+  // unread here.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [streamHistory, setStreamHistory] = useState<StreamHistoryItem[]>([]);
   // Confirm state for the two torrent privacy prompts.
   const [torrentPrompt, setTorrentPrompt] = useState<
     { input: DownloadInput; reason?: string } | null
@@ -337,6 +349,7 @@ export function App({
         return;
       }
       setConfigState(cfg);
+      setStreamHistory(await loadStreamHistory());
       // Apply any custom DNS before the first network call (e.g. token check).
       setDnsServers(resolveDnsServers(cfg));
       // Restore remembered UI preferences (validated, so stale values degrade
@@ -1119,6 +1132,21 @@ export function App({
     setNotice("Stream cancelled.");
   }, []);
 
+  // The same store the web writes, from src/core so neither front end owns it.
+  // Fire-and-forget: a convenience list must never interrupt a stream.
+  const recordStreamHistory = useCallback(async (input: DownloadInput) => {
+    const item = historyItemFor(input, Date.now());
+    if (!item) return; // no title in the release name, so no row to draw
+    try {
+      const current = await loadStreamHistory();
+      const next = recordStream(current, item);
+      await saveStreamHistory(next);
+      setStreamHistory(next);
+    } catch {
+      /* ignore — see above */
+    }
+  }, []);
+
   // Stream a torrent directly (no Real-Debrid): cache metadata, spin up a
   // local HTTP server for the files, then hand off to the same player/picker
   // path the Real-Debrid flow uses.
@@ -1160,6 +1188,7 @@ export function App({
             resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
+          void recordStreamHistory(input);
           if (candidates.length > 1) {
             setStreamedFiles(new Set());
             setStreamSource(input);
@@ -1177,7 +1206,7 @@ export function App({
         }
       })();
     },
-    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed],
+    [config, preparing, streamFiles, activeStream, playStream, ensureVpnSafe, markPlayed, recordStreamHistory],
   );
 
   useEffect(() => {
@@ -1307,6 +1336,7 @@ export function App({
             resolveReccConfig(config),
             { type: "started", rawName: input.name, ts: Date.now(), source: "torlink" },
           );
+          void recordStreamHistory(input);
           if (candidates.length > 1) {
             setPreparing(null);
             setStreamedFiles(new Set());
@@ -1337,7 +1367,7 @@ export function App({
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed],
+    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed, recordStreamHistory],
   );
 
   // Reopen a favourited series: re-resolve its magnet through the same stream

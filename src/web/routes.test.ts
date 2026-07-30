@@ -20,6 +20,7 @@ import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
 import type { FetchTitleMetaResult } from "../recc/omdb";
 import type { ReccEvent } from "../recc/client";
+import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 import type { LibraryResponse, PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
 import type { Runtime } from "../daemon/runtime";
@@ -45,6 +46,10 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
     // the developer's own ~/.config/torlnk/config.json.
     saveConfigImpl: async () => {
       throw new Error("test must inject saveConfigImpl");
+    },
+    loadStreamHistoryImpl: async () => [],
+    saveStreamHistoryImpl: async () => {
+      throw new Error("test must inject saveStreamHistoryImpl");
     },
     rdStatusImpl: async () => null,
     ...over,
@@ -2394,5 +2399,61 @@ describe("handleWebApi — POST /api/library", () => {
     });
     await post(d, { infoHash: HASH, name: "Kepler", action: "watched", filename: "ep1.mkv" });
     expect(events).toEqual([]);
+  });
+});
+
+describe("POST /api/stream — records stream history", () => {
+  const HASH = "c".repeat(40);
+
+  it("records the title and posts started to reccd", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    const events: ReccEvent[] = [];
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({
+          ...defaultConfig, downloadDir: "/tmp/dl", reccUrl: "http://localhost:4100",
+        }),
+        loadStreamHistoryImpl: async () => [],
+        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+        postEventImpl: async (_c, e) => { events.push(e); },
+      }),
+      "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+
+    expect(res.status).toBeLessThan(500);
+    expect(saved[0]?.[0]?.title).toBe("Kepler");
+    expect(saved[0]?.[0]?.episode).toBe(4);
+    // The web posted NO started event before this change — a browser stream
+    // taught reccd nothing about having begun.
+    expect(events).toEqual([
+      expect.objectContaining({ type: "started", rawName: "Kepler.S02E04.1080p.WEB-DL" }),
+    ]);
+  });
+
+  it("does not write history for a name with no title in it", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [],
+        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+      }),
+      "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "1080p.WEB-DL.x265", confirm: true }),
+    );
+    expect(saved).toHaveLength(0);
+  });
+
+  it("survives a history write that rejects", async () => {
+    // History is a convenience. It must never take a stream down with it.
+    const res = await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [],
+        saveStreamHistoryImpl: async () => { throw new Error("disk full"); },
+      }),
+      "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p", confirm: true }),
+    );
+    expect(res.status).toBeLessThan(500);
   });
 });
