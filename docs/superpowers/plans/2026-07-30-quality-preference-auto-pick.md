@@ -1066,13 +1066,38 @@ Add `autoPlayTitle` next to `streamResult` in `src/ui/App.tsx`:
   // `useConcurrentSearch`, which a callback cannot invoke. This is the same
   // core entry point the hook uses, so results are identical to what the
   // Results pane would have shown.
+  // Cancels any auto-play already in flight. `runSearch`'s per-source timeout
+  // is 25 SECONDS, so without this a user who hits Enter and then moves on gets
+  // a player for a title they left, and a double Enter runs two searches whose
+  // second `streamResult` bounces off "Stop the current stream first". Note the
+  // guards inside `streamResult` cannot help: they are evaluated after the
+  // await, when nothing is streaming yet. `useConcurrentSearch` aborts the same
+  // way on cleanup; this is the keypress path's equivalent.
+  const autoPlayRef = useRef<AbortController | null>(null);
+
   const autoPlayTitle = useCallback(
     (title: string, intent: PickIntent, fallback?: () => void) => {
       if (!config) return;
+      // Cancel-and-replace rather than ignore-while-busy: pressing Enter on a
+      // different row is a clear statement about what the user now wants.
+      autoPlayRef.current?.abort();
+      const ctrl = new AbortController();
+      autoPlayRef.current = ctrl;
       void (async () => {
         setNotice(`Finding a release for ${title}…`);
         const sources = enabledSources(config.disabledSources ?? [], config.adultContent ?? false);
-        const snap = await runSearch(title, sources);
+        let snap;
+        try {
+          snap = await runSearch(title, sources, { signal: ctrl.signal });
+        } catch {
+          // An aborted search rejects. Silent on purpose — a newer auto-play
+          // has already replaced this one's status line. Without this catch the
+          // rejection is swallowed unreported inside the `void (async …)()`.
+          return;
+        }
+        // A newer press superseded this one while it was in flight.
+        if (autoPlayRef.current !== ctrl) return;
+        autoPlayRef.current = null;
         const prefs = qualityPrefsFrom(config);
         const pick = pickBestRelease(snap.results, prefs, intent);
         if (!pick) {
