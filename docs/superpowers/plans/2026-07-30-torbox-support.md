@@ -368,8 +368,9 @@ describe("the debrid provider registry", () => {
     expect(getDebridProvider("realdebrid").checkCached).toBeUndefined();
   });
 
-  it("lists every provider id", () => {
-    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid", "torbox"]);
+  it("lists every provider this build carries", () => {
+    // TorBox joins this list in Task 5, when its client is real.
+    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid"]);
   });
 });
 ```
@@ -410,45 +411,34 @@ Fix the moved test's import path (`../util/net` → `../../util/net` etc.) and n
 
 - [ ] **Step 4: Write `src/integrations/debrid/index.ts`**
 
+**No TorBox stub.** The registry starts with Real-Debrid alone and Task 5 adds
+TorBox once its client is real, so no commit on this branch ever contains a
+provider whose methods reject with "not implemented".
+
 ```ts
 import type { DebridProvider, DebridProviderId } from "./types";
 import { realDebridProvider } from "./realdebrid";
-import { torBoxProvider } from "./torbox";
 
-/** Every provider, in the order the accounts pane lists them. */
-export const DEBRID_PROVIDER_IDS = ["realdebrid", "torbox"] as const satisfies readonly DebridProviderId[];
+/**
+ * Every provider torlink can resolve through, in the order the accounts pane
+ * lists them. Deliberately a runtime list and not `keyof`: the accounts pane
+ * and the sources capability flag both iterate it.
+ */
+export const DEBRID_PROVIDER_IDS = ["realdebrid"] as const satisfies readonly DebridProviderId[];
 
-const PROVIDERS: Record<DebridProviderId, DebridProvider> = {
+const PROVIDERS: Partial<Record<DebridProviderId, DebridProvider>> = {
   realdebrid: realDebridProvider,
-  torbox: torBoxProvider,
 };
 
 export function getDebridProvider(id: DebridProviderId): DebridProvider {
-  return PROVIDERS[id];
+  const provider = PROVIDERS[id];
+  // Reachable only from a hand-edited config naming a provider this build does
+  // not carry; resolveActiveDebrid validates the id, so this is a type guard.
+  if (!provider) throw new Error(`Unknown debrid provider: ${id}`);
+  return provider;
 }
 
 export type { DebridProvider, DebridProviderId, DebridStatus, RequestOptions, ResolveOptions } from "./types";
-```
-
-`./torbox` does not exist yet, so stub it now — Phase 2 fills it in. Create `src/integrations/debrid/torbox.ts` with exactly:
-
-```ts
-import type { DebridProvider } from "./types";
-
-// Filled in by Phase 2. The registry needs the export to exist first so the
-// Real-Debrid move can land green on its own.
-export const torBoxProvider: DebridProvider = {
-  id: "torbox",
-  label: "TorBox",
-  shortLabel: "TB",
-  homepage: "torbox.app",
-  tokenUrl: "https://torbox.app/settings",
-  tokenEnvVar: "TORBOX_API_TOKEN",
-  validateToken: () => Promise.reject(new Error("TorBox support is not implemented yet.")),
-  resolveMagnet: () => Promise.reject(new Error("TorBox support is not implemented yet.")),
-  isTransient: () => false,
-  isTokenRejection: () => false,
-};
 ```
 
 - [ ] **Step 5: Point the `ResolvedFile` consumers at `StreamFile`**
@@ -629,7 +619,7 @@ grep -rn '"realdebrid"' src --include='*.ts' --include='*.tsx' | grep -v "integr
 grep -rn "deliveryMethod(" src --include='*.tsx' --include='*.ts' | cut -c1-140
 ```
 
-Every hit outside `src/integrations/debrid/` that concerns a download item becomes `via: "debrid"` plus a `provider`. `src/download/queue.ts:302` is the writer; Task 12 gives it a real provider — for now write `via: "debrid", provider: "realdebrid"`. Update every `deliveryMethod(...)` call site to pass `item.provider`.
+Every hit outside `src/integrations/debrid/` that concerns a download item becomes `via: "debrid"` plus a `provider`. `src/download/queue.ts:302` is the writer; Task 11 gives it a real provider — for now write `via: "debrid", provider: "realdebrid"`. Update every `deliveryMethod(...)` call site to pass `item.provider`.
 
 - [ ] **Step 7: Verify**
 
@@ -651,14 +641,14 @@ existing queue and history files survive the upgrade unchanged."
 
 ## Phase 2 — the TorBox client
 
-### Task 4: TorBox request plumbing, the `success:false` envelope, and token redaction
+### Task 4: The TorBox client — request plumbing, error mapping, and `validateToken`
 
 **Files:**
-- Modify: `src/integrations/debrid/torbox.ts` (replace the Task 2 stub)
-- Create: `src/integrations/debrid/torbox.test.ts`
+- Create: `src/integrations/debrid/torbox.ts`, `src/integrations/debrid/torbox.test.ts`
 
 **Interfaces:**
-- Produces: `TorBoxError` (with `status?`, `code?`), `TOKEN_REJECTED_MESSAGE`, `isTransient`, `isTokenRejection`, and a private `request()`. Tasks 5–7 build on `request()`.
+- Consumes: Task 1's `DebridStatus`, `RequestOptions`.
+- Produces: `TorBoxError` (with `status?`, `code?`), `TOKEN_REJECTED_MESSAGE`, `isTransient`, `isTokenRejection`, `validateToken`, and a module-private `request()`. Tasks 5 and 6 build on `request()`; Task 6 assembles these into `torBoxProvider` and registers it.
 
 Two hazards land here. **TorBox returns `success: false` with HTTP 200** — RD's `request()` throws only on `!res.ok`, so a straight port reads failures as successes. And **`requestdl` puts the API key in the query string**, while RD's `request()` logs the path on every call (`realdebrid.ts:191,242,245`) — a port would log the token.
 
@@ -668,7 +658,7 @@ Create `src/integrations/debrid/torbox.test.ts`:
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isTokenRejection, isTransient, TOKEN_REJECTED_MESSAGE, torBoxProvider } from "./torbox";
+import { isTokenRejection, isTransient, TOKEN_REJECTED_MESSAGE, validateToken } from "./torbox";
 import { log } from "../../util/logger";
 
 const TOKEN = "tb-secret-token-abc123";
@@ -725,7 +715,7 @@ describe("TorBox request plumbing", () => {
       { "/v1/api/user/me": jsonRes(200, { success: true, data: { email: "ada@example.com", plan: 2 } }) },
       calls,
     );
-    await torBoxProvider.validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep });
+    await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep });
     expect(calls[0]!.headers["Authorization"]).toBe(`Bearer ${TOKEN}`);
     expect(calls[0]!.url).not.toContain(TOKEN);
   });
@@ -737,7 +727,7 @@ describe("TorBox request plumbing", () => {
       calls,
     );
     await expect(
-      torBoxProvider.validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 }),
+      validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 }),
     ).rejects.toThrow(/try later|DATABASE_ERROR/);
   });
 
@@ -747,8 +737,7 @@ describe("TorBox request plumbing", () => {
       { "/v1/api/user/me": jsonRes(401, { success: false, error: "BAD_TOKEN" }) },
       calls,
     );
-    const err = await torBoxProvider
-      .validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
+    const err = await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
       .catch((e: unknown) => e);
     expect(isTokenRejection(err)).toBe(true);
     expect((err as Error).message).toBe(TOKEN_REJECTED_MESSAGE);
@@ -760,8 +749,7 @@ describe("TorBox request plumbing", () => {
       { "/v1/api/user/me": jsonRes(200, { success: false, error: "AUTH_ERROR" }) },
       calls,
     );
-    const err = await torBoxProvider
-      .validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
+    const err = await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
       .catch((e: unknown) => e);
     expect(isTokenRejection(err)).toBe(true);
   });
@@ -770,8 +758,7 @@ describe("TorBox request plumbing", () => {
     const calls: Call[] = [];
     for (const slug of ["TOO_MANY_REQUESTS", "MONTHLY_LIMIT", "ACTIVE_LIMIT"]) {
       const fetchImpl = router({ "/v1/api/user/me": jsonRes(200, { success: false, error: slug }) }, calls);
-      const err = await torBoxProvider
-        .validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
+      const err = await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
         .catch((e: unknown) => e);
       expect(isTransient(err), slug).toBe(true);
     }
@@ -780,8 +767,7 @@ describe("TorBox request plumbing", () => {
   it("does not treat a bad token as transient", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({ "/v1/api/user/me": jsonRes(401, { success: false, error: "BAD_TOKEN" }) }, calls);
-    const err = await torBoxProvider
-      .validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
+    const err = await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
       .catch((e: unknown) => e);
     expect(isTransient(err)).toBe(false);
   });
@@ -803,13 +789,59 @@ describe("TorBox logging", () => {
   it("never writes the token to the log, even for a failing call", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({ "/v1/api/user/me": jsonRes(500, { success: false, error: "OOPS" }) }, calls);
-    await torBoxProvider
-      .validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 })
-      .catch(() => {});
+    await validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep, retries: 0 }).catch(() => {});
     const logged = spies.flatMap((s) => s.mock.calls.flat()).join("\n");
     expect(logged).not.toContain(TOKEN);
     // Proves the assertion above is not vacuous — something WAS logged.
     expect(logged).toContain("torbox");
+  });
+});
+
+describe("TorBox validateToken", () => {
+  const NOW_ISO = "2026-08-20T00:00:00Z";
+
+  async function statusFor(data: Record<string, unknown>) {
+    const calls: Call[] = [];
+    const fetchImpl = router({ "/v1/api/user/me": jsonRes(200, { success: true, data }) }, calls);
+    return validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep });
+  }
+
+  it("maps a Pro plan with an expiry", async () => {
+    expect(await statusFor({ email: "ada@example.com", plan: 2, premiumExpiresAt: NOW_ISO })).toEqual({
+      provider: "torbox",
+      username: "ada@example.com",
+      active: true,
+      planLabel: "pro",
+      expiresAt: new Date(NOW_ISO),
+    });
+  });
+
+  it("labels each plan integer", async () => {
+    expect((await statusFor({ email: "a@b.c", plan: 0 })).planLabel).toBe("free");
+    expect((await statusFor({ email: "a@b.c", plan: 1 })).planLabel).toBe("essential");
+    expect((await statusFor({ email: "a@b.c", plan: 3 })).planLabel).toBe("standard");
+  });
+
+  it("treats an unknown plan integer as active with a generic label", async () => {
+    const s = await statusFor({ email: "a@b.c", plan: 9 });
+    expect(s.active).toBe(true);
+    expect(s.planLabel).toBe("plan 9");
+  });
+
+  // ASSUMPTION, unverified: TorBox's free tier can add (cached) torrents, so
+  // active is true for plan 0. If it cannot, this becomes false and the
+  // existing torrent-confirm path covers it with no other change.
+  it("treats the free plan as able to add torrents", async () => {
+    expect((await statusFor({ email: "a@b.c", plan: 0 })).active).toBe(true);
+  });
+
+  it("has no expiry when premiumExpiresAt is absent or unparseable", async () => {
+    expect((await statusFor({ email: "a@b.c", plan: 2 })).expiresAt).toBeNull();
+    expect((await statusFor({ email: "a@b.c", plan: 2, premiumExpiresAt: "nope" })).expiresAt).toBeNull();
+  });
+
+  it("falls back to a placeholder username when TorBox sends no email", async () => {
+    expect((await statusFor({ plan: 2 })).username).toBe("TorBox account");
   });
 });
 ```
@@ -817,11 +849,11 @@ describe("TorBox logging", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run src/integrations/debrid/torbox.test.ts`
-Expected: FAIL — `TorBoxError`/`isTransient`/`TOKEN_REJECTED_MESSAGE` are not exported, and the stub `validateToken` rejects with "not implemented yet".
+Expected: FAIL — `src/integrations/debrid/torbox.ts` does not exist yet.
 
 - [ ] **Step 3: Write the plumbing**
 
-Replace `src/integrations/debrid/torbox.ts` with:
+Create `src/integrations/debrid/torbox.ts`:
 
 ```ts
 import { fetchResilient, HttpError, USER_AGENT } from "../../util/net";
@@ -1001,121 +1033,19 @@ async function request<T>(
   return env.data as T;
 }
 
-export const torBoxProvider: DebridProvider = {
-  id: "torbox",
-  label: "TorBox",
-  shortLabel: "TB",
-  homepage: "torbox.app",
-  tokenUrl: "https://torbox.app/settings",
-  tokenEnvVar: "TORBOX_API_TOKEN",
-  validateToken: (token, opts = {}) => validateToken(token, opts),
-  resolveMagnet: () => Promise.reject(new TorBoxError("Not implemented yet.")),
-  isTransient,
-  isTokenRejection,
-};
-
-// Replaced with the real mapping in the next task; present so this task's tests
-// can exercise `request()` through the provider's public surface.
-async function validateToken(token: string, opts: RequestOptions) {
-  await request<unknown>(token, "GET", "/api/user/me", undefined, opts);
-  throw new TorBoxError("Not implemented yet.");
-}
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+**No `torBoxProvider` object yet.** It is assembled in Task 5, once
+`resolveMagnet` and `checkCached` exist and it is registered — so no commit on
+this branch carries a provider whose methods reject. This task exports plain
+functions, and its tests call them directly.
 
-Run: `npx vitest run src/integrations/debrid/torbox.test.ts -t "request plumbing"` then `-t "TorBox logging"`.
-Expected: the plumbing and logging tests PASS. The `validateToken` "bearer header" test will still fail on the trailing `throw` — that is expected and Task 5 fixes it. To keep this task green, temporarily skip only that one test with `it.skip` and a comment `// unskipped in Task 5`.
+- [ ] **Step 4: Write `validateToken`, mapping `/api/user/me` onto `DebridStatus`**
 
-- [ ] **Step 5: Verify and commit**
+TorBox's `/api/user/me` returns `{plan, premiumExpiresAt, email}`. Plans: `0`
+Free, `1` Essential, `2` Pro, `3` Standard.
 
-```bash
-npm test && npm run typecheck && npm run lint
-git add -A
-git commit -m "feat: TorBox request plumbing with envelope-aware errors
-
-TorBox answers success:false with HTTP 200, so unlike the Real-Debrid client
-this checks the envelope whatever the status was. requestdl carries the API
-key in the query string, so the log path is query-stripped — a straight port
-of RD's per-call path logging would write the user's token to disk."
-```
-
----
-
-### Task 5: `validateToken` → `DebridStatus`
-
-**Files:**
-- Modify: `src/integrations/debrid/torbox.ts`
-- Test: `src/integrations/debrid/torbox.test.ts`
-
-**Interfaces:**
-- Consumes: Task 4's `request()`; Task 1's `DebridStatus`.
-- Produces: a working `torBoxProvider.validateToken`.
-
-TorBox's `/api/user/me` returns `{plan, premiumExpiresAt, email}`. Plans: `0` Free, `1` Essential, `2` Pro, `3` Standard.
-
-- [ ] **Step 1: Write the failing test**
-
-Un-skip Task 4's bearer-header test, and append to `src/integrations/debrid/torbox.test.ts`:
-
-```ts
-describe("TorBox validateToken", () => {
-  const NOW_ISO = "2026-08-20T00:00:00Z";
-
-  async function statusFor(data: Record<string, unknown>) {
-    const calls: Call[] = [];
-    const fetchImpl = router({ "/v1/api/user/me": jsonRes(200, { success: true, data }) }, calls);
-    return torBoxProvider.validateToken(TOKEN, { fetchImpl, sleepImpl: noSleep });
-  }
-
-  it("maps a Pro plan with an expiry", async () => {
-    expect(await statusFor({ email: "ada@example.com", plan: 2, premiumExpiresAt: NOW_ISO })).toEqual({
-      provider: "torbox",
-      username: "ada@example.com",
-      active: true,
-      planLabel: "pro",
-      expiresAt: new Date(NOW_ISO),
-    });
-  });
-
-  it("labels each plan integer", async () => {
-    expect((await statusFor({ email: "a@b.c", plan: 0 })).planLabel).toBe("free");
-    expect((await statusFor({ email: "a@b.c", plan: 1 })).planLabel).toBe("essential");
-    expect((await statusFor({ email: "a@b.c", plan: 3 })).planLabel).toBe("standard");
-  });
-
-  it("treats an unknown plan integer as active with a generic label", async () => {
-    const s = await statusFor({ email: "a@b.c", plan: 9 });
-    expect(s.active).toBe(true);
-    expect(s.planLabel).toBe("plan 9");
-  });
-
-  // ASSUMPTION, unverified: TorBox's free tier can add (cached) torrents, so
-  // active is true for plan 0. If it cannot, this becomes false and the
-  // existing torrent-confirm path covers it with no other change.
-  it("treats the free plan as able to add torrents", async () => {
-    expect((await statusFor({ email: "a@b.c", plan: 0 })).active).toBe(true);
-  });
-
-  it("has no expiry when premiumExpiresAt is absent or unparseable", async () => {
-    expect((await statusFor({ email: "a@b.c", plan: 2 })).expiresAt).toBeNull();
-    expect((await statusFor({ email: "a@b.c", plan: 2, premiumExpiresAt: "nope" })).expiresAt).toBeNull();
-  });
-
-  it("falls back to a placeholder username when TorBox sends no email", async () => {
-    expect((await statusFor({ plan: 2 })).username).toBe("TorBox account");
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run src/integrations/debrid/torbox.test.ts -t "validateToken"`
-Expected: FAIL — rejects with "Not implemented yet."
-
-- [ ] **Step 3: Implement**
-
-In `src/integrations/debrid/torbox.ts`, replace the placeholder `validateToken` with:
+Append to `src/integrations/debrid/torbox.ts`:
 
 ```ts
 // TorBox's plan integers, from its API docs. An unrecognised integer is
@@ -1160,17 +1090,24 @@ async function validateToken(token: string, opts: RequestOptions): Promise<Debri
 
 Add `DebridStatus` to the type import at the top of the file.
 
-- [ ] **Step 4: Run tests to verify they pass**
+Add `DebridStatus` to the type import at the top of the file.
+
+- [ ] **Step 5: Run the whole TorBox suite to verify it passes**
 
 Run: `npx vitest run src/integrations/debrid/torbox.test.ts`
-Expected: PASS — including the previously-skipped bearer-header test.
+Expected: PASS — plumbing, logging and validateToken. No test is skipped.
 
-- [ ] **Step 5: Verify and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
 npm test && npm run typecheck && npm run lint
 git add -A
-git commit -m "feat: TorBox validateToken maps /api/user/me onto DebridStatus
+git commit -m "feat: TorBox client plumbing and token validation
+
+TorBox answers success:false with HTTP 200, so unlike the Real-Debrid client
+this checks the envelope whatever the status was. requestdl carries the API
+key in the query string, so the log path is query-stripped — a straight port
+of RD's per-call path logging would write the user's token to disk.
 
 The free-plan-can-add-torrents assumption is unverified against a live
 account and is commented as such at both the code and the test."
@@ -1178,7 +1115,7 @@ account and is commented as such at both the code and the test."
 
 ---
 
-### Task 6: `resolveMagnet` — createtorrent, poll, requestdl
+### Task 5: `resolveMagnet` — createtorrent, poll, requestdl
 
 **Files:**
 - Modify: `src/integrations/debrid/torbox.ts`
@@ -1186,7 +1123,7 @@ account and is commented as such at both the code and the test."
 
 **Interfaces:**
 - Consumes: Task 4's `request()`.
-- Produces: a working `torBoxProvider.resolveMagnet(token, magnet, opts): Promise<StreamFile[]>`.
+- Produces: a working `resolveMagnet(token, magnet, opts): Promise<StreamFile[]>`.
 
 Pipeline: `POST /api/torrents/createtorrent` → poll `GET /api/torrents/mylist?id=&bypass_cache=true` until `download_finished` → `GET /api/torrents/requestdl?token=&torrent_id=&file_id=` per file. There is no `selectFiles` equivalent.
 
@@ -1228,7 +1165,7 @@ describe("TorBox resolveMagnet", () => {
       },
       calls,
     );
-    const files = await torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
+    const files = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
     expect(files).toEqual([
       {
         url: "https://cdn.torbox.app/dl/kestrel.mkv",
@@ -1255,7 +1192,7 @@ describe("TorBox resolveMagnet", () => {
       },
       calls,
     );
-    await torBoxProvider.resolveMagnet(TOKEN, MAGNET, {
+    await resolveMagnet(TOKEN, MAGNET, {
       fetchImpl,
       sleepImpl: noSleep,
       pollIntervalMs: 1,
@@ -1268,7 +1205,7 @@ describe("TorBox resolveMagnet", () => {
     const calls: Call[] = [];
     const fetchImpl = router({ [CREATE]: jsonRes(503, { success: false, error: "OOPS" }) }, calls);
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
     ).rejects.toThrow(/TorBox/);
     expect(calls.filter((c) => c.url.includes("createtorrent"))).toHaveLength(1);
   });
@@ -1283,7 +1220,7 @@ describe("TorBox resolveMagnet", () => {
       },
       calls,
     );
-    const files = await torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
+    const files = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
     expect(files).toHaveLength(1);
   });
 
@@ -1291,7 +1228,7 @@ describe("TorBox resolveMagnet", () => {
     const calls: Call[] = [];
     const fetchImpl = router({ [CREATE]: jsonRes(200, { success: true, data: { hash: HASH } }) }, calls);
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
     ).rejects.toThrow(/did not return a torrent id/);
   });
 
@@ -1305,7 +1242,7 @@ describe("TorBox resolveMagnet", () => {
       calls,
     );
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, {
+      resolveMagnet(TOKEN, MAGNET, {
         fetchImpl,
         sleepImpl: noSleep,
         pollIntervalMs: 10,
@@ -1328,7 +1265,7 @@ describe("TorBox resolveMagnet", () => {
       calls,
     );
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, {
+      resolveMagnet(TOKEN, MAGNET, {
         fetchImpl,
         sleepImpl: noSleep,
         pollIntervalMs: 1,
@@ -1350,7 +1287,7 @@ describe("TorBox resolveMagnet", () => {
       calls,
     );
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep, pollIntervalMs: 1 }),
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep, pollIntervalMs: 1 }),
     ).rejects.toThrow(/TorBox couldn't/);
   });
 
@@ -1364,7 +1301,7 @@ describe("TorBox resolveMagnet", () => {
       calls,
     );
     await expect(
-      torBoxProvider.resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
     ).rejects.toThrow(/no downloadable/);
   });
 });
@@ -1546,7 +1483,7 @@ export async function resolveMagnet(
 }
 ```
 
-Then wire it into the provider object: `resolveMagnet,`.
+Nothing wires it into a provider object yet — Task 5 assembles `torBoxProvider` once `checkCached` exists too.
 
 Note on the progress test's expectation `[25, 50, 100]`: the loop emits `25` (poll 1), `50` (poll 2), `100` (poll 3, which finishes), and the trailing `onProgress?.(100)` would make a fourth. Change the loop so the trailing call is skipped when the last emitted value was already 100:
 
@@ -1574,14 +1511,14 @@ does — it is not idempotent."
 
 ---
 
-### Task 7: `checkCached`
+### Task 6: `checkCached`, and registering TorBox
 
 **Files:**
-- Modify: `src/integrations/debrid/torbox.ts`
-- Test: `src/integrations/debrid/torbox.test.ts`
+- Modify: `src/integrations/debrid/torbox.ts`, `src/integrations/debrid/index.ts`
+- Test: `src/integrations/debrid/torbox.test.ts`, `src/integrations/debrid/status.test.ts`
 
 **Interfaces:**
-- Produces: `torBoxProvider.checkCached(token, hashes, opts): Promise<Set<string>>`, returning lowercase hex hashes.
+- Produces: `checkCached(token, hashes, opts): Promise<Set<string>>` returning lowercase hex hashes; `torBoxProvider` assembled from every piece; TorBox registered.
 
 `GET /api/torrents/checkcached?hash=h1,h2&format=list`. TorBox returns an empty object *or* an empty list when nothing is cached, so both must parse.
 
@@ -1605,7 +1542,7 @@ describe("TorBox checkCached", () => {
       },
       calls,
     );
-    const cached = await torBoxProvider.checkCached!(TOKEN, [HASH, HASH_B], { fetchImpl, sleepImpl: noSleep });
+    const cached = await checkCached(TOKEN, [HASH, HASH_B], { fetchImpl, sleepImpl: noSleep });
     expect(cached.has(HASH)).toBe(true);
     expect(cached.has(HASH_B)).toBe(false);
     expect(calls[0]!.url).toContain(`hash=${HASH}%2C${HASH_B}`);
@@ -1615,21 +1552,21 @@ describe("TorBox checkCached", () => {
   it("treats an empty object as nothing cached", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({ [CHECKCACHED]: jsonRes(200, { success: true, data: {} }) }, calls);
-    const cached = await torBoxProvider.checkCached!(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
+    const cached = await checkCached(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
     expect(cached.size).toBe(0);
   });
 
   it("treats an empty list as nothing cached", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({ [CHECKCACHED]: jsonRes(200, { success: true, data: [] }) }, calls);
-    const cached = await torBoxProvider.checkCached!(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
+    const cached = await checkCached(TOKEN, [HASH], { fetchImpl, sleepImpl: noSleep });
     expect(cached.size).toBe(0);
   });
 
   it("makes no request for an empty hash list", async () => {
     const calls: Call[] = [];
     const fetchImpl = router({}, calls);
-    const cached = await torBoxProvider.checkCached!(TOKEN, [], { fetchImpl, sleepImpl: noSleep });
+    const cached = await checkCached(TOKEN, [], { fetchImpl, sleepImpl: noSleep });
     expect(cached.size).toBe(0);
     expect(calls).toHaveLength(0);
   });
@@ -1676,14 +1613,70 @@ export async function checkCached(
 }
 ```
 
-Add `checkCached,` to the provider object.
+- [ ] **Step 4: Assemble `torBoxProvider` and register TorBox**
 
-- [ ] **Step 4: Run tests to verify they pass**
+Every piece now exists, so the provider object is built once, with no rejecting
+method, and joins the registry in the same commit.
+
+Append to `src/integrations/debrid/torbox.ts`:
+
+```ts
+export const torBoxProvider: DebridProvider = {
+  id: "torbox",
+  label: "TorBox",
+  shortLabel: "TB",
+  homepage: "torbox.app",
+  tokenUrl: "https://torbox.app/settings",
+  tokenEnvVar: "TORBOX_API_TOKEN",
+  validateToken,
+  resolveMagnet,
+  checkCached,
+  isTransient,
+  isTokenRejection,
+};
+```
+
+In `src/integrations/debrid/index.ts`, add the import, extend the id list, and
+add the map entry — the map can go back to a total `Record` now that both
+providers are present:
+
+```ts
+import { torBoxProvider } from "./torbox";
+
+export const DEBRID_PROVIDER_IDS = ["realdebrid", "torbox"] as const satisfies readonly DebridProviderId[];
+
+const PROVIDERS: Record<DebridProviderId, DebridProvider> = {
+  realdebrid: realDebridProvider,
+  torbox: torBoxProvider,
+};
+
+export function getDebridProvider(id: DebridProviderId): DebridProvider {
+  return PROVIDERS[id];
+}
+```
+
+Update Task 2's registry test, which asserted the one-provider list:
+
+```ts
+  it("lists every provider id", () => {
+    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid", "torbox"]);
+  });
+
+  it("returns the TorBox provider, which can check cached availability", () => {
+    const p = getDebridProvider("torbox");
+    expect(p.label).toBe("TorBox");
+    expect(p.shortLabel).toBe("TB");
+    expect(p.tokenEnvVar).toBe("TORBOX_API_TOKEN");
+    expect(p.checkCached).toBeDefined();
+  });
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `npx vitest run src/integrations/debrid/torbox.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Verify and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
 npm test && npm run typecheck && npm run lint
@@ -1699,7 +1692,7 @@ is the capability flag."
 
 ## Phase 3 — config and the active provider
 
-### Task 8: The second token and the provider preference
+### Task 7: The second token and the provider preference
 
 **Files:**
 - Modify: `src/config/config.ts:21-77,96-104`
@@ -1875,7 +1868,7 @@ one outcome the routing decision exists to prevent."
 
 ## Phase 4 — core wiring
 
-### Task 9: Provider-aware stream routing
+### Task 8: Provider-aware stream routing
 
 **Files:**
 - Modify: `src/core/streamRoute.ts`
@@ -1984,7 +1977,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Fix the callers**
 
-`npm run typecheck` will point at `src/ui/App.tsx:1341` and `src/web/routes.ts:369`, each testing `route.kind === "realdebrid"`. Change both to `"debrid"`. Leave the rest of their logic for Tasks 13–15.
+`npm run typecheck` will point at `src/ui/App.tsx:1341` and `src/web/routes.ts:369`, each testing `route.kind === "realdebrid"`. Change both to `"debrid"`. Leave the rest of their logic for Tasks 12–14.
 
 - [ ] **Step 6: Verify and commit**
 
@@ -2000,7 +1993,7 @@ a stream."
 
 ---
 
-### Task 10: Provider-aware stream sessions
+### Task 9: Provider-aware stream sessions
 
 **Files:**
 - Modify: `src/core/streamSession.ts:3-9,35-39,49-60,120-157`, `src/web/stream.ts:327`
@@ -2157,7 +2150,7 @@ provider served it, and ResolveDebridImpl dispatches through the registry."
 
 ---
 
-### Task 11: Provider-aware download queue
+### Task 10: Provider-aware download queue
 
 **Files:**
 - Modify: `src/download/queue.ts:30-37,67-121,271-317,323-374,379-433,437-470,1037-1043`, `src/daemon/runtime.ts:9,46,60-64,116-125,152-156`
@@ -2309,7 +2302,7 @@ so a shared classifier would fail the item instead of requeuing it."
 
 ## Phase 5 — the front ends
 
-### Task 12: TUI — the accounts pane, the token prompt, and the badge
+### Task 11: TUI — the accounts pane, the token prompt, and the badge
 
 **Files:**
 - Create: `src/ui/components/DebridBadge.tsx`
@@ -2460,7 +2453,7 @@ Take a `provider: DebridProvider` prop and derive every string from it — nothi
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `npx vitest run src/ui/components`
-Expected: PASS. `App.tsx` will not compile yet — Task 13 wires it.
+Expected: PASS. `App.tsx` will not compile yet — Task 12 wires it.
 
 - [ ] **Step 7: Commit**
 
@@ -2475,7 +2468,7 @@ string from DebridProvider, so a third provider is data rather than code."
 
 ---
 
-### Task 13: TUI — store, keymap, and App wiring
+### Task 12: TUI — store, keymap, and App wiring
 
 **Files:**
 - Modify: `src/ui/store.ts:168,183-184`, `src/ui/testHarness.ts:182-186`, `scripts/render-previews-impl.tsx:138-140`, `src/ui/keymap.ts:55,118,210`, `src/ui/App.tsx`, `src/ui/components/{Results,Downloads}.tsx`, `src/ui/views/Splash.tsx`
@@ -2660,7 +2653,7 @@ re-rendered."
 
 ---
 
-### Task 14: Web — routes, wire types, and the capability flags
+### Task 13: Web — routes, wire types, and the capability flags
 
 **Files:**
 - Modify: `src/web/routes.ts:110-129,221-237,336-403,706-710,734-796`, `src/web/wire.ts:120-131,295-309,343-356`
@@ -2809,7 +2802,7 @@ whether a cached marker is even answerable."
 
 ---
 
-### Task 15: Web — the add button and its copy
+### Task 14: Web — the add button and its copy
 
 **Files:**
 - Modify: `src/web/static/searchModel.ts:296-325`, `src/web/static/app.ts:1061-1068,1210,1242`
@@ -2978,7 +2971,7 @@ searchModel.ts where a test can reach them; app.ts stays DOM wiring."
 
 ## Phase 6 — the cached marker
 
-### Task 16: The cached-check module
+### Task 15: The cached-check module
 
 **Files:**
 - Create: `src/core/cachedHashes.ts`, `src/core/cachedHashes.test.ts`
@@ -3129,7 +3122,7 @@ rate-limited call does not discard the answers that did arrive."
 
 ---
 
-### Task 17: The cached marker in both front ends
+### Task 16: The cached marker in both front ends
 
 **Files:**
 - Modify: `src/web/routes.ts` (new route), `src/web/wire.ts`, `src/web/static/app.ts`, `src/web/static/searchModel.ts`, `src/ui/App.tsx`, `src/ui/store.ts`, `src/ui/testHarness.ts`, `scripts/render-previews-impl.tsx`, `src/ui/components/Results.tsx`
@@ -3347,7 +3340,7 @@ make it. No marker at all beats an unknown state that reads as uncached."
 
 ## Phase 7 — docs and the final sweep
 
-### Task 18: Documentation and package metadata
+### Task 17: Documentation and package metadata
 
 **Files:**
 - Modify: `README.md:5,98-117,267,271,280,336`, `package.json:4,44-45`, `CONTRIBUTING.md:61`, `CLAUDE.md:17`
@@ -3381,7 +3374,7 @@ RELEASING.md rather than left as a stale -rd suffix nobody explained."
 
 ---
 
-### Task 19: Final sweep
+### Task 18: Final sweep
 
 **Files:** whatever the greps below turn up.
 
@@ -3440,8 +3433,14 @@ git commit -m "chore: final TorBox sweep — stale RD-only copy and log hygiene"
 
 **Three TorBox shapes are documented but never tested against a live account.** Each is commented as such in the code, and each has a named fallback:
 
-1. `createtorrent`'s id field — the client accepts `torrent_id` or `id` and fails loudly otherwise (Task 6).
-2. `progress` is assumed to be a 0–1 float — if it is really 0–100, drop the `* 100` in `resolveMagnet` and fix the one test (Task 6).
+1. `createtorrent`'s id field — the client accepts `torrent_id` or `id` and fails loudly otherwise (Task 5).
+2. `progress` is assumed to be a 0–1 float — if it is really 0–100, drop the `* 100` in `resolveMagnet` and fix the one test (Task 5).
 3. `plan: 0` (free) is assumed able to add torrents — if not, `active` becomes `plan > 0` in `validateToken` and `classifyStreamRoute`'s existing `torrent-confirm` path covers it with no other change (Task 5).
 
-**The two renames that are not mechanical.** `status.premium` (boolean) and `user.premium` (seconds) collide, so a blind `s/premium/active/` corrupts the RD client — Task 1 Step 7 does those by hand. And `via: "realdebrid"` appears both as a persisted value and as a routing literal; Task 3 handles the persisted one, Task 9 the routing one.
+**Task 6 is where TorBox becomes reachable.** Before it, `DEBRID_PROVIDER_IDS`
+lists Real-Debrid alone and `torbox.ts` exports plain functions. Nothing on this
+branch commits a provider object with a rejecting method, and no test is ever
+committed skipped — if a task cannot land green without one, the task boundary
+is wrong and you should say so rather than skipping.
+
+**The two renames that are not mechanical.** `status.premium` (boolean) and `user.premium` (seconds) collide, so a blind `s/premium/active/` corrupts the RD client — Task 1 Step 7 does those by hand. And `via: "realdebrid"` appears both as a persisted value and as a routing literal; Task 3 handles the persisted one, Task 8 the routing one.
