@@ -14,6 +14,11 @@
 // unit). That module is dependency-free and stays that way — `platform:
 // "browser"` in tsup.web.config.ts fails the build if it ever isn't.
 import { streamCandidates } from "../../util/videoFiles";
+// The second value import out of this directory, and the same argument: which
+// file is the next episode is a decision both front ends make, so it is shared
+// rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
+// which is why it is a module of its own and not part of videoFiles.ts.
+import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
 import type { PublicStreamFile, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
 
@@ -91,8 +96,15 @@ export function playerPath(
 export type StreamOutcome =
   /** Exactly one candidate: open the player on it, no picker. */
   | { kind: "single"; file: PublicStreamFile }
-  /** Several candidates: ask which one. */
-  | { kind: "choose"; files: PublicStreamFile[] }
+  /**
+   * Several candidates: ask which one, opening on `preselect`.
+   *
+   * `preselect` is an index into `files` — the FILTERED list the picker draws,
+   * not the session's own indexes, which differ the moment a release ships a
+   * `.nfo`. Null is the ordinary answer and means "no opinion": the picker looks
+   * exactly as it always has.
+   */
+  | { kind: "choose"; files: PublicStreamFile[]; preselect: number | null }
   /** The session failed. `message` is already worded for a human. */
   | { kind: "error"; message: string }
   /** Ready, but there is nothing in it to play. */
@@ -110,8 +122,23 @@ export type StreamOutcome =
  * A `resolving` session never reaches here — `pollDecision` owns that state —
  * but it is treated as an error rather than silently as "empty", because a
  * caller that skipped the polling loop has a bug and should see it.
+ *
+ * `next` is the episode to open the picker on: pass a Continue-watching row's
+ * own `next`, which the server computed with `nextEpisode` over the row's
+ * high-water mark. It crosses the wire already (`PublicStreamHistoryItem`), so
+ * nothing here recomputes it and no field was added to carry it.
+ *
+ * ONE HALF OF THE PRESELECTION IS TUI-ONLY, deliberately. `nextEpisodeIndex`
+ * also falls back to "the first file you haven't watched" when no filename
+ * parses; that needs the watched FILENAMES, which `PublicFavourite` withholds on
+ * purpose (it sends a count — see wire.ts for why filenames from inside a
+ * stranger's torrent are not handed to a browser). The parse-based preselection,
+ * which is the feature, is identical in both front ends.
  */
-export function streamOutcome(session: PublicStreamSession): StreamOutcome {
+export function streamOutcome(
+  session: PublicStreamSession,
+  next?: { season: number; episode: number } | null,
+): StreamOutcome {
   if (session.state === "error") {
     // The core reuses the TUI's wording, so this is already a sentence a person
     // can act on. Only the generic case is written here.
@@ -123,7 +150,7 @@ export function streamOutcome(session: PublicStreamSession): StreamOutcome {
   const files = streamCandidates(session.files);
   if (files.length === 0) return { kind: "empty" };
   if (files.length === 1) return { kind: "single", file: files[0]! };
-  return { kind: "choose", files };
+  return { kind: "choose", files, preselect: nextEpisodeIndex(files, { next }) };
 }
 
 /** How long between polls of a resolving session. */
@@ -247,8 +274,19 @@ export interface PlayEffects {
   confirm(message: string): boolean;
   /** Transient message in the dashboard's notice line. */
   notice(message: string): void;
-  /** Show the file picker. Ownership of the session passes to it. */
-  choose(sessionId: string, capability: string, name: string, files: PublicStreamFile[]): void;
+  /**
+   * Show the file picker. Ownership of the session passes to it.
+   *
+   * `preselect` is an index into `files` to open on, or null for no opinion —
+   * `streamOutcome`'s decision, not one to re-derive here.
+   */
+  choose(
+    sessionId: string,
+    capability: string,
+    name: string,
+    files: PublicStreamFile[],
+    preselect: number | null,
+  ): void;
   /** Go to a player URL. Ownership of the session passes to the player. */
   open(path: string): void;
   sleep(ms: number): Promise<void>;
@@ -283,8 +321,18 @@ export interface PlayEffects {
  * 2. A `resolving` session is POLLED until it settles or the deadline passes.
  *    Real-Debrid caching sits mid-percent for minutes, and a loop that gave up
  *    early would strand a session that was about to be ready.
+ *
+ * `wanted` is data, not an effect, which is why it is a parameter rather than
+ * another member of `PlayEffects`: it is the Continue-watching row's own `next`,
+ * passed straight through to `streamOutcome`. Every other caller — a search
+ * result, a queue row — has no such row and passes nothing. (Named `wanted`
+ * rather than `next` only because the polling loop below already has a `next`.)
  */
-export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
+export async function runPlay(
+  row: DashRow,
+  fx: PlayEffects,
+  wanted?: { season: number; episode: number } | null,
+): Promise<void> {
   let start = await fx.start(row, false);
 
   if (start.kind === "confirm") {
@@ -328,7 +376,7 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
     session = next;
   }
 
-  const outcome = streamOutcome(session);
+  const outcome = streamOutcome(session, wanted);
   if (outcome.kind === "error") {
     // Already worded for a human by the core, which reuses the TUI's strings.
     fx.notice(outcome.message);
@@ -344,5 +392,5 @@ export async function runPlay(row: DashRow, fx: PlayEffects): Promise<void> {
     fx.open(playerPath(sessionId, outcome.file, capability));
     return;
   }
-  fx.choose(sessionId, capability, row.name, outcome.files);
+  fx.choose(sessionId, capability, row.name, outcome.files, outcome.preselect);
 }

@@ -39,6 +39,19 @@ export default defineConfig({
   // with a stack trace into `function O(e)` is unactionable. Browsers fetch a
   // sourcemap only when devtools is open, so this costs real users nothing.
   sourcemap: true,
+  // tsup treats everything in package.json `dependencies` as external, which for
+  // a BROWSER bundle is silently wrong: an external dep is left as a bare
+  // `import … from "parse-torrent-title"`, the build reports success, and the
+  // page then dies in the browser on a specifier no browser can resolve. Nothing
+  // in the test suite can see that — there is no jsdom here — so the enforcement
+  // has to be this line.
+  //
+  // Bundling it is safe: parse-torrent-title is two files of regexes with no
+  // imports of its own, and `platform: "browser"` above still fails the build if
+  // anything pulled in here ever reaches a Node builtin. It arrives via
+  // `src/util/nextEpisodeFile.ts` -> `src/util/release.ts`, the release parser
+  // both front ends share.
+  noExternal: [/^parse-torrent-title$/],
   dts: false,
   splitting: false,
   minify: true,

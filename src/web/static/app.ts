@@ -539,23 +539,39 @@ function hidePicker(): void {
 // its filename as watched against the SECOND torrent's favourite. Closing over
 // the hash at the call site (see play()) makes that impossible: each picker's
 // callbacks carry the hash they were opened with, for good.
+//
+// `preselect` is streamOutcome's decision (streamFlow.ts), never one made here:
+// which file is the next episode is shared with the TUI's picker, and app.ts is
+// wiring. All this does with it is mark the row, say so in a word, and put the
+// keyboard on it — pressing Enter then plays the episode the Continue-watching
+// row promised, which is the browser's equivalent of the TUI's opening cursor.
 function showPicker(
   infoHash: string,
   sessionId: string,
   capability: string,
   name: string,
   files: PublicStreamFile[],
+  preselect: number | null,
 ): void {
   pickerSession = sessionId;
   pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
   pickerFiles.replaceChildren(
-    ...files.map((file) => {
+    ...files.map((file, index) => {
       const li = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
       button.className = "picker-file";
       button.textContent = fileLabel(file);
       button.title = file.filename;
+      if (index === preselect) {
+        button.classList.add("picker-file-next");
+        button.setAttribute("aria-current", "true");
+        // createElement + textContent, as everywhere on this page.
+        const tag = document.createElement("span");
+        tag.className = "picker-next";
+        tag.textContent = "next";
+        button.append(tag);
+      }
       button.addEventListener("click", () => {
         // hidePicker() clears pickerSession, so the Cancel handler can no longer
         // stop the session we are about to hand to the player.
@@ -575,6 +591,12 @@ function showPicker(
     }),
   );
   picker.hidden = false;
+  // After un-hiding, and read back out of the DOM rather than closed over: a
+  // focus() on a hidden element does nothing at all.
+  if (preselect !== null) {
+    const target = pickerFiles.children[preselect]?.firstElementChild;
+    if (target instanceof HTMLElement) target.focus();
+  }
 }
 
 pickerCancel.addEventListener("click", () => {
@@ -598,7 +620,13 @@ pickerCancel.addEventListener("click", () => {
 // Continue watching, whose "remembered torrent won't resolve" fallback is a
 // search, not just the notice `startSession` already showed. Every other
 // caller passes nothing and behaves exactly as before.
-async function play(row: DashRow, onUnresolved?: () => void): Promise<void> {
+// `next`, when given, is a Continue-watching row's own suggested episode, passed
+// through to runPlay for the file picker to open on. Nothing here computes it.
+async function play(
+  row: DashRow,
+  onUnresolved?: () => void,
+  next?: { season: number; episode: number } | null,
+): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
   try {
@@ -610,13 +638,13 @@ async function play(row: DashRow, onUnresolved?: () => void): Promise<void> {
       notice: showNotice,
       // Closes over THIS row's hash, not a module-level variable — see
       // showPicker's comment for why that distinction is load-bearing.
-      choose: (sessionId, capability, name, files) =>
-        showPicker(row.id, sessionId, capability, name, files),
+      choose: (sessionId, capability, name, files, preselect) =>
+        showPicker(row.id, sessionId, capability, name, files, preselect),
       open: (path) => openPlayer(path),
       sleep,
       now: () => Date.now(),
       onUnresolved,
-    });
+    }, next);
   } finally {
     playing.delete(row.id);
   }
@@ -1714,12 +1742,16 @@ async function playContinueWatching(item: PublicStreamHistoryItem): Promise<void
   // The at-most-once guarantee is runPlay's (see streamFlow.ts's PlayEffects
   // doc comment) — this is only the DOM effect of switching to a search, the
   // same shape renderSavedSearchRow's click handler already uses.
+  // item.next is the server's own nextEpisode over this row's high-water mark —
+  // the same value continueWatchingSub renders — so the picker opens on the
+  // episode the row promised. Null (a film, a pack with no episode number) simply
+  // means no preselection.
   await play(dashRowForPlay(item.infoHash, item.rawName), () => {
     const query = continueWatchingFallbackQuery(item);
     queryInput.value = query;
     showView("search");
     startSearch(query);
-  });
+  }, item.next);
 }
 
 // createElement + textContent, as everywhere else on this page. A saved query is

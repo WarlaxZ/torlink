@@ -266,6 +266,20 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+/* The file the Continue-watching row said was next. It is also focused, so the
+   keyboard is already on it; this is the same information for eyes. */
+.picker-file-next {
+  border-color: var(--accent);
+}
+
+.picker-next {
+  margin-left: 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
 .empty,
 .notice,
 .error {

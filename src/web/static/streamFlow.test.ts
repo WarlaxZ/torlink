@@ -140,6 +140,48 @@ describe("streamOutcome", () => {
     expect(out.files).toHaveLength(2);
   });
 
+  // The point of the preselection: a Continue-watching row that says "next
+  // S03E05" opens the picker on S03E05. `next` is the SERVER's computation
+  // (nextEpisode, over the row's high-water mark) arriving on the wire, so the
+  // browser never adds a second "+1" of its own.
+  it("preselects the file naming the wanted episode", () => {
+    const out = streamOutcome(
+      session({
+        files: [file("Harrowgate.S03E04.1080p.mkv", 0), file("Harrowgate.S03E05.1080p.mkv", 1)],
+      }),
+      { season: 3, episode: 5 },
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.preselect).toBe(1);
+  });
+
+  // An index into the FILTERED list, because that is the list the picker draws.
+  // The session's own indexes differ the moment a release ships a .nfo.
+  it("counts the preselection over the candidates the picker shows", () => {
+    const out = streamOutcome(
+      session({
+        files: [
+          file("release.nfo", 0),
+          file("Harrowgate.S03E04.1080p.mkv", 1),
+          file("Harrowgate.S03E05.1080p.mkv", 2),
+        ],
+      }),
+      { season: 3, episode: 5 },
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.preselect).toBe(1);
+  });
+
+  it("has no preselection without a wanted episode, or when nothing matches", () => {
+    const files = [file("Harrowgate.S03E04.1080p.mkv", 0), file("Harrowgate.S03E05.1080p.mkv", 1)];
+    const noNext = streamOutcome(session({ files }));
+    const noMatch = streamOutcome(session({ files }), { season: 4, episode: 1 });
+    expect(noNext.kind === "choose" ? noNext.preselect : "not a picker").toBeNull();
+    expect(noMatch.kind === "choose" ? noMatch.preselect : "not a picker").toBeNull();
+  });
+
   it("reports the session's own error message", () => {
     const out = streamOutcome(session({ state: "error", error: "Real-Debrid said no." }));
     expect(out).toEqual({ kind: "error", message: "Real-Debrid said no." });
@@ -241,7 +283,12 @@ function harness(over: Partial<PlayEffects> = {}) {
     notices: [] as string[],
     stopped: [] as string[],
     opened: [] as string[],
-    chosen: [] as { sessionId: string; capability: string; files: PublicStreamFile[] }[],
+    chosen: [] as {
+      sessionId: string;
+      capability: string;
+      files: PublicStreamFile[];
+      preselect: number | null;
+    }[],
     polls: 0,
   };
   let clock = 0;
@@ -260,8 +307,8 @@ function harness(over: Partial<PlayEffects> = {}) {
       return false;
     },
     notice: (message) => calls.notices.push(message),
-    choose: (sessionId, capability, _name, files) =>
-      calls.chosen.push({ sessionId, capability, files }),
+    choose: (sessionId, capability, _name, files, preselect) =>
+      calls.chosen.push({ sessionId, capability, files, preselect }),
     open: (path) => calls.opened.push(path),
     sleep: async (ms) => {
       clock += ms;
@@ -410,6 +457,25 @@ describe("runPlay", () => {
     expect(calls.chosen[0]!.files.map((f) => f.filename)).toEqual(["a.mkv", "b.mkv"]);
     // The session is the picker's to stop now, not this flow's.
     expect(calls.stopped).toEqual([]);
+  });
+
+  it("hands the picker the episode to open on", async () => {
+    const { fx, calls } = harness({
+      start: async () =>
+        started({
+          files: [file("Harrowgate.S03E04.mkv", 0), file("Harrowgate.S03E05.mkv", 1)],
+        }),
+    });
+    await runPlay(row(), fx, { season: 3, episode: 5 });
+    expect(calls.chosen[0]!.preselect).toBe(1);
+  });
+
+  it("passes no preselection when the caller has no next episode", async () => {
+    const { fx, calls } = harness({
+      start: async () => started({ files: [file("a.mkv", 0), file("b.mkv", 1)] }),
+    });
+    await runPlay(row(), fx);
+    expect(calls.chosen[0]!.preselect).toBeNull();
   });
 
   it("surfaces the session's error and releases the session", async () => {
