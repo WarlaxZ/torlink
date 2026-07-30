@@ -20,15 +20,19 @@
 // all, so renaming a field typechecked on both sides and rendered nothing.
 //
 // THE IMPORTS, and why neither breaks the rule above: both are `import type`,
-// which TypeScript guarantees is erased at build time — the specifier never
-// reaches the emitted output, so it does not matter that `../util/releasePick`
-// itself has a runtime import of its own. Only a *value* import would drag
-// that in. `src/util/episode.ts` declares a single interface and imports
-// nothing itself, so it is erased for the simpler reason of having nothing to
-// erase. Both are here because the alternative was a hand-written copy of the
-// picker's shapes — `{ season, episode }` had already drifted once — the exact
-// drift this file was created to stop. Anything with a runtime value in it
-// still does not belong in this module.
+// which TypeScript guarantees is erased at build time regardless of what the
+// target module does — the specifier never reaches the emitted output, so it
+// does not matter that `../util/releasePick` itself has a runtime import of
+// its own (`./release`). `src/util/episode.ts` carries the narrower guarantee
+// too, for the simpler reason: it declares a single interface and imports
+// nothing itself, so there is nothing to drag in even if a future edit turned
+// this line into a value import. `../util/releasePick` has no such second
+// safety net — only the `import type` erasure protects it — so if that
+// specifier is ever changed to a value import, it must be re-checked against
+// the "imports nothing" rule above. Both are here because the alternative was
+// a hand-written copy of the picker's shapes — `{ season, episode }` had
+// already drifted once — the exact drift this file was created to stop.
+// Anything with a runtime value in it still does not belong in this module.
 import type { EpisodeRef } from "../util/episode";
 import type { FeatureId, MaxResolution } from "../util/releasePick";
 
