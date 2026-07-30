@@ -369,7 +369,7 @@ describe("the debrid provider registry", () => {
   });
 
   it("lists every provider this build carries", () => {
-    // TorBox joins this list in Task 5, when its client is real.
+    // TorBox joins this list in Task 6, when its client is real.
     expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid"]);
   });
 });
@@ -411,7 +411,7 @@ Fix the moved test's import path (`../util/net` → `../../util/net` etc.) and n
 
 - [ ] **Step 4: Write `src/integrations/debrid/index.ts`**
 
-**No TorBox stub.** The registry starts with Real-Debrid alone and Task 5 adds
+**No TorBox stub.** The registry starts with Real-Debrid alone and Task 6 adds
 TorBox once its client is real, so no commit on this branch ever contains a
 provider whose methods reject with "not implemented".
 
@@ -491,7 +491,8 @@ git mv, so the diff stays reviewable. ResolvedFile was already a bare alias
 for StreamFile, so its four consumers now name StreamFile directly and the
 type stops belonging to Real-Debrid.
 
-torbox.ts is a rejecting stub so the registry compiles; Phase 2 implements it."
+The registry carries Real-Debrid alone; TorBox joins it in Task 6, once its
+client is real."
 ```
 
 ---
@@ -1054,7 +1055,7 @@ async function request<T>(
 
 ```
 
-**No `torBoxProvider` object yet.** It is assembled in Task 5, once
+**No `torBoxProvider` object yet.** It is assembled in Task 6, once
 `resolveMagnet` and `checkCached` exist and it is registered — so no commit on
 this branch carries a provider whose methods reject. This task exports plain
 functions, and its tests call them directly.
@@ -1329,7 +1330,7 @@ describe("TorBox resolveMagnet", () => {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run src/integrations/debrid/torbox.test.ts -t "resolveMagnet"`
-Expected: FAIL — rejects with "Not implemented yet."
+Expected: FAIL — `resolveMagnet` is not exported from `./torbox` yet.
 
 - [ ] **Step 3: Implement**
 
@@ -1502,7 +1503,7 @@ export async function resolveMagnet(
 }
 ```
 
-Nothing wires it into a provider object yet — Task 5 assembles `torBoxProvider` once `checkCached` exists too.
+Nothing wires it into a provider object yet — Task 6 assembles `torBoxProvider` once `checkCached` exists too.
 
 Note on the progress test's expectation `[25, 50, 100]`: the loop emits `25` (poll 1), `50` (poll 2), `100` (poll 3, which finishes), and the trailing `onProgress?.(100)` would make a fourth. Change the loop so the trailing call is skipped when the last emitted value was already 100:
 
