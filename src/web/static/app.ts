@@ -92,9 +92,13 @@ import {
   type ReccType,
 } from "./reccModel";
 import {
+  applyContinueWatchingResponse,
   applyLibraryResponse,
   applySaved,
   applySavedSearchesResponse,
+  continueWatchingFallbackQuery,
+  continueWatchingStatus,
+  continueWatchingSub,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
@@ -107,6 +111,7 @@ import {
   savedSearchesToggleNotice,
   type LibraryInput,
   type PublicFavourite,
+  type PublicStreamHistoryItem,
   type SavedState,
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
@@ -155,6 +160,8 @@ const savedSearchesStatusLine = el<HTMLParagraphElement>("saved-searches-status"
 const savedSearchesRows = el<HTMLUListElement>("saved-searches-rows");
 const libraryStatusLine = el<HTMLParagraphElement>("library-status");
 const libraryRows = el<HTMLUListElement>("library-rows");
+const continueStatusLine = el<HTMLParagraphElement>("continue-status");
+const continueRows = el<HTMLUListElement>("continue-rows");
 
 const reccTypeSelect = el<HTMLSelectElement>("recc-type");
 const reccGenreInput = el<HTMLInputElement>("recc-genre");
@@ -582,12 +589,23 @@ pickerCancel.addEventListener("click", () => {
 // `confirm` is the native dialog, deliberately, for the same reason the delete
 // gate uses it. Synchronous and unmissable are the right properties for a
 // decision whose consequence (your IP in a public swarm) cannot be taken back.
-async function play(row: DashRow): Promise<void> {
+//
+// `onUnresolved`, when given, fires when `startSession` could not start a
+// session at all (a dead swarm, an unreachable server) — the one caller that
+// needs to react to that is Continue watching, whose "remembered torrent
+// won't resolve" fallback is a search, not just the notice `startSession`
+// already showed. Every other caller passes nothing and behaves exactly as
+// before.
+async function play(row: DashRow, onUnresolved?: () => void): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);
   try {
     await runPlay(row, {
-      start: startSession,
+      start: async (r, confirmed) => {
+        const result = await startSession(r, confirmed);
+        if (result.kind === "failed") onUnresolved?.();
+        return result;
+      },
       poll: pollSession,
       stop: stopSession,
       confirm: (message) => confirm(message),
@@ -1681,6 +1699,32 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
   renderResults();
 }
 
+async function removeContinueWatching(key: string): Promise<void> {
+  const body = await postSaved("/api/continue-watching", { key, action: "remove" });
+  if (!body) return;
+  savedState = applyContinueWatchingResponse(savedState, body);
+  renderSaved();
+}
+
+// Play the remembered torrent; if it will not resolve (a dead swarm, most
+// often), fall back to a search rather than leaving the user at a notice and
+// nothing else to do. continueWatchingFallbackQuery (savedModel.ts) is the
+// decision of WHAT to search for; this is only the DOM effect of switching to
+// it, the same shape renderSavedSearchRow's click handler already uses.
+async function playContinueWatching(item: PublicStreamHistoryItem): Promise<void> {
+  let fellBack = false;
+  await play(dashRowForPlay(item.infoHash, item.rawName), () => {
+    // start is called a second time after a Real-Debrid confirm prompt; only
+    // the first failure should trigger the fallback.
+    if (fellBack) return;
+    fellBack = true;
+    const query = continueWatchingFallbackQuery(item);
+    queryInput.value = query;
+    showView("search");
+    startSearch(query);
+  });
+}
+
 // createElement + textContent, as everywhere else on this page. A saved query is
 // the user's own typing, but a favourite's name is a release name from whoever
 // uploaded the torrent — so this list is as much an XSS surface as the results
@@ -1752,9 +1796,56 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   return li;
 }
 
+// createElement + textContent throughout: `title` and `rawName` both come from
+// a release name written by whoever uploaded the torrent, the same stranger's
+// string `renderLibraryRow`'s `name` is.
+function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+  const name = document.createElement("span");
+  name.className = "row-name";
+  name.textContent = item.title;
+  name.title = item.rawName;
+  head.append(name);
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  // Read at render time, not cached at module load, so the age is always
+  // relative to now rather than to whenever the page happened to start.
+  meta.textContent = continueWatchingSub(item, Date.now());
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void playContinueWatching(item));
+  actions.append(playButton);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeContinueWatching(item.key));
+  actions.append(remove);
+
+  li.append(head, meta, actions);
+  return li;
+}
+
 function renderSaved(): void {
+  continueRows.replaceChildren(...savedState.continueWatching.map(renderContinueRow));
   savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
   libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+
+  const cw = continueWatchingStatus(savedState);
+  continueStatusLine.textContent = cw.text;
+  continueStatusLine.classList.toggle("error", cw.tone === "error");
+  continueStatusLine.hidden = !cw.show;
 
   const wl = savedSearchesStatus(savedState);
   savedSearchesStatusLine.textContent = wl.text;

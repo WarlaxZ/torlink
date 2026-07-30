@@ -8,6 +8,7 @@ import {
   loadStreamHistory,
   nextEpisode,
   recordStream,
+  removeStreamHistory,
   saveStreamHistory,
   type StreamHistoryItem,
 } from "../core/streamHistory";
@@ -55,6 +56,7 @@ import { hintForGroup, parseRelease } from "../util/release";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  ContinueWatchingResponse,
   LibraryResponse,
   PublicFavourite,
   PublicSearchResult,
@@ -859,6 +861,39 @@ async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<Web
   return { status: 200, json: out };
 }
 
+/**
+ * `POST /api/continue-watching`: the row's ✕. One action, `"remove"` — nothing
+ * plays a title and then un-plays it, so there is no toggle to offer.
+ *
+ * Idempotent by construction: `removeStreamHistory` filters by key and a key
+ * that is not there filters nothing, so a double-fired click (this is the same
+ * ✕ pattern as the saved-searches remove, which exists for exactly that phone
+ * behaviour) is a no-op the second time rather than an error.
+ */
+async function continueWatchingAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  if (body.action !== "remove") return { status: 400, json: { error: "invalid action" } };
+
+  const key = typeof body.key === "string" ? body.key.trim() : "";
+  if (!key) return { status: 400, json: { error: "missing key" } };
+
+  const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+  const next = removeStreamHistory(current, key);
+  // Only write when something actually changed. removeStreamHistory always
+  // returns a new array (it is a plain `.filter`), so the write gate here is a
+  // length comparison rather than the reference check `libraryAction`'s
+  // "watched" branch uses — either way, a no-op remove (a stale page, a
+  // double-fired click) does not churn the history file.
+  if (next.length !== current.length) {
+    await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(next);
+  }
+
+  const out: ContinueWatchingResponse = { continueWatching: next.map(toPublicStreamHistoryItem) };
+  return { status: 200, json: out };
+}
+
 async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
@@ -1418,6 +1453,10 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === "/api/library") {
     return libraryAction(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/continue-watching") {
+    return continueWatchingAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

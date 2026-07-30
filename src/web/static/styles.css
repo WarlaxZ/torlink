@@ -713,6 +713,10 @@ select:focus-visible {
    phone, using .rows and .row from the search pane rather than a third row
    style — a saved search and a favourite are both list rows, and the only thing
    new here is the pair of headings. */
+.saved-strip {
+  margin-bottom: 1rem;
+}
+
 .saved-split {
   display: grid;
   /* minmax(0, …) for the reason .rows uses it: a long release name must

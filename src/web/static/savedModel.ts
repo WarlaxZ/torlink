@@ -7,9 +7,14 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 import { formatBytes } from "./dashboard";
-import type { LibraryRequest, PublicFavourite, SavedSearchesRequest } from "../wire";
+import type {
+  LibraryRequest,
+  PublicFavourite,
+  PublicStreamHistoryItem,
+  SavedSearchesRequest,
+} from "../wire";
 
-export type { PublicFavourite, SavedResponse } from "../wire";
+export type { PublicFavourite, PublicStreamHistoryItem, SavedResponse } from "../wire";
 
 /** Everything the pane renders from. */
 export interface SavedState {
@@ -17,6 +22,15 @@ export interface SavedState {
   savedSearches: string[];
   /** Favourited torrents, most-recent first. The TUI's `library`. */
   library: PublicFavourite[];
+  /**
+   * Titles part-way through, most-recent first. The TUI's `streamHistory`.
+   *
+   * NOT re-sorted here: `recordStream` (src/core/streamHistory.ts) prepends on
+   * every stream, so the server's array already arrives newest-first. Sorting
+   * again would be redundant at best and, if the tie-break ever disagreed with
+   * the store's own order, a silent divergence from the TUI's list.
+   */
+  continueWatching: PublicStreamHistoryItem[];
   /**
    * Whether a response has ever arrived.
    *
@@ -31,7 +45,7 @@ export interface SavedState {
 }
 
 export function emptySaved(): SavedState {
-  return { savedSearches: [], library: [], loaded: false, error: null };
+  return { savedSearches: [], library: [], continueWatching: [], loaded: false, error: null };
 }
 
 /** The `POST /api/saved-searches` body. Trimmed here so the box's stray spaces cannot create a second entry. */
@@ -146,10 +160,15 @@ export function applySaved(state: SavedState, body: unknown): SavedState {
   const savedSearches =
     body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
   const library = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
+  const continueWatching =
+    body && typeof body === "object"
+      ? (body as { continueWatching?: unknown }).continueWatching
+      : undefined;
   return {
     ...state,
     savedSearches: Array.isArray(savedSearches) ? (savedSearches as string[]) : [],
     library: Array.isArray(library) ? (library as PublicFavourite[]) : [],
+    continueWatching: Array.isArray(continueWatching) ? (continueWatching as PublicStreamHistoryItem[]) : [],
     loaded: true,
     error: null,
   };
@@ -187,6 +206,18 @@ export function applyLibraryResponse(state: SavedState, body: unknown): SavedSta
   };
 }
 
+/** The same fold as {@link applySavedSearchesResponse}, for `POST /api/continue-watching`. */
+export function applyContinueWatchingResponse(state: SavedState, body: unknown): SavedState {
+  const list =
+    body && typeof body === "object" ? (body as { continueWatching?: unknown }).continueWatching : undefined;
+  return {
+    ...state,
+    continueWatching: Array.isArray(list) ? (list as PublicStreamHistoryItem[]) : state.continueWatching,
+    loaded: true,
+    error: null,
+  };
+}
+
 /**
  * The notice shown after a saved-searches toggle.
  *
@@ -207,4 +238,75 @@ export function libraryToggleNotice(body: unknown): string {
     (body as { favourited?: unknown }).favourited === true
   );
   return favourited ? "Added to your library." : "Removed from your library.";
+}
+
+/**
+ * "just now" / "N minutes ago" / … / "N weeks ago", for a continue-watching
+ * row's age. `now` is a parameter rather than `Date.now()` read inside so the
+ * three boundary tests (`savedModel.test.ts`) are arithmetic, not a race
+ * against the clock.
+ */
+export function relativeAge(then: number, now: number): string {
+  const diffMs = Math.max(0, now - then);
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  const WEEK = 7 * DAY;
+
+  const minutes = Math.floor(diffMs / MIN);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+
+  const hours = Math.floor(diffMs / HOUR);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+  const days = Math.floor(diffMs / DAY);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+
+  const weeks = Math.floor(diffMs / WEEK);
+  return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+}
+
+/** "S02E04", zero-padded to two digits each — the same shape `nextLabel` (src/core/streamHistory.ts) uses. */
+function episodeTag(season: number, episode: number): string {
+  return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
+}
+
+/**
+ * A continue-watching row's subtitle: age, the last episode watched (when this
+ * is a series), and the next one to offer (when the server computed one).
+ *
+ * `item.next` — not a local re-derivation — is what decides whether "next …"
+ * appears: it is computed server-side by `nextEpisode`
+ * (src/core/streamHistory.ts) and is null for a film and for a season pack, so
+ * trusting it here is what keeps this string identical to the TUI's, without
+ * importing `src/core/streamHistory.ts` (which pulls in `node:fs`) into this
+ * browser bundle.
+ */
+export function continueWatchingSub(item: PublicStreamHistoryItem, now: number): string {
+  const parts = [relativeAge(item.startedAt, now)];
+  if (item.season !== undefined && item.episode !== undefined) {
+    parts.push(`last ${episodeTag(item.season, item.episode)}`);
+  }
+  if (item.next) {
+    parts.push(`next ${episodeTag(item.next.season, item.next.episode)}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * What to search for when the remembered torrent will not resolve.
+ *
+ * The next episode when there is one — searching for the episode you have NOT
+ * seen beats searching for the one you just watched — else the bare title
+ * (a film, or a season pack that named no episode).
+ */
+export function continueWatchingFallbackQuery(item: PublicStreamHistoryItem): string {
+  if (item.next) return `${item.title} ${episodeTag(item.next.season, item.next.episode)}`;
+  return item.title;
+}
+
+/** The continue-watching strip's status line. Reuses {@link statusFor}, the same helper the two lists share. */
+export function continueWatchingStatus(state: SavedState): SavedStatus {
+  return statusFor(state, state.continueWatching.length, "Stream something and it will show up here.");
 }

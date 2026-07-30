@@ -22,7 +22,13 @@ import type { FetchTitleMetaResult } from "../recc/omdb";
 import type { ReccEvent } from "../recc/client";
 import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
-import type { LibraryResponse, PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
+import type {
+  LibraryResponse,
+  PublicSearchSnapshot,
+  PublicStreamHistoryItem,
+  SavedResponse,
+  SourcesResponse,
+} from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -2038,6 +2044,67 @@ describe("GET /api/saved — continueWatching", () => {
   it("answers an empty list when nothing has been streamed", async () => {
     const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
     expect((res.json as SavedResponse).continueWatching).toEqual([]);
+  });
+});
+
+describe("handleWebApi — POST /api/continue-watching", () => {
+  function item(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
+    return {
+      key: "kepler||series",
+      title: "Kepler",
+      type: "series",
+      season: 2,
+      episode: 4,
+      rawName: "Kepler.S02E04.1080p",
+      infoHash: "a".repeat(40),
+      magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+      startedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/continue-watching", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("removes the matching entry and returns the rest, dropped magnets included", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    const d = deps({
+      loadStreamHistoryImpl: async () => [item(), item({ key: "harrowgate||series", title: "Harrowgate" })],
+      saveStreamHistoryImpl: async (items) => {
+        saved.push([...items]);
+      },
+    });
+    const res = await post(d, { key: "kepler||series", action: "remove" });
+    expect(res.status).toBe(200);
+    const body = res.json as { continueWatching: PublicStreamHistoryItem[] };
+    expect(body.continueWatching).toHaveLength(1);
+    expect(body.continueWatching[0]?.key).toBe("harrowgate||series");
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+    expect(saved[0]).toHaveLength(1);
+  });
+
+  it("is idempotent — removing a key that is not there changes nothing", async () => {
+    const d = deps({
+      loadStreamHistoryImpl: async () => [item()],
+      saveStreamHistoryImpl: async () => {
+        throw new Error("must not be called for a no-op remove");
+      },
+    });
+    const res = await post(d, { key: "no-such-key", action: "remove" });
+    expect(res.status).toBe(200);
+    expect((res.json as { continueWatching: PublicStreamHistoryItem[] }).continueWatching).toHaveLength(1);
+  });
+
+  it("rejects a missing or malformed body", async () => {
+    const d = deps({ loadStreamHistoryImpl: async () => [item()] });
+    const res = await post(d, { action: "remove" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an unknown action", async () => {
+    const d = deps({ loadStreamHistoryImpl: async () => [item()] });
+    const res = await post(d, { key: "kepler||series", action: "toggle" });
+    expect(res.status).toBe(400);
   });
 });
 

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyContinueWatchingResponse,
   applyLibraryResponse,
   applySaved,
   applySavedSearchesResponse,
+  continueWatchingFallbackQuery,
+  continueWatchingStatus,
+  continueWatchingSub,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
@@ -10,12 +14,13 @@ import {
   libraryBody,
   libraryStatus,
   libraryToggleNotice,
+  relativeAge,
   savedSearchesBody,
   savedSearchesStatus,
   savedSearchesToggleNotice,
   type SavedState,
 } from "./savedModel";
-import type { PublicFavourite } from "../wire";
+import type { PublicFavourite, PublicStreamHistoryItem } from "../wire";
 
 const HASH = "b".repeat(40);
 
@@ -27,11 +32,32 @@ function loaded(over: Partial<SavedState> = {}): SavedState {
   return { ...emptySaved(), loaded: true, ...over };
 }
 
+const base: PublicStreamHistoryItem = {
+  key: "k",
+  title: "Kepler",
+  type: "series",
+  season: 2,
+  episode: 4,
+  next: { season: 2, episode: 5 },
+  rawName: "Kepler.S02E04.1080p",
+  infoHash: "a".repeat(40),
+  startedAt: 1_700_000_000_000,
+};
+// Exactly 86,400,000 ms after `base.startedAt`, so "1 day ago" is arithmetic
+// rather than a guess about how the formatter rounds.
+const A_DAY_LATER = 1_700_086_400_000;
+
 describe("emptySaved", () => {
   it("opens unloaded with no error, so the pane can say 'loading' rather than 'empty'", () => {
     // These are different sentences to a user: an empty library and a library
     // that has not arrived yet must not read the same.
-    expect(emptySaved()).toEqual({ savedSearches: [], library: [], loaded: false, error: null });
+    expect(emptySaved()).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: false,
+      error: null,
+    });
   });
 });
 
@@ -185,9 +211,11 @@ describe("applySaved", () => {
     const next = applySaved(loaded({ error: "old failure" }), {
       savedSearches: ["tin rivers"],
       library: [favourite()],
+      continueWatching: [base],
     });
     expect(next.savedSearches).toEqual(["tin rivers"]);
     expect(next.library).toHaveLength(1);
+    expect(next.continueWatching).toEqual([base]);
     expect(next.loaded).toBe(true);
     expect(next.error).toBeNull();
   });
@@ -196,19 +224,37 @@ describe("applySaved", () => {
     // The body is whatever came back over the network; a proxy error page
     // parses to something that is not this shape at all.
     const next = applySaved(emptySaved(), {});
-    expect(next).toEqual({ savedSearches: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 
   it("tolerates a null body rather than throwing on the page", () => {
     const next = applySaved(emptySaved(), null);
-    expect(next).toEqual({ savedSearches: [], library: [], loaded: true, error: null });
+    expect(next).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 });
 
 describe("applySavedSearchesResponse", () => {
   it("takes the server's list and marks the state loaded, clearing any error", () => {
     const next = applySavedSearchesResponse(loaded({ error: "old failure" }), { savedSearches: ["tin rivers"] });
-    expect(next).toEqual({ savedSearches: ["tin rivers"], library: [], loaded: true, error: null });
+    expect(next).toEqual({
+      savedSearches: ["tin rivers"],
+      library: [],
+      continueWatching: [],
+      loaded: true,
+      error: null,
+    });
   });
 
   it("keeps the existing list on a null body rather than emptying it", () => {
@@ -274,5 +320,107 @@ describe("libraryToggleNotice", () => {
     expect(libraryToggleNotice({})).toBe("Removed from your library.");
     expect(libraryToggleNotice(null)).toBe("Removed from your library.");
     expect(libraryToggleNotice(undefined)).toBe("Removed from your library.");
+  });
+});
+
+describe("applyContinueWatchingResponse", () => {
+  it("takes the server's list and marks the state loaded, clearing any error", () => {
+    const next = applyContinueWatchingResponse(loaded({ error: "old failure" }), {
+      continueWatching: [base],
+    });
+    expect(next.continueWatching).toEqual([base]);
+    expect(next.loaded).toBe(true);
+    expect(next.error).toBeNull();
+  });
+
+  it("keeps the existing list on a null body rather than emptying it", () => {
+    const state = loaded({ continueWatching: [base] });
+    expect(applyContinueWatchingResponse(state, null)).toEqual(state);
+  });
+
+  it("keeps the existing list when continueWatching is missing or not an array", () => {
+    const state = loaded({ continueWatching: [base] });
+    expect(applyContinueWatchingResponse(state, {})).toEqual(state);
+    expect(applyContinueWatchingResponse(state, { continueWatching: "nope" })).toEqual(state);
+  });
+});
+
+describe("relativeAge", () => {
+  it("says just now for anything under a minute", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000)).toBe("just now");
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 59_000)).toBe("just now");
+  });
+
+  it("says 1 day ago exactly 86,400,000 ms later", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 86_400_000)).toBe("1 day ago");
+  });
+
+  it("says 2 weeks ago 14 days later", () => {
+    expect(relativeAge(1_700_000_000_000, 1_700_000_000_000 + 14 * 86_400_000)).toBe("2 weeks ago");
+  });
+});
+
+describe("continueWatchingSub", () => {
+  it("reports the last episode and the next one", () => {
+    expect(continueWatchingSub(base, A_DAY_LATER)).toBe("1 day ago · last S02E04 · next S02E05");
+  });
+
+  it("omits next when there is none to offer", () => {
+    // A season pack, or a film.
+    expect(continueWatchingSub({ ...base, next: null }, A_DAY_LATER)).toBe("1 day ago · last S02E04");
+  });
+
+  it("says only the age for a film", () => {
+    expect(
+      continueWatchingSub(
+        { ...base, type: "movie", season: undefined, episode: undefined, next: null },
+        A_DAY_LATER,
+      ),
+    ).toBe("1 day ago");
+  });
+});
+
+describe("continueWatchingFallbackQuery", () => {
+  it("asks for the next episode when there is one", () => {
+    // The remembered torrent is dead, so we search — and searching for the
+    // episode you have NOT seen beats searching for the one you just watched.
+    expect(continueWatchingFallbackQuery(base)).toBe("Kepler S02E05");
+  });
+
+  it("asks for the bare title when there is no next episode", () => {
+    // A season pack that named no episode.
+    expect(continueWatchingFallbackQuery({ ...base, next: null })).toBe("Kepler");
+  });
+
+  it("asks for the bare title for a film", () => {
+    expect(
+      continueWatchingFallbackQuery({
+        ...base,
+        title: "Tin Rivers",
+        type: "movie",
+        season: undefined,
+        episode: undefined,
+        next: null,
+      }),
+    ).toBe("Tin Rivers");
+  });
+});
+
+describe("continueWatchingStatus", () => {
+  it("says loading before the first response, not empty", () => {
+    expect(continueWatchingStatus(emptySaved())).toEqual({ text: "Loading…", show: true, tone: "dim" });
+  });
+
+  it("explains how to fill it when empty", () => {
+    expect(continueWatchingStatus({ ...emptySaved(), loaded: true })).toEqual({
+      text: "Stream something and it will show up here.",
+      show: true,
+      tone: "dim",
+    });
+  });
+
+  it("hides once there are rows", () => {
+    const state = { ...emptySaved(), loaded: true, continueWatching: [{ ...base }] };
+    expect(continueWatchingStatus(state).show).toBe(false);
   });
 });

@@ -609,3 +609,23 @@ export interface LibraryResponse {
   favourited: boolean;
   library: PublicFavourite[];
 }
+
+/**
+ * The body of `POST /api/continue-watching`.
+ *
+ * ONE ACTION, not `"toggle"`: nothing plays a title and then un-plays it, so
+ * there is nothing for a toggle to mean here. `key` rather than `infoHash`
+ * because it is `PublicStreamHistoryItem.key` — the store's own dedupe key,
+ * one row per title rather than per stream — so it identifies the row the
+ * user actually clicked remove on even if two entries somehow shared an info
+ * hash.
+ */
+export interface ContinueWatchingRequest {
+  key: string;
+  action: "remove";
+}
+
+/** The 200 body of `POST /api/continue-watching`. Same contract as `LibraryResponse`: the caller renders what comes back. */
+export interface ContinueWatchingResponse {
+  continueWatching: PublicStreamHistoryItem[];
+}
