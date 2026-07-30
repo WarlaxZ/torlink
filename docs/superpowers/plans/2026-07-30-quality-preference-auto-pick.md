@@ -2144,6 +2144,27 @@ describe("POST /api/preferences", () => {
   });
 });
 
+describe("preferences round trip", () => {
+  // The write path sanitises with `sanitiseQualityPrefs` and the read path
+  // projects with `qualityPrefsFrom` — two different functions doing
+  // overlapping validation. This is the only test that makes them agree on the
+  // same config object rather than on two independently-stubbed ones.
+  it("what POST stores is what GET reports", async () => {
+    let saved: Config | null = null;
+    const written = await handleWebApi(
+      deps({ loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } }),
+      "POST", "/api/preferences", new URLSearchParams(), AUTH,
+      JSON.stringify({ action: "set", preferences: { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] } }),
+    );
+    const read = await handleWebApi(
+      deps({ loadConfigImpl: async () => saved! }),
+      "GET", "/api/sources", new URLSearchParams(), AUTH, "",
+    );
+    expect((read.json as SourcesResponse).preferences)
+      .toEqual((written.json as PreferencesResponse).preferences);
+  });
+});
+
 describe("GET /api/sources preferences", () => {
   it("reports the stored preference", async () => {
     const res = await handleWebApi(
@@ -2505,8 +2526,11 @@ Gate both on `pickModel`, never on a conditional written inline here.
 // For You card. The whole decision is `autoPlayableFilm` in pickModel — this
 // function only looks up its two inputs and builds a node. A conditional here
 // that decided what to show would be the thing review has caught twice.
-function addReccPlay(card: HTMLElement, item: PublicRecommendation, filter: ReccType): void {
-  if (!autoPlayableFilm(posterMetaFor(item.imdbId)?.type, filter)) return;
+//
+// `medium` is whatever `fetchReccPoster` already learned for this card, or
+// `undefined` when it has not resolved (see below) — never a fresh request.
+function addReccPlay(card: HTMLElement, item: PublicRecommendation, medium: ReccMedium | undefined, filter: ReccType): void {
+  if (!autoPlayableFilm(medium, filter)) return;
   const play = document.createElement("button");
   play.type = "button";
   play.textContent = "Play";
@@ -2529,7 +2553,11 @@ function addHistoryPlay(row: HTMLElement, item: PublicStreamHistoryItem): void {
 
 `autoPlay(title, intent, fallback?)` searches via the existing search path, calls `pickBestRelease(results, prefsFromWire(prefs), intent)`, shows `pickStatusLine(pick, prefs.maxResolution ?? undefined)`, and hands the winner to `streamFlow.ts` unchanged — passing `intent` on when `pick.fromPack` is true so the file inside the pack is selected. `resume(item)` is the existing continue-watching action.
 
-`posterMetaFor(imdbId)` reads the already-fetched `/api/title` response for that card. **Task 12 added `type` to `PublicTitleMeta`, so the field is there** — this task only reads it; it must not change `wire.ts` or `routes.ts`. If the card's metadata has not resolved yet, pass `undefined` and let `autoPlayableFilm` fall back to the filter; never block a click on a network round trip.
+**There is no `posterMetaFor` helper, and you must not build a metadata cache to create one.** Verified: recc cards get their metadata from `fetchReccPoster(imdbId)` (`app.ts:1415`), which fetches `/api/title?imdb=…`, reads `PublicTitleMeta`, uses `posterUrl`, and **discards the rest of the response**. `resultPosters.ts`'s cache is keyed by *release name* and serves search results, not recc cards — it is the wrong structure and the wrong key.
+
+So the minimal, correct change: have `fetchReccPoster` carry `meta.type` out alongside its existing outcome (widen `ReccPosterOutcome`, or return it beside), and hand it to `addReccPlay` when the card paints. Task 12 already added `type` to `PublicTitleMeta`, so the field is on the response — this task only reads it, and must not touch `wire.ts` or `routes.ts`.
+
+**Before that fetch resolves, pass `undefined`.** `autoPlayableFilm` falls back to the filter, exactly as the terminal does with its debounce race. Never block a click on a network round trip, and do not add a synchronous cache just so the button can render a moment earlier — a Play button that appears when the poster does is fine.
 
 - [ ] **Step 4: Style it**
 
@@ -2537,7 +2565,13 @@ Add `.prefs` and `.pref-features` rules to `styles.css`, following the existing 
 
 - [ ] **Step 5: Run it and check by hand**
 
-Run: `npm run dev -- serve --web`
+**Build first, or you will be testing the old bundle.** `README.md:296` warns that the dashboard is served from `dist/web`, **not** `src` — edit `src/web/static/` and reload without rebuilding and you get silently stale assets that read exactly like a browser cache bug. So:
+
+```bash
+npm run build && npm run dev -- serve --web
+```
+
+Rebuild after every change you want to see. If a check below appears to fail, rebuild and retry before concluding anything — and if a check appears to *pass* on a stale bundle, that is a false positive, which is worse.
 
 There is no jsdom, deliberately — wiring is verified by running it. Check:
 - The disclosure opens; changing the resolution persists across a reload.
