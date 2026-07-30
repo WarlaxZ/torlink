@@ -5,6 +5,10 @@ import { parseDnsServers } from "../util/dns";
 import type { SourceId } from "../sources/types";
 import type { ReccClientConfig } from "../recc/client";
 import type { DebridProviderId } from "../integrations/debrid/types";
+import {
+  isFeatureId, isMaxResolution, NO_PREFS,
+  type FeatureId, type MaxResolution, type QualityPrefs,
+} from "../util/releasePick";
 
 // A pinned VIDEO torrent/series to return to, remembering which episodes have
 // been streamed. Never stores stream URLs — only the magnet + metadata, so it
@@ -65,6 +69,15 @@ export interface Config {
   // Pinned VIDEO torrents (the "Library"), most-recent first, each remembering
   // which episodes have been watched.
   favourites?: FavouriteItem[];
+  // Ceiling for auto-picked releases. Absent = no ceiling. Note that with no
+  // ceiling set the highest resolution available wins, which will usually be a
+  // remux — that is the intended reading of "best available", not a bug.
+  maxResolution?: MaxResolution;
+  // Features an auto-picked release should have. SOFT: when nothing has them,
+  // the pick falls back and reports which requirements it dropped.
+  requireFeatures?: FeatureId[];
+  // Features an auto-picked release must not have. HARD: never chosen.
+  excludeFeatures?: FeatureId[];
   // Sources the user has switched off; they're skipped during search. Stored as
   // opaque strings — unknown ids are simply ignored by the registry.
   disabledSources?: string[];
@@ -99,6 +112,51 @@ function isFavouriteItem(v: unknown): v is FavouriteItem {
     typeof r.name === "string" && r.name.length > 0 &&
     typeof r.magnet === "string" && r.magnet.length > 0
   );
+}
+
+interface RawQualityPrefs {
+  maxResolution?: unknown;
+  requireFeatures?: unknown;
+  excludeFeatures?: unknown;
+}
+
+function featureList(v: unknown): FeatureId[] {
+  return Array.isArray(v) ? [...new Set(v.filter(isFeatureId))] : [];
+}
+
+/**
+ * Drop anything a hand-edited config — or an older build with a different
+ * feature set — could put here. A preference that names an id this build does
+ * not know would silently match nothing, which reads as a broken picker rather
+ * than a bad config.
+ *
+ * A collision resolves in favour of EXCLUDE. Excluding is the hard rule and
+ * requiring is the soft one, so honouring the hard one loses less.
+ */
+export function sanitiseQualityPrefs(raw: RawQualityPrefs): {
+  maxResolution?: MaxResolution;
+  requireFeatures: FeatureId[];
+  excludeFeatures: FeatureId[];
+} {
+  const excludeFeatures = featureList(raw.excludeFeatures);
+  const requireFeatures = featureList(raw.requireFeatures).filter((id) => !excludeFeatures.includes(id));
+  const out: { maxResolution?: MaxResolution; requireFeatures: FeatureId[]; excludeFeatures: FeatureId[] } = {
+    requireFeatures,
+    excludeFeatures,
+  };
+  if (isMaxResolution(raw.maxResolution)) out.maxResolution = raw.maxResolution;
+  return out;
+}
+
+/** The picker's view of the config. */
+export function qualityPrefsFrom(config: Config): QualityPrefs {
+  const clean = sanitiseQualityPrefs(config);
+  const out: QualityPrefs = {
+    ...NO_PREFS,
+    require: clean.requireFeatures,
+    exclude: clean.excludeFeatures,
+  };
+  return clean.maxResolution ? { ...out, maxResolution: clean.maxResolution } : out;
 }
 
 const REALDEBRID_TOKEN_ENV = "REALDEBRID_API_TOKEN";
@@ -235,6 +293,10 @@ export async function loadConfig(): Promise<Config> {
           })
           .slice(0, 100)
       : [];
+    const quality = sanitiseQualityPrefs(parsed);
+    cfg.maxResolution = quality.maxResolution;
+    cfg.requireFeatures = quality.requireFeatures;
+    cfg.excludeFeatures = quality.excludeFeatures;
     return cfg;
   } catch {
     return { ...defaultConfig };
