@@ -20,6 +20,7 @@ import {
 import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { getDebridProvider } from "../integrations/debrid";
 import type { DebridProviderId } from "../integrations/debrid/types";
 
 export interface Runtime {
@@ -45,7 +46,7 @@ export function policySummary(cfg: Config): string {
     `up ${rate(cfg.uploadLimitKbps)}`,
     `seed ratio ${cfg.seedRatio && cfg.seedRatio > 0 ? cfg.seedRatio : "off"}`,
     `seed time ${cfg.seedMinutes && cfg.seedMinutes > 0 ? `${cfg.seedMinutes}m` : "off"}`,
-    `real-debrid ${active ? "on" : "off"}`,
+    `debrid ${active ? getDebridProvider(active.provider).label.toLowerCase() : "off"}`,
   ];
   return `policy: ${parts.join(" · ")}`;
 }

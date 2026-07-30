@@ -235,12 +235,28 @@ describe("policySummary", () => {
   it("names the limits it applied so a capped daemon says so at startup", () => {
     expect(
       policySummary({ downloadDir: "/d", trackers: [], downloadLimitKbps: 500, seedRatio: 2 }),
-    ).toBe("policy: down 500 KB/s · up unlimited · seed ratio 2 · seed time off · real-debrid off");
+    ).toBe("policy: down 500 KB/s · up unlimited · seed ratio 2 · seed time off · debrid off");
+  });
+
+  it("names Real-Debrid when it's the active provider", () => {
+    expect(
+      policySummary({ downloadDir: "/d", trackers: [], realDebridToken: "rd-tok" }),
+    ).toBe("policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid real-debrid");
+  });
+
+  // MUTATION GUARD: a hardcoded "real-debrid on/off" label reads this as
+  // configured (torBoxToken is set) and would still print "real-debrid on"
+  // for a TorBox-only user — this pins that the banner names the ACTIVE
+  // provider, not a fixed one.
+  it("names TorBox when it's the active provider", () => {
+    expect(
+      policySummary({ downloadDir: "/d", trackers: [], torBoxToken: "tb-tok" }),
+    ).toBe("policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid torbox");
   });
 
   it("reports an unconfigured daemon as unlimited", () => {
     expect(policySummary({ downloadDir: "/d", trackers: [] })).toBe(
-      "policy: down unlimited · up unlimited · seed ratio off · seed time off · real-debrid off",
+      "policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid off",
     );
   });
 });
