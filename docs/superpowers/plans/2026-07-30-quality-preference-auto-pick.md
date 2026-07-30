@@ -1974,66 +1974,88 @@ Keep it OPTIONAL, for the same reason Task 7b's field is optional: `PublicTitleM
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `src/web/routes.test.ts`, matching the file's existing `handleWebApi` call style and always passing **both** `loadConfigImpl` and `saveConfigImpl` (a test that forgets `saveConfigImpl` edits the developer's real config — `routes.ts:98-108`):
+This file has established helpers — use them, do not invent fixtures:
+
+- `deps(over: Partial<WebDeps> = {}): WebDeps` is a **function**, not an object. Call `deps({...})`, never `{...deps, ...}`.
+- `AUTH` is the auth header constant (`"Bearer secret"`).
+- `searchConfig(over: Partial<Config> = {}): Config` builds a config over `defaultConfig`.
+- **`deps()`'s default `saveConfigImpl` THROWS on purpose** (`routes.test.ts:50-52`), so a write test that forgets to inject a save seam fails loudly instead of editing the developer's real `~/.config/torlnk/config.json`. Always pass `saveConfigImpl`.
 
 ```ts
 describe("POST /api/preferences", () => {
+  async function post(body: unknown, over: Partial<WebDeps> = {}) {
+    return handleWebApi(deps(over), "POST", "/api/preferences", new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
   it("saves a valid preference and echoes it back", async () => {
     let saved: Config | null = null;
-    const res = await handleWebApi(
-      { ...deps, loadConfigImpl: async () => ({ ...base }), saveConfigImpl: async (c) => { saved = c; } },
-      "POST", "/api/preferences", new URLSearchParams(), auth,
-      JSON.stringify({ action: "set", preferences: { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] } }),
+    const res = await post(
+      { action: "set", preferences: { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
     );
     expect(res.status).toBe(200);
     expect(saved!.maxResolution).toBe("1080p");
     expect(saved!.requireFeatures).toEqual(["atmos"]);
     expect(saved!.excludeFeatures).toEqual(["dv"]);
+    expect((res.json as PreferencesResponse).preferences).toEqual({
+      maxResolution: "1080p", require: ["atmos"], exclude: ["dv"],
+    });
   });
 
   it("drops an unknown feature id rather than storing it", async () => {
     let saved: Config | null = null;
-    await handleWebApi(
-      { ...deps, loadConfigImpl: async () => ({ ...base }), saveConfigImpl: async (c) => { saved = c; } },
-      "POST", "/api/preferences", new URLSearchParams(), auth,
-      JSON.stringify({ action: "set", preferences: { maxResolution: null, require: ["laserdisc"], exclude: [] } }),
+    await post(
+      { action: "set", preferences: { maxResolution: null, require: ["laserdisc"], exclude: [] } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
     );
     expect(saved!.requireFeatures).toEqual([]);
+    expect(saved!.maxResolution).toBeUndefined();
   });
 
   it("rejects a body with no action", async () => {
-    const res = await handleWebApi(deps, "POST", "/api/preferences", new URLSearchParams(), auth, "{}");
-    expect(res.status).toBe(400);
+    expect((await post({})).status).toBe(400);
+  });
+
+  it("rejects a body whose preferences is not an object", async () => {
+    expect((await post({ action: "set", preferences: [] })).status).toBe(400);
   });
 
   it("re-reads config so a concurrent change to another field is not clobbered", async () => {
     let saved: Config | null = null;
-    await handleWebApi(
+    await post(
+      { action: "set", preferences: { maxResolution: "720p", require: [], exclude: [] } },
       {
-        ...deps,
-        // Simulates the TUI having added a saved search since page load.
-        loadConfigImpl: async () => ({ ...base, savedSearches: ["kestrel"] }),
+        // Simulates the TUI having added a saved search since the page loaded.
+        loadConfigImpl: async () => searchConfig({ savedSearches: ["kestrel"] }),
         saveConfigImpl: async (c) => { saved = c; },
       },
-      "POST", "/api/preferences", new URLSearchParams(), auth,
-      JSON.stringify({ action: "set", preferences: { maxResolution: "720p", require: [], exclude: [] } }),
     );
     expect(saved!.savedSearches).toEqual(["kestrel"]);
   });
 });
 
-describe("GET /api/sources", () => {
+describe("GET /api/sources preferences", () => {
   it("reports the stored preference", async () => {
     const res = await handleWebApi(
-      { ...deps, loadConfigImpl: async () => ({ ...base, maxResolution: "720p", requireFeatures: ["hdr"] }) },
-      "GET", "/api/sources", new URLSearchParams(), auth, "",
+      deps({ loadConfigImpl: async () => searchConfig({ maxResolution: "720p", requireFeatures: ["hdr"] }) }),
+      "GET", "/api/sources", new URLSearchParams(), AUTH, "",
     );
     expect((res.json as SourcesResponse).preferences).toEqual({
       maxResolution: "720p", require: ["hdr"], exclude: [],
     });
   });
 });
+
+describe("GET /api/title medium", () => {
+  it("echoes the medium OMDb reported", async () => {
+    // `titleDeps` and `OK` are this file's existing title-route helpers — read
+    // how the neighbouring /api/title tests build their stubs and follow that,
+    // returning `type: "movie"` from the stub.
+  });
+});
 ```
+
+The `/api/title` case is deliberately left as a description rather than code: that route's tests use their own `titleDeps`/`OK` helpers whose exact shape you must read from the file. Write it in that file's idiom, asserting the medium survives into `PublicTitleMeta`.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
