@@ -41,7 +41,7 @@ function pick(over: Partial<PublicRecommendation> = {}): PublicRecommendation {
     title: "Ashfall",
     year: 1999,
     score: 0.91,
-    reasons: ["because you liked Blade Runner", "sci-fi"],
+    reasons: ["because you liked Harrowgate", "sci-fi"],
     ...over,
   };
 }
@@ -386,8 +386,8 @@ describe("the card's actions", () => {
 
 describe("card copy", () => {
   it("shows reccd's strongest reason, with the rest as hover text", () => {
-    expect(reasonLine(pick())).toBe("because you liked Blade Runner");
-    expect(reasonTitle(pick())).toBe("because you liked Blade Runner · sci-fi");
+    expect(reasonLine(pick())).toBe("because you liked Harrowgate");
+    expect(reasonTitle(pick())).toBe("because you liked Harrowgate · sci-fi");
   });
 
   it("has no reason line when reccd gave none", () => {

@@ -59,7 +59,7 @@ describe("isInfoHash", () => {
     expect(isInfoHash("MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U")).toBe(true);
   });
   it("rejects ordinary queries and malformed hashes", () => {
-    expect(isInfoHash("the office 1080p")).toBe(false);
+    expect(isInfoHash("copper kettle 1080p")).toBe(false);
     expect(isInfoHash("g".repeat(40))).toBe(false); // 40 chars but not hex
     expect(isInfoHash("a".repeat(39))).toBe(false); // too short
     expect(isInfoHash("")).toBe(false);
@@ -91,7 +91,7 @@ describe("parseInput", () => {
     expect(parseInput(`  ${hash}  `)?.infoHash).toBe(hash);
   });
   it("returns null for ordinary queries and junk", () => {
-    expect(parseInput("the office 1080p")).toBeNull();
+    expect(parseInput("copper kettle 1080p")).toBeNull();
     expect(parseInput("g".repeat(40))).toBeNull(); // 40 chars but not hex
     expect(parseInput("magnet:?xt=urn:btih:tooshort")).toBeNull();
     expect(parseInput("")).toBeNull();

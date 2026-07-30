@@ -1674,7 +1674,7 @@ describe("GET /api/recommendations", () => {
     title: "Ashfall",
     year: 1999,
     score: 0.91,
-    reasons: ["because you liked Blade Runner"],
+    reasons: ["because you liked Harrowgate"],
   };
 
   beforeEach(() => {

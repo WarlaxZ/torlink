@@ -42,13 +42,13 @@ const NOW_MS = Date.now();
 // The "latest" fixture, now movie-focused so the Movies view can show off the
 // poster/plot preview pane. Varied sources keep the Src column lively.
 const RESULTS: TorrentResult[] = [
-  { infoHash: "b2", name: "Oppenheimer (2023) [1080p WEB]", source: "yts", sizeBytes: 2.1e9, seeders: 1240, leechers: 88, magnet: "", added: NOW - 7200 },
-  { infoHash: "g7", name: "Dune: Part Two (2024) [2160p BluRay]", source: "tpb-movies", sizeBytes: 8.4e9, seeders: 910, leechers: 41, magnet: "", added: NOW - 90000 },
-  { infoHash: "p1", name: "Poor Things (2023) 1080p BluRay x264", source: "x1337-movies", sizeBytes: 2.4e9, seeders: 612, leechers: 27, magnet: "", added: NOW - 5400 },
-  { infoHash: "k1", name: "Killers of the Flower Moon (2023) 2160p", source: "yts", sizeBytes: 9.1e9, seeders: 388, leechers: 19, magnet: "", added: NOW - 172800 },
-  { infoHash: "h1", name: "The Holdovers (2023) 1080p WEB-DL", source: "x1337-movies", sizeBytes: 2.0e9, seeders: 274, leechers: 14, magnet: "", added: NOW - 43200 },
-  { infoHash: "z1", name: "The Zone of Interest (2023) 1080p", source: "tpb-movies", sizeBytes: 1.8e9, seeders: 141, leechers: 9, magnet: "", added: NOW - 129600 },
-  { infoHash: "a2", name: "Anatomy of a Fall (2023) 1080p BluRay", source: "yts", sizeBytes: 2.3e9, seeders: 96, leechers: 5, magnet: "", added: NOW - 259200 },
+  { infoHash: "b2", name: "Kestrel (2010) [1080p WEB]", source: "yts", sizeBytes: 2.1e9, seeders: 1240, leechers: 88, magnet: "", added: NOW - 7200 },
+  { infoHash: "g7", name: "Tin Rivers (2024) [2160p BluRay]", source: "tpb-movies", sizeBytes: 8.4e9, seeders: 910, leechers: 41, magnet: "", added: NOW - 90000 },
+  { infoHash: "p1", name: "Ashfall (1999) 1080p BluRay x264", source: "x1337-movies", sizeBytes: 2.4e9, seeders: 612, leechers: 27, magnet: "", added: NOW - 5400 },
+  { infoHash: "k1", name: "Cartographers of the Quiet Sea (2023) 2160p", source: "yts", sizeBytes: 9.1e9, seeders: 388, leechers: 19, magnet: "", added: NOW - 172800 },
+  { infoHash: "h1", name: "Copper Kettle Run (2008) 1080p WEB-DL", source: "x1337-movies", sizeBytes: 2.0e9, seeders: 274, leechers: 14, magnet: "", added: NOW - 43200 },
+  { infoHash: "z1", name: "The Weight of Salt (2019) 1080p", source: "tpb-movies", sizeBytes: 1.8e9, seeders: 141, leechers: 9, magnet: "", added: NOW - 129600 },
+  { infoHash: "a2", name: "Harrowgate (2021) 1080p BluRay", source: "yts", sizeBytes: 2.3e9, seeders: 96, leechers: 5, magnet: "", added: NOW - 259200 },
 ];
 
 const DOWNLOADS: QueueItem[] = [
@@ -252,8 +252,8 @@ if (!browsePoster) {
   console.warn("browse: poster fetch failed — screenshot will show the empty state");
 }
 
-const OPPENHEIMER_PLOT =
-  "A dramatization of J. Robert Oppenheimer and his role in developing the atomic bomb during World War II.";
+const KESTREL_PLOT =
+  "A grounded falconer inherits a derelict aerodrome and one bird that still remembers how to fly.";
 
 save(
   "browse",
@@ -266,7 +266,7 @@ save(
     <Box marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
-        <SearchBar width={BROWSE_CW} value="oppenheimer" editing={false} placeholder="Search or paste a magnet link…" onSubmit={() => {}} />
+        <SearchBar width={BROWSE_CW} value="kestrel" editing={false} placeholder="Search or paste a magnet link…" onSubmit={() => {}} />
         <Box marginTop={1}>
           <Box marginRight={1}>
             <Panel title="results" width={LIST_W} focused count={`(${browseResults.length})`} height={PANEL_H}>
@@ -315,9 +315,9 @@ save(
             width={PREVIEW_W}
             height={PANEL_H}
             focused
-            title="Oppenheimer"
-            year={2023}
-            plot={OPPENHEIMER_PLOT}
+            title="Kestrel"
+            year={2010}
+            plot={KESTREL_PLOT}
             posterRows={browsePoster}
           />
         </Box>

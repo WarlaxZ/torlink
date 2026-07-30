@@ -253,8 +253,8 @@ describe("posterPath / imdbSearchUrl", () => {
   });
 
   it("escapes a title into the IMDb search", () => {
-    expect(imdbSearchUrl("Fast & Furious", null)).toBe(
-      "https://www.imdb.com/find/?q=Fast%20%26%20Furious&s=tt",
+    expect(imdbSearchUrl("Tin & Rivers", null)).toBe(
+      "https://www.imdb.com/find/?q=Tin%20%26%20Rivers&s=tt",
     );
   });
 });
