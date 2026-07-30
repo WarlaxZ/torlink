@@ -742,14 +742,12 @@ export function rankReleases<T extends PickableResult>(
   // asymmetry with the cap in `filterCandidates`, which treats unknown as
   // under: optimistic for inclusion, pessimistic for ranking, so such a release
   // is never excluded but is only chosen when nothing states a resolution.
-  // When the cap was ignored, rank ascending instead — someone who capped at
-  // 1080p and is offered only 2160p and 4320p should get the 2160p, not the
-  // largest thing in the list.
-  const heightRank = (p: ParsedRelease): number => {
-    const h = resolutionHeight(p.resolution);
-    if (h === null) return overCap ? Number.POSITIVE_INFINITY : -1;
-    return h;
-  };
+  //
+  // -1 is correct in BOTH directions, and the `overCap` case cannot arise:
+  // `filterCandidates` counts an unknown resolution as under the cap, so a
+  // single unknown-resolution survivor is enough to keep `overCap` false.
+  // `overCap === true` therefore implies every survivor states a height.
+  const heightRank = (p: ParsedRelease): number => resolutionHeight(p.resolution) ?? -1;
 
   const ranked = survivors.slice().sort((a, b) => {
     const ha = heightRank(a.parsed);
