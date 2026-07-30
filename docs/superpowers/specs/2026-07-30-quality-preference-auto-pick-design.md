@@ -625,6 +625,15 @@ nothing has asked a tracker. D's picker shows real availability per episode, so 
 mark an episode with no release found rather than hiding it, and must not conflate that
 with an episode that has not aired.
 
+**A complete-series pack is only recognised for its first season.** `S01-S05` parses as
+`season: 1`, so A's banding treats it as a season-1 pack and demotes it to the last band
+for seasons 2–5, which it in fact contains. Accepted for A — resolution outranks banding
+anyway, so the pack still wins when it is the best available, and demoting it is the safe
+direction: it is never promoted over a release naming the wanted season outright. D should
+fix this properly, since it is the spec that maps a show's seasons to what can actually be
+fetched; doing so needs the range parsed out of the name, which `parse-torrent-title` does
+not give.
+
 ## Risks
 
 **Enter changes meaning in two panes**, and this is the only behavioural regression here.
