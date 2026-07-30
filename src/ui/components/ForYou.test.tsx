@@ -327,7 +327,7 @@ describe("ForYou", () => {
     await vi.waitFor(() => expect(lastFrame()).toContain("Preview"));
   });
 
-  it("adds the selected pick to the watchlist on 'w' without dismissing it", async () => {
+  it("saves the selected pick as a search on 'w' without dismissing it", async () => {
     const { impl } = fetchStub();
     const toggleSavedSearch = vi.fn();
     const { stdin, lastFrame } = render(

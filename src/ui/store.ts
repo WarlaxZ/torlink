@@ -13,7 +13,7 @@ export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "
 
 export type Section =
   | Category
-  | "watchlist"
+  | "savedSearches"
   | "library"
   | "downloads"
   | "seeding"
@@ -24,7 +24,7 @@ export type Section =
 // as opposed to the downloads/seeding/accounts views.
 export function isCategory(section: Section): boolean {
   return (
-    section !== "watchlist" &&
+    section !== "savedSearches" &&
     section !== "library" &&
     section !== "downloads" &&
     section !== "seeding" &&
@@ -55,7 +55,7 @@ export function parseCategory(raw: string | undefined): Category {
 const SECTIONS: Section[] = [
   ...CATEGORIES.map((c) => c.key),
   "forYou",
-  "watchlist",
+  "savedSearches",
   "library",
   "downloads",
   "seeding",

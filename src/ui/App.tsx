@@ -92,7 +92,7 @@ import { TraktImportPrompt, type TraktImportView } from "./components/TraktImpor
 import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
 import { Accounts } from "./components/Accounts";
-import { Watchlist } from "./components/Watchlist";
+import { SavedSearches } from "./components/SavedSearches";
 import { Favourites } from "./components/Favourites";
 import { ForYou } from "./components/ForYou";
 import { TrackersPrompt } from "./components/TrackersPrompt";
@@ -657,7 +657,7 @@ export function App({
       void saveConfig(next);
       return next;
     });
-    setNotice("Watchlist updated.");
+    setNotice("Saved searches updated.");
   }, []);
 
   // Opens the shared RatePrompt for a For You pick (adds the "watched" action and
@@ -2499,8 +2499,8 @@ export function App({
                 onSignOutOmdb={clearOmdbKey}
               />
             </Box>
-            <Box display={section === "watchlist" ? "flex" : "none"} flexDirection="column">
-              <Watchlist />
+            <Box display={section === "savedSearches" ? "flex" : "none"} flexDirection="column">
+              <SavedSearches />
             </Box>
             <Box display={section === "library" ? "flex" : "none"} flexDirection="column">
               <Favourites />

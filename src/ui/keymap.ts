@@ -72,7 +72,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "e", label: "Toggle explore mode" },
       { keys: "b", label: "Show / hide the 'why' reasons" },
       { keys: "f", label: "Rate — watched / like / dislike" },
-      { keys: "w", label: "Add to watchlist" },
+      { keys: "w", label: "Save this title as a search" },
       { keys: "r", label: "Refresh recommendations" },
     ],
   },
@@ -141,7 +141,7 @@ export function footerHints(
       ALWAYS,
     ];
   }
-  if (section === "watchlist") {
+  if (section === "savedSearches") {
     return [NAVIGATE, { keys: "↵", label: "Run" }, { keys: "x", label: "Remove" }, SWITCH, ALWAYS];
   }
   if (section === "library") {
