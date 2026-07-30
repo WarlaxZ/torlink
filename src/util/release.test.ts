@@ -44,3 +44,34 @@ describe("parseRelease", () => {
     expect(a!.key).toBe(b!.key); // same film → one OMDb lookup
   });
 });
+
+describe("parseRelease — season and episode", () => {
+  it("returns both for an episode release", () => {
+    const p = parseRelease("Kepler.S02E04.1080p.WEB-DL.x265-GROUP");
+    expect(p?.title).toBe("Kepler");
+    expect(p?.season).toBe(2);
+    expect(p?.episode).toBe(4);
+  });
+
+  it("returns season but NOT episode for a season pack", () => {
+    // A pack names the season and no episode. The history store must not
+    // invent episode 1 from this — see nextEpisode in Task 2.
+    const p = parseRelease("Harrowgate.S03.1080p.WEB-DL");
+    expect(p?.title).toBe("Harrowgate");
+    expect(p?.season).toBe(3);
+    expect(p?.episode).toBeUndefined();
+  });
+
+  it("returns neither for a film", () => {
+    const p = parseRelease("Tin.Rivers.2024.2160p.BluRay");
+    expect(p?.title).toBe("Tin Rivers");
+    expect(p?.season).toBeUndefined();
+    expect(p?.episode).toBeUndefined();
+  });
+
+  it("still classifies an episode release as a series", () => {
+    // The existing isSeries behaviour must not regress: season/episode were
+    // already being read for exactly this, they were just not returned.
+    expect(parseRelease("Kepler.S02E04.1080p")?.type).toBe("series");
+  });
+});

@@ -8,6 +8,13 @@ export interface ParsedRelease {
   // Stable key for caching OMDb lookups: many torrents of the same title (just
   // different quality/group) collapse to one lookup.
   key: string;
+  /**
+   * Season and episode, when the release named them. Both optional and
+   * independent: a SEASON PACK ("Harrowgate.S03") yields a season with no
+   * episode, so a consumer must not treat a known season as implying episode 1.
+   */
+  season?: number;
+  episode?: number;
 }
 
 // Which medium a category section implies, if any.
@@ -42,5 +49,8 @@ export function parseRelease(name: string, hint?: SectionHint): ParsedRelease | 
   // failing that, a bare year with no episode markers implies a movie.
   const type: OmdbType | undefined = isSeries ? "series" : (hint ?? (year ? "movie" : undefined));
   const key = `${title.toLowerCase()}|${year ?? ""}|${type ?? ""}`;
-  return { title, year, type, key };
+  const result: ParsedRelease = { title, year, type, key };
+  if (typeof p.season === "number") result.season = p.season;
+  if (typeof p.episode === "number") result.episode = p.episode;
+  return result;
 }
