@@ -43,6 +43,7 @@ import {
 import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
 import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
 import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
+import { cachedHashesFor } from "../core/cachedHashes";
 import {
   fetchTitleMeta,
   fetchTitleMetaByName,
@@ -57,6 +58,7 @@ import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  CachedResponse,
   ContinueWatchingResponse,
   LibraryResponse,
   PublicFavourite,
@@ -155,6 +157,14 @@ export interface WebDeps {
    * route for why nothing awaits it.
    */
   postEventImpl?: (config: ReccClientConfig, event: ReccEvent) => Promise<void>;
+  /**
+   * Which of a batch of info hashes the active provider has cached, for
+   * `POST /api/cached`. Defaults to `cachedHashesFor` against the real
+   * provider client; injected so a test never dials out to TorBox or
+   * Real-Debrid. Takes the provider id (not a `DebridProvider` object) so the
+   * seam matches every other injected dep here, which is keyed on primitives.
+   */
+  checkCachedImpl?: (provider: DebridProviderId, token: string, hashes: string[]) => Promise<Set<string>>;
 }
 
 /** The path a client fetches to read one file of a session: `/stream/:sid/:idx`. */
@@ -1412,6 +1422,42 @@ async function reccEvent(deps: WebDeps, bodyText: string): Promise<WebResponse> 
   return { status: 200, json: out };
 }
 
+/**
+ * Which of the posted hashes the active provider has cached.
+ *
+ * 409, not an empty list, when the active provider cannot answer: an empty
+ * `cached` array is a claim ("none of these are cached") and Real-Debrid — which
+ * withdrew its instant-availability endpoint in 2024 — cannot make it. The
+ * browser learns the same thing from `/api/sources`'s `debridCachedCheck` and
+ * does not render the marker at all; this status is the guard for a client that
+ * asks anyway.
+ */
+async function checkCached(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+  if (!Array.isArray(body.hashes)) {
+    return { status: 400, json: { error: "hashes must be an array of info hashes" } };
+  }
+  const hashes = body.hashes.filter((h): h is string => typeof h === "string" && h.length > 0);
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const active = resolveActiveDebrid(config);
+  if (!active || getDebridProvider(active.provider).checkCached === undefined) {
+    return { status: 409, json: { error: "the active debrid provider cannot check cached availability" } };
+  }
+  if (hashes.length === 0) {
+    const empty: CachedResponse = { cached: [] };
+    return { status: 200, json: empty };
+  }
+  const cached = await (deps.checkCachedImpl ??
+    ((p: DebridProviderId, t: string, h: string[]) => cachedHashesFor(getDebridProvider(p), t, h)))(
+    active.provider,
+    active.token,
+    hashes,
+  );
+  const out: CachedResponse = { cached: hashes.map((h) => h.toLowerCase()).filter((h) => cached.has(h)) };
+  return { status: 200, json: out };
+}
+
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
 export function isApiPath(urlPath: string): boolean {
   return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
@@ -1494,6 +1540,10 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/title") {
     return titleMeta(deps, query);
+  }
+
+  if (method === "POST" && urlPath === "/api/cached") {
+    return checkCached(deps, bodyText);
   }
 
   // Both past the token gate above, and both need it: neither delegates to

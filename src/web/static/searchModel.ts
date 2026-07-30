@@ -444,6 +444,20 @@ function clip(name: string): string {
   return name.length > 60 ? `${name.slice(0, 59)}…` : name;
 }
 
+/**
+ * The cached marker for one result, or null for no marker.
+ *
+ * `canCheck` false means the active provider cannot answer — Real-Debrid
+ * withdrew its instant-availability endpoint in 2024 — so nothing is rendered.
+ * An "unknown" badge would read as "not cached", which is a claim torlink is
+ * not in a position to make. Absence of a marker on an uncached result is the
+ * same principle at result level.
+ */
+export function cachedTag(infoHash: string, cached: ReadonlySet<string>, canCheck: boolean): "cached" | null {
+  if (!canCheck) return null;
+  return cached.has(infoHash.toLowerCase()) ? "cached" : null;
+}
+
 /** How the results are laid out. */
 export type ResultLayout = "list" | "grid";
 

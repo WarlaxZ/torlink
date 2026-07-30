@@ -185,6 +185,15 @@ export interface Store {
   // The validated debrid account (whichever provider is active), or null when
   // unknown/not connected.
   debridStatus: DebridStatus | null;
+  // Info hashes the active debrid provider has cached, for the results marker.
+  // Empty when the provider cannot answer — see cachedTag's reasoning in
+  // src/web/static/searchModel.ts, which this mirrors for the terminal.
+  cachedHashes: ReadonlySet<string>;
+  // Called once a search settles with the hashes on screen. Resolves and
+  // clears `cachedHashes` itself; App.tsx owns this rather than the caller
+  // because it is the one place holding the debrid token (Store deliberately
+  // does not).
+  refreshCachedHashes: (hashes: readonly string[]) => void;
   // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.
   copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;

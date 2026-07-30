@@ -653,3 +653,19 @@ export interface ContinueWatchingRequest {
 export interface ContinueWatchingResponse {
   continueWatching: PublicStreamHistoryItem[];
 }
+
+/**
+ * `POST /api/cached` — which of these torrents the active debrid provider
+ * already has, so a result can be marked before the user commits to it.
+ *
+ * Info hashes only: a search result carries no magnet on this wire (that was a
+ * ~6MB-per-search decision) and a hash is all the provider needs.
+ */
+export interface CachedRequest {
+  hashes: string[];
+}
+
+/** Lowercase hex info hashes the provider has cached. A subset of the request. */
+export interface CachedResponse {
+  cached: string[];
+}

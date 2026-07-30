@@ -2818,3 +2818,64 @@ describe("POST /api/stream — records stream history", () => {
     await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
   });
 });
+
+describe("POST /api/cached", () => {
+  const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  function post(path: string, body: unknown, over: Partial<WebDeps> = {}) {
+    return handleWebApi(deps(over), "POST", path, new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
+  it("answers which hashes the active provider has cached", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A, HASH_B] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+      checkCachedImpl: () => Promise.resolve(new Set([HASH_A])),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ cached: [HASH_A] });
+  });
+
+  it("refuses when the active provider cannot check", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, realDebridToken: "rd-1" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("refuses when no debrid is configured", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A] }, {
+      loadConfigImpl: () => Promise.resolve(defaultConfig),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("answers an empty list for an empty request without calling the provider", async () => {
+    const checkCachedImpl = vi.fn();
+    const res = await post("/api/cached", { hashes: [] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+      checkCachedImpl,
+    });
+    expect(res.json).toEqual({ cached: [] });
+    expect(checkCachedImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-array hashes field", async () => {
+    const res = await post("/api/cached", { hashes: "aabb" }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("401s an unauthenticated caller when a token is set", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret", loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }) }),
+      "POST",
+      "/api/cached",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ hashes: [HASH_A] }),
+    );
+    expect(res.status).toBe(401);
+  });
+});

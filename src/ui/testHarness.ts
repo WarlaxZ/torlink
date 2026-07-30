@@ -185,6 +185,8 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     debridProvider: null,
     streamActive: false,
     debridStatus: null,
+    cachedHashes: new Set(),
+    refreshCachedHashes: noop,
     copyLink: noop,
     copyMagnet: noop,
     openDownloadFolder: noop,

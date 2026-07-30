@@ -61,6 +61,8 @@ function baseStore(overrides: Partial<Store> = {}): Store {
     toggleSavedSearch: () => {},
     toggleFavourite: () => {},
     isFavourited: () => false,
+    cachedHashes: new Set(),
+    refreshCachedHashes: () => {},
     ...overrides,
   } as unknown as Store;
 }

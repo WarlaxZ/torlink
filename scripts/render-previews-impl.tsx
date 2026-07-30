@@ -147,6 +147,8 @@ function makeStore(
     adultEnabled: false,
     streamActive: false,
     debridStatus: null,
+    cachedHashes: new Set(),
+    refreshCachedHashes: noop,
     copyLink: noop,
     copyMagnet: noop,
     openDownloadFolder: noop,

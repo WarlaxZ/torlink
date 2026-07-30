@@ -219,11 +219,22 @@ export function Results() {
     isFavourited,
     adultEnabled,
     omdbApiKey,
+    cachedHashes,
+    refreshCachedHashes,
   } = useStore();
   const [previewOn, setPreviewOn] = useState(true);
   const debridLabel = debridProvider ? getDebridProvider(debridProvider).label : undefined;
 
   const search = useConcurrentSearch(query, disabledSources, adultEnabled);
+
+  // Fired once a search settles (loading -> false), never before — the cached
+  // lookup is advisory and must not delay the results the user actually asked
+  // for. `refreshCachedHashes` itself no-ops when the active provider can't
+  // answer, so this fires unconditionally and lets that live in one place.
+  useEffect(() => {
+    if (search.loading) return;
+    refreshCachedHashes(search.results.map((r) => r.infoHash));
+  }, [search.loading, search.results, refreshCachedHashes]);
   const enabled = useMemo(
     () => enabledSources(disabledSources, adultEnabled),
     [disabledSources, adultEnabled],
@@ -666,6 +677,11 @@ export function Results() {
                           {cleanText(r.name)}
                         </Text>
                       </Box>
+                      {cachedHashes.has(r.infoHash.toLowerCase()) ? (
+                        <Box flexShrink={0} marginLeft={1}>
+                          <Text color={COLOR.good}>cached</Text>
+                        </Box>
+                      ) : null}
                       {showStats ? (
                         <>
                           <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">

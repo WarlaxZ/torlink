@@ -3,6 +3,7 @@ import {
   addBody,
   addPlan,
   ALL_TAB,
+  cachedTag,
   categoryTabs,
   dashRowForPlay,
   debridAddedNotice,
@@ -607,5 +608,25 @@ describe("tabClickPlan", () => {
     const view: SearchView = { ...emptyView(), mode: "search", query: "tin rivers", group: "Movies" };
     expect(tabClickPlan(view, "Movies", "tin rivers")).toEqual({ action: "ignore" });
     expect(tabClickPlan(emptyView(), "All", "")).toEqual({ action: "ignore" });
+  });
+});
+
+describe("cachedTag", () => {
+  it("marks a cached result when the provider can check", () => {
+    expect(cachedTag("aabb", new Set(["aabb"]), true)).toBe("cached");
+  });
+
+  it("shows nothing for an uncached result — absence is not a claim", () => {
+    expect(cachedTag("aabb", new Set(["ccdd"]), true)).toBeNull();
+  });
+
+  it("shows nothing at all when the provider cannot check", () => {
+    // Real-Debrid withdrew its instant-availability endpoint; an "unknown"
+    // state would read as "not cached", which is a claim we cannot make.
+    expect(cachedTag("aabb", new Set(["aabb"]), false)).toBeNull();
+  });
+
+  it("matches case-insensitively", () => {
+    expect(cachedTag("AABB", new Set(["aabb"]), true)).toBe("cached");
   });
 });

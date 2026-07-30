@@ -26,6 +26,7 @@ import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
+import { cachedHashesFor } from "../core/cachedHashes";
 import {
   forgetStreamHistory,
   historyItemFor,
@@ -282,6 +283,14 @@ export function App({
   const [notice, setNotice] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [debridStatus, setDebridStatus] = useState<DebridStatus | null>(null);
+  // Info hashes the active debrid provider has cached, for the results marker.
+  // Empty when the provider cannot answer — see cachedTag's reasoning in
+  // src/web/static/searchModel.ts, which this mirrors for the terminal.
+  const [cachedHashes, setCachedHashes] = useState<ReadonlySet<string>>(new Set());
+  // Guards an in-flight cached-hashes lookup landing after a newer search or a
+  // provider switch has already reset the set — a marker on the wrong row is
+  // worse than no marker.
+  const cachedRequestId = useRef(0);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   // Episodes streamed from the current picker session (marked ✓, cleared when
   // the picker opens/closes). Union with the favourite's persisted watched list.
@@ -1821,6 +1830,40 @@ export function App({
     return () => clearTimeout(t);
   }, [notice]);
 
+  // Stale cached markers are worse than none — a marker on the wrong row — so
+  // both triggers that mean "these results no longer apply" reset the set:
+  // a new query, and switching which debrid account is active.
+  useEffect(() => {
+    cachedRequestId.current += 1;
+    setCachedHashes(new Set());
+  }, [query]);
+
+  const activeCachedProvider = config ? (resolveActiveDebrid(config)?.provider ?? null) : null;
+  useEffect(() => {
+    cachedRequestId.current += 1;
+    setCachedHashes(new Set());
+  }, [activeCachedProvider]);
+
+  // Called by Results.tsx once a search settles with the hashes on screen.
+  // Lives here, not in Results.tsx, because only App.tsx holds the debrid
+  // token — Store deliberately carries no token (see Store's own comments) —
+  // and resolveActiveDebrid/getDebridProvider is the one place that already
+  // knows how to find both.
+  const refreshCachedHashes = useCallback(
+    (hashes: readonly string[]) => {
+      const requestId = ++cachedRequestId.current;
+      const active = config ? resolveActiveDebrid(config) : null;
+      if (!active || getDebridProvider(active.provider).checkCached === undefined || hashes.length === 0) {
+        setCachedHashes(new Set());
+        return;
+      }
+      void cachedHashesFor(getDebridProvider(active.provider), active.token, hashes).then((result) => {
+        if (cachedRequestId.current === requestId) setCachedHashes(result);
+      });
+    },
+    [config],
+  );
+
   const [prepElapsed, setPrepElapsed] = useState(0);
   useEffect(() => {
     if (!preparing) {
@@ -1900,6 +1943,8 @@ export function App({
       adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
       debridStatus,
+      cachedHashes,
+      refreshCachedHashes,
       copyLink,
       copyMagnet,
       openDownloadFolder,
@@ -1966,6 +2011,8 @@ export function App({
     startDebridDownload,
     streamResult,
     debridStatus,
+    cachedHashes,
+    refreshCachedHashes,
     copyLink,
     copyMagnet,
     openDownloadFolder,
