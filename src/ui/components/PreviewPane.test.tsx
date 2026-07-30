@@ -7,11 +7,11 @@ const base = { width: 40, height: 24, focused: true, title: "Windmere", year: 20
 describe("PreviewPane", () => {
   it("renders the title, year, plot and reason", () => {
     const f = render(
-      <PreviewPane {...base} plot="A nuclear disaster." posterRows={null} note="because you liked Paradise" />,
+      <PreviewPane {...base} plot="A nuclear disaster." posterRows={null} note="because you liked Harrowgate" />,
     ).lastFrame() ?? "";
     expect(f).toContain("Windmere (2019)");
     expect(f).toContain("A nuclear disaster.");
-    expect(f).toContain("because you liked Paradise");
+    expect(f).toContain("because you liked Harrowgate");
   });
 
   it("shows loading and empty states", () => {

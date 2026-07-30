@@ -281,7 +281,7 @@ With Real-Debrid the player redirects straight to their CDN, so the video never 
 
 ### For You
 
-If you've connected [reccd](#recommendations-optional), the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Paradise"). Rate a pick watched, liked or disliked, **save search** to add it to your Saved searches, or hand it straight to the search pane — the same choice the terminal's `w` makes on a For You pick, so a pick you rate here and one you rate in the terminal land in the same place. Ratings feed back into reccd exactly as they do from the terminal.
+If you've connected [reccd](#recommendations-optional), the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Harrowgate"). Rate a pick watched, liked or disliked, **save search** to add it to your Saved searches, or hand it straight to the search pane — the same choice the terminal's `w` makes on a For You pick, so a pick you rate here and one you rate in the terminal land in the same place. Ratings feed back into reccd exactly as they do from the terminal.
 
 A **continue watching** strip sits above the saved pane's two columns: whatever you're part-way through, newest first, same 200-item list the terminal keeps (streaming from either surface writes the same file). Each row's subtitle gives the age, the last episode you watched, and a suggested next episode where one can be told honestly. **Play** replays the remembered torrent — falling back to a fresh search if that swarm's gone quiet — and the ✕ removes the row.
 
