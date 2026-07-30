@@ -264,7 +264,7 @@ The browser searches every source the TUI does, and results stream in as each on
 
 Selecting a result shows its poster, plot and IMDb link, if you've added a free [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers the terminal's preview pane. Without one everything still works; you just get the release names.
 
-From a result you can **add** it to the queue, **add via RD** where Real-Debrid is configured, or **play** it straight away.
+From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid provider is configured, or **play** it straight away.
 
 ### Playing something
 

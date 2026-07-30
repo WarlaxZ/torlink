@@ -33,6 +33,9 @@ import {
   ALL_TAB,
   categoryTabs,
   dashRowForPlay,
+  debridAddedNotice,
+  debridAddLabel,
+  debridProviderLabel,
   emptyView,
   modeForQuery,
   parseLayout,
@@ -1058,12 +1061,14 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   });
   actions.append(favButton);
 
-  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
+  // Offered only where the TUI offers `r`: when a debrid token is actually
   // configured. A button that always answered "set a token first" is noise.
-  if (sources?.debridConfigured) {
+  // `debridProvider` guards against `debridConfigured: true` with a null
+  // provider producing a button labelled "add via null".
+  if (sources?.debridConfigured && sources.debridProvider) {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
-    debridButton.textContent = "add via RD";
+    debridButton.textContent = debridAddLabel(sources.debridProvider);
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
@@ -1207,7 +1212,14 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
   // The prompt-or-go decision is addPlan's, not this function's: it is a
   // decision about whether the user's IP is about to enter a public swarm, and
   // it belongs somewhere a test can reach.
-  const plan = addPlan(via, sources?.debridConfigured === true, result.name);
+  const provider = sources?.debridProvider ?? undefined;
+  const plan = addPlan(
+    via,
+    sources?.debridConfigured === true,
+    result.name,
+    provider ? debridProviderLabel(provider) : undefined,
+    provider ? debridAddLabel(provider) : undefined,
+  );
   if (plan.kind === "confirm" && !confirm(plan.message)) {
     showNotice("Nothing was added.");
     return;
@@ -1239,7 +1251,11 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
     showNotice("Already in the queue.");
     return;
   }
-  showNotice(plan.via === "debrid" ? "Added via Real-Debrid." : "Added to the queue.");
+  showNotice(
+    plan.via === "debrid" && sources?.debridProvider
+      ? debridAddedNotice(sources.debridProvider)
+      : "Added to the queue.",
+  );
 }
 
 // ---- preview ----
