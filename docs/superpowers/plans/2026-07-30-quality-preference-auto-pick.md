@@ -1051,35 +1051,56 @@ Expected: all pass. If `npm run previews` fails, `makeStore` was missed.
 
 - [ ] **Step 5: Implement it in `App.tsx`**
 
-Find where the store value object is constructed in `src/ui/App.tsx` and add `autoPlayTitle`, implemented as:
+**The search in this app is a React hook, and a hook cannot be called imperatively.** `submitQuery` (`App.tsx:1721`) is fire-and-forget — it sets `query` state and returns nothing; the actual fetching happens in `useConcurrentSearch`, which `Results.tsx:223` calls. So `autoPlayTitle` cannot "reuse the existing search". It calls the same core function the hook calls:
+
+- `runSearch(query, sources, opts): Promise<SearchSnapshot>` from `src/core/search.ts:114`. `SearchSnapshot` has `{ results, perSource, done, total }`.
+- `enabledSources(disabled, adultEnabled): Source[]` from `src/sources/registry.ts:56` — build the source list exactly as the hook does, from `config.disabledSources` and `config.adultContent`.
+
+Playback reuses `streamResult(input: DownloadInput)` (`App.tsx:1320`), which already owns the whole Real-Debrid / torrent-stream routing and the one-at-a-time guard. `DownloadInput` (`App.tsx:138`) is `{ id, name, magnet, source?, sizeBytes? }`.
+
+Add `autoPlayTitle` next to `streamResult` in `src/ui/App.tsx`:
 
 ```tsx
-  // Search, pick, play. Deliberately reuses the existing search and stream
-  // paths rather than adding a second way to do either: the only new decision
-  // is which release, and that lives in `pickBestRelease`.
+  // Search, pick, play. Calls `runSearch` directly rather than going through
+  // `submitQuery`: that only sets query state, and the fetch lives in
+  // `useConcurrentSearch`, which a callback cannot invoke. This is the same
+  // core entry point the hook uses, so results are identical to what the
+  // Results pane would have shown.
   const autoPlayTitle = useCallback(
     (title: string, intent: PickIntent, fallback?: () => void) => {
+      if (!config) return;
       void (async () => {
-        setStatus(`Finding a release for ${title}…`);
-        const results = await searchAllSources(title);
+        setNotice(`Finding a release for ${title}…`);
+        const sources = enabledSources(config.disabledSources ?? [], config.adultContent ?? false);
+        const snap = await runSearch(title, sources);
         const prefs = qualityPrefsFrom(config);
-        const pick = pickBestRelease(results, prefs, intent);
+        const pick = pickBestRelease(snap.results, prefs, intent);
         if (!pick) {
+          // Continue Watching passes its existing resume action here, so an
+          // offline or aged-out title still does something.
           if (fallback) fallback();
-          else setStatus(`No release found for ${title}.`);
+          else setNotice(`No release found for ${title}.`);
           return;
         }
-        setStatus(pickStatusLine(pick, prefs.maxResolution));
-        startStream(pick.chosen, pick.fromPack ? intent : undefined);
+        setNotice(pickStatusLine(pick, prefs.maxResolution));
+        streamResult({
+          id: pick.chosen.infoHash,
+          name: pick.chosen.name,
+          magnet: pick.chosen.magnet,
+          source: pick.chosen.source,
+          sizeBytes: pick.chosen.sizeBytes,
+        });
       })();
     },
-    [config],
+    [config, streamResult],
   );
 ```
 
-`searchAllSources` and `startStream` are placeholders for whatever `App.tsx` already calls for a search and for launching a stream from a `TorrentResult` — reuse the existing functions rather than adding new ones. When `pick.fromPack` is true, the intent must reach the file-selection step so `nextEpisodeIndex` picks the right file inside the pack.
+`autoPlayTitle` must be defined AFTER `streamResult` (it is in the dependency array), and added to the store value object alongside `openStreamHistory`.
 
-`pickStatusLine` comes from Task 7.
+**One gap this leaves, and it is deliberate for now:** `pick.fromPack` is not yet threaded into file selection, so a season pack plays via `streamResult`'s normal file picker rather than jumping to the episode. Wiring `nextEpisodeIndex` into that path touches `streamResult`'s prompt flow, which is Task 9's territory — Task 9 owns the Continue Watching case where `fromPack` actually matters. Leave a `TODO(task-9)` comment on the `streamResult` call naming this.
+
+`pickStatusLine` and `pickBestRelease` come from `src/util/releasePick.ts`; `qualityPrefsFrom` from `src/config/config.ts`. Check whether `setNotice` is the right status channel in this file — `App.tsx` uses `setNotice` for transient messages; if a more specific status setter is in use nearby, prefer it.
 
 - [ ] **Step 6: Run the full check**
 
