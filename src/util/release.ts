@@ -41,27 +41,30 @@ export function hintForGroup(group: string | null | undefined): SectionHint {
 // "x264", "WEB-DL" -> title "WEB"). Rather than hand-maintain a list of
 // resolution/codec/source words (which rots as new release formats appear),
 // ask the parser itself: it already classified every token it recognised into
-// resolution/source/codec/group/etc. If the title, once separators are
-// stripped, is wholly contained in the metadata it recognised, there is no
-// title left over — it is noise.
+// resolution/source/codec/group/etc. If EVERY token of the title is also a
+// token the parser recognised elsewhere, nothing survives as an actual title —
+// it is noise.
+//
+// Tokens are compared individually, not glued into one string per field and
+// substring-matched: a short real title can legitimately appear *inside* an
+// unrelated metadata token ("Up" is a substring of "GROUP"), and joining
+// before matching wrongly condemned it. Token-for-token comparison does not.
 function isNoiseOnly(title: string, parsed: Record<string, unknown>): boolean {
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const titleNorm = normalize(title);
-  if (!titleNorm) return true;
-  const noise = Object.entries(parsed)
-    .filter(([key]) => key !== "title" && key !== "year" && key !== "season" && key !== "episode")
-    .map(([, value]) => {
-      if (typeof value === "string") return normalize(value);
-      if (Array.isArray(value)) {
-        return value
-          .filter((v): v is string => typeof v === "string")
-          .map(normalize)
-          .join("");
+  const tokensOf = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const titleTokens = tokensOf(title);
+  if (titleTokens.length === 0) return true;
+  const recognised = new Set<string>();
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key === "title" || key === "year" || key === "season" || key === "episode") continue;
+    if (typeof value === "string") {
+      for (const t of tokensOf(value)) recognised.add(t);
+    } else if (Array.isArray(value)) {
+      for (const v of value) {
+        if (typeof v === "string") for (const t of tokensOf(v)) recognised.add(t);
       }
-      return "";
-    })
-    .join("");
-  return noise.length > 0 && noise.includes(titleNorm);
+    }
+  }
+  return recognised.size > 0 && titleTokens.every((t) => recognised.has(t));
 }
 
 // Extract a clean title (+ year, + medium) from a raw torrent release name so

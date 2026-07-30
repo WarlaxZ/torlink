@@ -48,6 +48,19 @@ describe("parseRelease", () => {
     expect(parseRelease("WEB-DL")).toBeNull();
   });
 
+  it("keeps a short real title that is a substring of a metadata token", () => {
+    // "up" is inside "group". Concatenating the metadata and substring-matching
+    // dropped this film entirely.
+    const r = parseRelease("Up.2009.1080p.BluRay.x264-GROUP");
+    expect(r?.title).toBe("Up");
+    expect(r?.year).toBe(2009);
+  });
+
+  it("keeps other short titles that brush against metadata", () => {
+    expect(parseRelease("Us.2019.1080p.WEB-DL-GROUP")?.title).toBe("Us");
+    expect(parseRelease("Her.2013.1080p.BluRay-RARBG")?.title).toBe("Her");
+  });
+
   it("still parses a real title that itself contains a resolution-like token", () => {
     // The noise check must not over-fire on a genuine title just because a
     // recognised token (here "1080p") also appears in the release name.
