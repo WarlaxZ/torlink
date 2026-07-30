@@ -63,7 +63,9 @@ Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to
 
 On a wide enough terminal a preview pane opens beside the results: highlight a film or show and torlink fetches its poster and plot and renders them right in the terminal (bring your own free [OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Accounts). Press `p` to toggle the pane, or `i` on any result to open its IMDb page.
 
-Press `w` on any named search to add or remove it from your Watchlist. The Watchlist pane keeps up to 50 saved searches; press `Enter` to run one again or `x` to remove it.
+Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50; press `Enter` to run one again or `x` to remove it.
+
+A **Continue watching** section in the sidebar lists titles you're part-way through, newest first, up to 200. Each row shows how long ago you last streamed it, the last episode you watched, and — when it can tell one honestly — a suggested next episode; a season pack with no episode number in its name gets no guess. `Enter` replays the same torrent that worked last time, and `x` forgets the row (both are disabled while a stream is already running, so a stray keypress can't kill your playback and delete the row at once). There's no resume position: torlink can't see into mpv, iina, vlc, or a browser tab, so this remembers *what* you were watching, not *where* you got to.
 
 <p align="center">
   <img src="preview/browse.svg" alt="torlink's Movies view: the sidebar, search bar, merged results, and a preview pane showing the highlighted film's poster and plot" style="max-width: 1024px; width: 100%; height: auto;">
@@ -181,7 +183,7 @@ TORLINK_DNS=cloudflare npm start
 
 ## In your browser (optional)
 
-Add `--web` and torlink also serves a browser interface — search every source (or submit an empty box to browse the curated library, same as the TUI), posters and plots, play something, the queue, your watchlist and library, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
+Add `--web` and torlink also serves a browser interface — search every source (or submit an empty box to browse the curated library, same as the TUI), posters and plots, play something, the queue, your saved searches, library and continue watching, and your For You feed — over the same queue as the process hosting it. Handy for a seedbox you check from your phone, or just for using torlink without a terminal open.
 
 ```sh
 torlnk --web          # the TUI hosts it; quitting the TUI stops it
@@ -239,7 +241,7 @@ There's no token in the config file on purpose: `config.json` is world-readable 
 
 You enter the token once in the browser, or follow a link that carries it. Either way it's kept in `sessionStorage` and sent as an `Authorization` header on every request — no cookie authenticates the API, so there's nothing for a hostile page to forge on your behalf. (The live-updates stream is the one exception: browsers can't attach headers to an `EventSource`, so it passes the token in the query string, and that route is read-only.)
 
-On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`, `watchlist`, `library`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download, or add or remove something from your saved lists. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
+On loopback with no token there is no credential at all, so requests that *change* something (`add`, `control`, `saved-searches`, `continue-watching`, `library`) are refused when the browser says they came from another origin — a page you happen to be visiting can't quietly tell your torlink to delete a download, or add or remove something from your saved lists. Only positive evidence counts: `curl` and scripts, which send no `Origin` or `Sec-Fetch-Site`, keep working exactly as before.
 
 ### From outside your network
 
@@ -279,13 +281,15 @@ With Real-Debrid the player redirects straight to their CDN, so the video never 
 
 ### For You
 
-If you've connected [reccd](#recommendations-optional), the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Paradise"). Rate a pick watched, liked or disliked, add it to your watchlist, or hand it straight to the search pane. Ratings feed back into reccd exactly as they do from the terminal.
+If you've connected [reccd](#recommendations-optional), the **for you** tab shows the same recommendations the TUI does — poster, year, and why it picked each one ("because you liked Paradise"). Rate a pick watched, liked or disliked, **save search** to add it to your Saved searches, or hand it straight to the search pane — the same choice the terminal's `w` makes on a For You pick, so a pick you rate here and one you rate in the terminal land in the same place. Ratings feed back into reccd exactly as they do from the terminal.
+
+A **continue watching** strip sits above the saved pane's two columns: whatever you're part-way through, newest first, same 200-item list the terminal keeps (streaming from either surface writes the same file). Each row's subtitle gives the age, the last episode you watched, and a suggested next episode where one can be told honestly. **Play** replays the remembered torrent — falling back to a fresh search if that swarm's gone quiet — and the ✕ removes the row.
 
 ### What it doesn't do yet
 
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which the browser can't see.
-- **No subtitles, no resume position, no next-episode queue.**
-- **No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write two things: your watchlist and your library (the same saved searches and favourites the TUI's `w` and `b` keys create), both guarded by the same Origin check as `add` and `control`.
+- **No subtitles, no scrubber, no automatic next-episode playback.** Continue watching (above) remembers *what* you were watching and, when it can, names what's next — it cannot resume *where* you left off, or start that next episode for you, because nothing here reads back from mpv, iina, vlc, or a browser tab; none of them report a position.
+- **No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write three things: your saved searches, your library, and your continue-watching list (the same searches, favourites and stream history the TUI's `w`, `b`, and Continue-watching pane create), all guarded by the same Origin check as `add` and `control`.
 
 ### Working on the web UI
 
