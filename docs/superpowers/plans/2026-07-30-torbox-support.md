@@ -2020,7 +2020,8 @@ a stream."
 - Test: `src/core/streamSession.test.ts:222+`
 
 **Interfaces:**
-- Produces: `StreamBackend = "debrid" | "torrent"`; `StreamSession.provider?: DebridProviderId`; `StartStreamInput.debridProvider?`; `ResolveDebridImpl = (provider, token, magnet, opts) => Promise<StreamFile[]>`; `NO_DEBRID_TOKEN`.
+- Produces: `StreamBackend = "debrid" | "torrent"`; `StreamSession.provider?: DebridProviderId`; `ResolveDebridImpl = (provider, token, magnet, opts) => Promise<StreamFile[]>`; `NO_DEBRID_TOKEN`.
+- **Note:** `StartStreamInput` gains NO `debridProvider` field. The provider is derived from `route.provider` in both `begin()` and `resolveInto()`, so the recorded provider and the resolving provider cannot disagree. A second field holding the same fact is the shape CLAUDE.md records four drift bugs from.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2041,7 +2042,6 @@ it("records which provider served the session and passes it to the resolver", as
     name: "Kepler.S02E04.1080p.WEB-DL",
     route: { kind: "debrid", provider: "torbox" },
     debridToken: "tb-1",
-    debridProvider: "torbox",
   });
   expect(session.backend).toBe("debrid");
   expect(session.provider).toBe("torbox");
@@ -2098,12 +2098,9 @@ Add to `StreamSession`, beside `backend`:
   provider?: DebridProviderId;
 ```
 
-Add to `StartStreamInput`, beside `debridToken`:
-
-```ts
-  // Which provider `debridToken` belongs to. Required for the debrid route.
-  debridProvider?: DebridProviderId;
-```
+`StartStreamInput` gains no provider field: `route.provider` already carries it,
+because `classifyStreamRoute` is what decided it. Two fields holding one fact is
+how the recorded provider and the resolving provider drift apart.
 
 Default the impl through the registry (`:82`):
 
@@ -2131,7 +2128,9 @@ In `resolveInto()` (`:147-157`):
     const viaDebrid = input.route.kind === "debrid";
     try {
       if (viaDebrid) {
-        const provider = input.debridProvider ?? (input.route.kind === "debrid" ? input.route.provider : undefined);
+        // Single source: the route. Same expression begin() used to stamp
+        // session.provider, so the two cannot disagree.
+        const provider = input.route.kind === "debrid" ? input.route.provider : undefined;
         if (!input.debridToken || !provider) throw new Error(NO_DEBRID_TOKEN);
         session.files = await this.resolveDebridImpl(provider, input.debridToken, input.magnet, {
           knownHash: input.infoHash,
@@ -2789,7 +2788,7 @@ Expected: FAIL — `debridProvider` is not in the `/api/sources` body.
 
 - Rename `rdStatusImpl` → `debridStatusImpl` and widen it to `(provider: DebridProviderId, token: string) => Promise<DebridStatus | null>`. Keep the whole docstring; replace "Real-Debrid"/"RD" with "the provider" and `rdStatus` with `debridStatus`.
 - Rename `RD_STATUS_PROBE_MS` → `DEBRID_STATUS_PROBE_MS`; `fetchRdStatus` → `fetchDebridStatus`, which calls `getDebridProvider(provider).validateToken(token, { retries: 0, signal: AbortSignal.timeout(...) })` and returns null on any failure.
-- `startStream` (`:361-391`): `const active = resolveActiveDebrid(config)`, probe only when `active`, pass `debridToken: active?.token` and `debridProvider: active?.provider`.
+- `startStream` (`:361-391`): `const active = resolveActiveDebrid(config)`, probe only when `active`, pass `debridToken: active?.token`. No `debridProvider` — `begin()` derives it from the route.
 - `/api/sources` (`:706-710`):
 
 ```ts
