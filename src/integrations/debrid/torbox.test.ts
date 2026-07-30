@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isTokenRejection, isTransient, TOKEN_REJECTED_MESSAGE, validateToken } from "./torbox";
+import { isTokenRejection, isTransient, resolveMagnet, TOKEN_REJECTED_MESSAGE, validateToken } from "./torbox";
 import { log } from "../../util/logger";
 
 const TOKEN = "tb-secret-token-abc123";
@@ -16,6 +16,9 @@ function jsonRes(status: number, body: unknown): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    // fetchResilient reads res.headers unconditionally for any status in its
+    // retry set (408/425/429/500/502/503/504), even when retries is 0.
+    headers: new Headers(),
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(JSON.stringify(body)),
   } as unknown as Response;
@@ -183,5 +186,199 @@ describe("TorBox validateToken", () => {
 
   it("falls back to a placeholder username when TorBox sends no email", async () => {
     expect((await statusFor({ plan: 2 })).username).toBe("TorBox account");
+  });
+});
+
+const MAGNET = "magnet:?xt=urn:btih:aabbccddeeff00112233445566778899aabbccdd&dn=Kestrel.2010.1080p.BluRay.x264";
+const HASH = "aabbccddeeff00112233445566778899aabbccdd";
+
+const CREATE = "/v1/api/torrents/createtorrent";
+const MYLIST = "/v1/api/torrents/mylist";
+const REQUESTDL = "/v1/api/torrents/requestdl";
+
+function torrent(over: Record<string, unknown> = {}) {
+  return {
+    id: 4242,
+    hash: HASH,
+    name: "Kestrel.2010.1080p.BluRay.x264",
+    download_finished: true,
+    download_present: true,
+    progress: 1,
+    files: [{ id: 0, name: "Kestrel.2010.1080p.BluRay.x264.mkv", size: 8_000_000_000 }],
+    ...over,
+  };
+}
+
+describe("TorBox resolveMagnet", () => {
+  it("returns one StreamFile per file, with the direct URL", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent() }),
+        [REQUESTDL]: jsonRes(200, { success: true, data: "https://cdn.torbox.app/dl/kestrel.mkv" }),
+      },
+      calls,
+    );
+    const files = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
+    expect(files).toEqual([
+      {
+        url: "https://cdn.torbox.app/dl/kestrel.mkv",
+        filename: "Kestrel.2010.1080p.BluRay.x264.mkv",
+        bytes: 8_000_000_000,
+      },
+    ]);
+    const create = calls.find((c) => c.url.includes("createtorrent"))!;
+    expect(create.method).toBe("POST");
+    expect(create.body).toContain(encodeURIComponent(MAGNET).slice(0, 20));
+  });
+
+  it("converts TorBox's 0-1 progress into the 0-100 every caller assumes", async () => {
+    const calls: Call[] = [];
+    const seen: number[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: (n: number) =>
+          n < 3
+            ? jsonRes(200, { success: true, data: torrent({ download_finished: false, progress: n === 1 ? 0.25 : 0.5 }) })
+            : jsonRes(200, { success: true, data: torrent() }),
+        [REQUESTDL]: jsonRes(200, { success: true, data: "https://cdn.torbox.app/dl/kestrel.mkv" }),
+      },
+      calls,
+    );
+    await resolveMagnet(TOKEN, MAGNET, {
+      fetchImpl,
+      sleepImpl: noSleep,
+      pollIntervalMs: 1,
+      onProgress: (p) => seen.push(p),
+    });
+    expect(seen).toEqual([25, 50, 100]);
+  });
+
+  it("adds the magnet with no retries — a retry would duplicate the torrent", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router({ [CREATE]: jsonRes(503, { success: false, error: "OOPS" }) }, calls);
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+    ).rejects.toThrow(/TorBox/);
+    expect(calls.filter((c) => c.url.includes("createtorrent"))).toHaveLength(1);
+  });
+
+  it("accepts `id` as well as `torrent_id` in the createtorrent response", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent() }),
+        [REQUESTDL]: jsonRes(200, { success: true, data: "https://cdn.torbox.app/dl/kestrel.mkv" }),
+      },
+      calls,
+    );
+    const files = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
+    expect(files).toHaveLength(1);
+  });
+
+  it("fails clearly when createtorrent names no torrent id", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router({ [CREATE]: jsonRes(200, { success: true, data: { hash: HASH } }) }, calls);
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+    ).rejects.toThrow(/did not return a torrent id/);
+  });
+
+  it("gives up when caching makes no progress for stallMs", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent({ download_finished: false, progress: 0.1 }) }),
+      },
+      calls,
+    );
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, {
+        fetchImpl,
+        sleepImpl: noSleep,
+        pollIntervalMs: 10,
+        stallMs: 30,
+      }),
+    ).rejects.toThrow(/no seeders|isn't caching/);
+  });
+
+  it("stops polling when the signal aborts", async () => {
+    const calls: Call[] = [];
+    const ctrl = new AbortController();
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: () => {
+          ctrl.abort();
+          return jsonRes(200, { success: true, data: torrent({ download_finished: false, progress: 0.1 }) });
+        },
+      },
+      calls,
+    );
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, {
+        fetchImpl,
+        sleepImpl: noSleep,
+        pollIntervalMs: 1,
+        signal: ctrl.signal,
+      }),
+    ).rejects.toThrow(/cancelled/);
+  });
+
+  it("reports a torrent TorBox could not fetch", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, {
+          success: true,
+          data: torrent({ download_finished: false, download_state: "error", progress: 0 }),
+        }),
+      },
+      calls,
+    );
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep, pollIntervalMs: 1 }),
+    ).rejects.toThrow(/TorBox couldn't/);
+  });
+
+  it("errors rather than returning an empty file list", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent({ files: [] }) }),
+      },
+      calls,
+    );
+    await expect(
+      resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }),
+    ).rejects.toThrow(/no downloadable/);
+  });
+
+  it("redacts the token from a network-layer error message that embeds the requestdl URL", async () => {
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent() }),
+        [REQUESTDL]: () => {
+          throw new Error(
+            `fetch failed: connect ECONNRESET https://api.torbox.app/v1/api/torrents/requestdl?token=${TOKEN}&torrent_id=4242&file_id=0`,
+          );
+        },
+      },
+      calls,
+    );
+    const err = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).not.toContain(TOKEN);
+    // Not vacuous: the rest of the network error detail survives redaction.
+    expect(message).toContain("ECONNRESET");
   });
 });
