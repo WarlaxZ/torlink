@@ -15,7 +15,7 @@ open a PR, merge it, and push the tag.
 
 | Thing | Value | Why |
 | --- | --- | --- |
-| npm package | `torlnk-rd` | `torlnk` is upstream's; unscoped `torlink` is rejected by npm's similarity filter (too close to `comlink`). `-rd` calls out the Real-Debrid support. |
+| npm package | `torlnk-rd` | `torlnk` is upstream's; unscoped `torlink` is rejected by npm's similarity filter (too close to `comlink`). `-rd` calls out the Real-Debrid support that originally justified the fork. TorBox support arrived later, but the package name doesn't follow: renaming a published package orphans every existing install (`npm i -g torlnk-rd` keeps working, a new name doesn't), so the `-rd` suffix stays even though it now only names one of two debrid providers. |
 | CLI command | `torlnk` | What users type. Independent of the package name (it's the `bin` key). |
 | GitHub repo | `WarlaxZ/torlink` | Where releases and the update check point. |
 

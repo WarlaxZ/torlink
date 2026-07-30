@@ -2,7 +2,7 @@
   <img src="preview/splash.svg" alt="torlink, curated torrents straight from your terminal" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
-> A fork of [baairon/torlink](https://github.com/baairon/torlink), headlined by optional [Real-Debrid](#real-debrid-optional) support — download and stream through Real-Debrid's servers for full speed without seeders, and keep your IP off the swarm — and an optional [browser interface](#in-your-browser-optional) with the same search, streaming and recommendations as the terminal, so a seedbox or a phone works as well as a laptop. Plus a handful of quality-of-life touches: remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
+> A fork of [baairon/torlink](https://github.com/baairon/torlink), headlined by optional [debrid](#debrid-optional) support — Real-Debrid or TorBox, either one downloads and streams through their servers for full speed without seeders, and keeps your IP off the swarm — and an optional [browser interface](#in-your-browser-optional) with the same search, streaming and recommendations as the terminal, so a seedbox or a phone works as well as a laptop. Plus a handful of quality-of-life touches: remembered preferences, search history, a source picker with an auto health-check, and an optional DNS-over-HTTPS escape hatch for blocked networks.
 
 Finding a torrent these days sucks. One site is a minefield of fake download buttons. Another hides the real link under a popup that spawns two more tabs. And after all that, half the results are dead, zero seeders.
 
@@ -95,26 +95,30 @@ The Seeding tab shows everything you're sharing back — live upload speed and p
 
 Don't want to wait for a download? Press **`v`** on a movie or an episode and torlink opens the largest video file straight in your media player while it downloads. The first time it'll ask which player to use (`mpv`, `iina`, `vlc`, or a path); after that it just plays. You can set one ahead of time with `TORLINK_PLAYER`.
 
-Without Real-Debrid, streaming runs **peer-to-peer** through a local server — the pieces you're watching download to a temporary folder as they play. Because that connects you straight to the swarm, torlink warns you once that your IP is visible to peers before the first torrent stream. While it plays, a banner shows the active stream; press **`x`** to stop. If the file finished downloading by the time you stop, torlink offers to **keep** it — moving it into your downloads folder to seed — otherwise the temporary copy is cleaned up.
+Without a debrid provider connected, streaming runs **peer-to-peer** through a local server — the pieces you're watching download to a temporary folder as they play. Because that connects you straight to the swarm, torlink warns you once that your IP is visible to peers before the first torrent stream. While it plays, a banner shows the active stream; press **`x`** to stop. If the file finished downloading by the time you stop, torlink offers to **keep** it — moving it into your downloads folder to seed — otherwise the temporary copy is cleaned up.
 
-With a Real-Debrid account connected (below), `v` streams from Real-Debrid's servers instead: faster, no waiting on seeders, and your IP never touches the swarm. torlink takes that route automatically whenever your account is active, and only falls back to a torrent stream if you confirm it — so setting up Real-Debrid never quietly drops you onto peer-to-peer.
+With a debrid account connected (below), `v` streams from that provider's servers instead: faster, no waiting on seeders, and your IP never touches the swarm. torlink takes that route automatically whenever an account is active, and only falls back to a torrent stream if you confirm it — so connecting a debrid provider never quietly drops you onto peer-to-peer.
 
-## Real-Debrid (optional)
+## Debrid (optional)
 
-torlink works great on its own, but if you have a [Real-Debrid](https://real-debrid.com) account you can plug it in for a noticeably better ride. Real-Debrid pulls the torrent onto its own servers and hands you back a plain, direct download. That means full speed even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because Real-Debrid does the torrenting, not you — your IP never touches the network.
+torlink works great on its own, but if you have a [Real-Debrid](https://real-debrid.com) or [TorBox](https://torbox.app) account you can plug it in for a noticeably better ride. Either service pulls the torrent onto its own servers and hands you back a plain, direct download. That means full speed even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because the provider does the torrenting, not you — your IP never touches the network.
 
-To connect it, open the **Accounts** tab in the sidebar (alongside Downloads and Seeding), select Real-Debrid, paste your API token from [real-debrid.com/apitoken](https://real-debrid.com/apitoken), and torlink checks it and remembers it. (Prefer to keep the token off disk? Set `REALDEBRID_API_TOKEN` in your environment instead and torlink picks it up.)
+To connect one, open the **Accounts** tab in the sidebar (alongside Downloads and Seeding), select Real-Debrid or TorBox, and paste in the API token — from [real-debrid.com/apitoken](https://real-debrid.com/apitoken) or [torbox.app/settings](https://torbox.app/settings) respectively. torlink checks it and remembers it. (Prefer to keep a token off disk? Set `REALDEBRID_API_TOKEN` or `TORBOX_API_TOKEN` in your environment instead and torlink picks it up — either one overrides whatever's saved in config for that provider.)
+
+If you connect both, torlink needs to know which one actually resolves your magnets: press **`a`** on the highlighted provider in the Accounts tab to make it the active one. With only one token configured, that one is used automatically; with both and no explicit choice made yet, torlink prefers Real-Debrid, so upgrading from an earlier version that only knew about Real-Debrid doesn't change how it behaves.
 
 <p align="center">
   <img src="preview/accounts.svg" alt="torlink's Accounts tab: Real-Debrid and RuTracker sign-in with connection status" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
-Once it's connected, downloading and streaming get an upgrade:
+Once one's connected, downloading and streaming get an upgrade:
 
-- **`r` — download via Real-Debrid.** torlink hands the magnet to Real-Debrid, waits for it to be ready, and downloads the direct link straight to your folder. If it's already in Real-Debrid's cache it's basically instant. The plain `d` download still works exactly as before, but now it warns you first, since that route is peer-to-peer and exposes your IP.
-- **`v` — stream via Real-Debrid.** [Streaming](#streaming) now routes through Real-Debrid's servers instead of the swarm — full-speed even with no seeders, and your IP stays private. If Real-Debrid can't prepare it (or your premium's lapsed), torlink tells you and offers a torrent stream instead rather than switching to peer-to-peer on its own.
+- **`r` — download via the active debrid provider.** torlink hands the magnet over, waits for it to be ready, and downloads the direct link straight to your folder. If it's already cached on the provider's end it's basically instant. The plain `d` download still works exactly as before, but now it warns you first, since that route is peer-to-peer and exposes your IP.
+- **`v` — stream via the active debrid provider.** [Streaming](#streaming) now routes through their servers instead of the swarm — full-speed even with no seeders, and your IP stays private. If the provider can't prepare it (or your premium's lapsed), torlink tells you and offers a torrent stream instead rather than switching to peer-to-peer on its own.
 
-Real-Debrid torrents are fetched, not seeded, so they land in Recently downloaded and never join the Seeding tab. Heads up: Real-Debrid's torrent features need an active **premium** account — torlink will tell you if yours isn't.
+Debrid torrents are fetched, not seeded, so they land in Recently downloaded and never join the Seeding tab. Heads up: Real-Debrid's torrent features need an active **premium** account — torlink will tell you if yours isn't. TorBox's free tier can add torrents too; a paid plan only raises its size limit.
+
+TorBox results also carry a **`cached`** marker on anything it already has ready to go — a hint that the download or stream will be instant. Real-Debrid results never show that marker, not because nothing there is cached, but because Real-Debrid withdrew its instant-availability check in 2024 and torlink won't guess: an absent marker means "can't tell," never "not cached."
 
 ## Recommendations (optional)
 
@@ -264,11 +268,11 @@ The browser searches every source the TUI does, and results stream in as each on
 
 Selecting a result shows its poster, plot and IMDb link, if you've added a free [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers the terminal's preview pane. Without one everything still works; you just get the release names.
 
-From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid provider is configured, or **play** it straight away.
+From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid provider is configured, or **play** it straight away. Under TorBox, a result already on their servers also carries a **cached** marker — Real-Debrid results never show one, for the same reason the terminal doesn't (see [Debrid](#debrid-optional)).
 
 ### Playing something
 
-Hit **play** on any row. torlnk resolves the torrent — through Real-Debrid if you have it, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
+Hit **play** on any row. torlnk resolves the torrent — through the active debrid provider if you have one connected, otherwise straight from the swarm — picks the video file (or asks, if there are several), and opens a player page.
 
 What happens next depends on the release, and it's worth knowing why:
 
@@ -277,7 +281,7 @@ What happens next depends on the release, and it's worth knowing why:
 
 There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
 
-With Real-Debrid the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without it, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
+With a debrid provider connected the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without one, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
 
 ### For You
 
@@ -333,7 +337,7 @@ Before opening a PR, skim [CONTRIBUTING.md](CONTRIBUTING.md); it lays out the ba
 
 Your files stay on your disk, and nothing routes through a central server; torlink only talks to the torrent network directly. Once a download finishes it keeps seeding by default, sharing it back so the next person can find it just as easily. The network only works because people pass things along, and even a few minutes makes a real difference. If you'd rather not, opt out anytime: open the Seeding tab, press `p` to pause or stop any item, and press it again to pick it back up. Always your call.
 
-For a fail-closed VPN setup, press `Shift+V` and enter the VPN interface name (`tun0`, `utun4`, or the Windows interface alias). Before any P2P download or stream starts, torlink verifies that the interface exists and owns the default route. It continues monitoring once per second and tears down active P2P sessions if that route changes. Real-Debrid transfers are unaffected. This is a route kill switch, not a replacement for firewall-level VPN rules.
+For a fail-closed VPN setup, press `Shift+V` and enter the VPN interface name (`tun0`, `utun4`, or the Windows interface alias). Before any P2P download or stream starts, torlink verifies that the interface exists and owns the default route. It continues monitoring once per second and tears down active P2P sessions if that route changes. Debrid transfers are unaffected, since they never touch the swarm. This is a route kill switch, not a replacement for firewall-level VPN rules.
 
 ## Star History
 
