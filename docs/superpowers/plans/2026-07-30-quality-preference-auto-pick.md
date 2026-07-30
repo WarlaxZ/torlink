@@ -1362,6 +1362,7 @@ git commit -m "feat: one shared rule for whether a For You row is an auto-playab
 ### Task 8: For You — auto-play a film
 
 **Files:**
+- Modify: `src/ui/hooks/useTitlePreview.ts` — add `type` to `TitlePreview` and populate it
 - Modify: `src/ui/components/ForYou.tsx` — props (`:15-29`) and the `useInput` handler (`:89-119`)
 - Modify: `src/ui/App.tsx` — pass `autoPlayTitle` into `<ForYou />`
 - Test: `src/ui/components/ForYou.test.tsx`
@@ -1503,7 +1504,11 @@ Replace the `key.return` branch in the `useInput` handler, and add an `s` branch
       }
 ```
 
-`preview` is the existing `useTitlePreview` result for the highlighted row. That hook does not currently surface `type` — thread Task 7b's new field through it (it already returns the `fetchTitleMeta` result; add `type` to whatever shape it exposes) rather than issuing a second OMDb call. If the hook turns out not to hold a resolved result for the highlighted row at keypress time, pass `undefined` and let the filter fallback handle it — never block Enter waiting on a network call.
+`preview` is the existing `useTitlePreview` result for the highlighted row (`ForYou.tsx:72-81`). Three facts, all verified:
+
+- **`TitlePreview` (`src/ui/hooks/useTitlePreview.ts:19`) is `{ imdbId, plot, posterRows }` — it has no `type`.** Add `type: ReccMedium | null | undefined` to that interface and populate it from the `fetchTitleMeta` result the hook already receives. Do NOT issue a second OMDb call.
+- **The fetch is not gated on the preview pane being open.** `ForYou.tsx:74` passes `enabled: omdbApiKey !== ""`, and only `posterEnabled: showPreview` gates the expensive poster render. So with a key configured, the medium is available for the highlighted row whether or not the user has pressed `p`. This is what makes OMDb a usable signal here rather than a rare one.
+- **It is debounced 150ms and only covers the selected row.** Pressing Enter immediately after moving the cursor can therefore find `type` still `undefined`. That is fine and must not be "fixed" by awaiting: pass it through as-is and let `autoPlayableFilm`'s filter fallback decide. Never block a keypress on a network call.
 
 In `App.tsx`, pass `autoPlayTitle={store.autoPlayTitle}` to `<ForYou />` (the element is at `App.tsx:2610-2618`).
 
