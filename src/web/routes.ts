@@ -53,6 +53,7 @@ import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
 import { hintForGroup, parseRelease } from "../util/release";
+import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
@@ -411,11 +412,17 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
   // process is not a price a convenience list gets to charge.
   void done.then(
     (resolved) => {
-      // `ready` with no files is not something the user can watch, which is the
-      // same bar the TUI's non-empty `streamCandidates` check applies (that
-      // helper lives in src/ui, so this cannot import it — it filters to
-      // playable extensions, where this only asks whether anything resolved).
-      if (resolved.state !== "ready" || resolved.files.length === 0) return;
+      // `ready` with nothing to offer is not something the user can watch. The
+      // bar is the TUI's own: the same non-empty `streamCandidates` check
+      // App.tsx applies before it opens a picker. The helper is imported rather
+      // than approximated — it lives in `src/util/videoFiles.ts`, which is where
+      // both front ends reach for it, and only `src/web` -> `src/ui` is
+      // forbidden. Note it is WIDER than "has a video extension": a torrent with
+      // nothing recognisable in it hands back every file, because an unknown
+      // container is still worth handing to a player. So this is "did anything
+      // resolve", said in the terminal's words, and the two surfaces cannot
+      // drift apart on what counts as watchable.
+      if (resolved.state !== "ready" || streamCandidates(resolved.files).length === 0) return;
       return recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
     },
     () => {},

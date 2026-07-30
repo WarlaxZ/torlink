@@ -54,6 +54,12 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
       throw new Error("test must inject saveConfigImpl");
     },
     loadStreamHistoryImpl: async () => [],
+    // A THROW, for the same reason saveConfigImpl is one. NOTE it is not a
+    // tripwire on POST /api/stream: that route's history write is
+    // fire-and-forget with a `.catch` (a convenience list must never take a
+    // stream down with it), so the throw lands in a promise nobody reads. The
+    // describe that cares injects a recording seam of its own and asserts what
+    // reached it — see "records stream history" below.
     saveStreamHistoryImpl: async () => {
       throw new Error("test must inject saveStreamHistoryImpl");
     },
@@ -2540,20 +2546,39 @@ describe("POST /api/stream — records stream history", () => {
 
   // Recording hangs off the session's own resolution, so every test here drives
   // a FAKE registry: with the default one these would each join a real swarm.
+  //
+  // THE WRITE SEAM IS ALWAYS INJECTED, and every write is captured in `writes`,
+  // so no test here can forget it (one deliberately replaces it with a rejecting
+  // one, which is a different question and says so).
+  // deps()'s default seam throws so a forgotten one fails loudly — but on THIS
+  // route the throw is swallowed by the fire-and-forget history write (a
+  // convenience list must never take a stream down with it), so it is no
+  // tripwire here: a test that forgot to inject would pass having recorded
+  // nothing, anywhere. Recording unconditionally and asserting `writes` is the
+  // loud version of the same check, and it cannot reach real state either way.
+  //
+  // Scoped to this describe on purpose. A module-wide version was tried and is
+  // wrong: the write lands a tick or more after the request, so the test running
+  // when it arrives is not the test that caused it, and every attribution — and
+  // therefore every failure message — names the wrong test.
   function streamDeps(over: Partial<WebDeps> = {}, sessionsOver = {}) {
     const sessions = registry(sessionsOver);
-    return { d: deps({ runtime: runtime(sessions), ...over }), sessions };
+    const writes: StreamHistoryItem[][] = [];
+    const d = deps({
+      runtime: runtime(sessions),
+      saveStreamHistoryImpl: async (items) => { writes.push([...items]); },
+      ...over,
+    });
+    return { d, sessions, writes };
   }
 
   it("records the title and posts started to reccd once the session resolves", async () => {
-    const saved: StreamHistoryItem[][] = [];
     const events: ReccEvent[] = [];
-    const { d } = streamDeps({
+    const { d, writes } = streamDeps({
       loadConfigImpl: async () => ({
         ...defaultConfig, downloadDir: "/tmp/dl", reccUrl: "http://localhost:4100",
       }),
       loadStreamHistoryImpl: async () => [],
-      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
       postEventImpl: async (_c, e) => { events.push(e); },
     });
     const res = await handleWebApi(
@@ -2562,9 +2587,9 @@ describe("POST /api/stream — records stream history", () => {
     );
 
     expect(res.status).toBeLessThan(500);
-    await vi.waitFor(() => expect(saved).toHaveLength(1));
-    expect(saved[0]?.[0]?.title).toBe("Kepler");
-    expect(saved[0]?.[0]?.episode).toBe(4);
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]?.[0]?.title).toBe("Kepler");
+    expect(writes[0]?.[0]?.episode).toBe(4);
     // The web posted NO started event before this change — a browser stream
     // taught reccd nothing about having begun.
     await vi.waitFor(() => expect(events).toHaveLength(1));
@@ -2578,13 +2603,9 @@ describe("POST /api/stream — records stream history", () => {
   // for a dead magnet. The TUI records only AFTER the resolve returns files, so
   // the same gesture in a terminal wrote nothing. Two front ends, one gesture.
   it("writes nothing when the session never resolves", async () => {
-    const saved: StreamHistoryItem[][] = [];
     let loadCalls = 0;
-    const { d, sessions } = streamDeps(
-      {
-        loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
-        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
-      },
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => { loadCalls += 1; return []; } },
       { streamTorrentImpl: async () => { throw new Error("dead swarm"); } },
     );
     const res = await handleWebApi(
@@ -2593,43 +2614,88 @@ describe("POST /api/stream — records stream history", () => {
     );
     expect(res.status).toBe(200);
     await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("error"));
-    expect(saved).toHaveLength(0);
+    expect(writes).toHaveLength(0);
     // As in the no-title case below: an untouched load seam is what separates a
     // clean skip from a crash the catch swallowed.
     expect(loadCalls).toBe(0);
   });
 
   it("writes exactly one row for one resolved stream", async () => {
-    const saved: StreamHistoryItem[][] = [];
-    const { d, sessions } = streamDeps({
-      loadStreamHistoryImpl: async () => [],
-      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
-    });
+    const { d, sessions, writes } = streamDeps({ loadStreamHistoryImpl: async () => [] });
     await handleWebApi(
       d, "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
     );
     await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
-    await vi.waitFor(() => expect(saved).toHaveLength(1));
-    expect(saved[0]).toHaveLength(1);
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toHaveLength(1);
+  });
+
+  // The bar for "watchable" is streamCandidates, the TUI's own helper — and the
+  // point of pinning it here is that the helper is WIDER than "has a video
+  // extension": with nothing playable in the torrent it hands back every file, so
+  // a single unrecognised container is still offered to a player rather than
+  // silently dropped. A gate that filtered on extension instead would give the
+  // browser a stricter rule than the terminal, which is the divergence this pair
+  // of tests exists to prevent in either direction.
+  it("still records a torrent whose only file is not obviously video", async () => {
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => [] },
+      {
+        streamTorrentImpl: async () => ({
+          name: "Swarm Name",
+          files: [{ url: LOCAL_URL, filename: "Kestrel.2010.1080p.BluRay.bin", bytes: 900 }],
+          dir: "/tmp/x",
+          isComplete: () => false,
+          stop: vi.fn(async () => {}),
+        }),
+      },
+    );
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kestrel.2010.1080p.BluRay.x264", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+  });
+
+  it("writes nothing when the session resolves with no files at all", async () => {
+    let loadCalls = 0;
+    const { d, sessions, writes } = streamDeps(
+      { loadStreamHistoryImpl: async () => { loadCalls += 1; return []; } },
+      {
+        streamTorrentImpl: async () => ({
+          name: "Swarm Name",
+          files: [],
+          dir: "/tmp/x",
+          isComplete: () => false,
+          stop: vi.fn(async () => {}),
+        }),
+      },
+    );
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    expect(writes).toHaveLength(0);
+    expect(loadCalls).toBe(0);
   });
 
   it("does not write history for a name with no title in it", async () => {
-    const saved: StreamHistoryItem[][] = [];
     let loadCalls = 0;
-    const { d, sessions } = streamDeps({
+    const { d, sessions, writes } = streamDeps({
       loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
-      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
     });
     await handleWebApi(
       d, "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "1080p.WEB-DL.x265", confirm: true }),
     );
     await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
-    expect(saved).toHaveLength(0);
-    // `saved` staying empty alone doesn't distinguish "the null guard worked"
+    expect(writes).toHaveLength(0);
+    // `writes` staying empty alone doesn't distinguish "the null guard worked"
     // from "recordStream threw on a null item and the try/catch swallowed
-    // it" — both leave `saved` empty. Asserting the persistence seams were
+    // it" — both leave `writes` empty. Asserting the persistence seams were
     // never even reached is what actually pins the guard: a clean early
     // return never calls loadStreamHistoryImpl; a crash-and-swallow would
     // have called it first.
