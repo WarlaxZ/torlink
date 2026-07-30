@@ -77,8 +77,8 @@ describe("addInput", () => {
     // the hash. Drop `options.name` and this row is called
     // "abcdef0123456789abcdef0123456789abcdef01".
     const { runtime, add } = fakeRuntime(dir);
-    expect(await addInput(runtime, HASH, { name: "Sintel 2010" })).toBe("added");
-    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Sintel 2010" }), dir);
+    expect(await addInput(runtime, HASH, { name: "Kestrel 2010" })).toBe("added");
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: HASH, name: "Kestrel 2010" }), dir);
     expect(add.mock.calls[0]![0].name).not.toBe(HASH);
   });
 
@@ -90,7 +90,7 @@ describe("addInput", () => {
 
   it("passes a known size through so the row has a total", async () => {
     const { runtime, add } = fakeRuntime(dir);
-    await addInput(runtime, HASH, { name: "Sintel", sizeBytes: 4096 });
+    await addInput(runtime, HASH, { name: "Kestrel", sizeBytes: 4096 });
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ sizeBytes: 4096 }), dir);
   });
 
@@ -102,11 +102,11 @@ describe("addInput", () => {
       downloadDir: dir,
       sessions: new StreamSessionRegistry(),
     };
-    expect(await addInput(runtime, HASH, { name: "Sintel", debridToken: "rd-tok" })).toBe("added");
+    expect(await addInput(runtime, HASH, { name: "Kestrel", debridToken: "rd-tok" })).toBe("added");
     // Not awaited: addDebrid's promise resolves when the whole download does,
     // which is minutes away. The queue row exists synchronously, which is what
     // "added" claims.
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Sintel" }), dir, "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), dir, "rd-tok");
     expect(add).not.toHaveBeenCalled();
   });
 });

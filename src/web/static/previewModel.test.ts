@@ -14,8 +14,8 @@ const OK: PublicTitleMeta = {
   status: "ok",
   imdbId: "tt1727587",
   plot: "A lonely young woman befriends a dragon.",
-  posterUrl: "https://m.media-amazon.com/images/M/sintel.jpg",
-  parsed: { title: "Sintel", year: 2010, type: "movie" },
+  posterUrl: "https://m.media-amazon.com/images/M/kestrel.jpg",
+  parsed: { title: "Kestrel", year: 2010, type: "movie" },
 };
 
 /**
@@ -61,33 +61,33 @@ describe("createPreviewController", () => {
 
   it("does not ask before the debounce has elapsed", async () => {
     const { controller, asked } = harness();
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS - 1);
     expect(asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(asked).toEqual(["Sintel.2010"]);
+    expect(asked).toEqual(["Kestrel.2010"]);
   });
 
   it("shows the release name while it waits, then the answer", async () => {
     const { controller, rendered } = harness();
-    controller.select("Sintel.2010", "Movies");
-    expect(rendered).toEqual([{ kind: "loading", release: "Sintel.2010" }]);
+    controller.select("Kestrel.2010", "Movies");
+    expect(rendered).toEqual([{ kind: "loading", release: "Kestrel.2010" }]);
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
-    expect(rendered.at(-1)).toEqual({ kind: "ready", release: "Sintel.2010", meta: OK });
+    expect(rendered.at(-1)).toEqual({ kind: "ready", release: "Kestrel.2010", meta: OK });
   });
 
   it("serves a repeat selection from cache, with no timer and no request", async () => {
     const { controller, rendered, asked } = harness();
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     controller.select("Other.2011", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
 
     rendered.length = 0;
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     // Synchronous: no "loading" frame at all.
-    expect(rendered).toEqual([{ kind: "ready", release: "Sintel.2010", meta: OK }]);
-    expect(asked).toEqual(["Sintel.2010", "Other.2011"]);
+    expect(rendered).toEqual([{ kind: "ready", release: "Kestrel.2010", meta: OK }]);
+    expect(asked).toEqual(["Kestrel.2010", "Other.2011"]);
   });
 
   it("re-selecting the row already shown does nothing", async () => {
@@ -95,13 +95,13 @@ describe("createPreviewController", () => {
     // — and each rebuild re-asserts the selection. Without this the debounce
     // restarts every frame and a preview never resolves mid-search.
     const { controller, rendered, asked } = harness();
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     rendered.length = 0;
-    for (let i = 0; i < 23; i++) controller.select("Sintel.2010", "Movies");
+    for (let i = 0; i < 23; i++) controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     expect(rendered).toEqual([]);
-    expect(asked).toEqual(["Sintel.2010"]);
+    expect(asked).toEqual(["Kestrel.2010"]);
   });
 
   it("treats the same release in a different tab as a different lookup", async () => {
@@ -147,7 +147,7 @@ describe("createPreviewController", () => {
 
   it("hides the pane for a null selection and cancels a pending lookup", async () => {
     const { controller, rendered, asked } = harness();
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     controller.select(null, "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS * 4);
     expect(asked).toEqual([]);
@@ -156,7 +156,7 @@ describe("createPreviewController", () => {
 
   it("turns a transport failure into an honest message, not a hung spinner", async () => {
     const { controller, rendered } = harness(() => null);
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     const last = rendered.at(-1);
     expect(last?.kind).toBe("ready");
@@ -167,38 +167,38 @@ describe("createPreviewController", () => {
   it("does not cache a transport failure", async () => {
     let fail = true;
     const { controller, asked } = harness(() => (fail ? null : OK));
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     fail = false;
     controller.select("Other", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     // Asked again: a second of downtime must not pin "couldn't reach the
     // server" to this title for the life of the page.
-    expect(asked).toEqual(["Sintel.2010", "Other", "Sintel.2010"]);
+    expect(asked).toEqual(["Kestrel.2010", "Other", "Kestrel.2010"]);
   });
 
   it("reset empties the cache and hides the pane", async () => {
     const { controller, rendered, asked } = harness();
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
     controller.reset();
     expect(rendered.at(-1)).toEqual({ kind: "hidden" });
-    controller.select("Sintel.2010", "Movies");
+    controller.select("Kestrel.2010", "Movies");
     await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
-    expect(asked).toEqual(["Sintel.2010", "Sintel.2010"]);
+    expect(asked).toEqual(["Kestrel.2010", "Kestrel.2010"]);
   });
 });
 
 describe("previewCopy", () => {
   it("prefers the server's parsed title over the raw release name", () => {
-    const copy = previewCopy("Sintel.2010.1080p.BluRay.x264-GROUP", OK);
-    expect(copy.heading).toBe("Sintel");
+    const copy = previewCopy("Kestrel.2010.1080p.BluRay.x264-GROUP", OK);
+    expect(copy.heading).toBe("Kestrel");
     expect(copy.sub).toBe("2010");
     expect(copy.body).toBe("A lonely young woman befriends a dragon.");
     expect(copy.imdbUrl).toBe("https://www.imdb.com/title/tt1727587/");
-    expect(copy.posterUrl).toBe("https://m.media-amazon.com/images/M/sintel.jpg");
+    expect(copy.posterUrl).toBe("https://m.media-amazon.com/images/M/kestrel.jpg");
   });
 
   it("falls back to the release name when nothing parsed", () => {
@@ -208,20 +208,20 @@ describe("previewCopy", () => {
   });
 
   it("says how to fix a missing key rather than looking broken", () => {
-    const copy = previewCopy("Sintel.2010", { status: "no-key", parsed: { title: "Sintel", year: 2010, type: "movie" } });
+    const copy = previewCopy("Kestrel.2010", { status: "no-key", parsed: { title: "Kestrel", year: 2010, type: "movie" } });
     expect(copy.body).toContain("OMDb API key");
     expect(copy.posterNote).toBe("No OMDb key");
     expect(copy.posterUrl).toBeNull();
   });
 
   it("reports an OMDb miss as a fact about the title", () => {
-    const copy = previewCopy("Sintel.2010", { status: "error", error: "Movie not found!" });
+    const copy = previewCopy("Kestrel.2010", { status: "error", error: "Movie not found!" });
     expect(copy.body).toBe("No match on OMDb (Movie not found!).");
     expect(copy.posterUrl).toBeNull();
   });
 
   it("degrades a poster-less hit to the placeholder, never a broken image", () => {
-    const copy = previewCopy("Sintel.2010", {
+    const copy = previewCopy("Kestrel.2010", {
       status: "ok",
       imdbId: "tt1727587",
       plot: "Something.",
@@ -232,14 +232,14 @@ describe("previewCopy", () => {
   });
 
   it("offers an IMDb search when no id resolved, never a guessed title page", () => {
-    const copy = previewCopy("Sintel.2010", {
+    const copy = previewCopy("Kestrel.2010", {
       status: "ok",
       imdbId: null,
       plot: null,
       posterUrl: null,
-      parsed: { title: "Sintel", year: 2010, type: "movie" },
+      parsed: { title: "Kestrel", year: 2010, type: "movie" },
     });
-    expect(copy.imdbUrl).toBe("https://www.imdb.com/find/?q=Sintel%202010&s=tt");
+    expect(copy.imdbUrl).toBe("https://www.imdb.com/find/?q=Kestrel%202010&s=tt");
     expect(copy.body).toContain("no plot");
   });
 });

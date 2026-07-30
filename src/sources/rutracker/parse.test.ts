@@ -16,11 +16,11 @@ const TABLE = (rows: string) => `<table id="tor-tbl"><tbody>${rows}</tbody></tab
 
 describe("parseRows", () => {
   it("extracts the size, seeders, leechers and added timestamp", () => {
-    const rows = parseRows(TABLE(ROW("Зарубежное кино", "Dune Part Two 2024 2160p")));
+    const rows = parseRows(TABLE(ROW("Зарубежное кино", "Tin Rivers 2024 2160p")));
     expect(rows).toHaveLength(1);
     const r = rows[0]!;
     expect(r.topicId).toBe("123");
-    expect(r.name).toBe("Dune Part Two 2024 2160p");
+    expect(r.name).toBe("Tin Rivers 2024 2160p");
     expect(r.sizeBytes).toBe(13192355840);
     expect(r.seeders).toBe(42);
     expect(r.leechers).toBe(3);

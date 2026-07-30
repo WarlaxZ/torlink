@@ -359,7 +359,7 @@ export interface AddResponse {
  * PARSING HAPPENS ON THE SERVER, and this field is why the browser can live
  * without it. The TUI reads a title and year out of a release name with
  * `parse-torrent-title` (via `src/util/release.ts`), and a second parser in the
- * browser would mean the two surfaces disagreed about what "Sintel.2010.1080p"
+ * browser would mean the two surfaces disagreed about what "Kestrel.2010.1080p"
  * is — a divergence with no test that could catch it, since neither side would
  * be wrong on its own. So the browser posts the raw release name and gets the
  * TUI's answer back, alongside the OMDb lookup that answer produced.

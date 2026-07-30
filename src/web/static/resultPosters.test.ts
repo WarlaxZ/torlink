@@ -18,7 +18,7 @@ function harness(over: Partial<PosterDeps> = {}) {
   const deps: PosterDeps = {
     fetchMeta: async (release) => {
       metaCalls.push(release);
-      return OK("https://m.media-amazon.com/dune.jpg");
+      return OK("https://m.media-amazon.com/tinrivers.jpg");
     },
     fetchBlob: async (url) => {
       blobCalls.push(url);
@@ -91,17 +91,17 @@ describe("searchHint", () => {
 describe("createPosterCache", () => {
   it("fetches metadata then bytes, and answers with the object URL", async () => {
     const { cache, metaCalls, blobCalls } = harness();
-    const outcome = await cache.want("Dune.Part.Two.2024.2160p.WEB-DL", "Movies");
+    const outcome = await cache.want("Tin.Rivers.2024.2160p.WEB-DL", "Movies");
     expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
-    expect(metaCalls).toEqual(["Dune.Part.Two.2024.2160p.WEB-DL"]);
-    expect(blobCalls).toEqual(["https://m.media-amazon.com/dune.jpg"]);
+    expect(metaCalls).toEqual(["Tin.Rivers.2024.2160p.WEB-DL"]);
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
   });
 
   it("answers a settled release from cache with no fetch at all", async () => {
     const { cache, metaCalls } = harness();
-    await cache.want("Dune.Part.Two.2024.2160p", "Movies");
+    await cache.want("Tin.Rivers.2024.2160p", "Movies");
     // Synchronous on a hit — this is what makes a 23-frame re-render free.
-    const again = cache.want("Dune.Part.Two.2024.2160p", "Movies");
+    const again = cache.want("Tin.Rivers.2024.2160p", "Movies");
     expect(again).toEqual({ kind: "poster", url: "blob:1" });
     expect(metaCalls).toHaveLength(1);
   });
@@ -111,9 +111,9 @@ describe("createPosterCache", () => {
     // Every snapshot frame re-mounts every row. Without coalescing, one search
     // is 23 lookups per row.
     const all = await Promise.all([
-      cache.want("Dune.Part.Two.2024", "Movies"),
-      cache.want("Dune.Part.Two.2024", "Movies"),
-      cache.want("Dune.Part.Two.2024", "Movies"),
+      cache.want("Tin.Rivers.2024", "Movies"),
+      cache.want("Tin.Rivers.2024", "Movies"),
+      cache.want("Tin.Rivers.2024", "Movies"),
     ]);
     expect(metaCalls).toHaveLength(1);
     expect(all).toEqual([
@@ -129,10 +129,10 @@ describe("createPosterCache", () => {
     // posterUrl, and fetching the bytes per release would be fifty blobs of
     // identical JPEG held in memory. Keyed by poster URL, not release name.
     const { cache, blobCalls } = harness();
-    const a = await cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-GROUP", "Movies");
-    const b = await cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-OTHER", "Movies");
+    const a = await cache.want("Tin.Rivers.2024.2160p.WEB-DL.x265-GROUP", "Movies");
+    const b = await cache.want("Tin.Rivers.2024.1080p.BluRay.x264-OTHER", "Movies");
     expect(a).toEqual(b);
-    expect(blobCalls).toEqual(["https://m.media-amazon.com/dune.jpg"]);
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
   });
 
   it("coalesces CONCURRENT asks for different releases of one film into one blob fetch", async () => {
@@ -147,11 +147,11 @@ describe("createPosterCache", () => {
     // others leaked.
     const { cache, blobCalls } = harness();
     const all = await Promise.all([
-      cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies"),
-      cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies"),
-      cache.want("Dune.Part.Two.2024.720p.HDTV.x264-C", "Movies"),
+      cache.want("Tin.Rivers.2024.2160p.WEB-DL.x265-A", "Movies"),
+      cache.want("Tin.Rivers.2024.1080p.BluRay.x264-B", "Movies"),
+      cache.want("Tin.Rivers.2024.720p.HDTV.x264-C", "Movies"),
     ]);
-    expect(blobCalls).toEqual(["https://m.media-amazon.com/dune.jpg"]);
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
     expect(all).toEqual([
       { kind: "poster", url: "blob:1" },
       { kind: "poster", url: "blob:1" },
@@ -168,8 +168,8 @@ describe("createPosterCache", () => {
       },
     });
     const all = await Promise.all([
-      cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies"),
-      cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies"),
+      cache.want("Tin.Rivers.2024.2160p.WEB-DL.x265-A", "Movies"),
+      cache.want("Tin.Rivers.2024.1080p.BluRay.x264-B", "Movies"),
     ]);
     expect(all).toEqual([{ kind: "none" }, { kind: "none" }]);
     expect(blobAttempts).toBe(1);
@@ -177,7 +177,7 @@ describe("createPosterCache", () => {
     // A fresh release of the same film is not stuck behind the failed fetch —
     // the in-flight entry cleaned itself up, so this one gets to retry rather
     // than being permanently answered "none" for a fetch that never happened.
-    await cache.want("Dune.Part.Two.2024.720p.HDTV.x264-C", "Movies");
+    await cache.want("Tin.Rivers.2024.720p.HDTV.x264-C", "Movies");
     expect(blobAttempts).toBe(2);
   });
 
@@ -186,8 +186,8 @@ describe("createPosterCache", () => {
     const { cache, revoked } = harness({
       fetchBlob: () => new Promise<string | null>((resolve) => (resolveBlob = resolve)),
     });
-    const a = cache.want("Dune.Part.Two.2024.2160p.WEB-DL.x265-A", "Movies");
-    const b = cache.want("Dune.Part.Two.2024.1080p.BluRay.x264-B", "Movies");
+    const a = cache.want("Tin.Rivers.2024.2160p.WEB-DL.x265-A", "Movies");
+    const b = cache.want("Tin.Rivers.2024.1080p.BluRay.x264-B", "Movies");
     // Let both releases' fetchMeta calls settle and join the one in-flight
     // blob fetch, before it resolves.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -199,8 +199,8 @@ describe("createPosterCache", () => {
     expect(outcomeB).toEqual({ kind: "none" });
     // One revoke, not two — both askers shared one decision, not one each.
     expect(revoked).toEqual(["blob:1"]);
-    expect(cache.peek("Dune.Part.Two.2024.2160p.WEB-DL.x265-A")).toBeUndefined();
-    expect(cache.peek("Dune.Part.Two.2024.1080p.BluRay.x264-B")).toBeUndefined();
+    expect(cache.peek("Tin.Rivers.2024.2160p.WEB-DL.x265-A")).toBeUndefined();
+    expect(cache.peek("Tin.Rivers.2024.1080p.BluRay.x264-B")).toBeUndefined();
   });
 
   it("a release that goes stale mid-flight does not poison a live release naming the same poster", async () => {
@@ -214,7 +214,7 @@ describe("createPosterCache", () => {
     // much still wants.
     let releaseXMeta!: (meta: PublicTitleMeta) => void;
     let releaseXBlob!: (url: string | null) => void;
-    const posterUrl = "https://m.media-amazon.com/dune.jpg";
+    const posterUrl = "https://m.media-amazon.com/tinrivers.jpg";
     const blobCalls: string[] = [];
     let blobs = 0;
     const deps: PosterDeps = {
@@ -262,7 +262,7 @@ describe("createPosterCache", () => {
     const { cache, blobCalls } = harness({
       fetchMeta: async () => ({ status: "no-key" }),
     });
-    const outcome = await cache.want("Dune.Part.Two.2024", "Movies");
+    const outcome = await cache.want("Tin.Rivers.2024", "Movies");
     expect(outcome).toEqual({ kind: "no-key" });
     // Nothing to fetch bytes from, and the note must say which fix applies.
     expect(blobCalls).toEqual([]);
@@ -302,12 +302,12 @@ describe("createPosterCache", () => {
 
   it("revokes every blob on clear, and forgets the hint with them", async () => {
     const { cache, revoked } = harness();
-    await cache.want("Dune.Part.Two.2024", "Movies");
+    await cache.want("Tin.Rivers.2024", "Movies");
     cache.clear();
     // Each object URL holds its JPEG in memory until revoked; a session of
     // searches would otherwise accumulate every poster it ever loaded.
     expect(revoked).toEqual(["blob:1"]);
-    expect(cache.peek("Dune.Part.Two.2024")).toBeUndefined();
+    expect(cache.peek("Tin.Rivers.2024")).toBeUndefined();
   });
 
   it("forgets a no-key answer on clear, so a reload that finds a key stops nagging", async () => {
@@ -323,16 +323,16 @@ describe("createPosterCache", () => {
     const { cache, revoked } = harness({
       fetchMeta: () => new Promise<PublicTitleMeta>((resolve) => (release = resolve)),
     });
-    const pending = cache.want("Dune.Part.Two.2024", "Movies");
+    const pending = cache.want("Tin.Rivers.2024", "Movies");
     // A new search starts while the lookup is in flight.
     cache.clear();
-    release(OK("https://m.media-amazon.com/dune.jpg"));
+    release(OK("https://m.media-amazon.com/tinrivers.jpg"));
     await pending;
     // The blob was created for a row nobody is showing any more; revoked rather
     // than leaked back into an emptied cache, and NOT resurrected into it — a
     // late answer must not re-populate a cache that moved on.
     expect(revoked).toEqual(["blob:1"]);
-    expect(cache.peek("Dune.Part.Two.2024")).toBeUndefined();
+    expect(cache.peek("Tin.Rivers.2024")).toBeUndefined();
   });
 
   it("a stale fetch's late finally must not evict a newer fetch's still-in-flight entry for the same poster URL", async () => {
@@ -342,7 +342,7 @@ describe("createPosterCache", () => {
     // stale fetch's finally evict a live one), and clear()'s own
     // `blobPending.clear()` (removing it would let a post-clear want() reuse a
     // dead generation's still-open fetch instead of starting its own).
-    const posterUrl = "https://m.media-amazon.com/dune.jpg";
+    const posterUrl = "https://m.media-amazon.com/tinrivers.jpg";
     let resolveFirst!: (url: string | null) => void;
     let resolveSecond: ((url: string | null) => void) | undefined;
     const blobCalls: string[] = [];
@@ -406,7 +406,7 @@ describe("createPosterCache", () => {
         return OK("https://m.media-amazon.com/x.jpg");
       },
     });
-    await cache.want("The.Bear.S03", "TV");
+    await cache.want("Harrowgate.S03", "TV");
     expect(groups).toEqual(["TV"]);
   });
 });

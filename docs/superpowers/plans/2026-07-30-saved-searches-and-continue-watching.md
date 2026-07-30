@@ -28,9 +28,9 @@
 ## Verified Facts — do not re-derive
 
 - **`parse-torrent-title` output**, confirmed by running it:
-  - `Severance.S02E04.1080p.WEB-DL.x265-GROUP` → `{title:"Severance", season:2, episode:4}`
-  - `The.Bear.S03.1080p.WEB-DL` → `{title:"The Bear", season:3}` — **a season pack has NO episode**
-  - `Dune.Part.Two.2024.2160p.BluRay` → `{title:"Dune Part Two", year:2024}`
+  - `Kepler.S02E04.1080p.WEB-DL.x265-GROUP` → `{title:"Kepler", season:2, episode:4}`
+  - `Harrowgate.S03.1080p.WEB-DL` → `{title:"Harrowgate", season:3}` — **a season pack has NO episode**
+  - `Tin.Rivers.2024.2160p.BluRay` → `{title:"Tin Rivers", year:2024}`
 - **`DownloadInput`** (`src/ui/App.tsx:126-132`) is `{ id, name, magnet, source?, sizeBytes? }` — `id` is the info hash. This is what the TUI holds at both stream sites, and it carries everything the history store needs.
 - **The rename's blast radius**, by file: `store.ts` 3, `keymap.ts` 2, `Watchlist.tsx` 3, `Sidebar.tsx` 1, `App.tsx` 4, `store.test.ts` 2, `ForYou.test.tsx` 1, `wire.ts` 8, `routes.ts` 9, `routes.test.ts` 12, `app.ts` 24, `reccModel.ts` 10, `reccModel.test.ts` 4, `savedModel.ts` 21, `savedModel.test.ts` 40, `index.html` 5, `styles.css` 1, `README.md` 5. **149 total across 18 files.**
 - **`dismissesPick` is `action !== "watchlist"`** (`reccModel.ts:313-315`), so the action already does not dismiss a pick.
@@ -59,8 +59,8 @@ Append to `src/util/release.test.ts`:
 ```ts
 describe("parseRelease — season and episode", () => {
   it("returns both for an episode release", () => {
-    const p = parseRelease("Severance.S02E04.1080p.WEB-DL.x265-GROUP");
-    expect(p?.title).toBe("Severance");
+    const p = parseRelease("Kepler.S02E04.1080p.WEB-DL.x265-GROUP");
+    expect(p?.title).toBe("Kepler");
     expect(p?.season).toBe(2);
     expect(p?.episode).toBe(4);
   });
@@ -68,15 +68,15 @@ describe("parseRelease — season and episode", () => {
   it("returns season but NOT episode for a season pack", () => {
     // A pack names the season and no episode. The history store must not
     // invent episode 1 from this — see nextEpisode in Task 2.
-    const p = parseRelease("The.Bear.S03.1080p.WEB-DL");
-    expect(p?.title).toBe("The Bear");
+    const p = parseRelease("Harrowgate.S03.1080p.WEB-DL");
+    expect(p?.title).toBe("Harrowgate");
     expect(p?.season).toBe(3);
     expect(p?.episode).toBeUndefined();
   });
 
   it("returns neither for a film", () => {
-    const p = parseRelease("Dune.Part.Two.2024.2160p.BluRay");
-    expect(p?.title).toBe("Dune Part Two");
+    const p = parseRelease("Tin.Rivers.2024.2160p.BluRay");
+    expect(p?.title).toBe("Tin Rivers");
     expect(p?.season).toBeUndefined();
     expect(p?.episode).toBeUndefined();
   });
@@ -84,7 +84,7 @@ describe("parseRelease — season and episode", () => {
   it("still classifies an episode release as a series", () => {
     // The existing isSeries behaviour must not regress: season/episode were
     // already being read for exactly this, they were just not returned.
-    expect(parseRelease("Severance.S02E04.1080p")?.type).toBe("series");
+    expect(parseRelease("Kepler.S02E04.1080p")?.type).toBe("series");
   });
 });
 ```
@@ -104,7 +104,7 @@ In `src/util/release.ts`, add to `ParsedRelease`:
 ```ts
   /**
    * Season and episode, when the release named them. Both optional and
-   * independent: a SEASON PACK ("The.Bear.S03") yields a season with no
+   * independent: a SEASON PACK ("Harrowgate.S03") yields a season with no
    * episode, so a consumer must not treat a known season as implying episode 1.
    */
   season?: number;
@@ -181,12 +181,12 @@ const HASH = "a".repeat(40);
 
 function item(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
   return {
-    key: "severance||series",
-    title: "Severance",
+    key: "kepler||series",
+    title: "Kepler",
     type: "series",
     season: 2,
     episode: 4,
-    rawName: "Severance.S02E04.1080p.WEB-DL",
+    rawName: "Kepler.S02E04.1080p.WEB-DL",
     infoHash: HASH,
     magnet: `magnet:?xt=urn:btih:${HASH}`,
     startedAt: 1_700_000_000_000,
@@ -197,15 +197,15 @@ function item(over: Partial<StreamHistoryItem> = {}): StreamHistoryItem {
 describe("historyItemFor", () => {
   it("builds an entry from a stream input, parsing the release name", () => {
     const built = historyItemFor(
-      { id: HASH, name: "Severance.S02E04.1080p.WEB-DL.x265-GROUP", magnet: "magnet:?x", source: "eztv" },
+      { id: HASH, name: "Kepler.S02E04.1080p.WEB-DL.x265-GROUP", magnet: "magnet:?x", source: "eztv" },
       1_700_000_000_000,
     );
-    expect(built?.title).toBe("Severance");
+    expect(built?.title).toBe("Kepler");
     expect(built?.season).toBe(2);
     expect(built?.episode).toBe(4);
     expect(built?.type).toBe("series");
     expect(built?.infoHash).toBe(HASH);
-    expect(built?.rawName).toBe("Severance.S02E04.1080p.WEB-DL.x265-GROUP");
+    expect(built?.rawName).toBe("Kepler.S02E04.1080p.WEB-DL.x265-GROUP");
     expect(built?.startedAt).toBe(1_700_000_000_000);
     expect(built?.source).toBe("eztv");
   });
@@ -217,7 +217,7 @@ describe("historyItemFor", () => {
   });
 
   it("omits source when the caller had none", () => {
-    const built = historyItemFor({ id: HASH, name: "Dune.Part.Two.2024.2160p", magnet: "m" }, 1);
+    const built = historyItemFor({ id: HASH, name: "Tin.Rivers.2024.2160p", magnet: "m" }, 1);
     expect(built).not.toBeNull();
     expect("source" in (built as object)).toBe(false);
   });
@@ -225,9 +225,9 @@ describe("historyItemFor", () => {
 
 describe("recordStream", () => {
   it("prepends a new title", () => {
-    const out = recordStream([item({ key: "other", title: "The Bear" })], item());
+    const out = recordStream([item({ key: "other", title: "Harrowgate" })], item());
     expect(out).toHaveLength(2);
-    expect(out[0]?.title).toBe("Severance");
+    expect(out[0]?.title).toBe("Kepler");
   });
 
   it("dedupes on key and moves the entry to the front", () => {
@@ -283,7 +283,7 @@ describe("nextEpisode", () => {
   });
 
   it("returns null for a SEASON PACK, which names no episode", () => {
-    // "The.Bear.S03" parses to season 3 with no episode. Guessing episode 1
+    // "Harrowgate.S03" parses to season 3 with no episode. Guessing episode 1
     // would tell the user to watch something they may already have seen.
     expect(nextEpisode(item({ season: 3, episode: undefined }))).toBeNull();
   });
@@ -342,7 +342,7 @@ import type { SourceId } from "../sources/types";
 export interface StreamHistoryItem {
   /** `parseRelease`'s key — the group and dedupe key. */
   key: string;
-  /** "Severance", never "Severance.S02E04.1080p.WEB-DL-GROUP". */
+  /** "Kepler", never "Kepler.S02E04.1080p.WEB-DL-GROUP". */
   title: string;
   year?: number;
   type?: "movie" | "series";
@@ -427,7 +427,7 @@ export function recordStream(
  * The episode to offer next, or null when there is nothing honest to offer.
  *
  * A SUGGESTION, never a claim the episode exists — nothing here has asked a
- * tracker. Null for a film, and null for a SEASON PACK: "The.Bear.S03" parses
+ * tracker. Null for a film, and null for a SEASON PACK: "Harrowgate.S03" parses
  * to a season with no episode, and guessing episode 1 would point the user at
  * something they may have already watched.
  */
@@ -500,7 +500,7 @@ One entry per title, newest first, capped at 200. The episode is a
 high-water mark, not the last thing played — rewatching S02E02 after S02E05
 must not rewind 'next' to S02E03.
 
-nextEpisode returns null for a season pack: 'The.Bear.S03' parses to a
+nextEpisode returns null for a season pack: 'Harrowgate.S03' parses to a
 season with no episode, and guessing episode 1 would point at something
 already watched.
 
@@ -912,16 +912,16 @@ describe("POST /api/stream — records stream history", () => {
         postEventImpl: async (_c, e) => { events.push(e); },
       }),
       "POST", "/api/stream", new URLSearchParams(), undefined,
-      JSON.stringify({ infoHash: HASH, name: "Severance.S02E04.1080p.WEB-DL", confirm: true }),
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
     );
 
     expect(res.status).toBeLessThan(500);
-    expect(saved[0]?.[0]?.title).toBe("Severance");
+    expect(saved[0]?.[0]?.title).toBe("Kepler");
     expect(saved[0]?.[0]?.episode).toBe(4);
     // The web posted NO started event before this change — a browser stream
     // taught reccd nothing about having begun.
     expect(events).toEqual([
-      expect.objectContaining({ type: "started", rawName: "Severance.S02E04.1080p.WEB-DL" }),
+      expect.objectContaining({ type: "started", rawName: "Kepler.S02E04.1080p.WEB-DL" }),
     ]);
   });
 
@@ -946,7 +946,7 @@ describe("POST /api/stream — records stream history", () => {
         saveStreamHistoryImpl: async () => { throw new Error("disk full"); },
       }),
       "POST", "/api/stream", new URLSearchParams(), undefined,
-      JSON.stringify({ infoHash: HASH, name: "Severance.S02E04.1080p", confirm: true }),
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p", confirm: true }),
     );
     expect(res.status).toBeLessThan(500);
   });
@@ -1094,11 +1094,11 @@ describe("GET /api/saved — continueWatching", () => {
     const res = await handleWebApi(
       deps({
         loadStreamHistoryImpl: async () => [
-          { key: "severance||series", title: "Severance", type: "series", season: 2, episode: 4,
-            rawName: "Severance.S02E04.1080p", infoHash: "a".repeat(40),
+          { key: "kepler||series", title: "Kepler", type: "series", season: 2, episode: 4,
+            rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
             magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`, startedAt: 1_700_000_000_000 },
-          { key: "the bear||series", title: "The Bear", type: "series", season: 3,
-            rawName: "The.Bear.S03.1080p", infoHash: "b".repeat(40),
+          { key: "harrowgate||series", title: "Harrowgate", type: "series", season: 3,
+            rawName: "Harrowgate.S03.1080p", infoHash: "b".repeat(40),
             magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`, startedAt: 1_600_000_000_000 },
         ],
       }),
@@ -1108,9 +1108,9 @@ describe("GET /api/saved — continueWatching", () => {
     const body = res.json as SavedResponse;
     expect(body.continueWatching).toHaveLength(2);
     expect(body.continueWatching[0]).toEqual({
-      key: "severance||series", title: "Severance", type: "series",
+      key: "kepler||series", title: "Kepler", type: "series",
       season: 2, episode: 4, next: { season: 2, episode: 5 },
-      rawName: "Severance.S02E04.1080p", infoHash: "a".repeat(40),
+      rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
       startedAt: 1_700_000_000_000,
     });
     // A season pack names no episode, so there is no honest next to offer.
@@ -1384,8 +1384,8 @@ Note the fixture is declared at **module scope**, not inside the first `describe
 
 ```ts
 const base: PublicStreamHistoryItem = {
-  key: "k", title: "Severance", type: "series", season: 2, episode: 4,
-  next: { season: 2, episode: 5 }, rawName: "Severance.S02E04.1080p",
+  key: "k", title: "Kepler", type: "series", season: 2, episode: 4,
+  next: { season: 2, episode: 5 }, rawName: "Kepler.S02E04.1080p",
   infoHash: "a".repeat(40), startedAt: 1_700_000_000_000,
 };
 // Exactly 86,400,000 ms after `base.startedAt`, so "1 day ago" is arithmetic
@@ -1416,25 +1416,25 @@ describe("continueWatchingFallbackQuery", () => {
   it("asks for the next episode when there is one", () => {
     // The remembered torrent is dead, so we search — and searching for the
     // episode you have NOT seen beats searching for the one you just watched.
-    expect(continueWatchingFallbackQuery(base)).toBe("Severance S02E05");
+    expect(continueWatchingFallbackQuery(base)).toBe("Kepler S02E05");
   });
 
   it("asks for the bare title when there is no next episode", () => {
     // A season pack that named no episode.
-    expect(continueWatchingFallbackQuery({ ...base, next: null })).toBe("Severance");
+    expect(continueWatchingFallbackQuery({ ...base, next: null })).toBe("Kepler");
   });
 
   it("asks for the bare title for a film", () => {
     expect(
       continueWatchingFallbackQuery({
         ...base,
-        title: "Dune Part Two",
+        title: "Tin Rivers",
         type: "movie",
         season: undefined,
         episode: undefined,
         next: null,
       }),
-    ).toBe("Dune Part Two");
+    ).toBe("Tin Rivers");
   });
 });
 
@@ -1495,7 +1495,7 @@ The **fallback** is the one decision here, so it goes in `savedModel.ts`, not `a
 export function continueWatchingFallbackQuery(item: PublicStreamHistoryItem): string;
 ```
 
-`"Severance S02E05"` when there is a next episode, else the bare title. `app.ts` calls it in `play`'s failure path.
+`"Kepler S02E05"` when there is a next episode, else the bare title. `app.ts` calls it in `play`'s failure path.
 
 - [ ] **Step 6: Verify**
 

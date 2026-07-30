@@ -20,7 +20,7 @@ import type { PublicFavourite } from "../wire";
 const HASH = "b".repeat(40);
 
 function favourite(over: Partial<PublicFavourite> = {}): PublicFavourite {
-  return { id: HASH, name: "Severance.S02.1080p", addedAt: 1_700_000_000_000, watched: 0, ...over };
+  return { id: HASH, name: "Kepler.S02.1080p", addedAt: 1_700_000_000_000, watched: 0, ...over };
 }
 
 function loaded(over: Partial<SavedState> = {}): SavedState {
@@ -37,18 +37,18 @@ describe("emptySaved", () => {
 
 describe("watchlistBody", () => {
   it("sends the query and the action", () => {
-    expect(watchlistBody("dune part two", "toggle")).toEqual({
-      query: "dune part two",
+    expect(watchlistBody("tin rivers", "toggle")).toEqual({
+      query: "tin rivers",
       action: "toggle",
     });
-    expect(watchlistBody("dune part two", "remove")).toEqual({
-      query: "dune part two",
+    expect(watchlistBody("tin rivers", "remove")).toEqual({
+      query: "tin rivers",
       action: "remove",
     });
   });
 
   it("trims, so the box's stray spaces cannot create a second entry", () => {
-    expect(watchlistBody("  dune  ", "toggle").query).toBe("dune");
+    expect(watchlistBody("  tin rivers  ", "toggle").query).toBe("tin rivers");
   });
 });
 
@@ -56,12 +56,12 @@ describe("libraryBody", () => {
   it("carries the name, which is what becomes the magnet's dn server-side", () => {
     expect(
       libraryBody(
-        { infoHash: HASH, name: "Severance.S02.1080p", sizeBytes: 24_000_000_000, source: "eztv" },
+        { infoHash: HASH, name: "Kepler.S02.1080p", sizeBytes: 24_000_000_000, source: "eztv" },
         "toggle",
       ),
     ).toEqual({
       infoHash: HASH,
-      name: "Severance.S02.1080p",
+      name: "Kepler.S02.1080p",
       sizeBytes: 24_000_000_000,
       source: "eztv",
       action: "toggle",
@@ -69,14 +69,14 @@ describe("libraryBody", () => {
   });
 
   it("omits sizeBytes and source when absent rather than sending zero or empty", () => {
-    const body = libraryBody({ infoHash: HASH, name: "Severance" }, "remove");
-    expect(body).toEqual({ infoHash: HASH, name: "Severance", action: "remove" });
+    const body = libraryBody({ infoHash: HASH, name: "Kepler" }, "remove");
+    expect(body).toEqual({ infoHash: HASH, name: "Kepler", action: "remove" });
     expect("sizeBytes" in body).toBe(false);
     expect("source" in body).toBe(false);
   });
 
   it("omits a zero size — the server treats >0 as known and 0 would read as known-and-empty", () => {
-    const body = libraryBody({ infoHash: HASH, name: "Severance", sizeBytes: 0 }, "toggle");
+    const body = libraryBody({ infoHash: HASH, name: "Kepler", sizeBytes: 0 }, "toggle");
     expect("sizeBytes" in body).toBe(false);
   });
 
@@ -150,14 +150,14 @@ describe("watchlistStatus / libraryStatus", () => {
   });
 
   it("hides the line once there are rows to look at", () => {
-    expect(watchlistStatus(loaded({ watchlist: ["dune"] })).show).toBe(false);
+    expect(watchlistStatus(loaded({ watchlist: ["tin rivers"] })).show).toBe(false);
     expect(libraryStatus(loaded({ library: [favourite()] })).show).toBe(false);
   });
 
   it("shows an error over both lists, and outranks having rows", () => {
     // A stale list next to no explanation is worse than a stale list with one:
     // the user needs to know these rows may not reflect the server.
-    const broken = loaded({ watchlist: ["dune"], error: "Can't reach torlnk." });
+    const broken = loaded({ watchlist: ["tin rivers"], error: "Can't reach torlnk." });
     expect(watchlistStatus(broken)).toEqual({
       text: "Can't reach torlnk.",
       show: true,
@@ -183,10 +183,10 @@ describe("watchlistStatus / libraryStatus", () => {
 describe("applySaved", () => {
   it("takes the server's lists and marks the state loaded, clearing any error", () => {
     const next = applySaved(loaded({ error: "old failure" }), {
-      watchlist: ["dune"],
+      watchlist: ["tin rivers"],
       library: [favourite()],
     });
-    expect(next.watchlist).toEqual(["dune"]);
+    expect(next.watchlist).toEqual(["tin rivers"]);
     expect(next.library).toHaveLength(1);
     expect(next.loaded).toBe(true);
     expect(next.error).toBeNull();
@@ -207,24 +207,24 @@ describe("applySaved", () => {
 
 describe("applyWatchlistResponse", () => {
   it("takes the server's list and marks the state loaded, clearing any error", () => {
-    const next = applyWatchlistResponse(loaded({ error: "old failure" }), { watchlist: ["dune"] });
-    expect(next).toEqual({ watchlist: ["dune"], library: [], loaded: true, error: null });
+    const next = applyWatchlistResponse(loaded({ error: "old failure" }), { watchlist: ["tin rivers"] });
+    expect(next).toEqual({ watchlist: ["tin rivers"], library: [], loaded: true, error: null });
   });
 
   it("keeps the existing list on a null body rather than emptying it", () => {
-    const state = loaded({ watchlist: ["dune"] });
+    const state = loaded({ watchlist: ["tin rivers"] });
     expect(applyWatchlistResponse(state, null)).toEqual(state);
   });
 
   it("keeps the existing list when watchlist is missing or not an array", () => {
-    const state = loaded({ watchlist: ["dune"] });
+    const state = loaded({ watchlist: ["tin rivers"] });
     expect(applyWatchlistResponse(state, {})).toEqual(state);
-    expect(applyWatchlistResponse(state, { watchlist: "dune" })).toEqual(state);
+    expect(applyWatchlistResponse(state, { watchlist: "tin rivers" })).toEqual(state);
   });
 
   it("keeps the existing list when the body itself is not an object", () => {
-    const state = loaded({ watchlist: ["dune"] });
-    expect(applyWatchlistResponse(state, "dune")).toEqual(state);
+    const state = loaded({ watchlist: ["tin rivers"] });
+    expect(applyWatchlistResponse(state, "tin rivers")).toEqual(state);
     expect(applyWatchlistResponse(state, 42)).toEqual(state);
     expect(applyWatchlistResponse(state, undefined)).toEqual(state);
   });

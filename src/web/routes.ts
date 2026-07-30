@@ -785,7 +785,7 @@ async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResp
     return { status: 400, json: { error: "invalid action" } };
   }
 
-  // Trimmed here so "  dune  " and "dune" are one entry, matching the TUI —
+  // Trimmed here so "  tin rivers  " and "tin rivers" are one entry, matching the TUI —
   // toggleSavedSearches trims too, but the emptiness check below needs the
   // trimmed value and a second trim inside the helper is not something to rely
   // on from out here.
@@ -970,14 +970,14 @@ interface TitleLookup {
  * parsed HERE with the TUI's own `parseRelease` rather than in the browser.
  * That placement is the point. `parse-torrent-title` is a Node dependency, and
  * the alternative to a round trip is a second release-name parser in the
- * browser bundle — at which point "Sintel.2010.1080p.BluRay.x264-GROUP" could
+ * browser bundle — at which point "Kestrel.2010.1080p.BluRay.x264-GROUP" could
  * mean one thing in the terminal and another in the tab, with no test able to
  * call either side wrong. One parser, server-side, and the parse comes back
  * with the answer so the UI can show the title it actually looked up.
  *
  * The cache key is built here so it cannot drift from the request it stands
  * for: it carries every parameter that changes the answer, and lowercases the
- * name so "Sintel" and "sintel" share an entry (OMDb's title match is
+ * name so "Kestrel" and "kestrel" share an entry (OMDb's title match is
  * case-insensitive, so they genuinely do have the same answer). A `?release=`
  * lookup shares that key space deliberately — fifty releases of one film parse
  * to one title and cost one OMDb call between them, which is the whole reason

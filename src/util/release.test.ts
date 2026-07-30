@@ -19,15 +19,15 @@ describe("parseRelease", () => {
   });
 
   it("detects a series from season/episode markers", () => {
-    const r = parseRelease("The.Bear.S01.1080p.WEB-DL.x264-GROUP");
-    expect(r!.title).toBe("The Bear");
+    const r = parseRelease("Harrowgate.S01.1080p.WEB-DL.x264-GROUP");
+    expect(r!.title).toBe("Harrowgate");
     expect(r!.type).toBe("series");
   });
 
   it("uses the section hint when the name has no season/year signal", () => {
-    expect(parseRelease("Dune Part Two 1080p", "series")!.type).toBe("series");
-    expect(parseRelease("Dune Part Two 1080p", "movie")!.type).toBe("movie");
-    expect(parseRelease("Dune Part Two 1080p")!.type).toBeUndefined();
+    expect(parseRelease("Tin Rivers 1080p", "series")!.type).toBe("series");
+    expect(parseRelease("Tin Rivers 1080p", "movie")!.type).toBe("movie");
+    expect(parseRelease("Tin Rivers 1080p")!.type).toBeUndefined();
   });
 
   it("lets a parsed season override a movie hint", () => {

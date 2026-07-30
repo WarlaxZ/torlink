@@ -11,7 +11,7 @@ describe("postEvent", () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(202, { accepted: 1 }));
     await postEvent(
       { reccUrl: "http://localhost:4100", reccToken: "dev-token" },
-      { type: "watched", rawName: "The.Matrix.1999.1080p", ts: 1000, source: "torlink" },
+      { type: "watched", rawName: "The.Ashfall.1999.1080p", ts: 1000, source: "torlink" },
       { fetchImpl }
     );
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -45,7 +45,7 @@ describe("postEvent", () => {
 
   it("sends a request body of exactly { events: [event] }", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(202, { accepted: 1 }));
-    const event = { type: "watched" as const, rawName: "The.Matrix.1999.1080p", ts: 1000, source: "torlink" };
+    const event = { type: "watched" as const, rawName: "The.Ashfall.1999.1080p", ts: 1000, source: "torlink" };
     await postEvent({ reccUrl: "http://localhost:4100", reccToken: "dev-token" }, event, { fetchImpl });
     const [, init] = fetchImpl.mock.calls[0] as [string, { body: string }];
     expect(JSON.parse(init.body)).toEqual({ events: [event] });

@@ -83,7 +83,7 @@ Kept separate from `history.json` on purpose: "I finished downloading this" and 
 export interface StreamHistoryItem {
   /** parseRelease's `key` — the group and dedupe key. One entry per title. */
   key: string;
-  /** "Severance", not "Severance.S02E04.1080p.WEB-DL-GROUP". */
+  /** "Kepler", not "Kepler.S02E04.1080p.WEB-DL-GROUP". */
   title: string;
   year?: number;
   type?: "movie" | "series";
@@ -135,11 +135,11 @@ The new `Store` fields — `streamHistory`, `openStreamHistory`, `removeStreamHi
 saved
 ┌────────────────────────────────────────────────────┐
 │ continue watching                                  │
-│  ▸ Severance         2d   last S02E04 · next S02E05│
-│  ▸ Dune: Part Two    1w   watched                  │
+│  ▸ Kepler         2d   last S02E04 · next S02E05│
+│  ▸ Tin Rivers: Part Two    1w   watched                  │
 └────────────────────────────────────────────────────┘
   ▸ saved searches            ▸ library
-    dune part two               Severance.S02.1080p ★
+    tin rivers               Kepler.S02.1080p ★
 ```
 
 A strip rather than a fifth tab: five top-level tabs is where this nav stops working on a phone, which #53 already recorded. Above the columns rather than beside them because it is what a returning user wants first.

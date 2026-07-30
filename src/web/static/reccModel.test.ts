@@ -32,7 +32,7 @@ import type { SourcesResponse } from "./searchModel";
 function pick(over: Partial<PublicRecommendation> = {}): PublicRecommendation {
   return {
     imdbId: "tt0133093",
-    title: "The Matrix",
+    title: "Ashfall",
     year: 1999,
     score: 0.91,
     reasons: ["because you liked Blade Runner", "sci-fi"],
@@ -336,10 +336,10 @@ describe("the action → event mapping", () => {
   });
 
   it("posts the pick's own title as the name", () => {
-    expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "The Matrix" });
-    expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "The Matrix" });
-    expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "The Matrix" });
-    expect(reccEventBody("watchlist", pick())).toEqual({ type: "favourited", rawName: "The Matrix" });
+    expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "Ashfall" });
+    expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "Ashfall" });
+    expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "Ashfall" });
+    expect(reccEventBody("watchlist", pick())).toEqual({ type: "favourited", rawName: "Ashfall" });
   });
 
   it("drops a rated pick from the feed but keeps a watchlisted one", () => {
@@ -501,9 +501,9 @@ describe("the no-key wording is shared with the search preview", () => {
   it("uses previewCopy's own sentence and frame label, not a second copy", () => {
     // This project has been bitten repeatedly by a second copy of something
     // drifting. The feed must fail here if the preview's wording changes.
-    const copy = previewCopy("Sintel.2010", {
+    const copy = previewCopy("Kestrel.2010", {
       status: "no-key",
-      parsed: { title: "Sintel", year: 2010, type: "movie" },
+      parsed: { title: "Kestrel", year: 2010, type: "movie" },
     });
     expect(reccPosterHint([{ kind: "no-key" }])).toBe(copy.body);
     expect(reccPosterNote({ kind: "no-key" })).toBe(copy.posterNote);
