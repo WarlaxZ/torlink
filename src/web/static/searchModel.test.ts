@@ -4,9 +4,11 @@ import {
   addPlan,
   ALL_TAB,
   categoryTabs,
+  dashRowForPlay,
   emptyView,
   erroredSources,
   modeForQuery,
+  parseLayout,
   previewApplies,
   progressLabel,
   reportsHealthLookup,
@@ -16,6 +18,7 @@ import {
   searchUrl,
   sourceLabel,
   statusLineHidden,
+  tabClickPlan,
   visibleResults,
   type PublicSearchResult,
   type PublicSearchSnapshot,
@@ -90,6 +93,7 @@ const sourcesResponse = (over: Partial<SourcesResponse> = {}): SourcesResponse =
   ],
   adultEnabled: false,
   debridConfigured: false,
+  omdbConfigured: false,
   ...over,
 });
 
@@ -399,6 +403,17 @@ describe("resultMeta / sourceLabel", () => {
   });
 });
 
+describe("dashRowForPlay", () => {
+  it("builds a playable row from just an id and a name — rowForPlay's own shape", () => {
+    // The one definition rowForPlay and the library row in app.ts both call.
+    const row = dashRowForPlay("beef", "Sintel 2010");
+    expect(row.id).toBe("beef");
+    expect(row.name).toBe("Sintel 2010");
+    expect(row.status).toBe("queued");
+    expect(isPlayable(row)).toBe(true);
+  });
+});
+
 describe("rowForPlay", () => {
   it("carries the result's name", () => {
     // MUTATION GUARD (runPlay not receiving the name). runPlay puts row.name in
@@ -474,5 +489,70 @@ describe("previewApplies", () => {
     expect(previewApplies("Games")).toBe(false);
     expect(previewApplies("Music")).toBe(false);
     expect(previewApplies("Books")).toBe(false);
+  });
+});
+
+describe("parseLayout", () => {
+  it("reads the two layouts", () => {
+    expect(parseLayout("list")).toBe("list");
+    expect(parseLayout("grid")).toBe("grid");
+  });
+
+  it("falls back to list for anything else", () => {
+    // The value comes out of localStorage, which is user-writable and survives
+    // upgrades — a stale or hand-edited entry must degrade to the default
+    // rather than render nothing. List is the default because it is the layout
+    // that works without an OMDb key.
+    expect(parseLayout(null)).toBe("list");
+    expect(parseLayout("")).toBe("list");
+    expect(parseLayout("gallery")).toBe("list");
+  });
+});
+
+describe("tabClickPlan", () => {
+  it("returns the box's current value when browsing (an empty box)", () => {
+    // Opening the page and clicking "Movies" with an empty search box used to
+    // call renderResults() while idle, which re-rendered an empty list. The
+    // fix is returning { action: "run", query: boxValue } here rather than
+    // deciding "" for anyone, which causes startSearch("") → modeForQuery("")
+    // → "browse" one layer up.
+    expect(tabClickPlan(emptyView(), "Movies", "")).toEqual({
+      action: "run",
+      query: "",
+    });
+  });
+
+  it("returns the box's current value when it holds typed-but-unsubmitted text", () => {
+    // User types "dune" without pressing Enter, then clicks a different tab.
+    // tabClickPlan hands back the box's own value rather than "", so a
+    // handler that renders plan.query keeps it on screen.
+    expect(tabClickPlan(emptyView(), "Movies", "dune")).toEqual({
+      action: "run",
+      query: "dune",
+    });
+  });
+
+  it("returns the box's value on a group change regardless of the view's mode or query", () => {
+    // tabClickPlan only compares view.group to the clicked group — it reads
+    // neither view.mode nor view.query, so the same plan comes back whether
+    // the view was mid-search or mid-browse; the box's own value is what gets
+    // used for the run.
+    const searching: SearchView = { ...emptyView(), query: "sintel", mode: "search", group: "All" };
+    expect(tabClickPlan(searching, "Movies", "sintel")).toEqual({
+      action: "run",
+      query: "sintel",
+    });
+    const browsing: SearchView = { ...emptyView(), query: "", mode: "browse", group: "All" };
+    expect(tabClickPlan(browsing, "TV", "")).toEqual({
+      action: "run",
+      query: "",
+    });
+  });
+
+  it("ignores a click on the already-selected tab", () => {
+    // Clicking the current tab restarts a 23-source fan-out. Don't do that.
+    const view: SearchView = { ...emptyView(), mode: "search", query: "dune", group: "Movies" };
+    expect(tabClickPlan(view, "Movies", "dune")).toEqual({ action: "ignore" });
+    expect(tabClickPlan(emptyView(), "All", "")).toEqual({ action: "ignore" });
   });
 });

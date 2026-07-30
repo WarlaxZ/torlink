@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toggleSavedSearches } from "./savedSearches";
+import { toggleSavedSearches } from "./savedSearchList";
 
 describe("toggleSavedSearches", () => {
   it("adds, removes, trims, and caps saved searches", () => {

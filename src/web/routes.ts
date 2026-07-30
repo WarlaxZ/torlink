@@ -4,12 +4,14 @@ import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache"
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
 import {
-  type Config,
   loadConfig,
   resolveAdultContent,
   resolveOmdbApiKey,
   resolveRealDebridToken,
   resolveReccConfig,
+  saveConfig,
+  type Config,
+  type FavouriteItem,
 } from "../config/config";
 import {
   fetchRecommendations,
@@ -22,7 +24,13 @@ import {
 } from "../recc/client";
 import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
 import { validateToken } from "../integrations/realdebrid";
-import { parseInput } from "../sources/magnet";
+import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
+import {
+  isFavourited,
+  markWatched,
+  removeFavourite as removeFromFavourites,
+  toggleFavourite as toggleInFavourites,
+} from "../util/favouriteList";
 import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
 import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
 import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
@@ -36,8 +44,11 @@ import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
 import { hintForGroup, parseRelease } from "../util/release";
+import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  LibraryResponse,
+  PublicFavourite,
   PublicSearchResult,
   PublicTitleParse,
   PublicSearchSnapshot,
@@ -48,9 +59,11 @@ import type {
   PublicRecommendations,
   PublicStreamSession,
   PublicTitleMeta,
+  SavedResponse,
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
+  WatchlistResponse,
 } from "./wire";
 
 export interface WebDeps {
@@ -71,6 +84,13 @@ export interface WebDeps {
    * gets a config without touching the user's real one.
    */
   loadConfigImpl?: () => Promise<Config>;
+  /**
+   * Persist the config. Injected with a default in the same style as
+   * `loadConfigImpl`, and for a stronger reason: the default writes the
+   * developer's real `~/.config/torlnk/config.json`, so a test that forgets this
+   * seam does not fail — it silently edits the machine it runs on.
+   */
+  saveConfigImpl?: (config: Config) => Promise<void>;
   /**
    * Last-known Real-Debrid account status for a token, or null when it can't be
    * determined. Only consulted when a token is configured (see the route).
@@ -624,6 +644,10 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // must agree with the TUI about whether Real-Debrid is on, and the TUI
     // resolves it the same way.
     debridConfigured: resolveRealDebridToken(config) !== "",
+    // resolveOmdbApiKey, not config.omdbApiKey, so TORLINK_OMDB_KEY counts —
+    // the browser must agree with the TUI about whether artwork is available,
+    // and the TUI resolves it the same way.
+    omdbConfigured: resolveOmdbApiKey(config) !== "",
   };
 }
 
@@ -700,6 +724,185 @@ async function addToQueue(
   const outcome = await addInput(deps.runtime, input, options);
   if (outcome === "invalid") return { status: 400, json: { error: "invalid magnet or info hash" } };
   const out: AddResponse = { ok: true, outcome };
+  return { status: 200, json: out };
+}
+
+// ---- saved lists -------------------------------------------------------
+// The watchlist (config.savedSearches) and the library (config.favourites),
+// which the TUI has had all along. Both are read here and mutated by the two
+// routes below.
+//
+// EVERY MUTATION RE-READS THE CONFIG FIRST, and that is not defensive style —
+// it is required. `serializeWrites()` in config.ts serializes writes within ONE
+// process, and `torlnk serve --web` is a separate process from any TUI the user
+// has open. A held snapshot written back would silently revert whatever the TUI
+// changed meanwhile: the Real-Debrid token, the sort, disabledSources. Last
+// writer wins on the one list being edited is acceptable (the TUI already does
+// that to itself); last writer wins on the whole file is not.
+
+/** A stored favourite as the browser sees it. Drops the magnet and the watched filenames. */
+export function toPublicFavourite(f: FavouriteItem): PublicFavourite {
+  const out: PublicFavourite = {
+    id: f.id,
+    name: f.name,
+    addedAt: f.addedAt,
+    watched: f.watched?.length ?? 0,
+  };
+  if (f.sizeBytes !== undefined && f.sizeBytes > 0) out.sizeBytes = f.sizeBytes;
+  if (f.source !== undefined) out.source = f.source;
+  return out;
+}
+
+/** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
+async function savedLists(deps: WebDeps): Promise<WebResponse> {
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const out: SavedResponse = {
+    // loadConfig already normalises both (junk dropped, caps applied), so these
+    // coalesces are for a config object built in a test, not for disk data.
+    watchlist: config.savedSearches ?? [],
+    library: (config.favourites ?? []).map(toPublicFavourite),
+  };
+  return { status: 200, json: out };
+}
+
+/** A JSON object body, or null for anything that is not one. */
+function parseObjectBody(bodyText: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function watchlistAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  const action = body.action;
+  if (action !== "toggle" && action !== "remove") {
+    return { status: 400, json: { error: "invalid action" } };
+  }
+
+  // Trimmed here so "  dune  " and "dune" are one entry, matching the TUI —
+  // toggleSavedSearches trims too, but the emptiness check below needs the
+  // trimmed value and a second trim inside the helper is not something to rely
+  // on from out here.
+  const query = typeof body.query === "string" ? body.query.trim() : "";
+  // A blank query would make toggleSavedSearches a no-op that still answered
+  // 200, telling the browser something happened when nothing did.
+  if (!query) return { status: 400, json: { error: "missing query" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const current = config.savedSearches ?? [];
+  const watchlist =
+    action === "remove" ? current.filter((q) => q !== query) : toggleSavedSearches(current, query);
+
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches: watchlist });
+
+  const out: WatchlistResponse = { saved: watchlist.includes(query), watchlist };
+  return { status: 200, json: out };
+}
+
+async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+
+  const action = body.action;
+  if (action !== "toggle" && action !== "remove" && action !== "watched") {
+    return { status: 400, json: { error: "invalid action" } };
+  }
+
+  // isInfoHash is anchored to the WHOLE string, so an ordinary query can never
+  // slip through; normalizeInfoHash does not itself validate, it only
+  // lowercases and converts 32-char base32 to hex, so the id ends up in one
+  // canonical form and the dedupe key matches whatever the TUI stored.
+  // Validated rather than trusted because this string becomes a magnet the
+  // download engine and Real-Debrid will act on.
+  const rawHash = typeof body.infoHash === "string" ? body.infoHash.trim() : "";
+  if (!isInfoHash(rawHash)) return { status: 400, json: { error: "invalid info hash" } };
+  const infoHash = normalizeInfoHash(rawHash);
+
+  // Required even on remove, where it is unused: a body missing it is a client
+  // bug, and accepting it on one action but not another is the kind of
+  // asymmetry that gets a caller written against the wrong shape.
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return { status: 400, json: { error: "missing name" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const current = config.favourites ?? [];
+  const wasFavourited = isFavourited(current, infoHash);
+
+  if (action === "watched") {
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    if (!filename) return { status: 400, json: { error: "missing filename" } };
+
+    // markWatched returns the SAME array reference when nothing changed — the
+    // id is not favourited, or the episode was already recorded. Both are
+    // ordinary: this fires whenever a player launches, including for a torrent
+    // the user never favourited. Writing anyway would churn config.json on
+    // every re-watch, so the reference check is the write gate.
+    const favourites = markWatched(current, infoHash, filename);
+    if (favourites !== current) {
+      await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+    }
+    const out: LibraryResponse = {
+      // Not an error when absent: the browser fires this after a successful
+      // play and must not be told off for playing something unfavourited.
+      favourited: isFavourited(favourites, infoHash),
+      library: favourites.map(toPublicFavourite),
+    };
+    return { status: 200, json: out };
+  }
+
+  let favourites: FavouriteItem[];
+  if (action === "remove") {
+    favourites = removeFromFavourites(current, infoHash);
+  } else {
+    const item: FavouriteItem = {
+      id: infoHash,
+      name,
+      // The bridge this route exists to build. See LibraryRequest's comment.
+      magnet: buildMagnet(infoHash, name),
+      // The SERVER's clock. A browser's can be years out, and the library is
+      // ordered most-recent-first — one bad addedAt pins a row to the top for
+      // good.
+      addedAt: Date.now(),
+    };
+    if (typeof body.sizeBytes === "number" && body.sizeBytes > 0) item.sizeBytes = body.sizeBytes;
+    if (typeof body.source === "string" && body.source) item.source = body.source as SourceId;
+    favourites = toggleInFavourites(current, item);
+  }
+
+  await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+
+  // Only a toggle rates anything. Removing a row from the library is
+  // housekeeping — the TUI's ✕ posts no event either, and treating it as a
+  // verdict would teach reccd that tidying up is a dislike.
+  if (action === "toggle") {
+    const reccConfig = resolveReccConfig(config);
+    if (reccConfig.reccUrl) {
+      const event: ReccEvent = {
+        type: wasFavourited ? "unfavourited" : "favourited",
+        rawName: name,
+        // Server clock and fixed source, for the reason reccEvent states.
+        ts: Date.now(),
+        source: "torlink",
+      };
+      // `.catch` on top of postEvent's own swallowing, and for the same reason
+      // reccEvent does it: this promise is unwatched, and an unhandled
+      // rejection from an injected impl would take the daemon down — which is
+      // the exact "reccd must never take the process with it" rule these
+      // routes exist to honour.
+      void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
+    }
+  }
+
+  const out: LibraryResponse = {
+    favourited: isFavourited(favourites, infoHash),
+    library: favourites.map(toPublicFavourite),
+  };
   return { status: 200, json: out };
 }
 
@@ -1149,6 +1352,18 @@ export async function handleWebApi(
       status: 200,
       json: sourcesResponse(config, deps.sourceHealthImpl ?? sourceHealth, Date.now()),
     };
+  }
+
+  if (method === "GET" && urlPath === "/api/saved") {
+    return savedLists(deps);
+  }
+
+  if (method === "POST" && urlPath === "/api/watchlist") {
+    return watchlistAction(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/library") {
+    return libraryAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

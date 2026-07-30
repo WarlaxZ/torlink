@@ -56,14 +56,14 @@ import {
 } from "./store";
 import { formatSort, parseSort, type Sort } from "./sort";
 import { addToHistory } from "./searchHistory";
-import { toggleSavedSearches } from "./savedSearches";
+import { toggleSavedSearches } from "../util/savedSearchList";
 import {
   toggleFavourite as toggleFavouriteList,
   removeFavourite as removeFavouriteFromList,
   isFavourited as isFavouritedIn,
   watchedFor,
   markWatched,
-} from "./favourites";
+} from "../util/favouriteList";
 import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { RdBadge } from "./components/RdBadge";

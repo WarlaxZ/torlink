@@ -13,14 +13,15 @@ import {
   type WebResponse,
 } from "./routes";
 import { DownloadQueue } from "../download/queue";
-import { defaultConfig, type Config } from "../config/config";
+import { defaultConfig, type Config, type FavouriteItem } from "../config/config";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
 import { SOURCES } from "../sources/registry";
 import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
 import type { FetchTitleMetaResult } from "../recc/omdb";
+import type { ReccEvent } from "../recc/client";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
-import type { PublicSearchSnapshot, SourcesResponse } from "./wire";
+import type { LibraryResponse, PublicSearchSnapshot, SavedResponse, SourcesResponse } from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
 function runtime(sessions = new StreamSessionRegistry()): Runtime {
@@ -39,6 +40,12 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
     // Never the user's real config file, and never the real Real-Debrid API:
     // the defaults for both reach outside the test.
     loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }),
+    // A THROW, not a no-op: three routes now write config, and a test that
+    // forgets to inject a save seam must fail loudly rather than silently edit
+    // the developer's own ~/.config/torlnk/config.json.
+    saveConfigImpl: async () => {
+      throw new Error("test must inject saveConfigImpl");
+    },
     rdStatusImpl: async () => null,
     ...over,
   };
@@ -1146,6 +1153,45 @@ describe("GET /api/sources", () => {
   });
 });
 
+describe("sourcesResponse — omdbConfigured", () => {
+  beforeEach(() => {
+    // resolveOmdbApiKey reads TORLINK_OMDB_KEY, which a developer may well have
+    // exported — without this the false case passes or fails by accident.
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+  });
+
+  const ask = (config: Partial<Config>) =>
+    handleWebApi(
+      deps({ loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }) }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+
+  it("is false with no key, so the browser fetches no posters at all", async () => {
+    const res = await ask({});
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(false);
+  });
+
+  it("is true from the config file", async () => {
+    const res = await ask({ omdbApiKey: "abc123" });
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(true);
+  });
+
+  it("is true from TORLINK_OMDB_KEY, so the browser agrees with the TUI", async () => {
+    vi.stubEnv("TORLINK_OMDB_KEY", "from-env");
+    const res = await ask({});
+    expect((res.json as SourcesResponse).omdbConfigured).toBe(true);
+  });
+
+  it("never puts the key itself on the wire", async () => {
+    const res = await ask({ omdbApiKey: "super-secret-key" });
+    expect(JSON.stringify(res.json)).not.toContain("super-secret-key");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Title metadata
 // ---------------------------------------------------------------------------
@@ -1844,5 +1890,509 @@ describe("POST /api/recc-event", () => {
     // an unhandled rejection.
     settle!();
     await Promise.resolve();
+  });
+});
+
+describe("handleWebApi — GET /api/saved", () => {
+  it("returns both lists, favourites without their magnets", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({
+          ...defaultConfig,
+          downloadDir: "/tmp/dl",
+          savedSearches: ["dune part two", "the bear s03"],
+          favourites: [
+            {
+              id: "a".repeat(40),
+              name: "Severance.S02.1080p.WEB-DL",
+              magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+              source: "eztv" as SourceId,
+              sizeBytes: 24_000_000_000,
+              addedAt: 1_700_000_000_000,
+              watched: ["ep1.mkv", "ep2.mkv", "ep3.mkv"],
+            },
+          ],
+        }),
+      }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.json as SavedResponse;
+    expect(body.watchlist).toEqual(["dune part two", "the bear s03"]);
+    expect(body.library).toEqual([
+      {
+        id: "a".repeat(40),
+        name: "Severance.S02.1080p.WEB-DL",
+        source: "eztv",
+        sizeBytes: 24_000_000_000,
+        addedAt: 1_700_000_000_000,
+        watched: 3,
+      },
+    ]);
+    // The magnet must not cross this wire: the page never needs it (playing a
+    // favourite goes through POST /api/stream { infoHash, name }), and neither
+    // must the episode FILENAMES — `watched` is a count, because the pane
+    // renders "3 watched" and the filenames are strings from inside a
+    // stranger's torrent.
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+    expect(JSON.stringify(body)).not.toContain("ep1.mkv");
+  });
+
+  it("omits sizeBytes for a favourite stored with a zero size, matching the client's own guard", async () => {
+    // savedModel.test.ts's libraryBody test pins the client half of this
+    // contract (a zero size is never sent); this pins the server half
+    // (toPublicFavourite must not hand one back either, if one is ever on disk).
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({
+          ...defaultConfig,
+          downloadDir: "/tmp/dl",
+          favourites: [
+            {
+              id: "a".repeat(40),
+              name: "Severance",
+              magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+              sizeBytes: 0,
+              addedAt: 1_700_000_000_000,
+            },
+          ],
+        }),
+      }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    const body = res.json as SavedResponse;
+    expect("sizeBytes" in body.library[0]!).toBe(false);
+  });
+
+  it("answers empty lists for a config with neither", async () => {
+    const res = await handleWebApi(
+      deps(),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ watchlist: [], library: [] });
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "GET",
+      "/api/saved",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("handleWebApi — POST /api/watchlist", () => {
+  // A fresh capture per test: the route must WRITE, and asserting on what it
+  // wrote is the only way to know it persisted rather than answered from memory.
+  function capture(config: Partial<Config> = {}) {
+    const saved: Config[] = [];
+    const d = deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }),
+      saveConfigImpl: async (c: Config) => {
+        saved.push(c);
+      },
+    });
+    return { deps: d, saved };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/watchlist", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("adds a query, most-recent first, and persists it", async () => {
+    const { deps: d, saved } = capture({ savedSearches: ["the bear s03"] });
+    const res = await post(d, { query: "dune part two", action: "toggle" });
+
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ saved: true, watchlist: ["dune part two", "the bear s03"] });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.savedSearches).toEqual(["dune part two", "the bear s03"]);
+  });
+
+  it("toggle removes a query that is already saved", async () => {
+    const { deps: d, saved } = capture({ savedSearches: ["dune part two", "the bear s03"] });
+    const res = await post(d, { query: "dune part two", action: "toggle" });
+
+    expect(res.json).toEqual({ saved: false, watchlist: ["the bear s03"] });
+    expect(saved[0]?.savedSearches).toEqual(["the bear s03"]);
+  });
+
+  it("trims the query, so the same search cannot be saved twice", async () => {
+    const { deps: d } = capture({ savedSearches: ["dune part two"] });
+    const res = await post(d, { query: "  dune part two  ", action: "toggle" });
+    expect(res.json).toEqual({ saved: false, watchlist: [] });
+  });
+
+  it("remove is idempotent — a double-fired click must not re-add", async () => {
+    const { deps: d } = capture({ savedSearches: ["dune part two"] });
+    const first = await post(d, { query: "dune part two", action: "remove" });
+    expect(first.json).toEqual({ saved: false, watchlist: [] });
+
+    // The SAME query again, on the SAME fixture. loadConfigImpl is a fixed
+    // closure over the original config (not the "saved" array from the first
+    // call), so this stands in for the second of two clicks that both fired
+    // before either write landed. It only pins that "remove" (unlike
+    // "toggle") does not flip a *present* entry off and back on twice — see
+    // the case below for the one that actually catches remove silently
+    // becoming toggle.
+    const second = await post(d, { query: "dune part two", action: "remove" });
+    expect(second.json).toEqual({ saved: false, watchlist: [] });
+
+    // The state a genuinely second-in-line click reads: the entry is already
+    // gone. remove() is a no-op here; if it were toggleSavedSearches (i.e.
+    // "remove" secretly meant "toggle"), this would ADD "dune part two" back —
+    // which is the actual "must not re-add" this test is named for.
+    const { deps: gone } = capture({ savedSearches: [] });
+    const third = await post(gone, { query: "dune part two", action: "remove" });
+    expect(third.json).toEqual({ saved: false, watchlist: [] });
+  });
+
+  it("rejects a blank query rather than answering 200 to a no-op", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, { query: "   ", action: "toggle" });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: "missing query" });
+    expect(saved).toHaveLength(0);
+  });
+
+  it("rejects an unknown action and an unparseable body", async () => {
+    const { deps: d } = capture();
+    const bad = await post(d, { query: "dune", action: "explode" });
+    expect(bad.status).toBe(400);
+    expect(bad.json).toEqual({ error: "invalid action" });
+
+    const junk = await handleWebApi(
+      d,
+      "POST",
+      "/api/watchlist",
+      new URLSearchParams(),
+      undefined,
+      "not json",
+    );
+    expect(junk.status).toBe(400);
+    expect(junk.json).toEqual({ error: "invalid JSON body" });
+  });
+
+  it("preserves unrelated config fields — it must not clobber the file", async () => {
+    const { deps: d, saved } = capture({
+      realDebridToken: "rd-token",
+      sort: "seeders:desc",
+      disabledSources: ["eztv"],
+    });
+    await post(d, { query: "dune", action: "toggle" });
+    expect(saved[0]?.realDebridToken).toBe("rd-token");
+    expect(saved[0]?.sort).toBe("seeders:desc");
+    expect(saved[0]?.disabledSources).toEqual(["eztv"]);
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/watchlist",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ query: "dune", action: "toggle" }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("handleWebApi — POST /api/library", () => {
+  const HASH = "b".repeat(40);
+
+  beforeEach(() => {
+    // Both override the config file inside resolveReccConfig, so a developer
+    // with a real reccd exported would never see the not-configured path — and
+    // the "configured" tests would talk to their actual service.
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  function fav(over: Partial<FavouriteItem> = {}): FavouriteItem {
+    return {
+      id: HASH,
+      name: "Severance.S02.1080p.WEB-DL",
+      magnet: `magnet:?xt=urn:btih:${HASH}`,
+      addedAt: 1_700_000_000_000,
+      ...over,
+    };
+  }
+
+  function capture(config: Partial<Config> = {}) {
+    const saved: Config[] = [];
+    const events: ReccEvent[] = [];
+    const d = deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }),
+      saveConfigImpl: async (c: Config) => {
+        saved.push(c);
+      },
+      postEventImpl: async (_cfg, e) => {
+        events.push(e);
+      },
+    });
+    return { deps: d, saved, events };
+  }
+
+  const post = (d: WebDeps, body: unknown) =>
+    handleWebApi(d, "POST", "/api/library", new URLSearchParams(), undefined, JSON.stringify(body));
+
+  it("favourites a search hit, building a magnet the config layer accepts", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, {
+      infoHash: HASH,
+      name: "Severance.S02.1080p.WEB-DL",
+      sizeBytes: 24_000_000_000,
+      source: "eztv",
+      action: "toggle",
+    });
+
+    expect(res.status).toBe(200);
+    const body = res.json as LibraryResponse;
+    expect(body.favourited).toBe(true);
+    expect(body.library).toHaveLength(1);
+    expect(body.library[0]?.name).toBe("Severance.S02.1080p.WEB-DL");
+    expect(body.library[0]?.watched).toBe(0);
+
+    // The stored entry MUST carry a magnet: a search result has none on the
+    // wire, and isFavouriteItem drops an entry without one — so without
+    // buildMagnet this favourite would vanish on the next loadConfig.
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.magnet).toContain(`xt=urn:btih:${HASH}`);
+    expect(stored?.magnet).toContain("dn=Severance.S02.1080p.WEB-DL");
+    expect(stored?.magnet).toContain("tr=");
+  });
+
+  it("omits a zero sizeBytes rather than storing it as a known-and-empty size", async () => {
+    const { deps: d, saved } = capture();
+    await post(d, { infoHash: HASH, name: "Severance", sizeBytes: 0, action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored && "sizeBytes" in stored).toBe(false);
+  });
+
+  it("stamps addedAt with the server clock, never the browser's", async () => {
+    const { deps: d, saved } = capture();
+    const before = Date.now();
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.addedAt).toBeGreaterThanOrEqual(before);
+    expect(stored?.addedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("toggle unfavourites a torrent already in the library", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav()] });
+    const res = await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+
+    expect((res.json as LibraryResponse).favourited).toBe(false);
+    expect((res.json as LibraryResponse).library).toEqual([]);
+    expect(saved[0]?.favourites).toEqual([]);
+  });
+
+  it("remove is idempotent", async () => {
+    const { deps: d } = capture({ favourites: [fav()] });
+    const gone = await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    expect((gone.json as LibraryResponse).library).toEqual([]);
+
+    const again = await post(d, { infoHash: "c".repeat(40), name: "Other", action: "remove" });
+    expect((again.json as LibraryResponse).library).toHaveLength(1);
+    expect((again.json as LibraryResponse).favourited).toBe(false);
+  });
+
+  it("posts favourited / unfavourited to reccd, so the taste profile matches the TUI", async () => {
+    const on = capture({ reccUrl: "http://localhost:4100" });
+    await post(on.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    expect(on.events).toEqual([
+      expect.objectContaining({ type: "favourited", rawName: "Severance.S02", source: "torlink" }),
+    ]);
+
+    const off = capture({ reccUrl: "http://localhost:4100", favourites: [fav()] });
+    await post(off.deps, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    expect(off.events).toEqual([expect.objectContaining({ type: "unfavourited" })]);
+  });
+
+  it("uses the server clock for the event ts, not a browser's", async () => {
+    const { deps: d, events } = capture({ reccUrl: "http://localhost:4100" });
+    const before = Date.now();
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(events[0]?.ts).toBeGreaterThanOrEqual(before);
+  });
+
+  it("posts no event on remove — the TUI's ✕ does not rate anything either", async () => {
+    const { deps: d, events } = capture({
+      reccUrl: "http://localhost:4100",
+      favourites: [fav()],
+    });
+    await post(d, { infoHash: HASH, name: "Severance", action: "remove" });
+    expect(events).toEqual([]);
+  });
+
+  it("succeeds with reccd unconfigured, and when the event post rejects", async () => {
+    const quiet = capture(); // no reccUrl
+    const ok = await post(quiet.deps, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(ok.status).toBe(200);
+    expect(quiet.events).toEqual([]);
+
+    const broken = deps({
+      loadConfigImpl: async () => ({
+        ...defaultConfig,
+        downloadDir: "/tmp/dl",
+        reccUrl: "http://localhost:4100",
+      }),
+      saveConfigImpl: async () => {},
+      postEventImpl: async () => {
+        throw new Error("reccd is down");
+      },
+    });
+    const survives = await post(broken, { infoHash: HASH, name: "Severance", action: "toggle" });
+    // reccd must never take a favourite with it: the event is fire-and-forget.
+    expect(survives.status).toBe(200);
+  });
+
+  it("rejects a bad hash, a missing name, and an unknown action", async () => {
+    const { deps: d, saved } = capture();
+
+    const badHash = await post(d, { infoHash: "nope", name: "X", action: "toggle" });
+    expect(badHash.status).toBe(400);
+    expect(badHash.json).toEqual({ error: "invalid info hash" });
+
+    const blankName = await post(d, { infoHash: HASH, name: "   ", action: "toggle" });
+    expect(blankName.status).toBe(400);
+    expect(blankName.json).toEqual({ error: "missing name" });
+
+    const badAction = await post(d, { infoHash: HASH, name: "X", action: "explode" });
+    expect(badAction.status).toBe(400);
+    expect(badAction.json).toEqual({ error: "invalid action" });
+
+    expect(saved).toHaveLength(0);
+  });
+
+  it("preserves unrelated config fields", async () => {
+    const { deps: d, saved } = capture({ realDebridToken: "rd-token", trackers: ["udp://x/announce"] });
+    await post(d, { infoHash: HASH, name: "Severance", action: "toggle" });
+    expect(saved[0]?.realDebridToken).toBe("rd-token");
+    expect(saved[0]?.trackers).toEqual(["udp://x/announce"]);
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/library",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ infoHash: HASH, name: "X", action: "toggle" }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("normalizes an uppercase hex hash to lowercase before storing, matching the TUI's dedupe key", async () => {
+    const { deps: d, saved } = capture();
+    const res = await post(d, { infoHash: HASH.toUpperCase(), name: "Severance", action: "toggle" });
+    expect(res.status).toBe(200);
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.id).toBe(HASH);
+    expect(stored?.id).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it("normalizes a 32-char base32 hash to lowercase hex before storing", async () => {
+    // XO53XO53... is the base32 encoding of forty repeated 0xbb bytes, i.e. HASH.
+    const { deps: d, saved } = capture();
+    const res = await post(d, {
+      infoHash: "XO53XO53XO53XO53XO53XO53XO53XO53",
+      name: "Severance",
+      action: "toggle",
+    });
+    expect(res.status).toBe(200);
+    const stored = saved[0]?.favourites?.[0];
+    expect(stored?.id).toBe(HASH);
+    expect(stored?.id).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it("stores an entry that survives loadConfig's own validation", async () => {
+    const { deps: d, saved } = capture();
+    await post(d, { infoHash: HASH, name: "Severance.S02", action: "toggle" });
+    const stored = saved[0]?.favourites?.[0];
+    // isFavouriteItem's three requirements, which is what would silently drop
+    // this entry on the next boot if buildMagnet were ever removed.
+    expect(typeof stored?.id).toBe("string");
+    expect(stored?.id.length).toBeGreaterThan(0);
+    expect(stored?.name.length).toBeGreaterThan(0);
+    expect(stored?.magnet.length).toBeGreaterThan(0);
+  });
+
+  it("records a watched episode against a favourite", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
+    const res = await post(d, {
+      infoHash: HASH,
+      name: "Severance",
+      action: "watched",
+      filename: "ep2.mkv",
+    });
+
+    expect(res.status).toBe(200);
+    expect((res.json as LibraryResponse).library[0]?.watched).toBe(2);
+    expect(saved[0]?.favourites?.[0]?.watched).toEqual(["ep1.mkv", "ep2.mkv"]);
+  });
+
+  it("skips the disk write when nothing changed", async () => {
+    // Already recorded: markWatched returns the same array reference, and
+    // writing anyway would churn the config file every time a user re-watched
+    // an episode.
+    const dupe = capture({ favourites: [fav({ watched: ["ep1.mkv"] })] });
+    await post(dupe.deps, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    expect(dupe.saved).toHaveLength(0);
+
+    // Not favourited at all: there is nothing to record against. Still a 200 —
+    // the browser fires this after a player launches and must not be handed an
+    // error for playing something it never favourited.
+    const absent = capture();
+    const res = await post(absent.deps, {
+      infoHash: HASH,
+      name: "Severance",
+      action: "watched",
+      filename: "ep1.mkv",
+    });
+    expect(res.status).toBe(200);
+    expect((res.json as LibraryResponse).favourited).toBe(false);
+    expect(absent.saved).toHaveLength(0);
+  });
+
+  it("rejects watched without a filename", async () => {
+    const { deps: d, saved } = capture({ favourites: [fav()] });
+    const res = await post(d, { infoHash: HASH, name: "Severance", action: "watched" });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: "missing filename" });
+    expect(saved).toHaveLength(0);
+  });
+
+  it("posts no reccd event for watched — it is progress, not a rating", async () => {
+    // The reccd-event gate literally checks `action === "toggle"`, so this
+    // already passed before its own fix existed — it does not prove the gate
+    // exists, it guards against a FUTURE widening of that gate (e.g. someone
+    // adding a "record progress" event type and forgetting to keep "watched"
+    // out of it).
+    const { deps: d, events } = capture({
+      reccUrl: "http://localhost:4100",
+      favourites: [fav()],
+    });
+    await post(d, { infoHash: HASH, name: "Severance", action: "watched", filename: "ep1.mkv" });
+    expect(events).toEqual([]);
   });
 });

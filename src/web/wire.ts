@@ -298,6 +298,20 @@ export interface SourcesResponse {
    * thing the TUI does, and deliberately not a silent downgrade to P2P.
    */
   debridConfigured: boolean;
+  /**
+   * Whether an OMDb API key is configured (file or `TORLINK_OMDB_KEY`).
+   *
+   * A capability flag, never the key — the same contract as
+   * `debridConfigured` above, and here for the same reason: this response is
+   * the one thing the search UI fetches before it can render anything.
+   *
+   * WHAT IT SAVES. Without it, a keyless server has every visible result row
+   * fire a `/api/title` lookup purely to be told `{status: "no-key"}` — one
+   * round trip per row to learn a fact that is true for the whole page. With
+   * it the browser fetches no artwork at all and shows the one setup hint.
+   * That difference IS the graceful degradation.
+   */
+  omdbConfigured: boolean;
 }
 
 /**
@@ -466,3 +480,105 @@ export interface ReccEventRequest {
  * to send it, and that is a 200 the UI can read rather than a 500.
  */
 export type PublicReccEventAck = { status: "accepted" } | { status: "not-configured" };
+
+/**
+ * One favourited torrent, as `GET /api/saved` hands it to the browser.
+ *
+ * TWO FIELDS ARE DELIBERATELY ABSENT.
+ *
+ * The MAGNET, because the page has no use for it: playing a favourite goes
+ * through `POST /api/stream { infoHash, name }`, which rebuilds the magnet
+ * server-side with the default tracker list. Shipping it would put a few hundred
+ * bytes of tracker URLs per row on the wire to no end.
+ *
+ * The watched FILENAMES, replaced by a count. The pane renders "3 watched", so
+ * the count is the whole requirement — and the filenames are strings from inside
+ * a stranger's torrent, which is not something to hand a browser without a
+ * reason.
+ */
+export interface PublicFavourite {
+  /** The info hash, which is also the dedupe key. */
+  id: string;
+  name: string;
+  sizeBytes?: number;
+  source?: string;
+  /** Epoch ms. */
+  addedAt: number;
+  /** How many episodes have been streamed, NOT which ones. */
+  watched: number;
+}
+
+/**
+ * The body of `GET /api/saved` — both saved lists in one response.
+ *
+ * One route rather than two because the `saved` pane shows both lists at once,
+ * so two routes would mean two round trips for one screen.
+ *
+ * The names are the TUI's and are load-bearing: `watchlist` is
+ * `config.savedSearches` (search query strings) and `library` is
+ * `config.favourites` (pinned torrents). Both clients read and write the same
+ * config file, so a browser that renamed either would show a different list
+ * under the same word.
+ */
+export interface SavedResponse {
+  watchlist: string[];
+  library: PublicFavourite[];
+}
+
+/**
+ * The body of `POST /api/watchlist`.
+ *
+ * `toggle` mirrors the TUI's `w` key: save this query, or unsave it if it is
+ * already there. `remove` is a separate, idempotent action rather than a second
+ * toggle, for the ✕ in the list — a toggle there would RE-ADD a row the user
+ * just deleted if the click double-fired, which on a phone it does.
+ */
+export interface WatchlistRequest {
+  query: string;
+  action: "toggle" | "remove";
+}
+
+/**
+ * The 200 body of `POST /api/watchlist`.
+ *
+ * The whole list comes back, not just the verdict, so the browser never has to
+ * predict server state: it flips the button optimistically and then renders
+ * whatever this says. `saved` is the state of THIS query afterwards, which the
+ * caller would otherwise have to search the list for.
+ */
+export interface WatchlistResponse {
+  saved: boolean;
+  watchlist: string[];
+}
+
+/**
+ * The body of `POST /api/library`.
+ *
+ * IDENTIFIED BY INFO HASH, WITH NO MAGNET, and that is forced rather than
+ * chosen: `PublicSearchResult` carries no magnet (it would be ~6MB a search)
+ * while a stored favourite REQUIRES one — `isFavouriteItem` drops an entry
+ * without it. The server bridges that with `buildMagnet(infoHash, name)`, the
+ * same reconstruction `POST /api/stream` already does for a hash-only play. So
+ * `name` is not decoration here: it becomes the magnet's `dn` and the row's
+ * label, and without it a favourite is 40 hex characters.
+ *
+ * `"watched"` records one episode filename against an existing favourite,
+ * mirroring the TUI's `markWatchedInFavourite`. It requires `filename`.
+ */
+export interface LibraryRequest {
+  /** 40 hex characters, or 32 base32. Also the dedupe key. */
+  infoHash: string;
+  name: string;
+  sizeBytes?: number;
+  source?: string;
+  action: "toggle" | "remove" | "watched";
+  /** Required for `"watched"`, ignored otherwise. */
+  filename?: string;
+}
+
+/** The 200 body of `POST /api/library`. Same contract as `WatchlistResponse`: the caller renders what comes back. */
+export interface LibraryResponse {
+  /** Whether THIS torrent is in the library afterwards. */
+  favourited: boolean;
+  library: PublicFavourite[];
+}

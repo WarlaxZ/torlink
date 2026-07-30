@@ -707,3 +707,115 @@ select:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* ---------------------------------------------------------------------------
+   The saved pane. Two lists side by side on a wide screen and stacked on a
+   phone, using .rows and .row from the search pane rather than a third row
+   style — a saved search and a favourite are both list rows, and the only thing
+   new here is the pair of headings. */
+.saved-split {
+  display: grid;
+  /* minmax(0, …) for the reason .rows uses it: a long release name must
+     ellipsis rather than widen its track past the viewport. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* The same breakpoint the search pane's .split uses, so the page reflows in one
+   step rather than two. */
+@media (max-width: 46rem) {
+  .saved-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.saved-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* A watchlist row is a button spanning the row: the whole thing re-runs that
+   search, so a small hit target inside a wide row would be a phone-hostile
+   near-miss. */
+.saved-query {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.saved-query:hover {
+  color: var(--accent);
+}
+
+/* A result row's thumbnail. The row keeps its head/meta/actions layout and
+   gains a fixed-width poster column, so a row with no artwork is the row this
+   page has always had rather than a hole where an image should be. */
+.result-with-poster {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+}
+
+/* Overrides .poster's centring and cap: in a row the frame IS its column. */
+.result-thumb {
+  max-width: none;
+  margin-inline: 0;
+  margin-bottom: 0;
+}
+
+/* At 3.5rem there is no room for "NO OMDB KEY" — the row's own hint line says
+   it once for the page, so the frame stays an empty box. */
+.result-thumb .poster-note {
+  font-size: 0.55rem;
+  padding: 0.2rem;
+}
+
+/* Grid layout for search results. Deliberately the For You feed's own grid
+   metrics, so the two poster walls on this page are one visual idea — and the
+   card carries the same play/add/add-via-RD row the list row does, on the card
+   rather than behind a hover: nothing the list offers may be lost in the grid. */
+.results-grid {
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem;
+}
+
+.result-card .poster {
+  max-width: none;
+  margin-bottom: 0.5rem;
+}
+
+.result-card .row-name {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.result-card .row-meta {
+  font-size: 0.7rem;
+}
+
+/* The actions sit at the bottom of every card whatever its title length, so a
+   row of cards has one row of buttons rather than a ragged one. */
+.result-card .row-actions {
+  margin-top: auto;
+  padding-top: 0.4rem;
+  flex-wrap: wrap;
+}

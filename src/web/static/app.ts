@@ -30,8 +30,10 @@ import {
   addPlan,
   ALL_TAB,
   categoryTabs,
+  dashRowForPlay,
   emptyView,
   modeForQuery,
+  parseLayout,
   parseSort,
   previewApplies,
   reportsHealthLookup,
@@ -41,10 +43,12 @@ import {
   searchUrl,
   sourceLabel,
   statusLineHidden,
+  tabClickPlan,
   visibleResults,
   type AddVia,
   type PublicSearchResult,
   type PublicSearchSnapshot,
+  type ResultLayout,
   type SearchView,
   type SourcesResponse,
 } from "./searchModel";
@@ -55,6 +59,12 @@ import {
   type PreviewState,
   type PublicTitleMeta,
 } from "./previewModel";
+import {
+  createPosterCache,
+  postersApply,
+  searchHint,
+  type PosterOutcome,
+} from "./resultPosters";
 import {
   ACTION_LABEL,
   createReccController,
@@ -78,6 +88,24 @@ import {
   type ReccState,
   type ReccType,
 } from "./reccModel";
+import {
+  applyLibraryResponse,
+  applySaved,
+  applyWatchlistResponse,
+  emptySaved,
+  favouriteLabel,
+  favouriteMeta,
+  isInLibrary,
+  libraryBody,
+  libraryStatus,
+  libraryToggleNotice,
+  watchlistBody,
+  watchlistStatus,
+  watchlistToggleNotice,
+  type LibraryInput,
+  type PublicFavourite,
+  type SavedState,
+} from "./savedModel";
 import { tokenFromHash } from "./authLink";
 
 // The token is held in sessionStorage and sent as an Authorization header on
@@ -113,11 +141,17 @@ const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
 const viewReccTab = el<HTMLButtonElement>("view-recc");
+const viewSavedTab = el<HTMLButtonElement>("view-saved");
 const viewQueueTab = el<HTMLButtonElement>("view-queue");
 const queueCount = el<HTMLSpanElement>("queue-count");
 const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
+const paneSaved = el<HTMLElement>("pane-saved");
 const paneQueue = el<HTMLElement>("pane-queue");
+const watchlistStatusLine = el<HTMLParagraphElement>("watchlist-status");
+const watchlistRows = el<HTMLUListElement>("watchlist-rows");
+const libraryStatusLine = el<HTMLParagraphElement>("library-status");
+const libraryRows = el<HTMLUListElement>("library-rows");
 
 const reccTypeSelect = el<HTMLSelectElement>("recc-type");
 const reccGenreInput = el<HTMLInputElement>("recc-genre");
@@ -129,12 +163,16 @@ const reccList = el<HTMLUListElement>("recc-list");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
+const saveSearchButton = el<HTMLButtonElement>("save-search");
 const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
+const layoutControl = el<HTMLLabelElement>("layout-control");
+const layoutSelect = el<HTMLSelectElement>("layout");
 const searchProgress = el<HTMLSpanElement>("search-progress");
 const searchStatusLine = el<HTMLParagraphElement>("search-status");
+const searchHintLine = el<HTMLParagraphElement>("search-hint");
 const resultsList = el<HTMLUListElement>("results");
 
 const previewPane = el<HTMLElement>("preview");
@@ -480,7 +518,18 @@ function hidePicker(): void {
 
 // Same createElement/textContent rule as renderRow, and for a stronger reason:
 // these strings are filenames from inside a stranger's torrent.
+//
+// `infoHash` is a PARAMETER, not a module-level variable read when a file is
+// chosen. The picker is an inline card, not a modal (index.html's `.picker` is
+// `display: block`), so the results list stays clickable while it is open —
+// clicking play on a different row opens a second picker for a different
+// torrent. A module-level "current picker hash" would be overwritten by that
+// second play(), and choosing a file from the FIRST picker would then record
+// its filename as watched against the SECOND torrent's favourite. Closing over
+// the hash at the call site (see play()) makes that impossible: each picker's
+// callbacks carry the hash they were opened with, for good.
 function showPicker(
+  infoHash: string,
   sessionId: string,
   capability: string,
   name: string,
@@ -500,6 +549,14 @@ function showPicker(
         // hidePicker() clears pickerSession, so the Cancel handler can no longer
         // stop the session we are about to hand to the player.
         hidePicker();
+        // Fire-and-forget, and only once a file was actually chosen. The server
+        // no-ops when this torrent is not favourited, so there is nothing to
+        // check here and nothing to wait for — the same shape as the TUI's
+        // markPlayed, which also records only after a player launches.
+        void postSaved(
+          "/api/library",
+          libraryBody({ infoHash, name }, "watched", file.filename),
+        );
         openPlayer(playerPath(sessionId, file, capability));
       });
       li.append(button);
@@ -532,7 +589,10 @@ async function play(row: DashRow): Promise<void> {
       stop: stopSession,
       confirm: (message) => confirm(message),
       notice: showNotice,
-      choose: showPicker,
+      // Closes over THIS row's hash, not a module-level variable — see
+      // showPicker's comment for why that distinction is load-bearing.
+      choose: (sessionId, capability, name, files) =>
+        showPicker(row.id, sessionId, capability, name, files),
       open: (path) => openPlayer(path),
       sleep,
       now: () => Date.now(),
@@ -550,7 +610,7 @@ async function play(row: DashRow): Promise<void> {
 // Search opens first. This app is a torrent finder; a queue monitor is what it
 // looks like when it opens on the queue. The Queue tab carries a count so
 // nothing in flight is out of sight.
-type ViewName = "search" | "recc" | "queue";
+type ViewName = "search" | "recc" | "saved" | "queue";
 let view: ViewName = "search";
 
 let searchView: SearchView = emptyView();
@@ -561,22 +621,46 @@ let searchStream: EventSource | null = null;
 // 23 of those arrive during one search.
 let selectedHash: string | null = null;
 
+// Remembered across reloads, and read through parseLayout because localStorage
+// is user-writable. Wrapped in try/catch for the reason readStoredToken is:
+// storage throws rather than returning null when it is blocked (Safari private
+// mode, a hardened profile), and a dead page is a worse outcome than a
+// forgotten preference.
+const LAYOUT_KEY = "torlnk.layout";
+
+function readStoredLayout(): ResultLayout {
+  try {
+    return parseLayout(localStorage.getItem(LAYOUT_KEY));
+  } catch {
+    return "list";
+  }
+}
+
+let layout: ResultLayout = readStoredLayout();
+
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
   paneRecc.hidden = next !== "recc";
+  paneSaved.hidden = next !== "saved";
   paneQueue.hidden = next !== "queue";
   viewSearchTab.setAttribute("aria-pressed", String(next === "search"));
   viewReccTab.setAttribute("aria-pressed", String(next === "recc"));
+  viewSavedTab.setAttribute("aria-pressed", String(next === "saved"));
   viewQueueTab.setAttribute("aria-pressed", String(next === "queue"));
   // The feed's first load happens here and nowhere else — `open()` is a no-op
   // after the first call, so this is "the tab has been visited", not "fetch
   // again". Nothing asks reccd for anything until a human opens this pane.
   if (next === "recc") recc.open();
+  // Refetched on every visit, not once: a favourite added from a search row
+  // while this pane sat hidden must be here when the user opens it, and the
+  // response is two small arrays.
+  if (next === "saved") void loadSaved();
 }
 
 viewSearchTab.addEventListener("click", () => showView("search"));
 viewReccTab.addEventListener("click", () => showView("recc"));
+viewSavedTab.addEventListener("click", () => showView("saved"));
 viewQueueTab.addEventListener("click", () => showView("queue"));
 
 // The tab strip, from GET /api/sources. The adult category is absent from that
@@ -593,16 +677,11 @@ function renderTabs(): void {
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(group === searchView.group));
       button.addEventListener("click", () => {
-        if (searchView.group === group) return;
+        const plan = tabClickPlan(searchView, group, queryInput.value);
+        if (plan.action === "ignore") return;
         searchView = { ...searchView, group };
         renderTabs();
-        // Switching category re-runs the search rather than filtering what is
-        // already here: the server searches only that group's sources, so the
-        // other tabs' hits were never fetched. Matches the TUI, where each tab
-        // is its own slice of one fan-out.
-        // mode, not query: a browse's query is empty but still needs re-running.
-        if (searchView.mode === "idle") renderResults();
-        else startSearch(searchView.query);
+        startSearch(plan.query);
       });
       return button;
     }),
@@ -647,6 +726,10 @@ function startSearch(raw: string): void {
   queryInput.value = query;
   selectedHash = null;
   preview.select(null, searchView.group);
+  // A new search is the only moment the whole set of rows changes, so it is the
+  // only moment every blob is certainly dead.
+  resultPosters.clear();
+  paintSearchHint();
   renderResults();
 
   const source = new EventSource(searchUrl(query, searchView.group, token));
@@ -700,6 +783,18 @@ searchForm.addEventListener("submit", (event) => {
   startSearch(queryInput.value);
 });
 
+// Saves whatever is in the box, submitted or not: the thing worth keeping is
+// the query you just typed, and requiring a search first would mean running one
+// to save one.
+saveSearchButton.addEventListener("click", () => {
+  const query = queryInput.value.trim();
+  if (!query) {
+    showNotice("Type a search to save it.");
+    return;
+  }
+  void toggleWatchlist(query);
+});
+
 sortSelect.addEventListener("change", () => {
   // parseSort is the TUI's own parser, so "seeders:desc" means the same thing
   // in both places and anything unrecognised falls back to the server's order.
@@ -716,6 +811,247 @@ aliveCheck.addEventListener("change", () => {
   searchView = { ...searchView, hideDead: aliveCheck.checked };
   renderResults();
 });
+
+layoutSelect.addEventListener("change", () => {
+  layout = parseLayout(layoutSelect.value);
+  try {
+    localStorage.setItem(LAYOUT_KEY, layout);
+  } catch {
+    /* not remembering the layout is survivable; failing the click is not */
+  }
+  // No refetch: both layouts render from the same visibleResults output and the
+  // same poster cache, so a toggle costs nothing.
+  renderResults();
+});
+
+// One cache for the whole page. Cleared when a new search starts — the only
+// moment the set of rows changes wholesale — which revokes every blob it holds.
+const resultPosters = createPosterCache({
+  async fetchMeta(release, group): Promise<PublicTitleMeta | null> {
+    const params = new URLSearchParams({ release });
+    // The group, not a parsed hint: the server maps it (hintForGroup) so the
+    // browser never has to know that "TV" means OMDb's "series".
+    if (group && group !== ALL_TAB) params.set("group", group);
+    try {
+      const res = await fetch(`/api/title?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return null;
+      const body = (await res.json()) as unknown;
+      return body && typeof body === "object" ? (body as PublicTitleMeta) : null;
+    } catch {
+      return null;
+    }
+  },
+  async fetchBlob(posterUrl): Promise<string | null> {
+    // Through /api/poster, never an <img src> at the CDN: that would leak the
+    // user's IP and referer on every row, which is why that route exists. It is
+    // also behind the bearer token, and an <img> cannot send a header.
+    try {
+      const res = await fetch(posterPath(posterUrl), { headers: authHeaders() });
+      if (!res.ok) return null;
+      return URL.createObjectURL(await res.blob());
+    } catch {
+      return null;
+    }
+  },
+  revoke: (url) => URL.revokeObjectURL(url),
+});
+
+/** The page's single "no OMDb key" line. The decision lives in resultPosters.ts's `searchHint`. */
+function paintSearchHint(): void {
+  const hint = searchHint(sources ? sources.omdbConfigured : null, searchView.group, resultPosters.hint());
+  searchHintLine.textContent = hint ?? "";
+  searchHintLine.hidden = hint === null;
+}
+
+/**
+ * Paint one poster frame.
+ *
+ * `compact` is the row thumbnail, where the frame is 3.5rem wide and "NO OMDB
+ * KEY" does not fit — it gets an empty box with the wording on `title`, and the
+ * page's hint line carries the explanation. A grid card's frame is poster-width,
+ * so it shows the note as text the way the For You cards do.
+ */
+function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean): void {
+  if (outcome.kind === "poster") {
+    const img = document.createElement("img");
+    img.src = outcome.url;
+    img.alt = "";
+    host.replaceChildren(img);
+    return;
+  }
+  const note = resultPosters.note(outcome);
+  const span = document.createElement("span");
+  span.className = "poster-note";
+  span.textContent = compact ? "" : note;
+  // An attribute, not markup — and the only way the compact frame says anything.
+  span.title = note;
+  host.replaceChildren(span);
+}
+
+// ONE observer for the page, not one per row, and this is the same hazard
+// resultPosters.ts exists for — one layer up.
+//
+// The results list is rebuilt on every snapshot frame, up to 23 a search. A row
+// whose poster has not settled yet has nothing to paint, so a per-row
+// `new IntersectionObserver(...)` would be constructed again on every frame —
+// and `disconnect()` only ever runs on intersect, so every row that never
+// scrolls into view leaves its observer alive holding a detached frame (the old
+// `li` having been discarded by `replaceChildren`). A 100-row browse across 23
+// frames is ~2300 live observers pinning dead nodes. Exactly the 23×-fetch,
+// 22-leaked-blob failure the cache prevents, in a different currency.
+//
+// One observer, disconnected wholesale at the top of every render and re-armed
+// on the new frames, cannot accumulate: after `disconnect()` it observes exactly
+// the frames now on the page.
+const posterObserver: IntersectionObserver | null =
+  // No IntersectionObserver (an old browser, a non-DOM environment) means fetch
+  // eagerly instead — a missing optimisation must not become a missing feature.
+  typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          // Stop watching this frame specifically; the others stay armed.
+          posterObserver?.unobserve(entry.target);
+          const pending = posterTargets.get(entry.target);
+          if (pending) startPoster(pending.release, entry.target as HTMLElement, pending.compact);
+        }
+      })
+    : null;
+
+// What each observed frame is waiting for. A WeakMap so a frame discarded by a
+// re-render is collectable — a Map keyed on elements would be the leak this
+// design is avoiding, just spelled differently.
+const posterTargets = new WeakMap<Element, { release: string; compact: boolean }>();
+
+function startPoster(release: string, host: HTMLElement, compact: boolean): void {
+  const outcome = resultPosters.want(release, searchView.group);
+  if (!(outcome instanceof Promise)) {
+    paintPoster(host, outcome, compact);
+    return;
+  }
+  void outcome.then((settledOutcome) => {
+    // The row may have been re-rendered or filtered away during the two round
+    // trips; a detached node is not worth painting.
+    if (host.isConnected) paintPoster(host, settledOutcome, compact);
+    paintSearchHint();
+  });
+}
+
+/**
+ * Mount a row's poster, lazily.
+ *
+ * Lazy because a browse can return 100+ rows, and fetching artwork for rows
+ * nobody scrolled to would spend a daily-capped OMDb key on them. For You is
+ * naturally ~20 picks and needs no such gate, which is why its own mount is
+ * eager.
+ */
+function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void {
+  const known = resultPosters.peek(release);
+  if (known !== undefined) {
+    // Settled already: paint it and never observe it. This is the path almost
+    // every frame of a re-render takes, and it is why the observer set stays
+    // small after the first pass.
+    paintPoster(host, known, compact);
+    return;
+  }
+  // An empty frame while it waits — NOT paintPoster's "none", which would put
+  // "No poster" on a grid card before anything had been asked. The CSS gives the
+  // frame its border and 2:3 box, so an empty one is a placeholder rather than a
+  // hole, and the row does not resize when the image lands.
+  host.replaceChildren();
+  if (posterObserver === null) {
+    startPoster(release, host, compact);
+    return;
+  }
+  posterTargets.set(host, { release, compact });
+  posterObserver.observe(host);
+}
+
+// The four buttons a result offers, built once and used by both layouts: a
+// grid card that offered fewer of them than the list row would be a downgrade
+// dressed as a view option.
+function resultActions(result: PublicSearchResult): HTMLDivElement {
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void play(rowForPlay(result)));
+  actions.append(playButton);
+
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.textContent = "add";
+  addButton.addEventListener("click", () => void addResult(result, "p2p"));
+  actions.append(addButton);
+
+  // Labelled by what the click will do, and rebuilt from savedState on every
+  // render — the results list is re-rendered on every snapshot frame, so a
+  // hardcoded label here would go stale within a second of being clicked.
+  const inLibrary = isInLibrary(savedState, result.infoHash);
+  const favButton = document.createElement("button");
+  favButton.type = "button";
+  favButton.textContent = favouriteLabel(inLibrary);
+  favButton.setAttribute("aria-pressed", String(inLibrary));
+  favButton.addEventListener("click", () => {
+    const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
+    if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
+    if (result.source) input.source = result.source;
+    void toggleLibrary(input);
+  });
+  actions.append(favButton);
+
+  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
+  // configured. A button that always answered "set a token first" is noise.
+  if (sources?.debridConfigured) {
+    const debridButton = document.createElement("button");
+    debridButton.type = "button";
+    debridButton.textContent = "add via RD";
+    debridButton.addEventListener("click", () => void addResult(result, "debrid"));
+    actions.append(debridButton);
+  }
+
+  return actions;
+}
+
+// Same createElement/textContent rule as every other list here: a release name
+// is written by whoever uploaded the torrent.
+function renderResultCard(result: PublicSearchResult): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row result-card";
+  li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
+
+  // The poster is the card's primary target and what it does is select the
+  // result, which fills the preview pane — the same thing clicking the name
+  // does in list view.
+  const posterButton = document.createElement("button");
+  posterButton.type = "button";
+  posterButton.className = "recc-poster";
+  posterButton.title = result.name;
+  const frame = document.createElement("div");
+  frame.className = "poster";
+  posterButton.append(frame);
+  posterButton.addEventListener("click", () => selectResult(result));
+  // compact: false — a card's frame is poster-width, so an empty one shows its
+  // note as text rather than relying on a tooltip.
+  mountResultPoster(result.name, frame, false);
+
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "result-name row-name";
+  name.textContent = result.name;
+  name.title = result.name;
+  name.addEventListener("click", () => selectResult(result));
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  meta.textContent = resultMeta(result, sources);
+
+  li.append(posterButton, name, meta, resultActions(result));
+  return li;
+}
 
 // Every node below is createElement + textContent. A release name is written by
 // whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
@@ -744,39 +1080,48 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
 
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
+  const actions = resultActions(result);
 
-  const playButton = document.createElement("button");
-  playButton.type = "button";
-  playButton.className = "play";
-  playButton.textContent = "play";
-  playButton.addEventListener("click", () => void play(rowForPlay(result)));
-  actions.append(playButton);
-
-  const addButton = document.createElement("button");
-  addButton.type = "button";
-  addButton.textContent = "add";
-  addButton.addEventListener("click", () => void addResult(result, "p2p"));
-  actions.append(addButton);
-
-  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
-  // configured. A button that always answered "set a token first" is noise.
-  if (sources?.debridConfigured) {
-    const debridButton = document.createElement("button");
-    debridButton.type = "button";
-    debridButton.textContent = "add via RD";
-    debridButton.addEventListener("click", () => void addResult(result, "debrid"));
-    actions.append(debridButton);
+  const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
+  if (!withPoster) {
+    li.append(head, meta, actions);
+    return li;
   }
 
-  li.append(head, meta, actions);
+  // The row's own layout is untouched — it moves wholesale into the second grid
+  // column, so a keyless page and a Games tab render exactly what they always
+  // did.
+  li.classList.add("result-with-poster");
+  const frame = document.createElement("div");
+  frame.className = "poster result-thumb";
+  const body = document.createElement("div");
+  body.append(head, meta, actions);
+  li.append(frame, body);
+  mountResultPoster(result.name, frame, true);
   return li;
 }
 
 function renderResults(): void {
+  // Every frame about to be replaced stops being watched. Without this the
+  // observer accumulates targets across all 23 snapshot frames of a search,
+  // pinning detached nodes for every row that never scrolled into view.
+  posterObserver?.disconnect();
   const shown = visibleResults(searchView, reportsHealthLookup(sources));
-  resultsList.replaceChildren(...shown.map(renderResult));
+
+  // The toggle is meaningless where there is no artwork, and a grid of empty
+  // frames is worse than the list it replaced — so on a Games tab, or with no
+  // OMDb key, the control is hidden and the layout is forced back to list. The
+  // stored preference is untouched: it applies again the moment the user is on
+  // a tab that can honour it.
+  const canGrid = postersApply(searchView.group, sources?.omdbConfigured === true);
+  layoutControl.hidden = !canGrid;
+  const effective: ResultLayout = canGrid ? layout : "list";
+
+  resultsList.classList.toggle("recc-grid", effective === "grid");
+  resultsList.classList.toggle("results-grid", effective === "grid");
+  resultsList.replaceChildren(
+    ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
+  );
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -792,6 +1137,7 @@ function renderResults(): void {
     selectedHash = null;
     preview.select(null, searchView.group);
   }
+  paintSearchHint();
 }
 
 function selectResult(result: PublicSearchResult): void {
@@ -1240,6 +1586,174 @@ reccGenreInput.addEventListener("change", () => recc.setGenre(reccGenreInput.val
 reccExploreCheck.addEventListener("change", () => recc.setExplore(reccExploreCheck.checked));
 reccRefreshButton.addEventListener("click", () => recc.refresh());
 
+// ---- saved ------------------------------------------------------------
+// The watchlist and the library. Decisions — which body each button sends, what
+// an empty or broken list says — are savedModel.ts's; what is here is fetch and
+// DOM.
+
+let savedState: SavedState = emptySaved();
+
+async function loadSaved(): Promise<void> {
+  try {
+    const res = await fetch("/api/saved", { headers: authHeaders() });
+    if (!res.ok) {
+      savedState = { ...savedState, loaded: true, error: `Couldn't load your lists (HTTP ${res.status}).` };
+      renderSaved();
+      return;
+    }
+    savedState = applySaved(savedState, await readJson(res));
+  } catch {
+    savedState = { ...savedState, loaded: true, error: "Couldn't load your lists — the server is not responding." };
+  }
+  renderSaved();
+}
+
+// Both mutators post, then render the list the SERVER returned rather than a
+// list predicted here — applyWatchlistResponse/applyLibraryResponse own that
+// fold, and watchlistToggleNotice/libraryToggleNotice own the notice text, both
+// in savedModel.ts where they can be unit-tested against a malformed body.
+async function postSaved(path: string, body: unknown): Promise<Record<string, unknown> | null> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    showNotice("That didn't reach the server.");
+    setConn("lost");
+    return null;
+  }
+  if (!res.ok) {
+    const envelope = await readEnvelope(res);
+    showNotice(envelope.error ?? `That didn't stick (HTTP ${res.status}).`);
+    return null;
+  }
+  return readJson(res);
+}
+
+// Called by the save-search button beside the search box.
+async function toggleWatchlist(query: string): Promise<void> {
+  const body = await postSaved("/api/watchlist", watchlistBody(query, "toggle"));
+  if (!body) return;
+  savedState = applyWatchlistResponse(savedState, body);
+  showNotice(watchlistToggleNotice(body));
+  renderSaved();
+}
+
+async function removeFromWatchlist(query: string): Promise<void> {
+  const body = await postSaved("/api/watchlist", watchlistBody(query, "remove"));
+  if (!body) return;
+  savedState = applyWatchlistResponse(savedState, body);
+  renderSaved();
+}
+
+// Called by the favourite button on each search row.
+async function toggleLibrary(input: LibraryInput): Promise<void> {
+  const body = await postSaved("/api/library", libraryBody(input, "toggle"));
+  if (!body) return;
+  savedState = applyLibraryResponse(savedState, body);
+  showNotice(libraryToggleNotice(body));
+  renderSaved();
+  // The ★ on the matching search row has to agree with what just happened.
+  renderResults();
+}
+
+async function removeFromLibrary(infoHash: string, name: string): Promise<void> {
+  const body = await postSaved("/api/library", libraryBody({ infoHash, name }, "remove"));
+  if (!body) return;
+  savedState = applyLibraryResponse(savedState, body);
+  renderSaved();
+  renderResults();
+}
+
+// createElement + textContent, as everywhere else on this page. A saved query is
+// the user's own typing, but a favourite's name is a release name from whoever
+// uploaded the torrent — so this list is as much an XSS surface as the results
+// list is.
+function renderWatchlistRow(query: string): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const run = document.createElement("button");
+  run.type = "button";
+  run.className = "saved-query";
+  run.textContent = query;
+  run.title = `Search for ${query}`;
+  run.addEventListener("click", () => {
+    queryInput.value = query;
+    showView("search");
+    startSearch(query);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeFromWatchlist(query));
+  actions.append(remove);
+
+  li.append(run, actions);
+  return li;
+}
+
+function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "row";
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+  const name = document.createElement("span");
+  name.className = "row-name";
+  name.textContent = f.name;
+  name.title = f.name;
+  head.append(name);
+
+  const meta = document.createElement("span");
+  meta.className = "row-meta";
+  meta.textContent = favouriteMeta(f);
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  // Play, through the same play() every other Play button on this page calls
+  // (which itself calls runPlay). A favourite has no magnet on the wire and
+  // does not need one: POST /api/stream
+  // rebuilds it from the hash, exactly as it does for a search hit.
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play";
+  playButton.textContent = "play";
+  playButton.addEventListener("click", () => void play(dashRowForPlay(f.id, f.name)));
+  actions.append(playButton);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "remove";
+  remove.addEventListener("click", () => void removeFromLibrary(f.id, f.name));
+  actions.append(remove);
+
+  li.append(head, meta, actions);
+  return li;
+}
+
+function renderSaved(): void {
+  watchlistRows.replaceChildren(...savedState.watchlist.map(renderWatchlistRow));
+  libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+
+  const wl = watchlistStatus(savedState);
+  watchlistStatusLine.textContent = wl.text;
+  watchlistStatusLine.classList.toggle("error", wl.tone === "error");
+  watchlistStatusLine.hidden = !wl.show;
+
+  const lib = libraryStatus(savedState);
+  libraryStatusLine.textContent = lib.text;
+  libraryStatusLine.classList.toggle("error", lib.tone === "error");
+  libraryStatusLine.hidden = !lib.show;
+}
+
 // ---- connection -----------------------------------------------------------
 
 // One probe of the JSON API, which — unlike EventSource — reports why it failed.
@@ -1308,13 +1822,19 @@ function openApp(payload: StatusPayload): void {
   viewsNav.hidden = false;
   showView(view);
   renderTabs();
+  layoutSelect.value = layout;
   renderResults();
+  renderSaved();
   rows = mergeRows(rows, rowsFromStatus(payload));
   render();
   connect();
   // After the panes are on screen: the tab strip and the source badges improve
   // when it lands, and nothing waits on it.
   void loadSources();
+  // Ahead of any search, because renderResult labels its favourite button from
+  // savedState: without this, a hit already in the library opens reading
+  // "favourite" and the first click removes it.
+  void loadSaved();
   queryInput.focus();
 }
 
