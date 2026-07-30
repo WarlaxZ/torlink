@@ -1309,20 +1309,31 @@ describe("POST /api/preferences", () => {
     expect((await post({})).status).toBe(400);
   });
 
+  it("rejects a body with an unrecognised action", async () => {
+    expect(
+      (await post({ action: "toggle", preferences: { maxResolution: null, require: [], exclude: [] } })).status,
+    ).toBe(400);
+  });
+
   it("rejects a body whose preferences is not an object", async () => {
     expect((await post({ action: "set", preferences: [] })).status).toBe(400);
   });
 
+  it("rejects a body with no preferences at all", async () => {
+    expect((await post({ action: "set" })).status).toBe(400);
+  });
+
   it("re-reads config so a concurrent change to another field is not clobbered", async () => {
     let saved: Config | null = null;
+    // A spy, so "did this request read config at all?" is answerable. An
+    // implementation serving a cached snapshot would never call it, and would
+    // pass just as well as a correct one if this only asserted on `saved`.
+    const loadConfigImpl = vi.fn(async () => searchConfig({ savedSearches: ["kestrel"] }));
     await post(
       { action: "set", preferences: { maxResolution: "720p", require: [], exclude: [] } },
-      {
-        // Simulates the TUI having added a saved search since the page loaded.
-        loadConfigImpl: async () => searchConfig({ savedSearches: ["kestrel"] }),
-        saveConfigImpl: async (c) => { saved = c; },
-      },
+      { loadConfigImpl, saveConfigImpl: async (c) => { saved = c; } },
     );
+    expect(loadConfigImpl).toHaveBeenCalledTimes(1);
     expect(saved!.savedSearches).toEqual(["kestrel"]);
   });
 
@@ -1347,19 +1358,29 @@ describe("preferences round trip", () => {
   // projects with `qualityPrefsFrom` — two different functions doing
   // overlapping validation. This is the only test that makes them agree on the
   // same config object rather than on two independently-stubbed ones.
+  //
+  // `dv` is in BOTH `require` and `exclude` on the way in: exclude must win and
+  // require must lose it (sanitiseQualityPrefs's collision rule). An input that
+  // needed no sanitising would make both sides compute the exact same object
+  // and the assertion would only prove self-consistency, not agreement on a
+  // sanitised shape — so this is chosen specifically to exercise that rule at
+  // the route level, and the expected value is pinned explicitly rather than
+  // only compared to the write's own echo.
   it("what POST stores is what GET reports", async () => {
     let saved: Config | null = null;
     const written = await handleWebApi(
       deps({ loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } }),
       "POST", "/api/preferences", new URLSearchParams(), AUTH,
-      JSON.stringify({ action: "set", preferences: { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] } }),
+      JSON.stringify({ action: "set", preferences: { maxResolution: "1080p", require: ["atmos", "dv"], exclude: ["dv"] } }),
     );
+    const expected = { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] };
+    expect((written.json as PreferencesResponse).preferences).toEqual(expected);
+
     const read = await handleWebApi(
       deps({ loadConfigImpl: async () => saved! }),
       "GET", "/api/sources", new URLSearchParams(), AUTH, "",
     );
-    expect((read.json as SourcesResponse).preferences)
-      .toEqual((written.json as PreferencesResponse).preferences);
+    expect((read.json as SourcesResponse).preferences).toEqual(expected);
   });
 });
 
@@ -1738,6 +1759,17 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     );
     expect(fetchTitleMetaImpl).toHaveBeenCalledOnce();
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  // `withParse`'s `parsed`-present branch is a separate code path from the
+  // direct construction `?name=`/`?imdb=` hit, and it is the one search-result
+  // rows actually use — the rows Task 14 gates a Play button on by medium.
+  it("carries the medium through alongside the release parse", async () => {
+    const res = await title(
+      releaseDeps({ fetchTitleMetaByNameImpl: async () => ({ ...OK_META, type: "movie" }) }),
+      "release=Kestrel.2010.1080p.BluRay.x264-GROUP&group=Movies",
+    );
+    expect(res.json).toMatchObject({ status: "ok", type: "movie", parsed: { title: "Kestrel", year: 2010 } });
   });
 });
 
