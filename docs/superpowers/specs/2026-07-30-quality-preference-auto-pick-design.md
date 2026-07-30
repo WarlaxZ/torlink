@@ -29,7 +29,7 @@ useful on its own.
 | --- | --- | --- |
 | **A — this spec** | Quality preference + `pickBestRelease` + auto-play from For You | ships first |
 | B — New Releases | A title-grouped tree list over the browse feeds, sorted by recency | later; reuses A's picker |
-| C — Debrid-aware picking | Prefer a release that will resolve instantly on Real-Debrid | later; wraps A's picker |
+| C — Debrid-aware picking | Walk the ranking until one resolves: skip releases that are uncached, dead, or taken down | later; loops over A's ranking |
 
 A ships alone because it needs nothing from B or C, and because it improves the surface
 people already use. B without A is a list that still makes you choose manually. C without
@@ -38,8 +38,10 @@ A has nothing to constrain.
 ### Explicitly not in this spec
 
 - The New Releases tree. No grouping of results by title.
-- Any Real-Debrid cache awareness. See "What we learned about Real-Debrid" below —
-  it is a bigger problem than it looks, and folding it in here would stall A.
+- Any Real-Debrid awareness — neither cache-checking nor takedown recovery. See "What we
+  learned about Real-Debrid" below: both need a retry loop that mutates the user's RD
+  account, and folding that in here would stall A. A's current behaviour on a dead or
+  flagged torrent is unchanged: the action fails with the existing message.
 - A "play best match" action on ordinary search results. It is a natural follow-up,
   but For You is the only surface that names a *title* rather than a *release*, and
   a picker needs a set of candidates for one title.
@@ -69,6 +71,26 @@ One cheap partial win already exists and belongs to C: `listTorrents` and `findE
 (`src/integrations/realdebrid.ts:274`, `:291`) already locate a torrent by infohash in
 the user's own account. Anything already there is instant. That covers re-watches for
 free; it says nothing about a title the user has never fetched.
+
+### "Removed" and "taken down" are the same question, and detection already exists
+
+C also has to answer *has this been pulled?*, not just *is it cached?*. That needs no new
+detection work:
+
+- `ERROR_STATUSES` (`src/integrations/realdebrid.ts:12`) is
+  `{error, magnet_error, virus, dead}`. `virus` is Real-Debrid's flag for content it has
+  removed; `messageForTorrentStatus` already renders it as "Real-Debrid flagged this
+  torrent's contents", and `dead` as "No seeders".
+- The unrestrict step separately maps `file_unavailable` and `no_longer_available` to
+  "No longer available on Real-Debrid (removed)."
+
+The constraint is identical to caching: all of it is knowable only *after* adding the
+magnet. What it changes is C's **value**. Today a `virus` or `dead` status fails the whole
+action and the user restarts by hand; with a fallback loop it simply advances to the next
+candidate. Recovering from a takedown is a better argument for building C than the
+caching speed-up was — and it is why C must be a loop over ranked candidates rather than
+a filter, which is exactly what `pickBestRelease` returning a ranked list (see
+"Ordering C's future needs" below) is designed to allow.
 
 ## 1. The preference
 
@@ -211,16 +233,40 @@ export interface Pick<T> {
   relaxed: FeatureId[];
   /** True when no candidate was at or under the cap, so the cap was ignored. */
   overCap: boolean;
-  /** True when `chosen` is a season pack and the intent named an episode. */
+  /**
+   * True when the intent named an episode but `chosen` does not name that episode —
+   * a season pack, a series pack, or an unbanded release. The caller must then pick
+   * the file inside it rather than playing the first one.
+   */
   fromPack: boolean;
 }
 
+/** Every surviving candidate, best first. */
+export function rankReleases<T extends PickableResult>(
+  candidates: readonly T[],
+  prefs: QualityPrefs,
+  intent: PickIntent,
+): Pick<T>[];
+
+/** The winner, or null. Exactly `rankReleases(...)[0] ?? null`. */
 export function pickBestRelease<T extends PickableResult>(
   candidates: readonly T[],
   prefs: QualityPrefs,
   intent: PickIntent,
 ): Pick<T> | null;
 ```
+
+#### Ordering C's future needs
+
+`rankReleases` exists because of the Real-Debrid findings above: neither "is it cached"
+nor "has it been taken down" can be answered without *trying* a candidate, so C is a loop
+that walks the ranking until one resolves. Returning only a winner would force C either to
+re-rank with the failed candidate removed, or to reimplement the ordering — the
+copy-then-drift bug this codebase has already hit four times.
+
+A ships `rankReleases` and uses only its head. That is a deliberate, single-line piece of
+scaffolding for a spec that is already designed, not speculative generality — and it costs
+nothing, because the ranking has to be computed in full either way.
 
 Structural `PickableResult` rather than `TorrentResult`, matching how `SortableResult`
 and `FilterableResult` are defined — so `TorrentResult` (terminal) and
@@ -229,29 +275,16 @@ either layer importing the other's type.
 
 ### The ranking
 
-Applied in order. Each step narrows the candidate set; a step that would empty it is
-skipped and recorded.
+Steps 1–4 **filter**; steps 5–8 **sort** what survives. The winner is the first row of
+the sorted list.
 
 1. **Parse and drop noise.** Candidates whose `parseRelease()` returns `null` are
    dropped — they are quality/codec residue with no title.
 
-2. **Intent.** For `{ kind: "episode", season, episode }`, candidates are banded:
-
-   - **Band 1** — names that exact episode (`season` and `episode` both match).
-   - **Band 2** — a pack covering it: the same `season`, no `episode` in the name.
-   - **Band 3** — everything else. A complete-series pack (`S01-S05`) lands here,
-     because `parse-torrent-title` reports no single `season` for a range. That is
-     the right place for it: it is usable but it is nobody's first choice for one
-     episode, and it will still be picked when it is all that exists.
-
-   The highest non-empty band wins outright, and later steps run only within it.
-   This is the step that stops "largest file" from always choosing
-   `Harrowgate.S03.1080p.WEB-DL` when the user wanted one episode of it. If band 2
-   wins, `fromPack` is true and the caller hands the resolved torrent's file list to
-   the existing `nextEpisodeIndex()` (`src/util/nextEpisodeFile.ts:87`) to select the
-   file inside the pack — that machinery already exists and is not duplicated here.
-
-   For `{ kind: "film" }` this step is a no-op.
+2. **Excluded features. Hard.** Any candidate matching an excluded feature is dropped
+   and never comes back, even if that empties the set — at which point the pick returns
+   `null` and the caller reports that everything found was excluded. "Never play DV"
+   has to mean never.
 
 3. **Resolution cap.** With `maxResolution` set, candidates above it are dropped.
 
@@ -261,21 +294,64 @@ skipped and recorded.
    those sources entirely. If every candidate is over the cap, the cap is dropped and
    `overCap` is set — the fail-soft choice, so the action still plays something.
 
-4. **Excluded features. Hard.** Any candidate matching an excluded feature is dropped
-   and never comes back, even if that empties the set — at which point the pick returns
-   `null` and the caller reports that everything found was excluded. "Never play DV"
-   has to mean never.
-
-5. **Required features. Soft.** Prefer candidates matching *all* required features. If
-   none do, drop the least-satisfied requirement and retry, recording each dropped id
-   in `relaxed`. Ordering is by how many candidates satisfy each requirement — the
+4. **Required features. Soft.** Keep only candidates matching *all* required features.
+   If none do, drop the least-satisfied requirement and retry, recording each dropped
+   id in `relaxed`. Ordering is by how many candidates satisfy each requirement — the
    rarest requirement is dropped first, so the commonest preference survives longest.
 
-6. **Largest `sizeBytes`**, then `seeders` descending as a tiebreak, then `name`
-   ascending so the result is deterministic for tests.
+   Requirements are applied *before* the resolution ranking below, so an explicitly
+   requested feature beats a higher resolution: with `require: ["atmos"]`, a 1080p
+   Atmos release wins over a 2160p one without it. A requirement the user ticked is a
+   stronger signal than a resolution they did not.
+
+5. **Resolution, highest first.** The primary ranker, not merely a filter. This is what
+   makes a 2160p season pack beat a 720p single episode.
+
+   A candidate whose resolution did not parse **ranks last** among known resolutions.
+   Note the deliberate asymmetry with step 3: unknown is optimistic for the cap (kept)
+   and pessimistic for the ranking (last), so such a release is never *excluded* but is
+   only *chosen* when nothing with a stated resolution is available.
+
+6. **Intent, as a tiebreak within one resolution.** For
+   `{ kind: "episode", season, episode }`, candidates band as:
+
+   - **Band 1** — names that exact episode (`season` and `episode` both match).
+   - **Band 2** — a pack covering it: the same `season`, no `episode` in the name.
+   - **Band 3** — everything else. A complete-series pack (`S01-S05`) lands here,
+     because `parse-torrent-title` reports no single `season` for a range. That is
+     the right place for it: it is usable but it is nobody's first choice for one
+     episode, and it will still be picked when it is all that exists.
+
+   If the winner is band 2 or 3, `fromPack` is true and the caller hands the resolved
+   torrent's file list to the existing `nextEpisodeIndex()`
+   (`src/util/nextEpisodeFile.ts:87`) to select the file inside the pack — that
+   machinery already exists and is not duplicated here.
+
+   For `{ kind: "film" }` this step is a no-op.
+
+7. **Largest `sizeBytes`.** Only ever separates releases of the same resolution and
+   band, so "largest available" means "largest at the best resolution available".
+
+8. **`seeders` descending, then `name` ascending**, so the result is deterministic
+   for tests.
 
 Returns `null` only when the candidate list is empty, every candidate was noise, or
-step 4 removed everything.
+step 2 removed everything.
+
+### Why resolution outranks size and intent
+
+Two decisions, taken together because they are the same decision:
+
+**Resolution over intent.** Strict banding (episode always beats pack) is smaller to
+download and much friendlier to a debrid cache, but it plays a visibly worse copy
+whenever the only single-episode release is poor. Resolution-first accepts the download
+cost to always get the best picture available under the cap. The practical consequence
+is real and worth stating plainly: **watching one episode may fetch an entire season.**
+
+**Resolution over size.** With no cap set, "largest file" alone would choose a 42 GB
+1080p remux over a 15 GB 2160p WEB-DL. Ranking on resolution first keeps one rule in
+force whether or not a cap is configured, rather than the picker behaving differently
+depending on a setting the user may not have touched.
 
 ### Why relax-and-report rather than refuse
 
@@ -350,12 +426,24 @@ real titles anywhere:
 
 Cases that must exist:
 
-- **The pack trap.** Candidates = a `Harrowgate.S03` pack (large) and a
-  `Harrowgate.S03E02` episode (small), intent = episode 2. The episode wins despite being
-  smaller. Same set with intent = film, and the pack wins on size.
+- **The pack trap, at equal resolution.** Candidates = `Harrowgate.S03.1080p` (large) and
+  `Harrowgate.S03E02.1080p` (small), intent = episode 2. The **episode wins** despite
+  being smaller — intent breaks the tie once resolution is level.
+- **Resolution outranks intent.** Candidates = `Harrowgate.S03.2160p` (pack) and
+  `Harrowgate.S03E02.720p` (episode), intent = episode 2, no cap. The **pack wins**, and
+  `fromPack` is true. With `maxResolution: "1080p"` the same set picks the 720p episode,
+  because the cap removes the pack first.
+- **Resolution outranks size.** `Kestrel.2010.1080p.BluRay.REMUX` at 42 GB versus
+  `Kestrel.2010.2160p.WEB-DL` at 15 GB, no cap: the **2160p wins**.
+- **Size only breaks a resolution tie.** Two 2160p releases, the larger wins.
+- **A requirement outranks resolution.** `require: ["atmos"]`, with a 1080p Atmos release
+  and a 2160p release without it: the **1080p wins**, and `relaxed` is empty.
 - **Cap respected**, and **cap ignored with `overCap` set** when nothing is under it.
-- **Unparseable resolution counts as under the cap** — a candidate with no resolution
-  token is not dropped by a `1080p` cap.
+- **Unparseable resolution is asymmetric** — a candidate with no resolution token is not
+  dropped by a `1080p` cap (step 3), but loses to any candidate with a stated resolution
+  (step 5), and is chosen when it is the only one.
+- **`rankReleases` returns every survivor in order**, and `pickBestRelease` equals its
+  head — the property C depends on.
 - **Exclusion is hard**: excluding `dv` with only `Tin.Rivers…DV…` available returns
   `null`, not a fallback.
 - **Requirement is soft**: requiring `atmos` with none available returns the best
@@ -377,7 +465,8 @@ the browser bundle — it must be run.
 
 ## 5. Documentation
 
-- `README.md`: the preference and what Enter now does on For You.
+- `README.md`: the preference, what Enter now does on For You, and the season-pack
+  consequence named under Risks.
 - The web UI's own limitations list — confirm it is still true once settings are
   web-editable.
 
@@ -387,6 +476,15 @@ the browser bundle — it must be run.
 used to Enter-then-browse now gets a player. Mitigated by `s` / the secondary button
 being visible in the footer hints and on the card, but it is a real change and belongs in
 the PR body rather than buried.
+
+**One episode can fetch a whole season.** Resolution ranks above intent, so a 2160p
+season pack beats a 720p single episode. Chosen deliberately (see "Why resolution
+outranks size and intent"), but it is the surprise most likely to generate a bug report:
+the download is an order of magnitude larger than the thing being watched, and on
+Real-Debrid a season pack is much less likely to already be cached. Two things make it
+survivable — `maxResolution` is the direct lever, and the status line names the release
+it chose, including its size, before playback starts. Worth a sentence in the README
+rather than leaving people to discover it.
 
 **`parse-torrent-title`'s vocabulary is the ceiling.** If it does not recognise a token,
 no feature test can. That is acceptable — it is already the basis of every title lookup
