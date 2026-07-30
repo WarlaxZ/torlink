@@ -1176,6 +1176,68 @@ git commit -m "feat: shared status copy for an auto-picked release"
 
 ---
 
+### Task 7b: Surface the medium on an OMDb lookup
+
+Auto-play needs to know whether a For You pick is a film. **reccd does not say** — `Recommendation` is `{ imdbId, title, year, score, reasons }` — and the pane's type filter defaults to `"all"` (`useRecommendations.ts:38`), so gating on the filter alone would mean Enter auto-plays nothing until the user presses `t`.
+
+OMDb's response carries `Type: "movie" | "series"`. `src/recc/omdb.ts` sends `type` as a *request* parameter but never reads it back.
+
+**Files:**
+- Modify: `src/recc/omdb.ts` — `OmdbResponse` (`:16-22`), `FetchTitleMetaResult` (`:8-10`), `request()` (`:56`)
+- Test: `src/recc/omdb.test.ts`
+
+**Interfaces:**
+- Produces: `FetchTitleMetaResult`'s ok branch gains `type: OmdbType | null`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `src/recc/omdb.test.ts`, matching the file's existing fake-fetch style:
+
+```ts
+it("reports the medium OMDb returned", async () => {
+  const fetchImpl = fakeJson({ Response: "True", imdbID: "tt1", Type: "movie", Plot: "x", Poster: "N/A" });
+  const out = await fetchTitleMeta("tt1", "key", { fetchImpl });
+  expect(out).toMatchObject({ ok: true, type: "movie" });
+});
+
+it("reports null when OMDb sends a medium it does not recognise", async () => {
+  const fetchImpl = fakeJson({ Response: "True", imdbID: "tt1", Type: "game" });
+  const out = await fetchTitleMeta("tt1", "key", { fetchImpl });
+  expect(out).toMatchObject({ ok: true, type: null });
+});
+```
+
+- [ ] **Step 2: Run the test and confirm it fails**
+
+Run: `npx vitest run src/recc/omdb.test.ts -t "medium"`
+Expected: FAIL — `type` is not on the result.
+
+- [ ] **Step 3: Implement**
+
+Add `Type?: string;` to `OmdbResponse`. Add `type: OmdbType | null;` to the ok branch of `FetchTitleMetaResult`. In `request()`, replace the success return with:
+
+```ts
+    // OMDb also returns "episode" and "game"; anything but the two we model
+    // becomes null rather than being coerced into one of them.
+    const type: OmdbType | null =
+      body.Type === "movie" || body.Type === "series" ? body.Type : null;
+    return { ok: true, type, imdbId: clean(body.imdbID), plot: clean(body.Plot), posterUrl: clean(body.Poster) };
+```
+
+- [ ] **Step 4: Run the tests and confirm they pass**
+
+Run: `npx vitest run src/recc && npm run typecheck`
+Expected: PASS. `typecheck` will flag any existing construction of the ok branch that now lacks `type`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/recc/omdb.ts src/recc/omdb.test.ts
+git commit -m "feat: report the medium on an OMDb title lookup"
+```
+
+---
+
 ### Task 8: For You — auto-play a film
 
 **Files:**
@@ -1187,47 +1249,111 @@ git commit -m "feat: shared status copy for an auto-picked release"
 - Consumes: `Store.autoPlayTitle` (Task 6).
 - Produces: `ForYouProps.autoPlayTitle?: (title: string, intent: PickIntent) => void`.
 
-**Behaviour.** On a **film** row, `Enter` calls `autoPlayTitle(title, { kind: "film" })`. On a **series** row, `Enter` is unchanged — `setSection` + `submitQuery`. `s` always does the unchanged thing. A For You series must never reach the picker: guessing season 1 episode 1 is what spec D exists to replace, and shipping the guess means users see it introduced and reversed.
+**Behaviour.** On a **film** row, `Enter` calls `autoPlayTitle(title, { kind: "film" })`. On a **series** row or a row of unknown medium, `Enter` is unchanged — `setSection` + `submitQuery`. `s` always does the unchanged thing. A For You series must never reach the picker: guessing season 1 episode 1 is what spec D exists to replace, and shipping the guess means users see it introduced and reversed.
 
-Row type comes from `recs.type`: `"movie"` is a film, `"tv"` is a series, and `"all"` is **unknown** — treat unknown as a series (no auto-play), because reccd's payload carries no per-item type and a wrong guess plays the wrong thing.
+**Determining the medium.** Two sources, in order:
+
+1. **OMDb's `type`** for that pick (Task 7b), which is per-item and correct whatever the filter says. For You already fetches OMDb metadata for the highlighted row via `useTitlePreview` (`src/ui/hooks/useTitlePreview.ts`), keyed by `imdbId`; reuse that result rather than issuing a second lookup.
+2. **The pane's filter**, when there is no OMDb key or the lookup has not resolved: `recs.type === "movie"` means film, anything else means do not auto-play.
+
+This ordering is why Task 7b exists. `useRecommendations.ts:38` starts the filter at `"all"` and reccd sends no per-item type, so filter-only gating would mean Enter auto-plays nothing until the user presses `t`.
+
+Add a pure helper next to the component so the rule is testable without rendering:
+
+```ts
+/**
+ * Whether a For You row can be auto-played. Only a film has an unambiguous
+ * intent — a show needs the season/episode picker (spec D).
+ *
+ * `omdbType` is per-item and wins when known. The filter is the fallback, and
+ * it can only ever say "yes, film": "all" means the medium is genuinely
+ * unknown, because reccd's payload carries no type.
+ */
+export function autoPlayableFilm(
+  omdbType: "movie" | "series" | null | undefined,
+  filter: ReccType,
+): boolean {
+  if (omdbType) return omdbType === "movie";
+  return filter === "movie";
+}
+```
 
 - [ ] **Step 1: Write the failing test**
+
+**There is no `type` prop on `ForYou`** — the filter lives inside `useRecommendations` as internal state, reachable only by pressing `t` (`all → movie → tv`). Do not invent a prop. Test the rule directly through the exported helper, and test the wiring by cycling the filter with real keystrokes.
 
 Add to `src/ui/components/ForYou.test.tsx`, reusing the existing `flush()` helper at `:33-39`:
 
 ```tsx
-it("auto-plays a film pick on Enter", async () => {
+import { autoPlayableFilm } from "./ForYou";
+
+describe("autoPlayableFilm", () => {
+  it("trusts OMDb's medium over the filter", () => {
+    expect(autoPlayableFilm("movie", "all")).toBe(true);
+    expect(autoPlayableFilm("series", "movie")).toBe(false);
+  });
+
+  it("falls back to the filter when OMDb said nothing", () => {
+    expect(autoPlayableFilm(null, "movie")).toBe(true);
+    expect(autoPlayableFilm(undefined, "all")).toBe(false);
+    expect(autoPlayableFilm(null, "tv")).toBe(false);
+  });
+});
+
+it("auto-plays on Enter once the filter is on films", async () => {
   const played: { title: string; intent: unknown }[] = [];
   const { stdin } = render(
-    <ForYou {...baseProps} active type="movie" autoPlayTitle={(title, intent) => played.push({ title, intent })} />,
+    <ForYou {...baseProps} active autoPlayTitle={(title, intent) => played.push({ title, intent })} />,
   );
+  await flush();
+  stdin.write("t"); // all -> movie
   await flush();
   stdin.write("\r");
   await flush();
   expect(played).toEqual([{ title: "Kestrel", intent: { kind: "film" } }]);
 });
 
-it("does not auto-play a series pick — that needs the episode picker", async () => {
+it("does not auto-play with the default 'all' filter and no OMDb medium", async () => {
   const played: string[] = [];
   const submitted: string[] = [];
   const { stdin } = render(
-    <ForYou {...baseProps} active type="tv"
+    <ForYou {...baseProps} active
       autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
   );
   await flush();
   stdin.write("\r");
   await flush();
   expect(played).toEqual([]);
-  expect(submitted).toEqual(["Harrowgate"]);
+  expect(submitted).toEqual(["Kestrel"]);
+});
+
+it("does not auto-play a show — that needs the episode picker", async () => {
+  const played: string[] = [];
+  const submitted: string[] = [];
+  const { stdin } = render(
+    <ForYou {...baseProps} active
+      autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
+  );
+  await flush();
+  stdin.write("t"); // all -> movie
+  await flush();
+  stdin.write("t"); // movie -> tv
+  await flush();
+  stdin.write("\r");
+  await flush();
+  expect(played).toEqual([]);
+  expect(submitted).toEqual(["Kestrel"]);
 });
 
 it("s searches the title without playing", async () => {
   const played: string[] = [];
   const submitted: string[] = [];
   const { stdin } = render(
-    <ForYou {...baseProps} active type="movie"
+    <ForYou {...baseProps} active
       autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
   );
+  await flush();
+  stdin.write("t");
   await flush();
   stdin.write("s");
   await flush();
@@ -1236,7 +1362,7 @@ it("s searches the title without playing", async () => {
 });
 ```
 
-Match `baseProps` and the recc-fetch mock to the file's existing setup; the fixture titles must be `Kestrel` (film) and `Harrowgate` (series).
+Match `baseProps` and the recc-fetch mock to the file's existing setup. Note that `t` refetches, so each `stdin.write("t")` needs its own `flush()`; the fixture the mock returns must be named `Kestrel` for every filter value, since the tests above assert on it after cycling.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
@@ -1245,7 +1371,7 @@ Expected: FAIL — `autoPlayTitle` is not a prop and Enter still submits a query
 
 - [ ] **Step 3: Implement**
 
-Add to `ForYouProps`:
+Export `autoPlayableFilm` from `ForYou.tsx` (the helper shown above), and add to `ForYouProps`:
 
 ```ts
   /** Absent means the pane behaves exactly as it did before. */
@@ -1265,9 +1391,10 @@ Replace the `key.return` branch in the `useInput` handler, and add an `s` branch
         if (!selectedItem) return;
         // Only a film has an unambiguous intent. A series needs the season and
         // episode picker (spec D); until then Enter does what it always did
-        // rather than guessing season 1 episode 1. `type: "all"` is unknown —
-        // reccd sends no per-item type — so it takes the safe branch too.
-        if (recs.type === "movie" && autoPlayTitle) {
+        // rather than guessing season 1 episode 1. `preview.type` is OMDb's
+        // per-item answer and wins; the pane's filter is the fallback when
+        // there is no OMDb key, and "all" means genuinely unknown.
+        if (autoPlayTitle && autoPlayableFilm(preview.type, recs.type)) {
           autoPlayTitle(selectedItem.title, { kind: "film" });
         } else {
           setSection(TYPE_SECTION[recs.type]);
@@ -1275,6 +1402,8 @@ Replace the `key.return` branch in the `useInput` handler, and add an `s` branch
         }
       }
 ```
+
+`preview` is the existing `useTitlePreview` result for the highlighted row. That hook does not currently surface `type` — thread Task 7b's new field through it (it already returns the `fetchTitleMeta` result; add `type` to whatever shape it exposes) rather than issuing a second OMDb call. If the hook turns out not to hold a resolved result for the highlighted row at keypress time, pass `undefined` and let the filter fallback handle it — never block Enter waiting on a network call.
 
 In `App.tsx`, pass `autoPlayTitle={store.autoPlayTitle}` to `<ForYou />` (the element is at `App.tsx:2610-2618`).
 
@@ -1324,9 +1453,14 @@ const item = (over: Partial<StreamHistoryItem>): StreamHistoryItem => ({
 
 const flush = async () => { await new Promise((r) => setTimeout(r, 0)); };
 
+// `vi.mock` is HOISTED above the imports; `vi.doMock` is not, and would be a
+// no-op here because `ContinueWatching` resolves `useStore` at module load.
+// The mock therefore reads a mutable holder that each test reassigns.
+let store = makeTestStore();
+vi.mock("../store", () => ({ useStore: () => store }));
+
 function renderWith(overrides: Parameters<typeof makeTestStore>[0]) {
-  const store = makeTestStore({ region: "content", section: "continueWatching", ...overrides });
-  vi.doMock("../store", () => ({ useStore: () => store }));
+  store = makeTestStore({ region: "content", section: "continueWatching", ...overrides });
   return render(<ContinueWatching />);
 }
 
@@ -1376,7 +1510,7 @@ describe("ContinueWatching Enter", () => {
 });
 ```
 
-If `vi.doMock` on the store proves awkward for this component, add an optional props escape hatch to `ContinueWatching` mirroring `ForYou`'s prop-driven shape rather than fighting the mock — but keep the store as the default source.
+`makeTestStore` must be called before `vi.mock`'s factory runs, which it is — the factory is lazy and only executes when `../store` is first imported. If the hoisting still bites, add an optional props escape hatch to `ContinueWatching` mirroring `ForYou`'s prop-driven shape rather than fighting the mock, keeping the store as the default source.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
@@ -1509,7 +1643,7 @@ git commit -m "feat: document the play and search keys in help and footers"
 **Files:**
 - Create: `src/ui/components/QualityPrompt.tsx`
 - Modify: `src/ui/App.tsx` — open it from the config pane, save on close
-- Modify: `src/ui/keymap.ts` — the "Accounts" help group (`:32-40`), for the key that opens it
+- Modify: `src/ui/keymap.ts` — the "Navigate" help group (`:13-31`), for the key that opens it
 - Test: `src/ui/components/QualityPrompt.test.tsx`
 
 **Interfaces:**
@@ -1639,7 +1773,13 @@ export function QualityPrompt({ width, maxResolution, require, exclude, onChange
 }
 ```
 
-In `App.tsx`, follow the existing pattern for `SourcesPrompt`/`LimitsPrompt`: a `showQuality` state, a key in the global handler (`App.tsx:1984-1996` holds `?`, `o`, `S` — pick an unused letter, `q` is free), and an `onChange` that does `setConfig` + `saveConfig` with the three new fields. Add the key to the "Accounts" help group.
+In `App.tsx`, follow the existing pattern for `SourcesPrompt`/`LimitsPrompt`: a `showQuality` state, a key in the global handler, and an `onChange` that does `setConfig` + `saveConfig` with the three new fields.
+
+**Use `P`, not `q`.** `q` is Quit (`keymap.ts:29`, `App.tsx:2076`). The global config keys in this app are uppercase — `S` sources, `D` DNS, `L` limits, `V` VPN, `shift+w`, `shift+x` — and `P` is unbound. Add it to the **"Navigate"** help group (`keymap.ts:13-31`), which is where those global keys live; there is no "Accounts" entry for them.
+
+```ts
+      { keys: "P", label: "Playback quality (resolution and features)" },
+```
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
@@ -1854,7 +1994,7 @@ Every decision about what to show and what to send lives here. `app.ts` is DOM w
   - `function prefsFromWire(p: PublicQualityPrefs): QualityPrefs`
   - `function prefsToWire(p: QualityPrefs): PublicQualityPrefs`
   - `function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent | null`
-  - `function canAutoPlayRecc(type: "all" | "movie" | "tv"): boolean`
+  - `function autoPlayableFilm(omdbType: "movie" | "series" | null | undefined, filter: "all" | "movie" | "tv"): boolean` — **the same name and signature as the helper Task 8 exports from `ForYou.tsx`**. Two implementations of one rule is the copy-then-drift bug this codebase has hit four times, but `src/web` may not import `src/ui`, so the browser gets its own copy here and both are tested against the same cases. If a third consumer appears, move it down into `src/util/releasePick.ts`.
   - `type PickPhase = { kind: "idle" } | { kind: "searching"; title: string } | { kind: "playing"; note: string } | { kind: "none"; title: string }`
   - `function createPickController(fx: PickEffects): PickController`
 
@@ -1864,7 +2004,7 @@ Create `src/web/static/pickModel.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { prefsFromWire, prefsToWire, intentForHistoryRow, canAutoPlayRecc } from "./pickModel";
+import { prefsFromWire, prefsToWire, intentForHistoryRow, autoPlayableFilm } from "./pickModel";
 import type { PublicStreamHistoryItem } from "../wire";
 
 const row = (over: Partial<PublicStreamHistoryItem>): PublicStreamHistoryItem => ({
@@ -1897,15 +2037,16 @@ describe("intentForHistoryRow", () => {
   });
 });
 
-describe("canAutoPlayRecc", () => {
-  it("plays films", () => { expect(canAutoPlayRecc("movie")).toBe(true); });
-
-  it("does not play shows — they need the episode picker", () => {
-    expect(canAutoPlayRecc("tv")).toBe(false);
+describe("autoPlayableFilm", () => {
+  it("trusts OMDb's medium over the filter", () => {
+    expect(autoPlayableFilm("movie", "all")).toBe(true);
+    expect(autoPlayableFilm("series", "movie")).toBe(false);
   });
 
-  it("does not play when the type filter is all, because the item type is unknown", () => {
-    expect(canAutoPlayRecc("all")).toBe(false);
+  it("falls back to the filter when OMDb said nothing", () => {
+    expect(autoPlayableFilm(null, "movie")).toBe(true);
+    expect(autoPlayableFilm(undefined, "all")).toBe(false);
+    expect(autoPlayableFilm(null, "tv")).toBe(false);
   });
 });
 ```
@@ -1948,11 +2089,23 @@ export function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent |
 
 /**
  * Whether a For You row can be auto-played. Only a film has an unambiguous
- * intent: a show needs the season/episode picker, and `all` means the item's
- * type is unknown because reccd sends no per-item type.
+ * intent — a show needs the season/episode picker (spec D).
+ *
+ * `omdbType` is per-item and wins when known. The pane's filter is the fallback
+ * for when there is no OMDb key, and it can only ever say "yes, film": "all"
+ * means the medium is genuinely unknown, because reccd sends no per-item type.
+ *
+ * DELIBERATELY IDENTICAL to the helper of the same name in
+ * `src/ui/components/ForYou.tsx`, down to the argument order. `src/web` cannot
+ * import `src/ui`, so the rule exists twice; keeping the name and the tests
+ * identical is what makes a divergence obvious in review.
  */
-export function canAutoPlayRecc(type: "all" | "movie" | "tv"): boolean {
-  return type === "movie";
+export function autoPlayableFilm(
+  omdbType: "movie" | "series" | null | undefined,
+  filter: "all" | "movie" | "tv",
+): boolean {
+  if (omdbType) return omdbType === "movie";
+  return filter === "movie";
 }
 ```
 
@@ -2012,13 +2165,103 @@ After `</header>` in `index.html`:
 
 - [ ] **Step 2: Wire it in `app.ts`**
 
-Build one row per `FEATURE_IDS` entry with `createElement` and `textContent` — never `innerHTML`; the labels are ours, but the rule is absolute in this directory. Each row is a three-state control matching the terminal's (off / require / exclude). On change, `POST /api/preferences` with `prefsToWire(...)` and store the echoed value.
+Read the initial value from the `preferences` field of `GET /api/sources`, which the client already fetches at boot. Build the rows with `createElement` + `textContent` — never `innerHTML`. The labels are ours, but the rule is absolute in this directory and there is no lint rule to catch a violation.
 
-Read the initial value from the `preferences` field of `GET /api/sources`, which the client already fetches at boot.
+```ts
+import { FEATURE_IDS, FEATURES } from "../../util/releasePick";
+import { prefsFromWire, prefsToWire } from "./pickModel";
+import type { PublicQualityPrefs, PreferencesResponse } from "../wire";
+
+// Off -> require -> exclude -> off, matching the terminal's three-state cell.
+// One control per feature rather than two checkbox lists, so a feature cannot
+// be required and excluded at the same time.
+const NEXT_STATE = { off: "require", require: "exclude", exclude: "off" } as const;
+const MARK = { off: "·", require: "✓", exclude: "✗" } as const;
+type FeatureState = keyof typeof NEXT_STATE;
+
+let prefs: PublicQualityPrefs = { maxResolution: null, require: [], exclude: [] };
+
+function stateOf(id: (typeof FEATURE_IDS)[number]): FeatureState {
+  if (prefs.exclude.includes(id)) return "exclude";
+  if (prefs.require.includes(id)) return "require";
+  return "off";
+}
+
+async function savePrefs(next: PublicQualityPrefs): Promise<void> {
+  const res = await api("/api/preferences", {
+    method: "POST",
+    body: JSON.stringify({ action: "set", preferences: next }),
+  });
+  // Trust the server's echo, not the local guess: it re-reads and sanitises,
+  // so an id this build sent but the server rejected must not linger in the UI.
+  prefs = ((await res.json()) as PreferencesResponse).preferences;
+  renderPrefs();
+}
+
+function renderPrefs(): void {
+  const box = document.getElementById("pref-features")!;
+  box.replaceChildren();
+  const res = document.getElementById("pref-res") as HTMLSelectElement;
+  res.value = prefs.maxResolution ?? "";
+  for (const id of FEATURE_IDS) {
+    const state = stateOf(id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pref-feature";
+    btn.dataset.state = state;
+    btn.textContent = `${MARK[state]} ${FEATURES[id].label}`;
+    btn.setAttribute("aria-label", `${FEATURES[id].label}: ${state}`);
+    btn.addEventListener("click", () => {
+      const next = NEXT_STATE[state];
+      void savePrefs({
+        maxResolution: prefs.maxResolution,
+        require: next === "require" ? [...prefs.require, id] : prefs.require.filter((x) => x !== id),
+        exclude: next === "exclude" ? [...prefs.exclude, id] : prefs.exclude.filter((x) => x !== id),
+      });
+    });
+    box.appendChild(btn);
+  }
+}
+
+document.getElementById("pref-res")!.addEventListener("change", (e) => {
+  const value = (e.target as HTMLSelectElement).value;
+  void savePrefs({ ...prefs, maxResolution: (value || null) as PublicQualityPrefs["maxResolution"] });
+});
+```
+
+`api(...)` is whatever authenticated fetch helper `app.ts` already uses — reuse it, do not add a second one. `prefsFromWire`/`prefsToWire` are needed where a pick is actually made (Step 3), not here.
 
 - [ ] **Step 3: Add the play buttons**
 
-On a For You card, add a Play button only when `canAutoPlayRecc(currentType)` is true. On a Continue Watching row, add one only when `intentForHistoryRow(item)` is non-null; keep the existing resume action as a secondary button in both cases. Playback goes through `streamFlow.ts` unchanged.
+Gate both on `pickModel`, never on a conditional written inline here.
+
+```ts
+// For You card. The whole decision is `autoPlayableFilm` in pickModel — this
+// function only looks up its two inputs and builds a node. A conditional here
+// that decided what to show would be the thing review has caught twice.
+function addReccPlay(card: HTMLElement, item: PublicRecommendation, filter: ReccType): void {
+  if (!autoPlayableFilm(posterMetaFor(item.imdbId)?.type, filter)) return;
+  const play = document.createElement("button");
+  play.type = "button";
+  play.textContent = "Play";
+  play.addEventListener("click", () => void autoPlay(item.title, { kind: "film" }));
+  card.appendChild(play);
+}
+
+// Continue Watching row. Null intent means a film or a season pack: there is
+// no honest next episode, so no Play button and the resume action stands alone.
+function addHistoryPlay(row: HTMLElement, item: PublicStreamHistoryItem): void {
+  const intent = intentForHistoryRow(item);
+  if (!intent) return;
+  const play = document.createElement("button");
+  play.type = "button";
+  play.textContent = "Play next";
+  play.addEventListener("click", () => void autoPlay(item.title, intent, () => resume(item)));
+  row.prepend(play);
+}
+```
+
+`autoPlay(title, intent, fallback?)` searches via the existing search path, calls `pickBestRelease(results, prefsFromWire(prefs), intent)`, shows `pickStatusLine(pick, prefs.maxResolution ?? undefined)`, and hands the winner to `streamFlow.ts` unchanged — passing `intent` on when `pick.fromPack` is true so the file inside the pack is selected. `resume(item)` is the existing continue-watching action. `posterMetaFor` is whatever `resultPosters.ts`/`previewModel.ts` already exposes for a fetched title; if it carries no `type`, thread Task 7b's field through `/api/title` the same way Task 8 threads it through `useTitlePreview`.
 
 - [ ] **Step 4: Style it**
 
@@ -2030,7 +2273,8 @@ Run: `npm run dev -- serve --web`
 
 There is no jsdom, deliberately — wiring is verified by running it. Check:
 - The disclosure opens; changing the resolution persists across a reload.
-- A For You **film** card shows Play; a **show** card does not.
+- A feature cell cycles off → require → exclude → off, and the change survives a reload.
+- A For You **film** card shows Play; a **show** card does not. With an OMDb key this is right on the default "all" filter; without one, only after switching the filter to films.
 - A Continue Watching row with a next episode shows Play; a film row does not.
 - A pick that relaxed a requirement shows the note from `pickStatusLine`.
 
@@ -2089,7 +2333,7 @@ git commit -m "docs: describe the quality preference and one-click play"
 
 ## Self-Review
 
-**Spec coverage.** Config fields and sanitisation → Task 5. The feature table → Task 2. `rankReleases`/`pickBestRelease` and the eight ranking steps → Tasks 3–4. Over-cap ascending → Task 4. Status copy → Task 7. Terminal For You → Task 8. Terminal Continue Watching → Task 9. Keymap both halves → Task 10. Terminal settings → Task 11. Web wire and routes → Task 12. Web pure module → Task 13. Web DOM → Task 14. README and limitations → Task 15. Every test case listed in the spec's Testing section appears in Tasks 2–5 and 12–13.
+**Spec coverage.** OMDb medium → Task 7b. Config fields and sanitisation → Task 5. The feature table → Task 2. `rankReleases`/`pickBestRelease` and the eight ranking steps → Tasks 3–4. Over-cap ascending → Task 4. Status copy → Task 7. Terminal For You → Task 8. Terminal Continue Watching → Task 9. Keymap both halves → Task 10. Terminal settings → Task 11. Web wire and routes → Task 12. Web pure module → Task 13. Web DOM → Task 14. README and limitations → Task 15. Every test case listed in the spec's Testing section appears in Tasks 2–5 and 12–13.
 
 **Two deliberate deviations from the spec, both recorded at the task that makes them:**
 
@@ -2098,4 +2342,12 @@ git commit -m "docs: describe the quality preference and one-click play"
 
 **One thing the spec left undefined, decided here:** it referred to a "web settings pane", which does not exist. Task 14 puts the controls in a header `<details>` block, because the preference affects two panes and `index.html:20` rules out a fifth nav tab.
 
-**Known soft spot.** Task 6 Step 5 names `searchAllSources` and `startStream` as placeholders for whatever `App.tsx` already uses. `App.tsx` is 96 KB and its search and stream entry points were not read while writing this plan; the implementer must find the real ones rather than adding new paths. This is the one step in the plan that is not literal.
+**One thing the code decided, not the spec:** For You's type filter starts at `"all"` (`useRecommendations.ts:38`) and reccd sends no per-item type, so gating auto-play on the filter alone would mean Enter plays nothing until the user presses `t`. Task 7b surfaces OMDb's `Type` — which `omdb.ts` requests but never parses — so a film is recognised per item, with the filter as the fallback when there is no OMDb key. The spec's "For You, film" row therefore means "OMDb says film, or the filter is explicitly films".
+
+**Known soft spots.** Three steps are not literal, all for the same reason — the existing call sites were not read while writing this plan:
+
+1. **Task 6 Step 5** names `searchAllSources` and `startStream` as placeholders for whatever `App.tsx` already uses. It is 96 KB; find the real entry points rather than adding new paths.
+2. **Task 8 Step 3** assumes `useTitlePreview` can surface Task 7b's `type` for the highlighted row. If it cannot cheaply, pass `undefined` and let the filter fallback handle it — never block Enter on a network call.
+3. **Task 14 Step 3** assumes something in `resultPosters.ts` / `previewModel.ts` exposes fetched title metadata per `imdbId`. If it carries no `type`, thread it through `/api/title` the same way.
+
+None of the three change a decision; each is a lookup the implementer must do.
