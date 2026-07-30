@@ -447,8 +447,8 @@ describe("POST /api/stream", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(res.json).toMatchObject({ session: { backend: "realdebrid" } });
-    expect(resolveDebridImpl).toHaveBeenCalledWith("rd-token", MAGNET, expect.anything());
+    expect(res.json).toMatchObject({ session: { backend: "debrid" } });
+    expect(resolveDebridImpl).toHaveBeenCalledWith("realdebrid", "rd-token", MAGNET, expect.anything());
     expect(streamTorrentImpl).not.toHaveBeenCalled();
   });
 

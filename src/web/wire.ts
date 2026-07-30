@@ -128,7 +128,7 @@ export interface PublicStreamFile {
  */
 export interface PublicStreamSession {
   id: string;
-  backend: "realdebrid" | "torrent";
+  backend: "debrid" | "torrent";
   name: string;
   state: "resolving" | "ready" | "error";
   /** Integer percent, 0–100 (not a 0..1 fraction). */

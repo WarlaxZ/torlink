@@ -9,8 +9,9 @@
 //
 // Two backends, one URL shape:
 //
-// - Real-Debrid: a `302` to the unrestricted link. The browser then talks
-//   straight to their CDN — native seeking, zero bytes through this process.
+// - The debrid provider: a `302` to the unrestricted link. The browser then
+//   talks straight to their CDN — native seeking, zero bytes through this
+//   process.
 // - WebTorrent: a range-forwarding reverse proxy. The backend's own URLs are
 //   `http://localhost:<ephemeral>/webtorrent/…`, which is unreachable from the
 //   phone on the sofa; proxying them through the port the dashboard is already
@@ -218,9 +219,9 @@ const PASS_THROUGH = ["content-type", "content-length", "content-range", "accept
  * socket, unlike everything in `routes.ts`.
  *
  * Returns the status written, so the caller logs what actually happened rather
- * than what was intended. The caller must log the *path* only: a Real-Debrid
- * unrestricted link is a credential against the user's account and must never
- * reach a log line, and the query string carries the capability.
+ * than what was intended. The caller must log the *path* only: an unrestricted
+ * link from the debrid provider is a credential against the user's account and
+ * must never reach a log line, and the query string carries the capability.
  */
 export async function handleStreamRequest(
   deps: StreamDeps,
@@ -279,9 +280,10 @@ export async function handleStreamRequest(
   }
 
   // The `.m3u`, and note where it sits: after every guard above, and *before*
-  // the backend split. A Real-Debrid session's playlist points at this handle,
-  // not at the unrestricted link — the redirect happens when the player
-  // follows it, so the credential never lands in a file on the user's disk.
+  // the backend split. A debrid-backed session's playlist points at this
+  // handle, not at the unrestricted link — the redirect happens when the
+  // player follows it, so the credential never lands in a file on the user's
+  // disk.
   //
   // This route exists because there is no registered desktop `vlc://` scheme to
   // link to. A three-line file with the right content type is the only thing
@@ -324,7 +326,7 @@ export async function handleStreamRequest(
     return 200;
   }
 
-  if (session.backend === "realdebrid") {
+  if (session.backend === "debrid") {
     // 302, not 307: the method is GET/HEAD either way, and 302 is what every
     // player (and every home-router HTTP client) handles without argument.
     // `Cache-Control: no-store` because an unrestricted link is time-limited
