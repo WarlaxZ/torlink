@@ -1195,25 +1195,32 @@ OMDb's response carries `Type: "movie" | "series"`. `src/recc/omdb.ts` sends `ty
 - Test: `src/recc/omdb.test.ts`
 
 **Interfaces:**
-- Produces: `FetchTitleMetaResult`'s ok branch gains `type: OmdbType | null`.
+- Produces: `FetchTitleMetaResult`'s ok branch gains **`type?: OmdbType | null`** — OPTIONAL, not required.
+
+**Why optional.** `request()` always sets it, so a real lookup always carries it. But `FetchTitleMetaResult` is the type of ~15 hand-written stubs in `src/web/routes.test.ts` (`fetchTitleMetaByNameImpl: async () => ({ ok: true, imdbId, plot, posterUrl })`) plus mocks in `src/ui/components/Results.test.tsx`. A required field breaks every one of them at typecheck for no benefit — none of those tests care about the medium. Optional is additive, exactly as Task 1's `ParsedRelease` fields were.
+
+**The one unavoidable ripple:** `src/recc/omdb.test.ts` asserts the whole object with `toEqual` in three places (lines ~23, ~31, ~59). Those exercise the real function, so they now see `type` and must be updated. `toEqual` is right for them — do not weaken them to `toMatchObject` to dodge the edit.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `src/recc/omdb.test.ts`, matching the file's existing fake-fetch style:
+The file's fetch helper is `jsonImpl(status, body)`, returning `{ impl, urls }` — there is no `fakeJson`. Add:
 
 ```ts
 it("reports the medium OMDb returned", async () => {
-  const fetchImpl = fakeJson({ Response: "True", imdbID: "tt1", Type: "movie", Plot: "x", Poster: "N/A" });
-  const out = await fetchTitleMeta("tt1", "key", { fetchImpl });
-  expect(out).toMatchObject({ ok: true, type: "movie" });
+  const { impl } = jsonImpl(200, { Response: "True", imdbID: "tt1", Type: "movie", Plot: "x", Poster: "N/A" });
+  const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
+  expect(res).toEqual({ ok: true, type: "movie", imdbId: "tt1", plot: "x", posterUrl: null });
 });
 
-it("reports null when OMDb sends a medium it does not recognise", async () => {
-  const fetchImpl = fakeJson({ Response: "True", imdbID: "tt1", Type: "game" });
-  const out = await fetchTitleMeta("tt1", "key", { fetchImpl });
-  expect(out).toMatchObject({ ok: true, type: null });
+it("reports null when OMDb sends a medium it does not model", async () => {
+  // OMDb also returns "episode" and "game"; neither is one of ours.
+  const { impl } = jsonImpl(200, { Response: "True", imdbID: "tt1", Type: "game" });
+  const res = await fetchTitleMeta("tt1", "KEY", { fetchImpl: impl });
+  expect(res).toEqual({ ok: true, type: null, imdbId: "tt1", plot: null, posterUrl: null });
 });
 ```
+
+Then update the three existing `toEqual({ ok: true, … })` assertions to include the `type` the real function now returns. Work out the right value for each from its fixture body rather than guessing — a fixture with no `Type` field yields `null`.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
@@ -1222,7 +1229,7 @@ Expected: FAIL — `type` is not on the result.
 
 - [ ] **Step 3: Implement**
 
-Add `Type?: string;` to `OmdbResponse`. Add `type: OmdbType | null;` to the ok branch of `FetchTitleMetaResult`. In `request()`, replace the success return with:
+Add `Type?: string;` to `OmdbResponse`. Add `type?: OmdbType | null;` to the ok branch of `FetchTitleMetaResult`. In `request()`, replace the success return with:
 
 ```ts
     // OMDb also returns "episode" and "game"; anything but the two we model
@@ -1234,8 +1241,8 @@ Add `Type?: string;` to `OmdbResponse`. Add `type: OmdbType | null;` to the ok b
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `npx vitest run src/recc && npm run typecheck`
-Expected: PASS. `typecheck` will flag any existing construction of the ok branch that now lacks `type`.
+Run: `npx vitest run src/recc && npm run typecheck && npx vitest run src/web/routes.test.ts src/ui/components/Results.test.tsx`
+Expected: PASS everywhere. Because `type` is optional, the stub literals in `routes.test.ts` and `Results.test.tsx` must still compile untouched — if you find yourself editing them, the field was declared required by mistake.
 
 - [ ] **Step 5: Commit**
 
@@ -1355,43 +1362,54 @@ The rule itself is `autoPlayableFilm` from `src/util/releasePick.ts` (Task 7c) �
 
 - [ ] **Step 1: Write the failing test**
 
-**There is no `type` prop on `ForYou`** — the filter lives inside `useRecommendations` as internal state, reachable only by pressing `t` (`all → movie → tv`). Do not invent a prop. Test the rule directly through the exported helper, and test the wiring by cycling the filter with real keystrokes.
+**Two things about this test file, both verified — do not write against the plan's guesses:**
 
-Add to `src/ui/components/ForYou.test.tsx`, reusing the existing `flush()` helper at `:33-39`:
+- **There is no `type` prop on `ForYou`.** The filter lives inside `useRecommendations` as internal state, reachable only by pressing `t` (`all → movie → tv`). Do not invent a prop; cycle it with real keystrokes.
+- **There is no `baseProps` object.** The file renders inline, e.g.
+  `render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />)`,
+  with module constants `CONFIG = { reccUrl, reccToken }`, `REC = { imdbId: "tt1", title: "Windmere", year: 2019, score: 33.4, reasons: [...] }`, and stub factories `fetchStub()`, `fetchStubWithPlot(plot)`, `fetchStubFull(plot)` each returning `{ impl, urls }`. Follow that idiom.
+- **The fixture title is `Windmere`, not `Kestrel`.** It is an invented title already established in this file, so it stays — assert on `"Windmere"`. Do not rename the existing fixture, and do not introduce `Kestrel` here just to match the plan's other examples.
+
+Add to `src/ui/components/ForYou.test.tsx`, reusing the existing `flush()` helper at `:34`:
 
 ```tsx
 it("auto-plays on Enter once the filter is on films", async () => {
   const played: { title: string; intent: unknown }[] = [];
+  const { impl } = fetchStub();
   const { stdin } = render(
-    <ForYou {...baseProps} active autoPlayTitle={(title, intent) => played.push({ title, intent })} />,
+    <ForYou reccConfig={CONFIG} visible active fetchImpl={impl}
+      setSection={vi.fn()} submitQuery={vi.fn()}
+      autoPlayTitle={(title, intent) => played.push({ title, intent })} />,
   );
   await flush();
   stdin.write("t"); // all -> movie
   await flush();
   stdin.write("\r");
   await flush();
-  expect(played).toEqual([{ title: "Kestrel", intent: { kind: "film" } }]);
+  expect(played).toEqual([{ title: "Windmere", intent: { kind: "film" } }]);
 });
 
 it("does not auto-play with the default 'all' filter and no OMDb medium", async () => {
   const played: string[] = [];
   const submitted: string[] = [];
+  const { impl } = fetchStub();
   const { stdin } = render(
-    <ForYou {...baseProps} active
+    <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
       autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
   );
   await flush();
   stdin.write("\r");
   await flush();
   expect(played).toEqual([]);
-  expect(submitted).toEqual(["Kestrel"]);
+  expect(submitted).toEqual(["Windmere"]);
 });
 
 it("does not auto-play a show — that needs the episode picker", async () => {
   const played: string[] = [];
   const submitted: string[] = [];
+  const { impl } = fetchStub();
   const { stdin } = render(
-    <ForYou {...baseProps} active
+    <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
       autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
   );
   await flush();
@@ -1402,14 +1420,15 @@ it("does not auto-play a show — that needs the episode picker", async () => {
   stdin.write("\r");
   await flush();
   expect(played).toEqual([]);
-  expect(submitted).toEqual(["Kestrel"]);
+  expect(submitted).toEqual(["Windmere"]);
 });
 
 it("s searches the title without playing", async () => {
   const played: string[] = [];
   const submitted: string[] = [];
+  const { impl } = fetchStub();
   const { stdin } = render(
-    <ForYou {...baseProps} active
+    <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
       autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
   );
   await flush();
@@ -1418,11 +1437,11 @@ it("s searches the title without playing", async () => {
   stdin.write("s");
   await flush();
   expect(played).toEqual([]);
-  expect(submitted).toEqual(["Kestrel"]);
+  expect(submitted).toEqual(["Windmere"]);
 });
 ```
 
-Match `baseProps` and the recc-fetch mock to the file's existing setup. Note that `t` refetches, so each `stdin.write("t")` needs its own `flush()`; the fixture the mock returns must be named `Kestrel` for every filter value, since the tests above assert on it after cycling.
+Note that `t` refetches, so each `stdin.write("t")` needs its own `flush()`. `fetchStub()` returns the same `REC` whatever the filter, so `Windmere` is what comes back at every filter value — which is what makes the assertions above valid after cycling.
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
@@ -1870,6 +1889,11 @@ git commit -m "feat: edit the quality preference from the terminal"
   - `interface PreferencesResponse { preferences: PublicQualityPrefs }`
   - `GET /api/sources` gains `preferences: PublicQualityPrefs`
   - `POST /api/preferences`
+  - **`PublicTitleMeta` gains `type?: "movie" | "series" | null`**, populated by `titleMeta()` from Task 7b's new field.
+
+**Why the title-meta change belongs here and not in Task 14.** Task 14 gates the browser's Play button on the item's medium, which it can only get from `/api/title`. That is this task's file (`routes.ts`) and this task's type (`wire.ts`). Adding it in Task 14 would make that task's diff span three layers, two of which its reviewer has no brief for. Add it now, with a test that `GET /api/title` echoes the medium through.
+
+Keep it OPTIONAL, for the same reason Task 7b's field is optional: `PublicTitleMeta` is constructed in several tests, and a required field breaks them for no benefit.
 
 **Deviation from the spec, deliberate:** the spec says `PUT /api/preferences`. There are no `PUT` routes in this codebase — every mutation is `POST` with an `action` discriminator (`savedSearchesAction`, `libraryAction`, `continueWatchingAction`). Follow the codebase. Reading joins `/api/sources`, which is already the capability-and-config payload the browser fetches at boot, so no second round trip.
 
@@ -2296,7 +2320,9 @@ function addHistoryPlay(row: HTMLElement, item: PublicStreamHistoryItem): void {
 }
 ```
 
-`autoPlay(title, intent, fallback?)` searches via the existing search path, calls `pickBestRelease(results, prefsFromWire(prefs), intent)`, shows `pickStatusLine(pick, prefs.maxResolution ?? undefined)`, and hands the winner to `streamFlow.ts` unchanged — passing `intent` on when `pick.fromPack` is true so the file inside the pack is selected. `resume(item)` is the existing continue-watching action. `posterMetaFor` is whatever `resultPosters.ts`/`previewModel.ts` already exposes for a fetched title; if it carries no `type`, thread Task 7b's field through `/api/title` the same way Task 8 threads it through `useTitlePreview`.
+`autoPlay(title, intent, fallback?)` searches via the existing search path, calls `pickBestRelease(results, prefsFromWire(prefs), intent)`, shows `pickStatusLine(pick, prefs.maxResolution ?? undefined)`, and hands the winner to `streamFlow.ts` unchanged — passing `intent` on when `pick.fromPack` is true so the file inside the pack is selected. `resume(item)` is the existing continue-watching action.
+
+`posterMetaFor(imdbId)` reads the already-fetched `/api/title` response for that card. **Task 12 added `type` to `PublicTitleMeta`, so the field is there** — this task only reads it; it must not change `wire.ts` or `routes.ts`. If the card's metadata has not resolved yet, pass `undefined` and let `autoPlayableFilm` fall back to the filter; never block a click on a network round trip.
 
 - [ ] **Step 4: Style it**
 
