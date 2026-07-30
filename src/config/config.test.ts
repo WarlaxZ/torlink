@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import {
   loadConfig,
   saveConfig,
@@ -7,6 +7,10 @@ import {
   resolveDnsServers,
   resolveReccConfig,
   resolveAdultContent,
+  defaultConfig,
+  resolveActiveDebrid,
+  resolveDebridTokenFor,
+  resolveTorBoxToken,
 } from "./config";
 
 describe("config realDebridToken", () => {
@@ -248,5 +252,82 @@ describe("resolveReccConfig", () => {
     delete process.env.TORLINK_RECC_URL;
     delete process.env.TORLINK_RECC_TOKEN;
     expect(resolveReccConfig({ ...base })).toEqual({ reccUrl: undefined, reccToken: undefined });
+  });
+});
+
+describe("resolveTorBoxToken", () => {
+  const KEY = "TORBOX_API_TOKEN";
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env[KEY]; delete process.env[KEY]; });
+  afterEach(() => { if (saved === undefined) delete process.env[KEY]; else process.env[KEY] = saved; });
+
+  it("reads the persisted token", () => {
+    expect(resolveTorBoxToken({ ...defaultConfig, torBoxToken: "  tb-1  " })).toBe("tb-1");
+  });
+
+  it("lets the env var win, so the token need never touch disk", () => {
+    process.env[KEY] = " tb-env ";
+    expect(resolveTorBoxToken({ ...defaultConfig, torBoxToken: "tb-file" })).toBe("tb-env");
+  });
+
+  it("is empty when neither is set", () => {
+    expect(resolveTorBoxToken(defaultConfig)).toBe("");
+  });
+});
+
+describe("resolveActiveDebrid", () => {
+  const KEYS = ["REALDEBRID_API_TOKEN", "TORBOX_API_TOKEN"] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => { for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; } });
+  afterEach(() => {
+    for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]!; }
+  });
+
+  it("is null when no token is configured at all", () => {
+    expect(resolveActiveDebrid(defaultConfig)).toBeNull();
+  });
+
+  it("uses the only configured provider, whichever it is", () => {
+    expect(resolveActiveDebrid({ ...defaultConfig, realDebridToken: "rd-1" }))
+      .toEqual({ provider: "realdebrid", token: "rd-1" });
+    expect(resolveActiveDebrid({ ...defaultConfig, torBoxToken: "tb-1" }))
+      .toEqual({ provider: "torbox", token: "tb-1" });
+  });
+
+  it("honours the explicit preference when both are configured", () => {
+    const both = { ...defaultConfig, realDebridToken: "rd-1", torBoxToken: "tb-1" };
+    expect(resolveActiveDebrid({ ...both, debridProvider: "torbox" }))
+      .toEqual({ provider: "torbox", token: "tb-1" });
+    expect(resolveActiveDebrid({ ...both, debridProvider: "realdebrid" }))
+      .toEqual({ provider: "realdebrid", token: "rd-1" });
+  });
+
+  it("falls back to Real-Debrid when both are configured and nothing is preferred", () => {
+    expect(resolveActiveDebrid({ ...defaultConfig, realDebridToken: "rd-1", torBoxToken: "tb-1" }))
+      .toEqual({ provider: "realdebrid", token: "rd-1" });
+  });
+
+  it("ignores a preference whose token is missing rather than reporting nothing configured", () => {
+    expect(resolveActiveDebrid({ ...defaultConfig, torBoxToken: "tb-1", debridProvider: "realdebrid" }))
+      .toEqual({ provider: "torbox", token: "tb-1" });
+  });
+
+  it("ignores a hand-edited nonsense preference", () => {
+    const cfg = { ...defaultConfig, realDebridToken: "rd-1", debridProvider: "nonsense" as never };
+    expect(resolveActiveDebrid(cfg)).toEqual({ provider: "realdebrid", token: "rd-1" });
+  });
+
+  it("counts an env-only token, so a preference works with nothing on disk", () => {
+    process.env["TORBOX_API_TOKEN"] = "tb-env";
+    expect(resolveActiveDebrid({ ...defaultConfig, debridProvider: "torbox" }))
+      .toEqual({ provider: "torbox", token: "tb-env" });
+  });
+});
+
+describe("resolveDebridTokenFor", () => {
+  it("reads the token for a named provider", () => {
+    const cfg = { ...defaultConfig, realDebridToken: "rd-1", torBoxToken: "tb-1" };
+    expect(resolveDebridTokenFor(cfg, "realdebrid")).toBe("rd-1");
+    expect(resolveDebridTokenFor(cfg, "torbox")).toBe("tb-1");
   });
 });

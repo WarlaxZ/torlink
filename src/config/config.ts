@@ -4,6 +4,7 @@ import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import { parseDnsServers } from "../util/dns";
 import type { SourceId } from "../sources/types";
 import type { ReccClientConfig } from "../recc/client";
+import type { DebridProviderId } from "../integrations/debrid/types";
 
 // A pinned VIDEO torrent/series to return to, remembering which episodes have
 // been streamed. Never stores stream URLs — only the magnet + metadata, so it
@@ -24,6 +25,13 @@ export interface Config {
   // encryption); a REALDEBRID_API_TOKEN env var overrides it at read time, so
   // those who prefer it can keep the token off disk entirely.
   realDebridToken?: string;
+  // TorBox API token. Stored as-is in config.json, same trade-off as
+  // realDebridToken above; a TORBOX_API_TOKEN env var overrides it at read time.
+  torBoxToken?: string;
+  // Which debrid service resolves magnets when more than one token is set.
+  // Stored as an opaque string: an unrecognised value is ignored rather than
+  // treated as "nothing configured" (see resolveActiveDebrid).
+  debridProvider?: string;
   // Base URL of the reccd recommendation service, e.g. http://localhost:4100
   reccUrl?: string;
   // Bearer token for authenticating with reccd
@@ -101,6 +109,41 @@ const REALDEBRID_TOKEN_ENV = "REALDEBRID_API_TOKEN";
 export function resolveRealDebridToken(config: Config): string {
   const env = process.env[REALDEBRID_TOKEN_ENV];
   return (env?.trim() || config.realDebridToken?.trim()) ?? "";
+}
+
+const TORBOX_TOKEN_ENV = "TORBOX_API_TOKEN";
+
+export function resolveTorBoxToken(config: Config): string {
+  const env = process.env[TORBOX_TOKEN_ENV];
+  return (env?.trim() || config.torBoxToken?.trim()) ?? "";
+}
+
+export function resolveDebridTokenFor(config: Config, provider: DebridProviderId): string {
+  return provider === "torbox" ? resolveTorBoxToken(config) : resolveRealDebridToken(config);
+}
+
+/**
+ * The debrid provider that will actually resolve a magnet, and its token — the
+ * single read point for that decision.
+ *
+ * The explicit `debridProvider` preference wins, but only if its token
+ * resolves: a preference pointing at a provider the user has since signed out
+ * of must not read as "no debrid configured", which would silently route a
+ * stream into a public swarm. Otherwise the one configured provider is used,
+ * and with both configured and no preference, Real-Debrid — the provider
+ * torlink had first, so an upgrading user's behaviour does not change.
+ */
+export function resolveActiveDebrid(config: Config): { provider: DebridProviderId; token: string } | null {
+  const preferred = config.debridProvider;
+  if (preferred === "realdebrid" || preferred === "torbox") {
+    const token = resolveDebridTokenFor(config, preferred);
+    if (token) return { provider: preferred, token };
+  }
+  const rd = resolveRealDebridToken(config);
+  if (rd) return { provider: "realdebrid", token: rd };
+  const tb = resolveTorBoxToken(config);
+  if (tb) return { provider: "torbox", token: tb };
+  return null;
 }
 
 const MEDIA_PLAYER_ENV = "TORLINK_PLAYER";
