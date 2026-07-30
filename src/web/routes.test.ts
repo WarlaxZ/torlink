@@ -2548,8 +2548,13 @@ describe("POST /api/stream — records stream history", () => {
   // a FAKE registry: with the default one these would each join a real swarm.
   //
   // THE WRITE SEAM IS ALWAYS INJECTED, and every write is captured in `writes`,
-  // so no test here can forget it (one deliberately replaces it with a rejecting
-  // one, which is a different question and says so).
+  // so no test here can forget it. Enforced by COMPOSITION rather than by
+  // convention: the recorder is installed after `over` is spread and delegates to
+  // whatever the caller passed, so a test may decide what happens after a write
+  // (one deliberately rejects) but cannot decide whether it is counted. Spreading
+  // `over` last, as this once did, silently disarms the recorder — and a silently
+  // empty `writes` is how the next vacuous `expect(writes).toHaveLength(0)` gets
+  // written and believed.
   // deps()'s default seam throws so a forgotten one fails loudly — but on THIS
   // route the throw is swallowed by the fire-and-forget history write (a
   // convenience list must never take a stream down with it), so it is no
@@ -2564,10 +2569,16 @@ describe("POST /api/stream — records stream history", () => {
   function streamDeps(over: Partial<WebDeps> = {}, sessionsOver = {}) {
     const sessions = registry(sessionsOver);
     const writes: StreamHistoryItem[][] = [];
+    const alsoSave = over.saveStreamHistoryImpl;
     const d = deps({
       runtime: runtime(sessions),
-      saveStreamHistoryImpl: async (items) => { writes.push([...items]); },
       ...over,
+      // Record first, then delegate: a caller's own impl still runs (and may
+      // still reject, which is a test in here), and the record already happened.
+      saveStreamHistoryImpl: async (items) => {
+        writes.push([...items]);
+        if (alsoSave) await alsoSave(items);
+      },
     });
     return { d, sessions, writes };
   }
@@ -2700,6 +2711,27 @@ describe("POST /api/stream — records stream history", () => {
     // return never calls loadStreamHistoryImpl; a crash-and-swallow would
     // have called it first.
     expect(loadCalls).toBe(0);
+  });
+
+  // The seam's whole value is that it CANNOT be lost, so that a future
+  // `expect(writes).toHaveLength(0)` cannot pass for the wrong reason. Spreading
+  // a caller's overrides last made the recorder replaceable, and the test below
+  // ("survives a history write that rejects") already replaces it — so the
+  // invariant this helper's comment claims has to be enforced, not asserted.
+  it("records a write even when the caller brings its own write impl", async () => {
+    const own: StreamHistoryItem[][] = [];
+    const { d, writes } = streamDeps({
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async (items) => { own.push([...items]); },
+    });
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    expect(res.status).toBeLessThan(500);
+    // Both see it: the recorder is composed with the override, not replaced by it.
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(own).toHaveLength(1);
   });
 
   it("survives a history write that rejects", async () => {
