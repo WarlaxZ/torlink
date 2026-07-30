@@ -1970,7 +1970,48 @@ export function QualityPrompt({ width, maxResolution, require, exclude, onChange
 }
 ```
 
-In `App.tsx`, follow the existing pattern for `SourcesPrompt`/`LimitsPrompt`: a `showQuality` state, a key in the global handler, and an `onChange` that does `setConfig` + `saveConfig` with the three new fields.
+In `App.tsx`, follow the `SourcesPrompt` pattern exactly — it is the closest analogue and all four pieces are verified:
+
+1. **State:** `const [editingQuality, setEditingQuality] = useState(false);` beside `editingSources` (`:250`).
+2. **Open it** from the global key handler, next to the `o` / `S` cases (`:1984-1996`).
+3. **Suppress other input while open:** `editingQuality` must be added to the guard list at `:1901` and given an early return at `:2018` alongside `if (editingSources) return; // the sources panel owns input`. Miss this and keystrokes leak to the pane behind the prompt.
+4. **Render** beside the other prompts (`:2320`):
+
+```tsx
+        {editingQuality ? (
+          <Box marginTop={1}>
+            <QualityPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              maxResolution={store.config.maxResolution}
+              require={store.config.requireFeatures ?? []}
+              exclude={store.config.excludeFeatures ?? []}
+              onChange={setQualityPrefs}
+              onCancel={() => setEditingQuality(false)}
+            />
+          </Box>
+        ) : null}
+```
+
+5. **Persist** with the same functional-update-then-save shape as `toggleSource` (`:659`), which avoids writing back a stale snapshot:
+
+```tsx
+  const setQualityPrefs = useCallback(
+    (next: { maxResolution?: MaxResolution; require: FeatureId[]; exclude: FeatureId[] }) => {
+      setConfigState((prev) => {
+        if (!prev) return prev;
+        const updated = {
+          ...prev,
+          maxResolution: next.maxResolution,
+          requireFeatures: next.require,
+          excludeFeatures: next.exclude,
+        };
+        void saveConfig(updated);
+        return updated;
+      });
+    },
+    [],
+  );
+```
 
 **Use `P`, not `q`.** `q` is Quit (`keymap.ts:29`, `App.tsx:2076`). The global config keys in this app are uppercase — `S` sources, `D` DNS, `L` limits, `V` VPN, `shift+w`, `shift+x` — and `P` is unbound. Add it to the **"Navigate"** help group (`keymap.ts:13-31`), which is where those global keys live; there is no "Accounts" entry for them.
 
