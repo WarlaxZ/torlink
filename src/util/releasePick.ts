@@ -7,7 +7,7 @@
 // makes it the one safe dependency. The sibling modules `resultSort.ts` and
 // `resultFilter.ts` import nothing at all for the same reason.
 
-import type { ParsedRelease } from "./release";
+import { parseRelease, type ParsedRelease } from "./release";
 
 /** The ceilings a user can choose. A closed set because it is a UI choice. */
 export type MaxResolution = "2160p" | "1080p" | "720p" | "480p";
@@ -75,4 +75,97 @@ export function isFeatureId(v: unknown): v is FeatureId {
 
 export function isMaxResolution(v: unknown): v is MaxResolution {
   return typeof v === "string" && (MAX_RESOLUTIONS as readonly string[]).includes(v);
+}
+
+export interface QualityPrefs {
+  maxResolution?: MaxResolution;
+  require: readonly FeatureId[];
+  exclude: readonly FeatureId[];
+}
+
+export const NO_PREFS: QualityPrefs = { require: [], exclude: [] };
+
+/**
+ * The fields a pick reads. Structural rather than `TorrentResult`, matching
+ * `SortableResult` and `FilterableResult`, so the TUI's `TorrentResult` and the
+ * browser's `PublicSearchResult` (which has no `magnet`) both satisfy it
+ * without either layer importing the other's type.
+ */
+export interface PickableResult {
+  name: string;
+  sizeBytes: number;
+  seeders: number;
+}
+
+export interface Survivor<T> {
+  item: T;
+  parsed: ParsedRelease;
+}
+
+export interface FilterOutcome<T> {
+  survivors: Survivor<T>[];
+  /** Requirements dropped to leave anything at all, in the order dropped. */
+  relaxed: FeatureId[];
+  /** True when no candidate was under the cap, so the cap was ignored. */
+  overCap: boolean;
+}
+
+export function filterCandidates<T extends PickableResult>(
+  candidates: readonly T[],
+  prefs: QualityPrefs,
+): FilterOutcome<T> {
+  // 1. Parse, dropping names that are only quality/codec residue.
+  let survivors: Survivor<T>[] = [];
+  for (const item of candidates) {
+    const parsed = parseRelease(item.name);
+    if (parsed) survivors.push({ item, parsed });
+  }
+
+  // 2. Excluded features are HARD. Dropped even if that empties the list:
+  //    "never play DV" has to mean never, and the caller reports the empty
+  //    result rather than falling back to something the user ruled out.
+  if (prefs.exclude.length) {
+    survivors = survivors.filter((s) => !prefs.exclude.some((id) => hasFeature(s.parsed, id)));
+  }
+
+  // 3. The cap. A candidate whose resolution did not parse counts as UNDER it
+  //    — the same trap `resultFilter.ts` documents for `seeders: 0`. Several
+  //    sources emit names with no resolution token, and reading "unknown" as
+  //    "too big" would empty those sources entirely.
+  let overCap = false;
+  const capHeight = prefs.maxResolution ? resolutionHeight(prefs.maxResolution) : null;
+  if (capHeight !== null && survivors.length) {
+    const under = survivors.filter((s) => {
+      const h = resolutionHeight(s.parsed.resolution);
+      return h === null || h <= capHeight;
+    });
+    if (under.length) survivors = under;
+    else overCap = true; // nothing fits; keep everything and say so
+  }
+
+  // 4. Required features are SOFT. Drop the rarest unsatisfiable requirement
+  //    and retry, so the commonest preference survives longest.
+  const relaxed: FeatureId[] = [];
+  let required = [...prefs.require];
+  while (required.length && survivors.length) {
+    const matching = survivors.filter((s) => required.every((id) => hasFeature(s.parsed, id)));
+    if (matching.length) {
+      survivors = matching;
+      break;
+    }
+    // Rarest first: fewest survivors satisfy it.
+    let rarest = required[0]!;
+    let fewest = Infinity;
+    for (const id of required) {
+      const n = survivors.filter((s) => hasFeature(s.parsed, id)).length;
+      if (n < fewest) {
+        fewest = n;
+        rarest = id;
+      }
+    }
+    relaxed.push(rarest);
+    required = required.filter((id) => id !== rarest);
+  }
+
+  return { survivors, relaxed, overCap };
 }

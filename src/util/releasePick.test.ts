@@ -67,3 +67,77 @@ describe("hasFeature", () => {
     for (const id of FEATURE_IDS) expect(FEATURES[id].label).toBeTruthy();
   });
 });
+
+import { filterCandidates, NO_PREFS, type QualityPrefs } from "./releasePick";
+
+const c = (name: string, sizeBytes = 1, seeders = 1) => ({ name, sizeBytes, seeders });
+const names = <T extends { name: string }>(s: { item: T }[]) => s.map((x) => x.item.name);
+const prefs = (over: Partial<QualityPrefs> = {}): QualityPrefs => ({ ...NO_PREFS, ...over });
+
+describe("filterCandidates", () => {
+  it("drops names that parse to nothing but noise", () => {
+    const out = filterCandidates([c("Kestrel.2010.1080p.BluRay.x264"), c("1080p.WEB-DL.x265")], prefs());
+    expect(names(out.survivors)).toEqual(["Kestrel.2010.1080p.BluRay.x264"]);
+  });
+
+  it("drops an excluded feature and never brings it back", () => {
+    const out = filterCandidates(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP")],
+      prefs({ exclude: ["dv"] }),
+    );
+    expect(out.survivors).toEqual([]);
+    expect(out.relaxed).toEqual([]);
+  });
+
+  it("drops candidates above the cap", () => {
+    const out = filterCandidates(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP"), c("Kestrel.2010.1080p.BluRay.x264")],
+      prefs({ maxResolution: "1080p" }),
+    );
+    expect(names(out.survivors)).toEqual(["Kestrel.2010.1080p.BluRay.x264"]);
+    expect(out.overCap).toBe(false);
+  });
+
+  it("keeps a candidate whose resolution did not parse, rather than assuming it is too big", () => {
+    const out = filterCandidates(
+      [c("Kestrel.2010.BluRay.x264"), c("Kestrel.2010.1080p.BluRay.x264")],
+      prefs({ maxResolution: "1080p" }),
+    );
+    expect(names(out.survivors)).toHaveLength(2);
+  });
+
+  it("ignores the cap and reports overCap when nothing is under it", () => {
+    const out = filterCandidates(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP")],
+      prefs({ maxResolution: "720p" }),
+    );
+    expect(out.survivors).toHaveLength(1);
+    expect(out.overCap).toBe(true);
+  });
+
+  it("keeps only candidates with every required feature", () => {
+    const out = filterCandidates(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP"), c("Kestrel.2010.1080p.BluRay.x264")],
+      prefs({ require: ["atmos"] }),
+    );
+    expect(names(out.survivors)).toEqual(["Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP"]);
+    expect(out.relaxed).toEqual([]);
+  });
+
+  it("relaxes a requirement nothing satisfies, and says which", () => {
+    const out = filterCandidates([c("Kestrel.2010.1080p.BluRay.x264")], prefs({ require: ["atmos"] }));
+    expect(out.survivors).toHaveLength(1);
+    expect(out.relaxed).toEqual(["atmos"]);
+  });
+
+  it("drops the rarest requirement first so the commonest survives longest", () => {
+    // Both candidates are HDR; neither is Atmos. "atmos" is the rarer, so it
+    // goes and "hdr" is still enforced.
+    const out = filterCandidates(
+      [c("Tin.Rivers.2024.2160p.WEB-DL.HDR-GROUP"), c("Kestrel.2010.1080p.BluRay.x264")],
+      prefs({ require: ["atmos", "hdr"] }),
+    );
+    expect(out.relaxed).toEqual(["atmos"]);
+    expect(names(out.survivors)).toEqual(["Tin.Rivers.2024.2160p.WEB-DL.HDR-GROUP"]);
+  });
+});
