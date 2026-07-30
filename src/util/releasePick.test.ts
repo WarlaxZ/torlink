@@ -250,6 +250,19 @@ describe("pickBestRelease", () => {
     expect(pickBestRelease([c("Kestrel.2010.BluRay.x264")], NO_PREFS, FILM)?.chosen.name)
       .toBe("Kestrel.2010.BluRay.x264");
   });
+
+  it("treats a season range as its first season, and demotes it for later ones", () => {
+    const range = c("Harrowgate.S01-S05.1080p.WEB-DL", 90_000);
+    const ep = c("Harrowgate.S03E02.1080p.WEB-DL", 1_000);
+    // Season 3 is inside the range, but the parser only sees season 1, so the
+    // release that names S03E02 outright wins.
+    expect(pickBestRelease([range, ep], NO_PREFS, { kind: "episode", season: 3, episode: 2 })?.chosen.name)
+      .toBe("Harrowgate.S03E02.1080p.WEB-DL");
+    // For season 1 the same range IS recognised as a pack covering the episode.
+    const s1 = pickBestRelease([range], NO_PREFS, { kind: "episode", season: 1, episode: 2 });
+    expect(s1?.chosen.name).toBe("Harrowgate.S01-S05.1080p.WEB-DL");
+    expect(s1?.fromPack).toBe(true);
+  });
 });
 
 describe("rankReleases", () => {
