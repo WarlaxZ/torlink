@@ -3,14 +3,14 @@ import { Box, Text, useInput } from "ink";
 import { Panel } from "./Panel";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { formatBytes, cleanText, truncate } from "../../util/format";
-import type { ResolvedFile } from "../../integrations/realdebrid";
+import type { StreamFile } from "../../util/player";
 
 type SortMode = "name" | "size";
 
 interface StreamFilePromptProps {
   width: number;
-  files: ResolvedFile[];
-  onSelect: (file: ResolvedFile) => void;
+  files: StreamFile[];
+  onSelect: (file: StreamFile) => void;
   onCancel: () => void;
   // Max rows the file list body may occupy. The caller sizes this from the
   // available window height so the list fills most of the screen.
@@ -42,7 +42,7 @@ interface StreamFilePromptProps {
 }
 
 // Order the candidates by title (case/number-aware) or by size, largest-first.
-function sortFiles(files: ResolvedFile[], mode: SortMode): ResolvedFile[] {
+function sortFiles(files: StreamFile[], mode: SortMode): StreamFile[] {
   const copy = [...files];
   if (mode === "name") {
     copy.sort((a, b) =>

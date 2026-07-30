@@ -16,7 +16,7 @@ import { saveHistory, saveHistorySync, type HistoryItem } from "./history";
 import { downloadFiles, sanitizeFilename } from "./http";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { resolveMagnet, isTransient } from "../integrations/realdebrid";
+import { resolveMagnet, isTransient } from "../integrations/debrid/realdebrid";
 import { Semaphore } from "../util/semaphore";
 import { backoffDelay } from "../util/net";
 import { log } from "../util/logger";

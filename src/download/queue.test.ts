@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { describe, it, expect, afterEach } from "vitest";
 import { DownloadQueue, seedPolicyReached, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
-import { RealDebridError } from "../integrations/realdebrid";
+import { RealDebridError } from "../integrations/debrid/realdebrid";
 import { deleteTorrentMeta, saveTorrentMeta } from "./persist";
 
 const tmpDirs: string[] = [];

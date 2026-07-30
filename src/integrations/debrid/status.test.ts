@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { daysUntil, expiringSoon, formatAccountStatus } from "./status";
 import type { DebridStatus } from "./types";
-import { debridStatusFromRealDebridUser } from "../realdebrid";
+import { debridStatusFromRealDebridUser } from "./realdebrid";
+import { getDebridProvider, DEBRID_PROVIDER_IDS } from "./index";
 
 const NOW = new Date("2026-07-30T00:00:00Z");
 
@@ -79,5 +80,24 @@ describe("debridStatusFromRealDebridUser", () => {
     expect(s.active).toBe(false);
     expect(s.planLabel).toBe("free");
     expect(s.expiresAt).toBeNull();
+  });
+});
+
+describe("the debrid provider registry", () => {
+  it("returns the Real-Debrid provider with its UI metadata", () => {
+    const p = getDebridProvider("realdebrid");
+    expect(p.id).toBe("realdebrid");
+    expect(p.label).toBe("Real-Debrid");
+    expect(p.shortLabel).toBe("RD");
+    expect(p.tokenEnvVar).toBe("REALDEBRID_API_TOKEN");
+  });
+
+  it("does not offer a cached check for Real-Debrid — the endpoint was removed in 2024", () => {
+    expect(getDebridProvider("realdebrid").checkCached).toBeUndefined();
+  });
+
+  it("lists every provider this build carries", () => {
+    // TorBox joins this list in Task 5, when its client is real.
+    expect([...DEBRID_PROVIDER_IDS]).toEqual(["realdebrid"]);
   });
 });

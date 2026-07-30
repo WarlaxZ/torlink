@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { log } from "../util/logger";
+import { log } from "../../util/logger";
 import {
   validateToken,
   resolveMagnet,

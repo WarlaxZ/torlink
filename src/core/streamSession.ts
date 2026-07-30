@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
-import { resolveMagnet } from "../integrations/realdebrid";
-import type { ResolveOptions } from "../integrations/realdebrid";
+import { resolveMagnet } from "../integrations/debrid/realdebrid";
+import type { ResolveOptions } from "../integrations/debrid/realdebrid";
 import type { StreamFile } from "../util/player";
 import type { StreamRoute } from "./streamRoute";
 

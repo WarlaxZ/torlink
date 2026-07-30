@@ -31,9 +31,8 @@ import {
   type ReccEventType,
   type RecommendationQuery,
 } from "../recc/client";
-import { debridStatusFromRealDebridUser } from "../integrations/realdebrid";
+import { debridStatusFromRealDebridUser, validateToken } from "../integrations/debrid/realdebrid";
 import type { DebridStatus } from "../integrations/debrid/types";
-import { validateToken } from "../integrations/realdebrid";
 import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
 import {
   isFavourited,

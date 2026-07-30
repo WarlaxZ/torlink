@@ -16,11 +16,16 @@ import {
 } from "../config/config";
 import { setDnsServers } from "../util/dns";
 import { expandHome, normalizeDownloadDir } from "../config/folder";
-import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
-import { debridStatusFromRealDebridUser } from "../integrations/realdebrid";
+import {
+  validateToken,
+  isPremiumActive,
+  resolveMagnet,
+  isTokenRejection,
+  debridStatusFromRealDebridUser,
+} from "../integrations/debrid/realdebrid";
 import type { DebridStatus } from "../integrations/debrid/types";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
-import type { ResolvedFile } from "../integrations/realdebrid";
+import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";

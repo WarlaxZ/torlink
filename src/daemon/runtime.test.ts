@@ -121,8 +121,8 @@ describe("startRuntime — stream sessions", () => {
 
 // A resumed Real-Debrid item re-runs the pipeline; hang resolveMagnet so the
 // test never touches the network and the item stays where resume() put it.
-vi.mock("../integrations/realdebrid", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../integrations/realdebrid")>()),
+vi.mock("../integrations/debrid/realdebrid", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../integrations/debrid/realdebrid")>()),
   resolveMagnet: vi.fn(() => new Promise(() => {})),
 }));
 
