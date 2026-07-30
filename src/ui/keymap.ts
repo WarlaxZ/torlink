@@ -20,6 +20,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Default download folder" },
       { keys: "S", label: "Choose sources" },
+      { keys: "P", label: "Playback quality (resolution and features)" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "t", label: "Extra trackers" },
       { keys: "L", label: "Transfer and seeding limits" },

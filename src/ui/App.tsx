@@ -16,7 +16,13 @@ import {
   type Config,
   type FavouriteItem,
 } from "../config/config";
-import { pickBestRelease, pickStatusLine, type PickIntent } from "../util/releasePick";
+import {
+  pickBestRelease,
+  pickStatusLine,
+  type PickIntent,
+  type FeatureId,
+  type MaxResolution,
+} from "../util/releasePick";
 import { runSearch } from "../core/search";
 import { enabledSources } from "../sources/registry";
 import { setDnsServers } from "../util/dns";
@@ -100,6 +106,7 @@ import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
+import { QualityPrompt } from "./components/QualityPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
@@ -250,6 +257,7 @@ export function App({
   const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
+  const [editingQuality, setEditingQuality] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
   const [editingRutracker, setEditingRutracker] = useState(false);
   const [rutrackerStatus, setRutrackerStatus] = useState<LoginStatus>({ kind: "idle" });
@@ -685,6 +693,25 @@ export function App({
       return next;
     });
   }, []);
+
+  // Same functional-update-then-save shape as toggleSource, so a stale
+  // snapshot from outside the updater never overwrites a concurrent write.
+  const setQualityPrefs = useCallback(
+    (next: { maxResolution?: MaxResolution; require: FeatureId[]; exclude: FeatureId[] }) => {
+      setConfigState((prev) => {
+        if (!prev) return prev;
+        const updated = {
+          ...prev,
+          maxResolution: next.maxResolution,
+          requireFeatures: next.require,
+          excludeFeatures: next.exclude,
+        };
+        void saveConfig(updated);
+        return updated;
+      });
+    },
+    [],
+  );
 
   const toggleSavedSearch = useCallback((raw: string) => {
     const query = raw.trim();
@@ -2002,7 +2029,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -2067,6 +2094,7 @@ export function App({
     editingOmdb,
     editingPlayer,
     editingSources,
+    editingQuality,
     editingDns,
     editingRutracker,
     editingTrackers,
@@ -2125,6 +2153,7 @@ export function App({
       if (importingTrakt) return; // the Trakt import prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
+      if (editingQuality) return; // the quality prompt owns input
       if (editingDns) return; // the DNS prompt owns input
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
@@ -2173,6 +2202,11 @@ export function App({
       if (input === "S") {
         setShowHelp(false);
         setEditingSources(true);
+        return;
+      }
+      if (input === "P") {
+        setShowHelp(false);
+        setEditingQuality(true);
         return;
       }
       if (input === "D") {
@@ -2444,6 +2478,19 @@ export function App({
               adultEnabled={store.adultEnabled}
               onToggle={toggleSource}
               onCancel={() => setEditingSources(false)}
+            />
+          </Box>
+        ) : null}
+
+        {editingQuality ? (
+          <Box marginTop={1}>
+            <QualityPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              maxResolution={store.config.maxResolution}
+              require={store.config.requireFeatures ?? []}
+              exclude={store.config.excludeFeatures ?? []}
+              onChange={setQualityPrefs}
+              onCancel={() => setEditingQuality(false)}
             />
           </Box>
         ) : null}
@@ -2737,7 +2784,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2826,7 +2873,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }
