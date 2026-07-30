@@ -1279,18 +1279,23 @@ git commit -m "feat: report the medium on an OMDb title lookup"
 Both front ends must answer "can this For You row be auto-played?" identically, and `src/web` may not import `src/ui`. `src/util/` is the one directory both can reach, so the rule lives there — not copied into each.
 
 **Files:**
-- Modify: `src/util/releasePick.ts`
-- Test: `src/util/releasePick.test.ts`
+- Create: `src/util/autoPlayableFilm.ts`
+- Test: `src/util/autoPlayableFilm.test.ts`
 
 **Interfaces:**
 - Produces: `type ReccMedium = "movie" | "series"`, `type ReccFilter = "all" | "movie" | "tv"`, and `function autoPlayableFilm(omdbType: ReccMedium | null | undefined, filter: ReccFilter): boolean`.
+
+**Its own file, not appended to `releasePick.ts`.** `releasePick.ts` ranks candidate releases for a title already chosen; this rule answers whether a For You *row* is playable at all, which is a different question upstream of any ranking. `resultSort.ts` and `resultFilter.ts` are the established pattern for exactly this — a small standalone `src/util` module importing nothing.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `src/util/releasePick.test.ts`:
 
+Create `src/util/autoPlayableFilm.test.ts`:
+
 ```ts
-import { autoPlayableFilm } from "./releasePick";
+import { describe, it, expect } from "vitest";
+import { autoPlayableFilm } from "./autoPlayableFilm";
 
 describe("autoPlayableFilm", () => {
   it("trusts OMDb's medium over the filter", () => {
@@ -1308,17 +1313,27 @@ describe("autoPlayableFilm", () => {
 
 - [ ] **Step 2: Run the test and confirm it fails**
 
-Run: `npx vitest run src/util/releasePick.test.ts -t "autoPlayableFilm"`
-Expected: FAIL — not exported.
+Run: `npx vitest run src/util/autoPlayableFilm.test.ts`
+Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
-Append to `src/util/releasePick.ts`:
+Create `src/util/autoPlayableFilm.ts`:
 
 ```ts
-/** What OMDb says a title is. Mirrors `OmdbType` without importing it: this
- *  module's only import is `./release`, and `src/recc/omdb.ts` is not on that
- *  list. `release.ts` already re-states the same two values for the same reason. */
+// Whether a For You row can be auto-played. IMPORTS NOTHING, like its
+// siblings `resultSort.ts` and `resultFilter.ts`, and for the same reason:
+// `src/web/static/` is bundled with `platform: "browser"`, so a module both
+// front ends share cannot reach anything Node-shaped.
+
+/**
+ * What OMDb says a title is.
+ *
+ * Restated rather than imported from `src/recc/omdb.ts`. A type-only import
+ * would in fact be safe — it is erased at build time, which is how
+ * `release.ts` gets `OmdbType` — but this module has no imports at all, and
+ * keeping it that way is the property that makes it obviously bundle-safe.
+ */
 export type ReccMedium = "movie" | "series";
 /** The For You pane's type filter, in both front ends. */
 export type ReccFilter = "all" | "movie" | "tv";
@@ -1347,13 +1362,13 @@ export function autoPlayableFilm(
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `npx vitest run src/util/releasePick.test.ts && npm run build`
+Run: `npx vitest run src/util/autoPlayableFilm.test.ts && npm run build`
 Expected: PASS, and the build confirms the browser bundle is still clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/util/releasePick.ts src/util/releasePick.test.ts
+git add src/util/autoPlayableFilm.ts src/util/autoPlayableFilm.test.ts
 git commit -m "feat: one shared rule for whether a For You row is an auto-playable film"
 ```
 
@@ -1380,7 +1395,7 @@ git commit -m "feat: one shared rule for whether a For You row is an auto-playab
 
 This ordering is why Task 7b exists. `useRecommendations.ts:38` starts the filter at `"all"` and reccd sends no per-item type, so filter-only gating would mean Enter auto-plays nothing until the user presses `t`.
 
-The rule itself is `autoPlayableFilm` from `src/util/releasePick.ts` (Task 7c) — import it, do not restate it here. It is already tested there, so this task's tests cover only the wiring.
+The rule itself is `autoPlayableFilm` from `src/util/autoPlayableFilm.ts` (Task 7c) — import it, do not restate it here. It is already tested there, so this task's tests cover only the wiring.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1472,7 +1487,7 @@ Expected: FAIL — `autoPlayTitle` is not a prop and Enter still submits a query
 
 - [ ] **Step 3: Implement**
 
-Import `autoPlayableFilm` from `../../util/releasePick`, and add to `ForYouProps`:
+Import `autoPlayableFilm` from `../../util/autoPlayableFilm`, and add to `ForYouProps`:
 
 ```ts
   /** Absent means the pane behaves exactly as it did before. */
@@ -2180,7 +2195,7 @@ Every decision about what to show and what to send lives here. `app.ts` is DOM w
   - `function prefsFromWire(p: PublicQualityPrefs): QualityPrefs`
   - `function prefsToWire(p: QualityPrefs): PublicQualityPrefs`
   - `function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent | null`
-  - Nothing for the film rule — **`autoPlayableFilm` is re-exported from `src/util/releasePick.ts`, not reimplemented.** See the note under Task 7c.
+  - Nothing for the film rule — **`autoPlayableFilm` is re-exported from `src/util/autoPlayableFilm.ts`, not reimplemented.** See the note under Task 7c.
   - `type PickPhase = { kind: "idle" } | { kind: "searching"; title: string } | { kind: "playing"; note: string } | { kind: "none"; title: string }`
   - `function createPickController(fx: PickEffects): PickController`
 
@@ -2224,7 +2239,7 @@ describe("intentForHistoryRow", () => {
 });
 
 // `autoPlayableFilm` is NOT tested again here — it lives in
-// `src/util/releasePick.ts` and is covered by its own tests (Task 7c). This
+// `src/util/autoPlayableFilm.ts` and is covered by its own tests (Task 7c). This
 // module only re-exports it so callers in this directory have one import site.
 ```
 
@@ -2267,7 +2282,7 @@ export function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent |
 // The film rule lives in `src/util/releasePick.ts` (Task 7c) because both
 // front ends need it and `src/web` may not import `src/ui`. Re-export it so
 // callers in this directory have one import site:
-export { autoPlayableFilm } from "../../util/releasePick";
+export { autoPlayableFilm } from "../../util/autoPlayableFilm";
 ```
 
 - [ ] **Step 4: Run the tests and confirm they pass**
