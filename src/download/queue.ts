@@ -232,6 +232,12 @@ export class DownloadQueue extends EventEmitter {
   }
 
   private startEngine(item: QueueItem): void {
+    // Structural invariant: no debrid item is ever handed to webtorrent. This
+    // holds incidentally today (debrid items never carry status "queued"/
+    // "selecting"), but a hand-edited or corrupted queue.json could claim
+    // otherwise, so make the guard explicit rather than relying on every
+    // caller never producing that state.
+    if (item.via === "debrid") return;
     if (!this.p2pAllowed) {
       item.status = "paused";
       item.error = "VPN kill switch blocked peer-to-peer traffic.";
@@ -505,8 +511,12 @@ export class DownloadQueue extends EventEmitter {
     const cap = this.maxDownloads === 0 ? Infinity : this.maxDownloads;
     let started = false;
     while (this.activeCount < cap) {
+      // A corrupted/hand-edited "queued" debrid item is skipped here too:
+      // promoting it would otherwise flip it to "downloading" and then have
+      // startEngine's guard silently no-op, leaving it stuck downloading
+      // forever with no engine and no pipeline driving it.
       const next = [...this.items.values()]
-        .filter((it) => it.status === "queued")
+        .filter((it) => it.status === "queued" && it.via !== "debrid")
         .sort((a, b) => a.addedAt - b.addedAt)[0];
       if (!next) break;
       next.status = "downloading";
@@ -746,8 +756,14 @@ export class DownloadQueue extends EventEmitter {
     if (!it || it.status !== "paused") return;
     if (it.via === "debrid") {
       if (!this.debridAuth) {
+        // No provider is active at all, so naming the item's own stored
+        // provider here would overpromise: the retry that follows resolves
+        // through whichever provider is active when it runs, not necessarily
+        // the one this item was originally added with. Match the "no debrid
+        // configured" copy used elsewhere (App.tsx, routes.ts) instead of a
+        // specific provider name.
         it.status = "failed";
-        it.error = `Set a ${getDebridProvider(it.provider ?? "realdebrid").label} token, then download again.`;
+        it.error = "Set a Real-Debrid or TorBox token, then download again.";
         this.changed();
         return;
       }
@@ -755,6 +771,12 @@ export class DownloadQueue extends EventEmitter {
       // continues each partial file via HTTP Range from its on-disk size.
       // Debrid transfers are bounded by their own semaphore, so they
       // resume immediately rather than waiting on the P2P download slot cap.
+      // The re-resolve always goes through the *currently active* provider
+      // (it may differ from the one this item was originally added with, if
+      // the user switched since), so stamp the item to match — otherwise its
+      // badge and the history entry `completeDebrid` writes would keep
+      // naming the old provider even though the new one fetched the file.
+      it.provider = this.debridAuth.provider;
       it.status = "downloading";
       it.error = undefined;
       this.debridAttempts.set(id, 0);
@@ -883,11 +905,20 @@ export class DownloadQueue extends EventEmitter {
     if (it.via === "debrid") {
       // No auth (e.g. retried after a restart): can't re-run, tell the user.
       if (!this.debridAuth) {
+        // Same reasoning as resume(): no provider is active, so naming the
+        // item's own stored provider would overpromise which token unblocks it.
         it.status = "failed";
-        it.error = `Set a ${getDebridProvider(it.provider ?? "realdebrid").label} token, then download again.`;
+        it.error = "Set a Real-Debrid or TorBox token, then download again.";
         this.changed();
         return;
       }
+      // The re-resolve always goes through the *currently active* provider,
+      // which may differ from the one this item was originally added with
+      // (the user may have switched since); stamp the item to match so its
+      // badge and the history entry `completeDebrid` writes don't keep
+      // naming the old provider for a file the new one actually fetched.
+      it.provider = this.debridAuth.provider;
+      it.status = "downloading";
       it.phase = "queued";
       it.progress = 0;
       it.speed = 0;

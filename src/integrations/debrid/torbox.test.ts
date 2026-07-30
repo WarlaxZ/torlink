@@ -154,6 +154,33 @@ describe("TorBox logging", () => {
     expect((err as TorBoxError).status).toBe(500);
     expect((err as TorBoxError).message).toBe("TorBox error: OOPS.");
   });
+
+  it("never writes the token to the log on a failing requestdl call — the one route that actually carries it in the query string", async () => {
+    // /api/user/me (the case above) has no token in its URL at all, so it
+    // never exercised logPath()'s actual reason for existing: requestdl is
+    // the one TorBox route that puts the API token in the query string
+    // (torbox.ts's own contract comment, near requestDownloadLink).
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(200, { success: true, data: torrent() }),
+        [REQUESTDL]: jsonRes(500, { success: false, error: "OOPS" }),
+      },
+      calls,
+    );
+    const err = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep }).catch(
+      (e: unknown) => e,
+    );
+    const logged = spies.flatMap((s) => s.mock.calls.flat()).join("\n");
+    expect(logged).not.toContain(TOKEN);
+    // Proves the assertion above is not vacuous — the requestdl call really
+    // was logged, just without its token.
+    expect(logged).toContain("requestdl");
+    expect(err).toBeInstanceOf(TorBoxError);
+    expect((err as TorBoxError).status).toBe(500);
+    expect((err as TorBoxError).message).toBe("TorBox error: OOPS.");
+  });
 });
 
 describe("TorBox validateToken", () => {

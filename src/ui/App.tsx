@@ -2494,7 +2494,10 @@ export function App({
               onConfirm={() => {
                 const { input, reason } = torrentPrompt;
                 setTorrentPrompt(null);
-                // Remember the acknowledgement only for the no-RD one-time warning.
+                // Remember the acknowledgement only for the no-active-debrid
+                // one-time warning (torrent-auto); a torrent-confirm prompt
+                // (reason set — a configured-but-inactive Real-Debrid or
+                // TorBox account) always prompts again and is never persisted.
                 if (!reason && config) setConfig({ ...config, torrentStreamAck: true });
                 startTorrentStream(input);
               }}

@@ -76,4 +76,26 @@ describe("Splash", () => {
     await flush();
     expect(quitAll).toHaveBeenCalledTimes(1);
   });
+
+  it("does not show a stale account name left over from before a provider switch", async () => {
+    // debridStatus can lag behind debridProvider in the async window right
+    // after a switch (it's revalidated, not swapped instantly). A status from
+    // the OLD provider says nothing about the new one, so it must be ignored
+    // rather than rendered — the same guard Accounts.tsx and
+    // classifyStreamRoute already apply.
+    const { lastFrame } = renderSplash({
+      debridConfigured: true,
+      debridProvider: "realdebrid",
+      debridStatus: {
+        provider: "torbox",
+        username: "stale-torbox-user",
+        active: true,
+        planLabel: "pro",
+        expiresAt: null,
+      },
+    });
+    await flush();
+    expect(lastFrame()).not.toContain("stale-torbox-user");
+    expect(lastFrame()).toContain("connected");
+  });
 });

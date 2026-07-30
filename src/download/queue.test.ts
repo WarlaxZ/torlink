@@ -217,6 +217,58 @@ describe("DownloadQueue debrid path", () => {
     expect(q.getHistory().some((h) => h.id === "tb2")).toBe(true);
     q.suspend();
   });
+
+  it("stamps the item's provider to the currently active one on retry, not the one it was added with", async () => {
+    // Add a TorBox item, let it fail, then switch the active debrid auth to
+    // Real-Debrid before retrying. The retry re-resolves through Real-Debrid,
+    // so the item (and the history it produces) must say so too — not carry
+    // the stale "torbox" it was created with.
+    const q = new DownloadQueue();
+    let sawProvider: string | undefined;
+    // A single mutable deps object, reused across the whole test: addDebrid
+    // stashes this exact object on the queue as `this.debridDeps`, and retry()
+    // re-reads `resolveMagnet` off it at call time — so swapping the function
+    // in place (rather than passing a second deps object retry has no way to
+    // receive) is how the test drives "the retry actually used realdebrid".
+    const deps: DebridDeps = {
+      resolveMagnet: async () => {
+        throw new TorBoxError("dead torrent"); // no status/code = terminal, fails immediately
+      },
+      downloadFiles: async (_files, dir) => [path.join(dir, "f.mkv")],
+    };
+    await q.addDebrid(
+      { id: "tb3", name: "Kestrel.2010.1080p.BluRay.x264", magnet: "magnet:?xt=urn:btih:4444444444444444444444444444444444444444" },
+      "/downloads",
+      "torbox",
+      "tb-1",
+      deps,
+    );
+    const failed = q.getItems().find((i) => i.id === "tb3");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.provider).toBe("torbox");
+
+    // Switch the active debrid provider, as the app does on a provider switch.
+    q.setDebridToken("realdebrid", "rd-tok");
+    let stampedOnItem: string | undefined;
+    deps.resolveMagnet = async (provider) => {
+      sawProvider = provider;
+      // Capture mid-flight: completeDebrid deletes the item from `items` once
+      // the pipeline finishes, so this is the only point it can be read.
+      stampedOnItem = q.getItems().find((i) => i.id === "tb3")?.provider;
+      return [{ url: "https://dl/f", filename: "f.mkv", bytes: 10 }];
+    };
+    q.retry("tb3");
+    for (let i = 0; i < 50 && !q.getHistory().some((h) => h.id === "tb3"); i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(sawProvider).toBe("realdebrid");
+    expect(stampedOnItem).toBe("realdebrid");
+    const entry = q.getHistory().find((h) => h.id === "tb3")!;
+    expect(entry).toBeDefined();
+    expect(entry.provider).toBe("realdebrid");
+    q.suspend();
+  });
 });
 
 describe("DownloadQueue Real-Debrid scheduling", () => {
@@ -484,6 +536,41 @@ describe("DownloadQueue error resilience on boot", () => {
     ).not.toThrow();
 
     expect(q.getSeed("h-broken")?.status).toBe("paused");
+    q.suspend();
+  });
+
+  it("never hands a debrid item to the webtorrent engine, even a corrupted one that claims to be queued", () => {
+    // No debrid item should ever carry status "queued" (addDebrid always
+    // starts "downloading"), but a hand-edited or corrupted queue.json could
+    // claim otherwise. promote() picks up "queued" items regardless of via,
+    // so the guard against ever reaching startEngine's engine.add has to be
+    // structural, not incidental on debrid items never actually being queued.
+    const q = new DownloadQueue();
+    let addCalls = 0;
+    const fakeEngine = (q as unknown as { engine: { add: () => void } }).engine;
+    fakeEngine.add = () => {
+      addCalls++;
+    };
+
+    q.restore([
+      {
+        id: "corrupt1",
+        name: "Kestrel.2010.1080p.BluRay.x264",
+        magnet: "magnet:?xt=urn:btih:5555555555555555555555555555555555555555",
+        dir: "/downloads",
+        via: "debrid",
+        provider: "torbox",
+        status: "queued",
+        progress: 0,
+        totalBytes: 100,
+        downloadedBytes: 0,
+        speed: 0,
+        peers: 0,
+        addedAt: Date.now(),
+      },
+    ]);
+
+    expect(addCalls).toBe(0);
     q.suspend();
   });
 });

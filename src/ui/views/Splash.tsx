@@ -49,6 +49,12 @@ export function Splash({
   // Only rendered when debridConfigured, which implies debridProvider is set —
   // the fallback never actually reaches the screen, but stays neutral anyway.
   const debridLabel = debridProvider ? getDebridProvider(debridProvider).label : "a debrid service";
+  // debridStatus can lag behind debridProvider in the async window right after
+  // a switch (it's revalidated, not swapped instantly) — a status from a
+  // different provider says nothing about the active one, so it's ignored
+  // rather than rendered. Same guard as Accounts.tsx and classifyStreamRoute.
+  const activeUsername =
+    debridStatus && debridStatus.provider === debridProvider ? debridStatus.username : undefined;
 
   useInput(
     (input, key) => {
@@ -96,7 +102,7 @@ export function Splash({
       <Box marginTop={1}>
         {debridConfigured ? (
           <Text dimColor>
-            {`${debridLabel}: connected${debridStatus?.username ? ` as ${debridStatus.username}` : ""}`}
+            {`${debridLabel}: connected${activeUsername ? ` as ${activeUsername}` : ""}`}
           </Text>
         ) : (
           <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid or TorBox for instant, private streaming.</Text>

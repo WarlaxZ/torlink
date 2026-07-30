@@ -129,9 +129,11 @@ export interface AddInputOptions {
   debridToken?: string;
   /**
    * Which debrid service `debridToken` belongs to. Defaults to `"realdebrid"`
-   * when omitted, so a caller written before TorBox support (e.g. today's
-   * `src/web/routes.ts`, which resolves only the Real-Debrid token) keeps
-   * behaving exactly as before.
+   * when omitted, so a caller written before TorBox support keeps behaving
+   * exactly as before. Today's `src/web/routes.ts` always sets this
+   * explicitly — it resolves the *active* debrid provider via
+   * `resolveActiveDebrid`, Real-Debrid or TorBox — so the fallback here is for
+   * older/other callers only.
    */
   debridProvider?: DebridProviderId;
   /** Total size in bytes when the caller knows it; seeds the row's progress total. */

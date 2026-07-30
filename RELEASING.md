@@ -99,3 +99,12 @@ The tag is the single source of truth, which keeps every install path in step:
   across filesystems (`/tmp` is often a separate tmpfs) throws `EXDEV`. Windows
   can't overwrite a running `node.exe`, so it stages and swaps via an on-exit
   `.cmd` helper (best-effort; Unix is seamless).
+- **Downgrading past the TorBox release is not clean.** `normalizeVia`
+  (`src/download/types.ts`) migrates a persisted `via: "realdebrid"` forward to
+  `{via: "debrid", provider: "realdebrid"}`, but only forward — there is no
+  companion step that migrates back. A user who downgrades to a pre-TorBox
+  build reads `via: "debrid"` as an unrecognised value, falls back to `p2p`,
+  and `restore()` would hand that item's magnet straight to webtorrent instead
+  of failing it as a retryable debrid item. Not a concern for a normal forward
+  release; worth remembering before ever recommending a user roll back across
+  this boundary.

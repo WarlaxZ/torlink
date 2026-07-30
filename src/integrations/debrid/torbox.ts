@@ -257,9 +257,15 @@ interface TorBoxTorrent {
   download_state?: string;
   /**
    * ASSUMPTION, unverified against a live account: a 0..1 fraction (not
-   * 0-100). This is the highest-consequence guess in this module — every
-   * onProgress consumer in torlink assumes 0-100 — so it is converted exactly
-   * once, at the boundary below, before it leaves this module.
+   * 0-100). This is the highest-consequence guess in this module. If TorBox
+   * actually reports 0-100, `percent` below pins to 100 on the very first
+   * poll, `bestProgress` never advances past it, and every later poll reads
+   * as no progress — so after `stallMs` (180s) the user gets a *spurious*
+   * "TorBox isn't caching this torrent — it may have no seeders" while the
+   * UI has shown 100% the whole time. The one-line fix if this is wrong:
+   * drop the `* 100` below and read `torrent.progress` as already 0-100.
+   * Converted exactly once, at the boundary below, before it leaves this
+   * module.
    */
   progress?: number;
   files?: TorBoxFile[];
@@ -363,8 +369,15 @@ export async function resolveMagnet(
     throwIfAborted(signal);
     torrent = await getTorrent(token, id, opts);
     // ASSUMPTION, unverified against a live account: TorBox reports progress
-    // as a 0..1 fraction. Every onProgress consumer in torlink assumes 0-100,
-    // so this conversion happens exactly once, here.
+    // as a 0..1 fraction, so `* 100` below converts it. If it is instead
+    // already 0-100, this pins `percent` to 100 on the first poll (100 is
+    // clamped, but 0.99 * 100 rounds to 99 either way, so it looks plausible
+    // and does not throw). `bestProgress` then never sees a higher value
+    // again, `stalledMs` climbs on every subsequent poll, and at `stallMs`
+    // (180s) this throws the "isn't caching this torrent — it may have no
+    // seeders" error below — spuriously, on a torrent that was caching fine,
+    // with the UI having shown 100% for the whole three-minute wait. The
+    // one-line fix if TorBox turns out to report 0-100: drop the `* 100` here.
     const percent = Math.min(100, Math.max(0, Math.round((torrent.progress ?? 0) * 100)));
     onProgress?.(percent);
     lastEmitted = percent;
