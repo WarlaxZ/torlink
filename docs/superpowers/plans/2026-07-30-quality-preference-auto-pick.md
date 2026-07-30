@@ -1525,11 +1525,65 @@ git commit -m "feat: auto-play a For You film on Enter"
 
 **Files:**
 - Modify: `src/ui/components/ContinueWatching.tsx:16-29`
+- Modify: `src/ui/App.tsx` — thread the pack intent into the file picker (see below)
 - Test: `src/ui/components/ContinueWatching.test.tsx` (create)
 
 **Interfaces:**
 - Consumes: `Store.autoPlayTitle` (Task 6), `nextEpisode` from `src/core/streamHistory.ts:116`.
 - Produces: no new exports.
+
+### Also in this task: make `fromPack` actually select the episode
+
+Task 6 left a `TODO(task-9)` on its `streamResult` call. This is it.
+
+`openStreamPicker` (`App.tsx:1174`) already chooses the picker's opening position:
+
+```tsx
+      setStreamPreselect(
+        nextEpisodeIndex(candidates, {
+          next: recorded ? nextEpisode(recorded) : null,
+          watched: watchedFor(config?.favourites ?? [], input.id),
+        }),
+      );
+```
+
+`recorded` is the history row *this* play just wrote — which, for a season pack, is the pack. `nextEpisode()` on a pack row returns **null** (a pack parses to a season with no episode), so the preselect falls back to `watched` and will not land on the episode the user asked for. Auto-play knows the answer exactly; the picker just is not being told.
+
+Fix: let `autoPlayTitle` hand its intent down as an override. Keep it small — a ref set immediately before `streamResult` and consumed once by `openStreamPicker`:
+
+```tsx
+  // The episode auto-play is actually after, when it had to settle for a pack.
+  // Beats `nextEpisode(recorded)` because the pack's own history row has no
+  // episode to derive one from. One-shot: cleared on read, so a later manual
+  // play of the same torrent gets the ordinary history-based preselect.
+  const packTargetRef = useRef<EpisodeRef | null>(null);
+```
+
+In `autoPlayTitle`, before calling `streamResult`:
+
+```tsx
+        packTargetRef.current =
+          pick.fromPack && intent.kind === "episode"
+            ? { season: intent.season, episode: intent.episode }
+            : null;
+```
+
+And in `openStreamPicker`, prefer it:
+
+```tsx
+      const packTarget = packTargetRef.current;
+      packTargetRef.current = null;
+      setStreamPreselect(
+        nextEpisodeIndex(candidates, {
+          next: packTarget ?? (recorded ? nextEpisode(recorded) : null),
+          watched: watchedFor(config?.favourites ?? [], input.id),
+        }),
+      );
+```
+
+A ref rather than state on purpose: this must be readable synchronously by the time the picker opens, and it must not trigger a re-render. `EpisodeRef` comes from `src/util/episode.ts`.
+
+Remove Task 6's `TODO(task-9)` comment as part of this.
 
 **Behaviour.** On a row where `nextEpisode(item)` is non-null, `Enter` calls `autoPlayTitle(item.title, { kind: "episode", … }, () => openStreamHistory(item))`. Where it is **null**, `Enter` is unchanged.
 
