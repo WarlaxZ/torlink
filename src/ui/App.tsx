@@ -26,6 +26,7 @@ import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
 import {
+  forgetStreamHistory,
   historyItemFor,
   loadStreamHistory,
   recordStream,
@@ -1395,12 +1396,21 @@ export function App({
     [streamResult],
   );
 
+  // Optimistic locally, re-read on disk. The row must vanish under the cursor
+  // now; the FILE must not be written from this component's snapshot, because
+  // `serve --web` is a separate process appending to it (see
+  // forgetStreamHistory). Same total swallow as recordStreamHistory above, and
+  // for the same reason: every throwable call sits inside the try, so nothing
+  // here can become an unhandled rejection in the TUI's Node process.
   const removeStreamHistoryEntry = useCallback((key: string) => {
-    setStreamHistory((prev) => {
-      const next = removeStreamHistory(prev, key);
-      void saveStreamHistory(next);
-      return next;
-    });
+    setStreamHistory((prev) => removeStreamHistory(prev, key));
+    void (async () => {
+      try {
+        setStreamHistory(await forgetStreamHistory(key));
+      } catch {
+        /* ignore — see above */
+      }
+    })();
   }, []);
 
   const closePlayerPrompt = useCallback(() => {

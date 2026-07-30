@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  forgetStreamHistory,
   historyItemFor,
   nextEpisode,
   nextLabel,
@@ -195,6 +196,41 @@ describe("removeStreamHistory", () => {
     const current = [item({ key: "a" }), item({ key: "b" })];
     expect(removeStreamHistory(current, "a")).toHaveLength(1);
     expect(removeStreamHistory(current, "nope")).toHaveLength(2);
+  });
+});
+
+describe("forgetStreamHistory", () => {
+  it("re-reads the file, so a row this process never saw survives the removal", async () => {
+    // The TUI and `serve --web` are SEPARATE PROCESSES writing one file. A
+    // remover that wrote its own in-memory snapshot back would delete whatever
+    // the browser recorded since the TUI loaded, with nothing on screen to say
+    // so. This is the read-modify-write rule, one process out.
+    const onDisk = [item({ key: "harrowgate|series", title: "Harrowgate" }), item({ key: "kepler|series" })];
+    const saved: StreamHistoryItem[][] = [];
+    const next = await forgetStreamHistory("kepler|series", {
+      load: async () => onDisk,
+      save: async (items) => {
+        saved.push([...items]);
+      },
+    });
+    expect(next.map((e) => e.key)).toEqual(["harrowgate|series"]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.map((e) => e.key)).toEqual(["harrowgate|series"]);
+  });
+
+  it("propagates a failing read rather than writing a truncated file", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    await expect(
+      forgetStreamHistory("kepler|series", {
+        load: async () => {
+          throw new Error("unreadable");
+        },
+        save: async (items) => {
+          saved.push([...items]);
+        },
+      }),
+    ).rejects.toThrow("unreadable");
+    expect(saved).toHaveLength(0);
   });
 });
 

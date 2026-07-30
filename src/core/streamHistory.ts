@@ -153,6 +153,32 @@ export function removeStreamHistory(
   return current.filter((e) => e.key !== key);
 }
 
+/**
+ * Forget one row: RE-READ the file, drop the key, write the rest back.
+ *
+ * The re-read is the whole point. The TUI holds `streamHistory` in React state
+ * from startup, and `serve --web` is a SEPARATE PROCESS writing the same file —
+ * so a remover that saved its own snapshot would silently delete every row the
+ * browser recorded since the TUI loaded. `serializeWrites()` cannot help; it
+ * orders writes within one process. Same rule as config writes from the web:
+ * never hold a snapshot across a write.
+ *
+ * Rejects rather than swallowing (and never writes) when the read fails —
+ * a caller in a TUI process must wrap this, or an unhandled rejection can take
+ * the terminal down with it.
+ */
+export async function forgetStreamHistory(
+  key: string,
+  deps: {
+    load?: () => Promise<StreamHistoryItem[]>;
+    save?: (items: readonly StreamHistoryItem[]) => Promise<void>;
+  } = {},
+): Promise<StreamHistoryItem[]> {
+  const next = removeStreamHistory(await (deps.load ?? loadStreamHistory)(), key);
+  await (deps.save ?? saveStreamHistory)(next);
+  return next;
+}
+
 const write = serializeWrites();
 
 export function saveStreamHistory(items: readonly StreamHistoryItem[]): Promise<void> {
