@@ -17,6 +17,18 @@ interface StreamFilePromptProps {
   maxRows?: number;
   // Filenames already watched (this session ∪ persisted favourite) — marked ✓.
   watched?: string[];
+  /**
+   * Where to open the cursor: an index into `files` AS GIVEN, from
+   * `nextEpisodeIndex` (src/util/nextEpisodeFile.ts). Omitted, or pointing at
+   * nothing, means the first row — exactly today's behaviour.
+   *
+   * Resolved to the file's own `url` and looked up in the sorted list on every
+   * render while the cursor is untouched, for two reasons. The list is REORDERED
+   * for display, so an index into `files` is not a row on screen. And this can
+   * arrive a tick after mount (the history read that computes it is async), which
+   * an initial `useState` value would miss.
+   */
+  preselect?: number;
   // Toggle the current torrent as a favourite (the `b` key).
   onFavourite?: () => void;
   // Whether the current torrent is already favourited (drives the star glyph).
@@ -50,11 +62,19 @@ export function StreamFilePrompt({
   watched = [],
   onFavourite,
   favourited = false,
+  preselect,
 }: StreamFilePromptProps) {
-  const [cursor, setCursor] = useState(0);
+  // null means "wherever the preselection says", so a preselection that lands
+  // late still moves the highlight, and a re-sort cannot strand it. Any keypress
+  // makes the cursor a number and the preselection stops being consulted.
+  const [cursor, setCursor] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const sorted = useMemo(() => sortFiles(files, sortMode), [files, sortMode]);
-  const clamped = Math.min(cursor, Math.max(0, sorted.length - 1));
+  const preselectUrl = preselect !== undefined ? files[preselect]?.url : undefined;
+  const opening = preselectUrl !== undefined
+    ? Math.max(0, sorted.findIndex((f) => f.url === preselectUrl))
+    : 0;
+  const clamped = Math.min(cursor ?? opening, Math.max(0, sorted.length - 1));
   const watchedSet = useMemo(() => new Set(watched), [watched]);
 
   useInput((input, key) => {
