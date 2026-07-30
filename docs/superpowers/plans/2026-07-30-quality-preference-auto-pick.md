@@ -2570,6 +2570,8 @@ async function fetchReccPoster(imdbId: string): Promise<{
 
 `ReccMedium` comes from `src/util/autoPlayableFilm.ts`. `reccPosterNote` and `reccPosterHint` still take a plain `ReccPosterOutcome` and must not change.
 
+**Import `autoPlayableFilm` from `./pickModel`, not from `src/util/autoPlayableFilm.ts` directly.** Task 13 re-exports it there precisely so every pick-related decision this file needs — `prefsFromWire`, `prefsToWire`, `intentForHistoryRow`, `autoPlayableFilm` — arrives from one module. Importing around the re-export would leave it dead code for a reviewer to flag.
+
 **Before that fetch resolves, pass `undefined`.** `autoPlayableFilm` falls back to the filter, exactly as the terminal does with its debounce race. Never block a click on a network round trip, and do not add a synchronous cache just so the button can render a moment earlier — a Play button that appears when the poster does is fine.
 
 - [ ] **Step 4: Style it**
