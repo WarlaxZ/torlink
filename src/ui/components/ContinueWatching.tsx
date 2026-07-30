@@ -41,6 +41,13 @@ export function ContinueWatching() {
           return;
         }
         autoPlayTitle(item.title, { kind: "episode", ...next }, () => openStreamHistory(item));
+      } else if (input === "r") {
+        // Resume the remembered torrent outright, regardless of whether a next
+        // episode is known — Enter's next-episode search has no equivalent
+        // "just play what I was watching" action, and the browser row keeps
+        // both a plain play and a Play next for exactly that reason.
+        const item = streamHistory[clamped];
+        if (item) openStreamHistory(item);
       } else if (input === "x" && !streamActive) {
         const item = streamHistory[clamped];
         if (item) removeStreamHistory(item.key);

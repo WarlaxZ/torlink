@@ -84,6 +84,7 @@ export const HELP_GROUPS: HelpGroup[] = [
     hints: [
       { keys: "↑ ↓", label: "Move between titles" },
       { keys: "↵", label: "Play the next episode, or resume where there is none" },
+      { keys: "r", label: "Resume the remembered torrent" },
       { keys: "s", label: "Search this title instead of playing it" },
       { keys: "x", label: "Remove from the list" },
     ],
@@ -163,7 +164,15 @@ export function footerHints(
     ? { keys: "x", label: "Stop stream" }
     : { keys: "x", label: "Remove" };
   if (section === "continueWatching") {
-    return [NAVIGATE, { keys: "↵", label: "Play" }, { keys: "s", label: "Search" }, REMOVE, SWITCH, ALWAYS];
+    return [
+      NAVIGATE,
+      { keys: "↵", label: "Play" },
+      { keys: "r", label: "Resume" },
+      { keys: "s", label: "Search" },
+      REMOVE,
+      SWITCH,
+      ALWAYS,
+    ];
   }
   if (section === "savedSearches") {
     return [NAVIGATE, { keys: "↵", label: "Run" }, REMOVE, SWITCH, ALWAYS];

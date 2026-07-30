@@ -73,6 +73,24 @@ describe("ContinueWatching Enter", () => {
     expect(resumed).toEqual(["Kestrel"]);
   });
 
+  it("r always resumes the remembered torrent, even when a next episode is known", async () => {
+    const played: unknown[] = [];
+    const resumed: string[] = [];
+    const searched: string[] = [];
+    const { stdin } = renderWith({
+      streamHistory: [item({})], // Kepler S02E04 — nextEpisode(item) is non-null here
+      autoPlayTitle: (t) => played.push(t),
+      openStreamHistory: (i) => resumed.push(i.title),
+      submitQuery: (q: string) => searched.push(q),
+    });
+    await flush();
+    stdin.write("r");
+    await flush();
+    expect(resumed).toEqual(["Kepler"]);
+    expect(played).toEqual([]);
+    expect(searched).toEqual([]);
+  });
+
   it("s searches without playing", async () => {
     const played: unknown[] = [];
     const searched: string[] = [];
