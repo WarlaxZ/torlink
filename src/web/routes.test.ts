@@ -70,12 +70,14 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
 
 const AUTH = "Bearer secret";
 
-// REALDEBRID_API_TOKEN overrides the config file inside resolveRealDebridToken,
-// so a developer who happens to have one exported would see the stream routes
-// take the Real-Debrid path no matter what config these tests inject. Cleared
-// for every test; the empty string reads as "not set".
+// REALDEBRID_API_TOKEN and TORBOX_API_TOKEN override the config file inside
+// resolveRealDebridToken/resolveTorBoxToken (and so inside resolveActiveDebrid),
+// so a developer who happens to have either exported would see the stream
+// routes take that provider's path no matter what config these tests inject.
+// Cleared for every test; the empty string reads as "not set".
 beforeEach(() => {
   vi.stubEnv("REALDEBRID_API_TOKEN", "");
+  vi.stubEnv("TORBOX_API_TOKEN", "");
 });
 afterEach(() => {
   vi.unstubAllEnvs();
