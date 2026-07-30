@@ -41,7 +41,7 @@ import {
   saveStreamHistory,
   type StreamHistoryItem,
 } from "../core/streamHistory";
-import { nextEpisodeIndex } from "../util/nextEpisodeFile";
+import { nextEpisodeIndex, packTargetFor, type PackTarget } from "../util/nextEpisodeFile";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
@@ -1233,9 +1233,17 @@ export function App({
     (candidates: ResolvedFile[], input: DownloadInput, recorded: StreamHistoryItem | null) => {
       setStreamedFiles(new Set());
       setStreamSource(input);
+      // KEYED BY INFOHASH, not just cleared on read. `openStreamPicker` runs
+      // only when a MULTI-FILE torrent actually resolves, so every other path
+      // leaves the ref set: `streamResult` bailing on its guard, the
+      // torrent-stream ack prompt being cancelled, an RD resolve failing, or a
+      // single-file torrent. Without the key, a stale target from an abandoned
+      // play preselects the wrong episode in a later, unrelated picker.
+      const packTarget = packTargetFor(packTargetRef.current, input.id);
+      if (packTarget) packTargetRef.current = null;
       setStreamPreselect(
         nextEpisodeIndex(candidates, {
-          next: recorded ? nextEpisode(recorded) : null,
+          next: packTarget ?? (recorded ? nextEpisode(recorded) : null),
           watched: watchedFor(config?.favourites ?? [], input.id),
         }),
       );
@@ -1504,6 +1512,11 @@ export function App({
   // way on cleanup; this is the keypress path's equivalent.
   const autoPlayRef = useRef<AbortController | null>(null);
 
+  // The episode auto-play is actually after, when it had to settle for a pack.
+  // Beats `nextEpisode(recorded)` because the pack's own history row has no
+  // episode to derive one from. Keyed by infohash and cleared on use.
+  const packTargetRef = useRef<PackTarget | null>(null);
+
   const autoPlayTitle = useCallback(
     (title: string, intent: PickIntent, fallback?: () => void) => {
       if (!config) return;
@@ -1538,10 +1551,10 @@ export function App({
           return;
         }
         setNotice(pickStatusLine(pick, prefs.maxResolution));
-        // TODO(task-9): pick.fromPack is not threaded into file selection yet,
-        // so a season pack plays via streamResult's normal file picker rather
-        // than jumping straight to the episode. Task 9 owns wiring
-        // nextEpisodeIndex into that path for Continue Watching.
+        packTargetRef.current =
+          pick.fromPack && intent.kind === "episode"
+            ? { infoHash: pick.chosen.infoHash, next: { season: intent.season, episode: intent.episode } }
+            : null;
         streamResult({
           id: pick.chosen.infoHash,
           name: pick.chosen.name,

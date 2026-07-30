@@ -4,11 +4,23 @@ import { useStore } from "../store";
 import { Panel } from "./Panel";
 import { wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
-import { nextLabel } from "../../core/streamHistory";
+import { nextEpisode, nextLabel } from "../../core/streamHistory";
 import { cleanText, truncate } from "../../util/format";
 
 export function ContinueWatching() {
-  const { streamHistory, openStreamHistory, removeStreamHistory, region, section, contentWidth, listRows, streamActive } = useStore();
+  const {
+    streamHistory,
+    openStreamHistory,
+    removeStreamHistory,
+    region,
+    section,
+    contentWidth,
+    listRows,
+    streamActive,
+    autoPlayTitle,
+    setSection,
+    submitQuery,
+  } = useStore();
   const focused = region === "content" && section === "continueWatching";
   const [cursor, setCursor] = useState(0);
   const clamped = Math.min(cursor, Math.max(0, streamHistory.length - 1));
@@ -19,10 +31,25 @@ export function ContinueWatching() {
       else if (key.downArrow || input === "j") setCursor(wrapStep(clamped, 1, streamHistory.length));
       else if (key.return) {
         const item = streamHistory[clamped];
-        if (item) openStreamHistory(item);
+        if (!item) return;
+        const next = nextEpisode(item);
+        // Null for a film AND for a series watched via a season pack — see
+        // streamHistory.ts. There is nothing honest to search for, so Enter
+        // keeps doing exactly what it did before.
+        if (!next) {
+          openStreamHistory(item);
+          return;
+        }
+        autoPlayTitle(item.title, { kind: "episode", ...next }, () => openStreamHistory(item));
       } else if (input === "x" && !streamActive) {
         const item = streamHistory[clamped];
         if (item) removeStreamHistory(item.key);
+      } else if (input === "s") {
+        const item = streamHistory[clamped];
+        if (item) {
+          setSection("all");
+          submitQuery(item.title);
+        }
       }
     },
     { isActive: focused && streamHistory.length > 0 },
