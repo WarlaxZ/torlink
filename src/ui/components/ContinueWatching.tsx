@@ -15,7 +15,7 @@ function nextLabel(item: StreamHistoryItem): string {
 }
 
 export function ContinueWatching() {
-  const { streamHistory, openStreamHistory, removeStreamHistory, region, section, contentWidth, listRows } = useStore();
+  const { streamHistory, openStreamHistory, removeStreamHistory, region, section, contentWidth, listRows, streamActive } = useStore();
   const focused = region === "content" && section === "continueWatching";
   const [cursor, setCursor] = useState(0);
   const clamped = Math.min(cursor, Math.max(0, streamHistory.length - 1));
@@ -27,7 +27,7 @@ export function ContinueWatching() {
       else if (key.return) {
         const item = streamHistory[clamped];
         if (item) openStreamHistory(item);
-      } else if (input === "x") {
+      } else if (input === "x" && !streamActive) {
         const item = streamHistory[clamped];
         if (item) removeStreamHistory(item.key);
       }

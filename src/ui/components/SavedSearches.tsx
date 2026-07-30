@@ -6,7 +6,7 @@ import { wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
 
 export function SavedSearches() {
-  const { savedSearches, toggleSavedSearch, submitQuery, setSection, region, section, contentWidth, listRows } = useStore();
+  const { savedSearches, toggleSavedSearch, submitQuery, setSection, region, section, contentWidth, listRows, streamActive } = useStore();
   const focused = region === "content" && section === "savedSearches";
   const [cursor, setCursor] = useState(0);
   const clamped = Math.min(cursor, Math.max(0, savedSearches.length - 1));
@@ -16,7 +16,7 @@ export function SavedSearches() {
     else if (key.return) {
       const query = savedSearches[clamped];
       if (query) { submitQuery(query); setSection("all"); }
-    } else if (input === "x") {
+    } else if (input === "x" && !streamActive) {
       const query = savedSearches[clamped]; if (query) toggleSavedSearch(query);
     }
   }, { isActive: focused && savedSearches.length > 0 });

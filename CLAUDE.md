@@ -27,7 +27,7 @@ reason. Two reasons that actually qualify:
 | Where | `src/ui/` | `src/web/` (server) + `src/web/static/` (bundle) |
 | A new list/pane | a `Section` + `Sidebar.tsx` nav entry + a component | a nav tab or pane section in `index.html` + wiring in `static/app.ts` |
 | A new key | **both** halves of `src/ui/keymap.ts` — `HELP_GROUPS` and `footerHints` | n/a — buttons, not keys |
-| A new `Store` field | matching entry in `makeStore` (`scripts/render-previews-impl.tsx`) or `npm run previews` breaks | n/a |
+| A new `Store` field | matching entry in **two** places — `makeStore` (`scripts/render-previews-impl.tsx`), or `npm run previews` breaks, *and* `makeTestStore` (`src/ui/testHarness.ts`), or `npm run typecheck` breaks | n/a |
 | Reaching data | direct — same process | a route in `src/web/routes.ts` + a type in `src/web/wire.ts` |
 | Docs | `README.md` — and check the web UI's own limitations list is still true | same |
 
