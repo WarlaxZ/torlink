@@ -129,8 +129,6 @@ export interface PublicStreamFile {
 export interface PublicStreamSession {
   id: string;
   backend: "debrid" | "torrent";
-  /** Which debrid service served it, when `backend` is "debrid". */
-  provider?: "realdebrid" | "torbox";
   name: string;
   state: "resolving" | "ready" | "error";
   /** Integer percent, 0–100 (not a 0..1 fraction). */
