@@ -3,7 +3,16 @@ import { Box, Text, useInput } from "ink";
 import { Panel } from "./Panel";
 import { wrapStep } from "../move";
 import { COLOR, ICON } from "../theme";
-import { FEATURE_IDS, FEATURES, MAX_RESOLUTIONS, type FeatureId, type MaxResolution } from "../../util/releasePick";
+import {
+  FEATURE_IDS,
+  FEATURES,
+  MAX_RESOLUTIONS,
+  NEXT_FEATURE_STATE,
+  FEATURE_STATE_MARK,
+  type FeatureId,
+  type FeatureState,
+  type MaxResolution,
+} from "../../util/releasePick";
 
 /** none -> highest -> … -> lowest -> none. `undefined` is "no ceiling". */
 export function cycleResolution(current: MaxResolution | undefined): MaxResolution | undefined {
@@ -11,12 +20,6 @@ export function cycleResolution(current: MaxResolution | undefined): MaxResoluti
   const i = MAX_RESOLUTIONS.indexOf(current);
   return i === MAX_RESOLUTIONS.length - 1 ? undefined : MAX_RESOLUTIONS[i + 1];
 }
-
-// Off -> require -> exclude -> off. One three-state cell per feature rather
-// than two parallel lists, so a feature cannot be required and excluded at once.
-type FeatureState = "off" | "require" | "exclude";
-const NEXT_STATE: Record<FeatureState, FeatureState> = { off: "require", require: "exclude", exclude: "off" };
-const MARK: Record<FeatureState, string> = { off: "·", require: "✓", exclude: "✗" };
 
 export interface QualityPromptProps {
   width: number;
@@ -45,7 +48,7 @@ export function QualityPrompt({ width, maxResolution, require, exclude, onChange
         return;
       }
       const id = FEATURE_IDS[clamped - 1]!;
-      const next = NEXT_STATE[stateOf(id)];
+      const next = NEXT_FEATURE_STATE[stateOf(id)];
       onChange({
         maxResolution,
         require: next === "require" ? [...require, id] : require.filter((x) => x !== id),
@@ -69,7 +72,7 @@ export function QualityPrompt({ width, maxResolution, require, exclude, onChange
             <Box key={id}>
               <Text color={selected ? COLOR.accent : undefined}>{selected ? `${ICON.pointer} ` : "  "}</Text>
               <Text color={state === "require" ? COLOR.good : state === "exclude" ? COLOR.bad : undefined}>
-                {MARK[state]}
+                {FEATURE_STATE_MARK[state]}
               </Text>
               <Text dimColor={state === "off"}>{` ${FEATURES[id].label}`}</Text>
             </Box>

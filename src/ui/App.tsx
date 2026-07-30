@@ -19,6 +19,8 @@ import {
 import {
   pickBestRelease,
   pickStatusLine,
+  pickSearchingLine,
+  pickNoneLine,
   type PickIntent,
   type FeatureId,
   type MaxResolution,
@@ -1553,10 +1555,10 @@ export function App({
       const ctrl = new AbortController();
       autoPlayRef.current = ctrl;
       void (async () => {
-        setNotice(`Finding a release for ${title}…`);
+        setNotice(pickSearchingLine(title));
         const sources = enabledSources(
           (config.disabledSources ?? []) as SourceId[],
-          config.adultContent ?? false,
+          resolveAdultContent(config),
         );
         const snap = await runSearch(title, sources, { signal: ctrl.signal });
         // An aborted search RESOLVES rather than rejecting, with whatever the
@@ -1571,10 +1573,13 @@ export function App({
         const prefs = qualityPrefsFrom(config);
         const pick = pickBestRelease(snap.results, prefs, intent);
         if (!pick) {
-          // Continue Watching passes its existing resume action here, so an
-          // offline or aged-out title still does something.
-          if (fallback) fallback();
-          else setNotice(`No release found for ${title}.`);
+          // Say so even when there is a fallback: `openStreamHistory` (the
+          // fallback Continue Watching passes) only starts a stream — it does
+          // not set a notice of its own — so without this the resumed torrent
+          // just appears with no explanation, unlike the browser, which shows
+          // "No release found…" before it falls back to the same replay.
+          setNotice(pickNoneLine(title));
+          fallback?.();
           return;
         }
         setNotice(pickStatusLine(pick, prefs.maxResolution));

@@ -300,4 +300,15 @@ describe("pickStatusLine", () => {
     const pick = pickBestRelease([c("Kestrel.2010.2160p.WEB-DL")], prefs({ maxResolution: "720p" }), FILM)!;
     expect(pickStatusLine(pick)).toContain("your resolution limit");
   });
+
+  it("names both when the cap AND a requirement gave way", () => {
+    const pick = pickBestRelease(
+      [c("Kestrel.2010.2160p.WEB-DL")],
+      prefs({ maxResolution: "720p", require: ["atmos"] }),
+      FILM,
+    )!;
+    const line = pickStatusLine(pick, "720p");
+    expect(line).toContain("nothing at 720p or below");
+    expect(line).toContain("no Atmos release");
+  });
 });

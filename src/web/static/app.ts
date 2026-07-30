@@ -121,7 +121,15 @@ import {
   type SavedState,
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
-import { FEATURE_IDS, FEATURES } from "../../util/releasePick";
+import {
+  FEATURE_IDS,
+  FEATURES,
+  NEXT_FEATURE_STATE,
+  FEATURE_STATE_MARK,
+  pickSearchingLine,
+  pickNoneLine,
+  type FeatureState,
+} from "../../util/releasePick";
 import type { ReccMedium } from "../../util/autoPlayableFilm";
 import {
   autoPlayableFilm,
@@ -162,7 +170,7 @@ const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 
-const prefsBlock = el<HTMLElement>("prefs");
+const prefsBlock = el<HTMLDetailsElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
 const prefsFeaturesBox = el<HTMLDivElement>("pref-features");
 
@@ -681,13 +689,6 @@ async function play(
 // POST /api/preferences and paint the rows FEATURES describes — no ranking
 // decision is made in this file; that is pickModel.ts/releasePick.ts's job.
 
-// Off -> require -> exclude -> off, matching the terminal's three-state cell.
-// One control per feature rather than two checkbox lists, so a feature cannot
-// be required and excluded at the same time.
-const NEXT_STATE = { off: "require", require: "exclude", exclude: "off" } as const;
-const MARK = { off: "·", require: "✓", exclude: "✗" } as const;
-type FeatureState = keyof typeof NEXT_STATE;
-
 let prefs: PublicQualityPrefs = { maxResolution: null, require: [], exclude: [] };
 
 function stateOf(id: (typeof FEATURE_IDS)[number]): FeatureState {
@@ -729,10 +730,10 @@ function renderPrefs(): void {
     btn.type = "button";
     btn.className = "pref-feature";
     btn.dataset.state = state;
-    btn.textContent = `${MARK[state]} ${FEATURES[id].label}`;
+    btn.textContent = `${FEATURE_STATE_MARK[state]} ${FEATURES[id].label}`;
     btn.setAttribute("aria-label", `${FEATURES[id].label}: ${state}`);
     btn.addEventListener("click", () => {
-      const next = NEXT_STATE[state];
+      const next = NEXT_FEATURE_STATE[state];
       void savePrefs({
         maxResolution: prefs.maxResolution,
         require: next === "require" ? [...prefs.require, id] : prefs.require.filter((x) => x !== id),
@@ -746,6 +747,17 @@ function renderPrefs(): void {
 prefsResSelect.addEventListener("change", () => {
   const value = prefsResSelect.value;
   void savePrefs({ ...prefs, maxResolution: (value || null) as PublicQualityPrefs["maxResolution"] });
+});
+
+// `prefs` is otherwise only ever set at boot and from this tab's own POST
+// echo, so another surface changing the stored preference (the TUI's `P`,
+// or another browser tab) would sit unseen until reload — and the next click
+// here would build its whole-object POST from that stale snapshot and quietly
+// wipe the other surface's change. Re-read the moment the disclosure opens,
+// through the same fetch `loadSources()` already does, so there is no second
+// endpoint or parse path for the same data.
+prefsBlock.addEventListener("toggle", () => {
+  if (prefsBlock.open) void loadSources();
 });
 
 // ---- search ---------------------------------------------------------------
@@ -1048,9 +1060,9 @@ const pickController = createPickController<PublicSearchResult>({
 // the controller.
 function renderPickPhase(state: PickState): void {
   const phase = state.phase;
-  if (phase.kind === "searching") showNotice(`Searching for “${phase.title}”…`);
+  if (phase.kind === "searching") showNotice(pickSearchingLine(phase.title));
   else if (phase.kind === "playing") showNotice(phase.note);
-  else if (phase.kind === "none") showNotice(`No release found for “${phase.title}”.`);
+  else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
 }
 
 searchForm.addEventListener("submit", (event) => {

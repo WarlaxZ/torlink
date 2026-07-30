@@ -65,6 +65,25 @@ export const FEATURES: Record<FeatureId, { label: string; test: (p: ParsedReleas
 
 export const FEATURE_IDS: readonly FeatureId[] = Object.keys(FEATURES) as FeatureId[];
 
+/**
+ * The three-state feature cell — off → require → exclude → off — and its mark,
+ * shared so the terminal's `QualityPrompt` and the browser's preferences
+ * disclosure render and cycle the same states. Copy-then-drift has bitten this
+ * codebase four times (see the module doc comments this one echoes), so this
+ * one lives here rather than in either front end.
+ */
+export type FeatureState = "off" | "require" | "exclude";
+export const NEXT_FEATURE_STATE: Record<FeatureState, FeatureState> = {
+  off: "require",
+  require: "exclude",
+  exclude: "off",
+};
+export const FEATURE_STATE_MARK: Record<FeatureState, string> = {
+  off: "·",
+  require: "✓",
+  exclude: "✗",
+};
+
 export function hasFeature(p: ParsedRelease, id: FeatureId): boolean {
   return FEATURES[id].test(p);
 }
@@ -265,6 +284,20 @@ export function pickBestRelease<T extends PickableResult>(
  * gave way. Shared so the terminal and the browser say the same thing — the
  * copy-then-drift bug this codebase has hit four times.
  */
+/**
+ * The other two phase strings a one-click pick can show, shared for the same
+ * reason `pickStatusLine` is: the terminal and the browser wrote their own
+ * copies of these and drifted (no quotes vs. curly quotes, "Finding" vs.
+ * "Searching"). One home for all three phase strings, here.
+ */
+export function pickSearchingLine(title: string): string {
+  return `Searching for “${title}”…`;
+}
+
+export function pickNoneLine(title: string): string {
+  return `No release found for “${title}”.`;
+}
+
 export function pickStatusLine<T extends PickableResult>(
   pick: Pick<T>,
   maxResolution?: MaxResolution,
