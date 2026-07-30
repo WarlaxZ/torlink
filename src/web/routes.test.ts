@@ -1988,7 +1988,7 @@ describe("handleWebApi — GET /api/saved", () => {
       "",
     );
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ savedSearches: [], library: [] });
+    expect(res.json).toEqual({ savedSearches: [], library: [], continueWatching: [] });
   });
 
   it("requires the token when one is configured", async () => {
@@ -2001,6 +2001,43 @@ describe("handleWebApi — GET /api/saved", () => {
       "",
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/saved — continueWatching", () => {
+  it("reports titles with their next episode, and no magnets", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [
+          { key: "kepler||series", title: "Kepler", type: "series", season: 2, episode: 4,
+            rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`, startedAt: 1_700_000_000_000 },
+          { key: "harrowgate||series", title: "Harrowgate", type: "series", season: 3,
+            rawName: "Harrowgate.S03.1080p", infoHash: "b".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`, startedAt: 1_600_000_000_000 },
+        ],
+      }),
+      "GET", "/api/saved", new URLSearchParams(), undefined, "",
+    );
+
+    const body = res.json as SavedResponse;
+    expect(body.continueWatching).toHaveLength(2);
+    expect(body.continueWatching[0]).toEqual({
+      key: "kepler||series", title: "Kepler", type: "series",
+      season: 2, episode: 4, next: { season: 2, episode: 5 },
+      rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+      startedAt: 1_700_000_000_000,
+    });
+    // A season pack names no episode, so there is no honest next to offer.
+    expect(body.continueWatching[1]?.next).toBeNull();
+    // Same exclusion as PublicFavourite: playing goes through
+    // POST /api/stream { infoHash, name }, which rebuilds the magnet.
+    expect(JSON.stringify(body)).not.toContain("magnet:");
+  });
+
+  it("answers an empty list when nothing has been streamed", async () => {
+    const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
+    expect((res.json as SavedResponse).continueWatching).toEqual([]);
   });
 });
 

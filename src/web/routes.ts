@@ -6,6 +6,7 @@ import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
 import {
   historyItemFor,
   loadStreamHistory,
+  nextEpisode,
   recordStream,
   saveStreamHistory,
   type StreamHistoryItem,
@@ -61,6 +62,7 @@ import type {
   PublicSearchSnapshot,
   PublicSource,
   PublicStreamFile,
+  PublicStreamHistoryItem,
   PublicReccEventAck,
   PublicReccEventType,
   PublicRecommendations,
@@ -790,14 +792,29 @@ export function toPublicFavourite(f: FavouriteItem): PublicFavourite {
   return out;
 }
 
+/** A stream-history entry as the browser sees it. Drops the magnet; adds the suggested next episode. */
+export function toPublicStreamHistoryItem(item: StreamHistoryItem): PublicStreamHistoryItem {
+  const out: PublicStreamHistoryItem = {
+    key: item.key, title: item.title, rawName: item.rawName,
+    infoHash: item.infoHash, startedAt: item.startedAt, next: nextEpisode(item),
+  };
+  if (item.year !== undefined) out.year = item.year;
+  if (item.type !== undefined) out.type = item.type;
+  if (item.season !== undefined) out.season = item.season;
+  if (item.episode !== undefined) out.episode = item.episode;
+  return out;
+}
+
 /** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
 async function savedLists(deps: WebDeps): Promise<WebResponse> {
   const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const history = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
   const out: SavedResponse = {
     // loadConfig already normalises both (junk dropped, caps applied), so these
     // coalesces are for a config object built in a test, not for disk data.
     savedSearches: config.savedSearches ?? [],
     library: (config.favourites ?? []).map(toPublicFavourite),
+    continueWatching: history.map(toPublicStreamHistoryItem),
   };
   return { status: 200, json: out };
 }

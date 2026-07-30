@@ -509,6 +509,29 @@ export interface PublicFavourite {
 }
 
 /**
+ * One title the user is part-way through, as `GET /api/saved` sends it.
+ *
+ * The MAGNET is absent for the reason it is absent from `PublicFavourite`:
+ * playing goes through `POST /api/stream { infoHash, name }`, which rebuilds it
+ * server-side, so shipping it would be tracker URLs on the wire to no end.
+ *
+ * `next` is computed server-side by `nextEpisode` and is a SUGGESTION — null
+ * for a film and for a season pack, which names a season but no episode.
+ */
+export interface PublicStreamHistoryItem {
+  key: string;
+  title: string;
+  year?: number;
+  type?: "movie" | "series";
+  season?: number;
+  episode?: number;
+  next: { season: number; episode: number } | null;
+  rawName: string;
+  infoHash: string;
+  startedAt: number;
+}
+
+/**
  * The body of `GET /api/saved` — both saved lists in one response.
  *
  * One route rather than two because the `saved` pane shows both lists at once,
@@ -519,10 +542,14 @@ export interface PublicFavourite {
  * `config.favourites` (pinned torrents). Both clients read and write the same
  * config file, so a browser that renamed either would show a different list
  * under the same word.
+ *
+ * `continueWatching` is the stream-history store (Task 2), newest first, each
+ * mapped by `toPublicStreamHistoryItem`.
  */
 export interface SavedResponse {
   savedSearches: string[];
   library: PublicFavourite[];
+  continueWatching: PublicStreamHistoryItem[];
 }
 
 /**
