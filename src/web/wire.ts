@@ -18,6 +18,15 @@
 // interfaces let `progress` be read as a 0..1 fraction when the producer sends
 // an integer percent; and before this module there was no compile-time link at
 // all, so renaming a field typechecked on both sides and rendered nothing.
+//
+// THE ONE IMPORT, and why it does not break the rule above: `src/util/episode.ts`
+// declares a single interface and imports nothing itself, so this `import type`
+// is erased at build time and reaches no Node builtin and no app module — the
+// property the "imports nothing" rule exists to protect. It is here because the
+// alternative was a seventh hand-written copy of `{ season, episode }`, the
+// exact drift this file was created to stop. Anything with a runtime value in it
+// still does not belong in this module.
+import type { EpisodeRef } from "../util/episode";
 
 /**
  * One in-flight (or paused / queued / failed) download.
@@ -525,7 +534,7 @@ export interface PublicStreamHistoryItem {
   type?: "movie" | "series";
   season?: number;
   episode?: number;
-  next: { season: number; episode: number } | null;
+  next: EpisodeRef | null;
   rawName: string;
   infoHash: string;
   startedAt: number;

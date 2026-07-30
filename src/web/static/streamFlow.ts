@@ -19,6 +19,7 @@ import { streamCandidates } from "../../util/videoFiles";
 // rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
 // which is why it is a module of its own and not part of videoFiles.ts.
 import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
+import type { EpisodeRef } from "../../util/episode";
 import type { PublicStreamFile, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
 
@@ -33,6 +34,10 @@ export type {
   StartStreamResponse,
   StreamConfirmResponse,
 } from "../wire";
+// Same argument, one layer further down: app.ts holds an episode reference on its
+// way to `runPlay`, and re-exporting the one declaration is what stops it from
+// spelling `{ season, episode }` out again. See src/util/episode.ts.
+export type { EpisodeRef } from "../../util/episode";
 
 /**
  * Whether a row is worth offering a Play button on.
@@ -137,7 +142,7 @@ export type StreamOutcome =
  */
 export function streamOutcome(
   session: PublicStreamSession,
-  next?: { season: number; episode: number } | null,
+  next?: EpisodeRef | null,
 ): StreamOutcome {
   if (session.state === "error") {
     // The core reuses the TUI's wording, so this is already a sentence a person
@@ -331,7 +336,7 @@ export interface PlayEffects {
 export async function runPlay(
   row: DashRow,
   fx: PlayEffects,
-  wanted?: { season: number; episode: number } | null,
+  wanted?: EpisodeRef | null,
 ): Promise<void> {
   let start = await fx.start(row, false);
 

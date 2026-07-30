@@ -18,6 +18,7 @@
  * picker behaving exactly as it always has.
  */
 import { parseRelease } from "./release";
+import type { EpisodeRef } from "./episode";
 import type { NamedFile } from "./videoFiles";
 
 export interface NextEpisodeHint {
@@ -33,7 +34,7 @@ export interface NextEpisodeHint {
    * Null for a film and for a season pack that names no episode — that judgement
    * is `nextEpisode`'s and is deliberately not re-derived here.
    */
-  next?: { season: number; episode: number } | null;
+  next?: EpisodeRef | null;
   /**
    * Filenames already streamed — `watchedFor(config.favourites, infoHash)`, plus
    * whatever this picker session has played. Used only when the parse has

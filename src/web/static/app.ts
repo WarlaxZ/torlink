@@ -19,6 +19,7 @@ import {
   isPlayable,
   playerPath,
   runPlay,
+  type EpisodeRef,
   type PublicStreamFile,
   type PublicStreamSession,
   type StartResult,
@@ -625,7 +626,7 @@ pickerCancel.addEventListener("click", () => {
 async function play(
   row: DashRow,
   onUnresolved?: () => void,
-  next?: { season: number; episode: number } | null,
+  next?: EpisodeRef | null,
 ): Promise<void> {
   if (playing.has(row.id)) return;
   playing.add(row.id);

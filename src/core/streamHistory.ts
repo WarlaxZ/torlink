@@ -7,6 +7,7 @@ import { promises as fs } from "node:fs";
 import { streamHistoryFile } from "../config/paths";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import { parseRelease } from "../util/release";
+import type { EpisodeRef } from "../util/episode";
 import type { SourceId } from "../sources/types";
 
 /**
@@ -128,7 +129,7 @@ export function recordStream(
  * to a season with no episode, and guessing episode 1 would point the user at
  * something they may have already watched.
  */
-export function nextEpisode(item: StreamHistoryItem): { season: number; episode: number } | null {
+export function nextEpisode(item: StreamHistoryItem): EpisodeRef | null {
   if (item.type !== "series") return null;
   if (item.season === undefined || item.episode === undefined) return null;
   return { season: item.season, episode: item.episode + 1 };
