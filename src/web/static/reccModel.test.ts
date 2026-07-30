@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ACTION_EVENT,
   ACTION_LABEL,
+  actionNotice,
   createReccController,
   DEFAULT_FILTERS,
   dismissesPick,
@@ -17,7 +18,9 @@ import {
   reccStatus,
   recommendationsUrl,
   sameFilters,
+  saveSearchBlockedNotice,
   searchGroupForType,
+  titleToSave,
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccFilters,
@@ -364,6 +367,20 @@ describe("the card's actions", () => {
     expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "Ashfall" });
     expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "Ashfall" });
     expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "Ashfall" });
+  });
+
+  it("tells the user a rating was noted", () => {
+    expect(actionNotice("like", pick())).toBe("Thanks — noted “Ashfall” as liked.");
+  });
+
+  it("gives back the pick's trimmed title to save, or null with nothing usable", () => {
+    expect(titleToSave(pick({ title: "  Ashfall  " }))).toBe("Ashfall");
+    expect(titleToSave(pick({ title: "   " }))).toBeNull();
+    expect(titleToSave(pick({ title: "" }))).toBeNull();
+  });
+
+  it("pins the wording for a pick with no title to save", () => {
+    expect(saveSearchBlockedNotice()).toBe("That pick has no title to save.");
   });
 });
 

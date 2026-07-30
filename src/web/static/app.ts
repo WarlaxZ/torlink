@@ -81,7 +81,9 @@ import {
   reccStatus,
   recommendationsUrl,
   RECC_ACTIONS,
+  saveSearchBlockedNotice,
   searchGroupForType,
+  titleToSave,
   type PublicRecommendation,
   type PublicRecommendations,
   type ReccAction,
@@ -1430,12 +1432,11 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
 async function actOnPick(action: ReccAction, item: PublicRecommendation): Promise<void> {
-  // The local action never reaches reccd. Its title is the pick's own, exactly
-  // as the TUI's `w` uses `item.title` — not a release name.
+  // The local action never reaches reccd.
   if (!isRatingAction(action)) {
-    const title = item.title.trim();
+    const title = titleToSave(item);
     if (!title) {
-      showNotice("That pick has no title to save.");
+      showNotice(saveSearchBlockedNotice());
       return;
     }
     await toggleSavedSearch(title);

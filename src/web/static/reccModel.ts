@@ -338,10 +338,26 @@ export function reccEventBody(
   return { type: ACTION_EVENT[action], rawName: item.title };
 }
 
-/** What to tell the user after an action lands. */
-export function actionNotice(action: ReccAction, item: PublicRecommendation): string {
-  if (action === "saveSearch") return `Saved “${item.title}” as a search.`;
+/** What to tell the user after a rating lands. */
+export function actionNotice(action: ReccRatingAction, item: PublicRecommendation): string {
   return `Thanks — noted “${item.title}” as ${ACTION_EVENT[action]}.`;
+}
+
+/**
+ * The title to save for a pick, or null when there is nothing usable to save.
+ *
+ * Trims, exactly as the TUI's `w` uses `item.title` — not a release name —
+ * and a blank result (an empty or whitespace-only title from reccd) is not
+ * something `toggleSavedSearch` should ever be asked to act on.
+ */
+export function titleToSave(item: PublicRecommendation): string | null {
+  const title = item.title.trim();
+  return title ? title : null;
+}
+
+/** What to tell the user when a pick has no title worth saving. */
+export function saveSearchBlockedNotice(): string {
+  return "That pick has no title to save.";
 }
 
 /**
@@ -408,4 +424,3 @@ export function searchGroupForType(type: ReccType, sources: SourcesResponse | nu
   const wanted = type === "movie" ? "Movies" : "TV";
   return categoryTabs(sources).includes(wanted) ? wanted : ALL_TAB;
 }
-
