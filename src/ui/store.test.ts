@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isCategory, parseCategory, parseSection } from "./store";
+import { makeTestStore } from "./testHarness";
 
 describe("parseCategory", () => {
   it("accepts the known category keys", () => {
@@ -57,5 +58,19 @@ describe("isCategory", () => {
     expect(isCategory("anime")).toBe(true);
     expect(isCategory("music")).toBe(true);
     expect(isCategory("books")).toBe(true);
+  });
+});
+
+describe("Store.autoPlayTitle", () => {
+  it("is present on the store shape", () => {
+    const store = makeTestStore();
+    expect(typeof store.autoPlayTitle).toBe("function");
+  });
+
+  it("can be overridden for a test", () => {
+    const calls: string[] = [];
+    const store = makeTestStore({ autoPlayTitle: (title) => calls.push(title) });
+    store.autoPlayTitle("Kestrel", { kind: "film" });
+    expect(calls).toEqual(["Kestrel"]);
   });
 });
