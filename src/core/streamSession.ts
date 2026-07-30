@@ -58,8 +58,6 @@ export interface StartStreamInput {
   // downgrade to P2P: that would expose the user's IP after they deliberately
   // configured a debrid service.
   debridToken?: string;
-  // Which provider `debridToken` belongs to. Required for the debrid route.
-  debridProvider?: DebridProviderId;
 }
 
 export const NO_DEBRID_TOKEN = "No debrid token configured for this stream.";
@@ -155,7 +153,11 @@ export class StreamSessionRegistry {
     const viaDebrid = input.route.kind === "debrid";
     try {
       if (viaDebrid) {
-        const provider = input.debridProvider ?? (input.route.kind === "debrid" ? input.route.provider : undefined);
+        // Derived the same way, and from the same expression, as the `provider`
+        // stamped onto the session in begin() — one source of truth (the route
+        // classifyStreamRoute produced), so the session can never record a
+        // provider other than the one it actually resolves through.
+        const provider = input.route.kind === "debrid" ? input.route.provider : undefined;
         if (!input.debridToken || !provider) throw new Error(NO_DEBRID_TOKEN);
         session.files = await this.resolveDebridImpl(provider, input.debridToken, input.magnet, {
           knownHash: input.infoHash,

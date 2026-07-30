@@ -295,7 +295,6 @@ describe("StreamSessionRegistry — debrid route", () => {
       name: "Kepler.S02E04.1080p.WEB-DL",
       route: { kind: "debrid", provider: "torbox" },
       debridToken: "tb-1",
-      debridProvider: "torbox",
     });
     expect(session.backend).toBe("debrid");
     expect(session.provider).toBe("torbox");
