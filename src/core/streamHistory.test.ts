@@ -70,6 +70,35 @@ describe("historyItemFor", () => {
     expect(historyItemFor({ id: HASH, name: "1080p.WEB-DL.x265", magnet: "m" }, 1)).toBeNull();
   });
 
+  // A series' dedupe key must NOT depend on whether the release name happened
+  // to carry a year: release names for one show disagree about that, and a key
+  // that carries it puts the same show in two rows with two independent
+  // high-water marks, one of them permanently stale.
+  it("gives one series the same key whether or not the release name carries a year", () => {
+    const withYear = historyItemFor({ id: HASH, name: "Kepler.2024.S02E04.1080p.WEB-DL", magnet: "m" }, 1);
+    const without = historyItemFor({ id: HASH, name: "Kepler.S02E05.1080p.WEB-DL", magnet: "m" }, 2);
+    expect(withYear?.key).toBe(without?.key);
+    // The year is still on the item for display; it is just not in the key.
+    expect(withYear?.year).toBe(2024);
+  });
+
+  it("collapses a series' two release-name shapes into one row with one high-water mark", () => {
+    const first = historyItemFor({ id: HASH, name: "Kepler.2024.S02E04.1080p.WEB-DL", magnet: "m" }, 1)!;
+    const second = historyItemFor({ id: HASH, name: "Kepler.S02E05.1080p.WEB-DL", magnet: "m" }, 2)!;
+    const rows = recordStream(recordStream([], first), second);
+    expect(rows).toHaveLength(1);
+    expect(nextLabel(rows[0]!)).toBe("next S02E06");
+  });
+
+  // Films keep the year: two different films can honestly share a title, and
+  // collapsing them would hide one behind the other.
+  it("keeps two same-titled films of different years apart", () => {
+    const older = historyItemFor({ id: HASH, name: "Ashfall.1999.1080p", magnet: "m" }, 1)!;
+    const newer = historyItemFor({ id: HASH, name: "Ashfall.2024.1080p", magnet: "m" }, 2)!;
+    expect(older.key).not.toBe(newer.key);
+    expect(recordStream(recordStream([], older), newer)).toHaveLength(2);
+  });
+
   it("omits source when the caller had none", () => {
     const built = historyItemFor({ id: HASH, name: "Tin.Rivers.2024.2160p", magnet: "m" }, 1);
     expect(built).not.toBeNull();

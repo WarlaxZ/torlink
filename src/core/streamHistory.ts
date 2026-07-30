@@ -15,7 +15,7 @@ import type { SourceId } from "../sources/types";
  * opposite of that.
  */
 export interface StreamHistoryItem {
-  /** `parseRelease`'s key — the group and dedupe key. */
+  /** The group and dedupe key — see {@link historyKeyFor}. */
   key: string;
   /** "Kepler", never "Kepler.S02E04.1080p.WEB-DL-GROUP". */
   title: string;
@@ -45,6 +45,28 @@ export const STREAM_HISTORY_CAP = 200;
  * quality noise ("1080p.WEB-DL.x265") gives no row worth drawing, and this list
  * exists precisely so the user sees titles rather than release names.
  */
+/**
+ * The dedupe key for a title, DELIBERATELY NOT `parseRelease`'s `key`.
+ *
+ * `parseRelease`'s key is an OMDb *cache* key: the year belongs in it because
+ * two films can honestly share a title. But a release name for a series is
+ * unreliable about carrying the year at all — "Kepler.2024.S02E04" and
+ * "Kepler.S02E05" are the same show — so inheriting it here put one series in
+ * two rows with two independent high-water marks, one permanently stale.
+ *
+ * So: a series is keyed on title + type only; anything else keeps the year.
+ * The lower-casing mirrors `parseRelease`'s own (src/util/release.ts) so the
+ * two agree on what "same title" means.
+ *
+ * No migration needed — `removeStreamHistory` filters on the *stored* value, so
+ * rows written under the old key keep working and merge into the new one the
+ * next time that title is streamed.
+ */
+function historyKeyFor(parsed: { title: string; year?: number; type?: string; key: string }): string {
+  if (parsed.type !== "series") return parsed.key;
+  return `${parsed.title.toLowerCase()}|series`;
+}
+
 export function historyItemFor(
   input: { id: string; name: string; magnet: string; source?: SourceId },
   now: number,
@@ -52,7 +74,7 @@ export function historyItemFor(
   const parsed = parseRelease(input.name);
   if (!parsed) return null;
   const out: StreamHistoryItem = {
-    key: parsed.key,
+    key: historyKeyFor(parsed),
     title: parsed.title,
     rawName: input.name,
     infoHash: input.id,
