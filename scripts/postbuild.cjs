@@ -1,6 +1,6 @@
 'use strict';
 
-const { chmodSync, copyFileSync, mkdirSync } = require('node:fs');
+const { chmodSync, copyFileSync, mkdirSync, readFileSync, readdirSync } = require('node:fs');
 const { resolve } = require('node:path');
 
 const root = resolve(__dirname, '..');
@@ -20,6 +20,32 @@ const webOut = resolve(root, 'dist/web');
 mkdirSync(webOut, { recursive: true });
 for (const file of ['index.html', 'player.html', 'styles.css']) {
   copyFileSync(resolve(root, 'src/web/static', file), resolve(webOut, file));
+}
+
+// Nothing in a browser bundle may keep an unresolved import. tsup externalises
+// everything in `dependencies` by default, so a `src/web/static` module that
+// imports an npm package builds "successfully" and then dies on load with a
+// bare specifier the browser cannot resolve — and with no jsdom here, no test
+// can see it. That shipped once (`parse-torrent-title`, fixed with `noExternal`
+// in tsup.web.config.ts). `node:*` is the same failure with a different cause,
+// and the same fix does not apply: that one means the wrong code moved into
+// `static/`. Fail the build rather than print success over a broken dashboard.
+const BARE_IMPORT = /\b(?:from|import)\s*\(?\s*["'](?![./])([^"']+)["']/g;
+const stowaways = new Map();
+for (const file of readdirSync(webOut).filter((f) => f.endsWith('.js'))) {
+  const code = readFileSync(resolve(webOut, file), 'utf8');
+  for (const [, spec] of code.matchAll(BARE_IMPORT)) {
+    if (!stowaways.has(spec)) stowaways.set(spec, file);
+  }
+}
+if (stowaways.size > 0) {
+  const lines = [...stowaways].map(([spec, file]) => `  ${spec}  (dist/web/${file})`);
+  console.error(
+    `postbuild: the browser bundle keeps ${stowaways.size} unresolved import(s):\n${lines.join('\n')}\n` +
+      "A 'node:*' specifier means node-only code reached src/web/static/ — move it to src/core or src/util.\n" +
+      'Anything else is an npm package tsup externalised — add it to `noExternal` in tsup.web.config.ts.',
+  );
+  process.exit(1);
 }
 
 // On Windows chmod is effectively a no-op, and npm re-applies bin permissions on install anyway, so a failure
