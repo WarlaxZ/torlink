@@ -1597,9 +1597,8 @@ Fix: let `autoPlayTitle` hand its intent down as an override. Keep it small — 
 ```tsx
   // The episode auto-play is actually after, when it had to settle for a pack.
   // Beats `nextEpisode(recorded)` because the pack's own history row has no
-  // episode to derive one from. One-shot: cleared on read, so a later manual
-  // play of the same torrent gets the ordinary history-based preselect.
-  const packTargetRef = useRef<EpisodeRef | null>(null);
+  // episode to derive one from. Keyed by infohash and cleared on use.
+  const packTargetRef = useRef<{ infoHash: string; next: EpisodeRef } | null>(null);
 ```
 
 In `autoPlayTitle`, before calling `streamResult`:
@@ -1607,15 +1606,22 @@ In `autoPlayTitle`, before calling `streamResult`:
 ```tsx
         packTargetRef.current =
           pick.fromPack && intent.kind === "episode"
-            ? { season: intent.season, episode: intent.episode }
+            ? { infoHash: pick.chosen.infoHash, next: { season: intent.season, episode: intent.episode } }
             : null;
 ```
 
-And in `openStreamPicker`, prefer it:
+And in `openStreamPicker`, consume it only for the torrent it was set for:
 
 ```tsx
-      const packTarget = packTargetRef.current;
-      packTargetRef.current = null;
+      // KEYED BY INFOHASH, not just cleared on read. `openStreamPicker` runs
+      // only when a MULTI-FILE torrent actually resolves, so every other path
+      // leaves the ref set: `streamResult` bailing on its guard, the
+      // torrent-stream ack prompt being cancelled, an RD resolve failing, or a
+      // single-file torrent. Without the key, a stale target from an abandoned
+      // play preselects the wrong episode in a later, unrelated picker.
+      const pending = packTargetRef.current;
+      const packTarget = pending?.infoHash === input.id ? pending.next : null;
+      if (packTarget) packTargetRef.current = null;
       setStreamPreselect(
         nextEpisodeIndex(candidates, {
           next: packTarget ?? (recorded ? nextEpisode(recorded) : null),
@@ -1625,6 +1631,26 @@ And in `openStreamPicker`, prefer it:
 ```
 
 A ref rather than state on purpose: this must be readable synchronously by the time the picker opens, and it must not trigger a re-render. `EpisodeRef` comes from `src/util/episode.ts`.
+
+**Test the staleness guard, not just the happy path:** set a pack target for one infohash, open the picker for a different one, and assert the preselect fell back to `nextEpisode(recorded)`. That is the case the infohash key exists for, and it is invisible without a test.
+
+### Also in this task: the `s` key on Continue Watching
+
+Task 10 adds `{ keys: "s", label: "Search" }` to this pane's footer and help group. **Nothing else adds the handler**, and Task 10's tests assert on `footerHints`, not on the component — so without this, Task 10 ships a footer advertising a key that does nothing, and its own tests still pass.
+
+Add it to `ContinueWatching.tsx`'s `useInput`, mirroring `ForYou.tsx`:
+
+```tsx
+      else if (input === "s") {
+        const item = streamHistory[clamped];
+        if (item) {
+          setSection("all");
+          submitQuery(item.title);
+        }
+      }
+```
+
+`setSection` and `submitQuery` come from `useStore()` — add them to the destructure. Cover it with a test that `s` searches and does NOT play.
 
 Remove Task 6's `TODO(task-9)` comment as part of this.
 
@@ -2544,9 +2570,14 @@ git commit -m "feat: playback preferences and play buttons in the browser UI"
 
 Cover: what the three settings do; that with nothing set the best resolution available wins, then the largest file; that Enter/Play works on For You **films** and on Continue Watching rows with a next episode, with shows waiting on the episode picker; and the season-pack consequence — **watching one episode can fetch a whole season**, because resolution outranks the episode-versus-pack preference, with `maxResolution` as the lever.
 
-- [ ] **Step 2: Check the limitations list**
+- [ ] **Step 2: Correct two README claims this feature falsifies**
 
-The web UI previously could not change any configuration. It can now change this one. Update the list if it claims otherwise.
+Both are in the web UI's limitations list and both are now wrong. Located and verified:
+
+- **`README.md:291`** — "**No subtitles, no scrubber, no automatic next-episode playback.** Continue watching (above) remembers *what* you were watching and, when it can, names what's next…". Continue Watching's Enter now *does* automatically play the next episode. Rewrite this bullet so it still covers subtitles and the scrubber but no longer denies next-episode playback; say what it actually does now.
+- **`README.md:292`** — "**No settings UI.** Tokens, sources, limits and folders are set in the TUI only — the browser reads that config but has no page for it. It does write three things: your saved searches, your library, …". The browser now has a settings control (the header disclosure) and writes a **fourth** thing: the playback preference. Update both halves of that sentence — the count and the "no page for it" claim.
+
+Re-read the surrounding bullets before editing so the corrected ones keep the list's voice.
 
 - [ ] **Step 3: Run everything**
 
