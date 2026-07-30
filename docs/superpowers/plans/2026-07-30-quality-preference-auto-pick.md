@@ -1086,16 +1086,14 @@ Add `autoPlayTitle` next to `streamResult` in `src/ui/App.tsx`:
       void (async () => {
         setNotice(`Finding a release for ${title}…`);
         const sources = enabledSources(config.disabledSources ?? [], config.adultContent ?? false);
-        let snap;
-        try {
-          snap = await runSearch(title, sources, { signal: ctrl.signal });
-        } catch {
-          // An aborted search rejects. Silent on purpose — a newer auto-play
-          // has already replaced this one's status line. Without this catch the
-          // rejection is swallowed unreported inside the `void (async …)()`.
-          return;
-        }
-        // A newer press superseded this one while it was in flight.
+        const snap = await runSearch(title, sources, { signal: ctrl.signal });
+        // An aborted search RESOLVES rather than rejecting, with whatever the
+        // snapshot held when the abort landed — usually empty
+        // (src/core/search.ts:108-111 documents this, and requires callers to
+        // treat an abort as a discard). So no try/catch: the identity check
+        // below is what discards it, and it must come before anything that
+        // reads `snap`, or a superseded search would report "no release found"
+        // over the newer one's status line.
         if (autoPlayRef.current !== ctrl) return;
         autoPlayRef.current = null;
         const prefs = qualityPrefsFrom(config);
