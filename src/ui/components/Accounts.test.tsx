@@ -1,23 +1,63 @@
 import { describe, expect, it } from "vitest";
 import { render } from "ink-testing-library";
 import { StoreContext, type Store } from "../store";
-import { Accounts } from "./Accounts";
+import { Accounts, type DebridAccountProps } from "./Accounts";
 import type { ReccStatus } from "../../recc/status";
+import type { DebridStatus } from "../../integrations/debrid/types";
 
 function storeStub(): Store {
   return { region: "content", section: "accounts" } as unknown as Store;
 }
 
 const noop = () => {};
+
+const RD_STATUS: DebridStatus = {
+  provider: "realdebrid",
+  username: "alice",
+  active: true,
+  planLabel: "premium",
+  expiresAt: null,
+};
+
+const TB_STATUS: DebridStatus = {
+  provider: "torbox",
+  username: "alice",
+  active: true,
+  planLabel: "pro",
+  expiresAt: null,
+};
+
+function debridProps() {
+  return [
+    {
+      provider: "realdebrid" as const,
+      token: "rd_live_xxx",
+      status: RD_STATUS,
+      onManage: noop,
+      onSignOut: noop,
+    },
+    {
+      provider: "torbox" as const,
+      token: "tb_live_xxx",
+      status: TB_STATUS,
+      onManage: noop,
+      onSignOut: noop,
+    },
+  ] satisfies DebridAccountProps[];
+}
+
+function props(overrides: Partial<typeof baseProps> = {}) {
+  return { ...baseProps, ...overrides };
+}
+
 const baseProps = {
-  rdToken: "",
-  rdStatus: null,
+  debrid: debridProps(),
+  activeDebrid: "realdebrid" as DebridAccountProps["provider"] | null,
+  onSetActiveDebrid: noop,
   rutrackerUser: undefined as string | undefined,
   reccConfigured: false,
   reccStatus: null as ReccStatus | null,
   reccEnvOverride: false,
-  onManageRd: noop,
-  onSignOutRd: noop,
   onManageRutracker: noop,
   onSignOutRutracker: noop,
   onManageRecc: noop,
@@ -32,15 +72,35 @@ const baseProps = {
 function renderAccounts(overrides: Partial<typeof baseProps> = {}) {
   return render(
     <StoreContext.Provider value={storeStub()}>
-      <Accounts {...baseProps} {...overrides} />
+      <Accounts {...props(overrides)} />
     </StoreContext.Provider>,
   );
 }
 
 describe("Accounts", () => {
-  it("lists Real-Debrid, RuTracker, reccd and OMDb", () => {
-    const frame = renderAccounts().lastFrame() ?? "";
+  it("lists both debrid providers and marks the active one", () => {
+    const { lastFrame } = render(
+      <StoreContext.Provider value={storeStub()}>
+        <Accounts {...props()} />
+      </StoreContext.Provider>,
+    );
+    const frame = lastFrame() ?? "";
     expect(frame).toContain("Real-Debrid");
+    expect(frame).toContain("TorBox");
+    expect(frame).toContain("active");
+  });
+
+  it("offers the make-active key only on a signed-in provider that is not already active", () => {
+    const { lastFrame } = render(
+      <StoreContext.Provider value={storeStub()}>
+        <Accounts {...props({ activeDebrid: "realdebrid" })} />
+      </StoreContext.Provider>,
+    );
+    expect(lastFrame() ?? "").toContain("a use");
+  });
+
+  it("lists RuTracker, reccd and OMDb", () => {
+    const frame = renderAccounts().lastFrame() ?? "";
     expect(frame).toContain("RuTracker");
     expect(frame).toContain("reccd");
     expect(frame).toContain("OMDb");

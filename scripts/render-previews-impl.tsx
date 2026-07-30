@@ -384,13 +384,20 @@ save(
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Accounts
-          rdToken="rd_live_xxx"
-          rdStatus={RD_STATUS}
+          debrid={[
+            {
+              provider: "realdebrid",
+              token: "rd_live_xxx",
+              status: RD_STATUS,
+              onManage: () => {},
+              onSignOut: () => {},
+            },
+          ]}
+          activeDebrid="realdebrid"
+          onSetActiveDebrid={() => {}}
           rutrackerUser="you"
           reccConfigured
           reccStatus={{ state: "connected", host: "reccd.local:4100" }}
-          onManageRd={() => {}}
-          onSignOutRd={() => {}}
           onManageRutracker={() => {}}
           onSignOutRutracker={() => {}}
           onManageRecc={() => {}}

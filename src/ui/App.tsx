@@ -24,6 +24,7 @@ import {
   debridStatusFromRealDebridUser,
 } from "../integrations/debrid/realdebrid";
 import type { DebridStatus } from "../integrations/debrid/types";
+import { getDebridProvider } from "../integrations/debrid";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
@@ -83,7 +84,7 @@ import {
 } from "../util/favouriteList";
 import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
-import { RdBadge } from "./components/RdBadge";
+import { DebridBadge } from "./components/DebridBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
 import { Rule } from "./components/Rule";
 import { Footer } from "./components/Footer";
@@ -2118,7 +2119,7 @@ export function App({
             <Logo />
           </Box>
           <Box flexShrink={1} minWidth={0} marginLeft={2}>
-            <RdBadge status={rdStatus} />
+            <DebridBadge status={rdStatus} />
             {notice ? (
               <Text color={COLOR.good} wrap="truncate-end">{`  ${notice}`}</Text>
             ) : null}
@@ -2169,6 +2170,7 @@ export function App({
               width={Math.max(24, Math.min(cols - 4, 62))}
               value={store.config.realDebridToken ?? ""}
               status={rdStatus}
+              provider={getDebridProvider("realdebrid")}
               onSubmit={setRealDebridToken}
               onClear={clearRealDebridToken}
               onCancel={closeTokenPrompt}
@@ -2585,12 +2587,19 @@ export function App({
             </Box>
             <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
               <Accounts
-                rdToken={resolveRealDebridToken(store.config)}
-                rdStatus={rdStatus}
+                debrid={[
+                  {
+                    provider: "realdebrid",
+                    token: resolveRealDebridToken(store.config),
+                    status: rdStatus,
+                    onManage: openTokenPrompt,
+                    onSignOut: clearRealDebridToken,
+                  },
+                ]}
+                activeDebrid="realdebrid"
+                onSetActiveDebrid={() => {}}
                 rutrackerUser={rutrackerUser}
                 streamActive={store.streamActive}
-                onManageRd={openTokenPrompt}
-                onSignOutRd={clearRealDebridToken}
                 onManageRutracker={openRutrackerPrompt}
                 onSignOutRutracker={signOutRutracker}
                 reccConfigured={store.reccConfigured}
