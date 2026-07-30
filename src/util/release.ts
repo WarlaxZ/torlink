@@ -15,6 +15,21 @@ export interface ParsedRelease {
    */
   season?: number;
   episode?: number;
+  /**
+   * What the release name says about picture and sound. Raw parser vocabulary,
+   * NOT a normalised enum: `resolution` can be "1080p", "1080i" or "4k", so
+   * consumers must go through `resolutionHeight()` in `releasePick.ts` rather
+   * than comparing strings. The `*List` fields are the parser's own `colorlist`
+   * / `audiolist`, which carry every match rather than just the first — a
+   * release can be both HDR and DV.
+   */
+  resolution?: string;
+  codec?: string;
+  colorList?: string[];
+  audioList?: string[];
+  channels?: number;
+  bitdepth?: number;
+  remux?: boolean;
 }
 
 // Which medium a category section implies, if any.
@@ -92,5 +107,16 @@ export function parseRelease(name: string, hint?: SectionHint): ParsedRelease | 
   const result: ParsedRelease = { title, year, type, key };
   if (typeof p.season === "number") result.season = p.season;
   if (typeof p.episode === "number") result.episode = p.episode;
+  if (typeof p.resolution === "string") result.resolution = p.resolution;
+  if (typeof p.codec === "string") result.codec = p.codec;
+  if (typeof p.channels === "number") result.channels = p.channels;
+  if (typeof p.bitdepth === "number") result.bitdepth = p.bitdepth;
+  if (p.remux === true) result.remux = true;
+  // `colorlist`/`audiolist` are only present when the parser matched more than
+  // one; fall back to the singular field so a single match is not lost.
+  const colorList = p.colorlist ?? (typeof p.color === "string" ? [p.color] : undefined);
+  if (colorList?.length) result.colorList = colorList;
+  const audioList = p.audiolist ?? (typeof p.audio === "string" ? [p.audio] : undefined);
+  if (audioList?.length) result.audioList = audioList;
   return result;
 }
