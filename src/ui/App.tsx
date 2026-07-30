@@ -2804,6 +2804,7 @@ export function App({
                 setCaptureMode={store.setCaptureMode}
                 onRatePick={openRatePick}
                 toggleSavedSearch={store.toggleSavedSearch}
+                autoPlayTitle={store.autoPlayTitle}
               />
             </Box>
           </Box>

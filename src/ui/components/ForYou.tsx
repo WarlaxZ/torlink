@@ -11,6 +11,8 @@ import { PreviewPane } from "./PreviewPane";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { cleanText, truncate } from "../../util/format";
 import { openUrl, imdbTitleUrl } from "../../util/openUrl";
+import { autoPlayableFilm } from "../../util/autoPlayableFilm";
+import type { PickIntent } from "../../util/releasePick";
 
 interface ForYouProps {
   reccConfig: ReccClientConfig;
@@ -26,6 +28,8 @@ interface ForYouProps {
   height?: number;
   // OMDb key (already resolved from env/config). Empty = plot/poster off.
   omdbApiKey?: string;
+  // Absent means the pane behaves exactly as it did before.
+  autoPlayTitle?: (title: string, intent: PickIntent) => void;
 }
 
 const NEXT_TYPE: Record<ReccType, ReccType> = { all: "movie", movie: "tv", tv: "all" };
@@ -47,6 +51,7 @@ export function ForYou({
   width = 60,
   height = 20,
   omdbApiKey = "",
+  autoPlayTitle,
 }: ForYouProps) {
   const recs = useRecommendations(reccConfig, visible, fetchImpl);
   const [selected, setSelected] = useState(0);
@@ -108,8 +113,22 @@ export function ForYou({
       else if (input === "f") {
         if (selectedItem) onRatePick?.(selectedItem.title, () => recs.dismiss(selectedItem.imdbId));
       }
-      else if (key.return) {
+      else if (input === "s") {
         if (selectedItem) {
+          setSection(TYPE_SECTION[recs.type]);
+          submitQuery(selectedItem.title);
+        }
+      }
+      else if (key.return) {
+        if (!selectedItem) return;
+        // Only a film has an unambiguous intent. A series needs the season and
+        // episode picker (spec D); until then Enter does what it always did
+        // rather than guessing season 1 episode 1. `preview.type` is OMDb's
+        // per-item answer and wins; the pane's filter is the fallback when
+        // there is no OMDb key, and "all" means genuinely unknown.
+        if (autoPlayTitle && autoPlayableFilm(preview.type, recs.type)) {
+          autoPlayTitle(selectedItem.title, { kind: "film" });
+        } else {
           setSection(TYPE_SECTION[recs.type]);
           submitQuery(selectedItem.title);
         }

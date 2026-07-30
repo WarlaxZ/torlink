@@ -13,6 +13,7 @@ interface Meta {
   imdbId: string | null;
   plot: string | null;
   posterUrl: string | null;
+  type: OmdbType | null;
 }
 
 // undefined = still loading; null = looked up, none available.
@@ -20,6 +21,9 @@ export interface TitlePreview {
   imdbId: string | null | undefined;
   plot: string | null | undefined;
   posterRows: string[] | null | undefined;
+  // OMDb's answer for this specific pick — the medium signal For You's Enter
+  // handler prefers over its own filter (see util/autoPlayableFilm.ts).
+  type: OmdbType | null | undefined;
 }
 
 interface Args {
@@ -81,8 +85,8 @@ export function useTitlePreview(args: Args): TitlePreview {
         metas.current.set(
           cacheKey,
           res.ok
-            ? { imdbId: res.imdbId, plot: res.plot, posterUrl: res.posterUrl }
-            : { imdbId: null, plot: null, posterUrl: null },
+            ? { imdbId: res.imdbId, plot: res.plot, posterUrl: res.posterUrl, type: res.type ?? null }
+            : { imdbId: null, plot: null, posterUrl: null, type: null },
         );
         bump((n) => n + 1);
       });
@@ -114,5 +118,6 @@ export function useTitlePreview(args: Args): TitlePreview {
     imdbId: meta === undefined ? undefined : meta.imdbId,
     plot: meta === undefined ? undefined : meta.plot,
     posterRows: meta === undefined ? undefined : meta.posterUrl === null ? null : posters.current.get(posterKey),
+    type: meta === undefined ? undefined : meta.type,
   };
 }
