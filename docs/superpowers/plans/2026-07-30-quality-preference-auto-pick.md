@@ -1238,6 +1238,91 @@ git commit -m "feat: report the medium on an OMDb title lookup"
 
 ---
 
+### Task 7c: The film rule, in one place
+
+Both front ends must answer "can this For You row be auto-played?" identically, and `src/web` may not import `src/ui`. `src/util/` is the one directory both can reach, so the rule lives there — not copied into each.
+
+**Files:**
+- Modify: `src/util/releasePick.ts`
+- Test: `src/util/releasePick.test.ts`
+
+**Interfaces:**
+- Produces: `type ReccMedium = "movie" | "series"`, `type ReccFilter = "all" | "movie" | "tv"`, and `function autoPlayableFilm(omdbType: ReccMedium | null | undefined, filter: ReccFilter): boolean`.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `src/util/releasePick.test.ts`:
+
+```ts
+import { autoPlayableFilm } from "./releasePick";
+
+describe("autoPlayableFilm", () => {
+  it("trusts OMDb's medium over the filter", () => {
+    expect(autoPlayableFilm("movie", "all")).toBe(true);
+    expect(autoPlayableFilm("series", "movie")).toBe(false);
+  });
+
+  it("falls back to the filter when OMDb said nothing", () => {
+    expect(autoPlayableFilm(null, "movie")).toBe(true);
+    expect(autoPlayableFilm(undefined, "all")).toBe(false);
+    expect(autoPlayableFilm(null, "tv")).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test and confirm it fails**
+
+Run: `npx vitest run src/util/releasePick.test.ts -t "autoPlayableFilm"`
+Expected: FAIL — not exported.
+
+- [ ] **Step 3: Implement**
+
+Append to `src/util/releasePick.ts`:
+
+```ts
+/** What OMDb says a title is. Mirrors `OmdbType` without importing it: this
+ *  module's only import is `./release`, and `src/recc/omdb.ts` is not on that
+ *  list. `release.ts` already re-states the same two values for the same reason. */
+export type ReccMedium = "movie" | "series";
+/** The For You pane's type filter, in both front ends. */
+export type ReccFilter = "all" | "movie" | "tv";
+
+/**
+ * Whether a For You row can be auto-played. Only a film has an unambiguous
+ * intent — a show needs the season/episode picker (spec D).
+ *
+ * `omdbType` is per-item and wins when known. The pane's filter is the
+ * fallback for when there is no OMDb key, and it can only ever say "yes,
+ * film": "all" means the medium is genuinely unknown, because reccd sends no
+ * per-item type (`useRecommendations.ts:38` starts the filter at "all").
+ *
+ * HERE rather than in either front end because both need it and `src/web`
+ * may not import `src/ui` (eslint.config.js:78). Two copies of one rule is
+ * the copy-then-drift bug this codebase has hit four times.
+ */
+export function autoPlayableFilm(
+  omdbType: ReccMedium | null | undefined,
+  filter: ReccFilter,
+): boolean {
+  if (omdbType) return omdbType === "movie";
+  return filter === "movie";
+}
+```
+
+- [ ] **Step 4: Run the tests and confirm they pass**
+
+Run: `npx vitest run src/util/releasePick.test.ts && npm run build`
+Expected: PASS, and the build confirms the browser bundle is still clean.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/util/releasePick.ts src/util/releasePick.test.ts
+git commit -m "feat: one shared rule for whether a For You row is an auto-playable film"
+```
+
+---
+
 ### Task 8: For You — auto-play a film
 
 **Files:**
@@ -1258,25 +1343,7 @@ git commit -m "feat: report the medium on an OMDb title lookup"
 
 This ordering is why Task 7b exists. `useRecommendations.ts:38` starts the filter at `"all"` and reccd sends no per-item type, so filter-only gating would mean Enter auto-plays nothing until the user presses `t`.
 
-Add a pure helper next to the component so the rule is testable without rendering:
-
-```ts
-/**
- * Whether a For You row can be auto-played. Only a film has an unambiguous
- * intent — a show needs the season/episode picker (spec D).
- *
- * `omdbType` is per-item and wins when known. The filter is the fallback, and
- * it can only ever say "yes, film": "all" means the medium is genuinely
- * unknown, because reccd's payload carries no type.
- */
-export function autoPlayableFilm(
-  omdbType: "movie" | "series" | null | undefined,
-  filter: ReccType,
-): boolean {
-  if (omdbType) return omdbType === "movie";
-  return filter === "movie";
-}
-```
+The rule itself is `autoPlayableFilm` from `src/util/releasePick.ts` (Task 7c) — import it, do not restate it here. It is already tested there, so this task's tests cover only the wiring.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1285,21 +1352,6 @@ export function autoPlayableFilm(
 Add to `src/ui/components/ForYou.test.tsx`, reusing the existing `flush()` helper at `:33-39`:
 
 ```tsx
-import { autoPlayableFilm } from "./ForYou";
-
-describe("autoPlayableFilm", () => {
-  it("trusts OMDb's medium over the filter", () => {
-    expect(autoPlayableFilm("movie", "all")).toBe(true);
-    expect(autoPlayableFilm("series", "movie")).toBe(false);
-  });
-
-  it("falls back to the filter when OMDb said nothing", () => {
-    expect(autoPlayableFilm(null, "movie")).toBe(true);
-    expect(autoPlayableFilm(undefined, "all")).toBe(false);
-    expect(autoPlayableFilm(null, "tv")).toBe(false);
-  });
-});
-
 it("auto-plays on Enter once the filter is on films", async () => {
   const played: { title: string; intent: unknown }[] = [];
   const { stdin } = render(
@@ -1371,7 +1423,7 @@ Expected: FAIL — `autoPlayTitle` is not a prop and Enter still submits a query
 
 - [ ] **Step 3: Implement**
 
-Export `autoPlayableFilm` from `ForYou.tsx` (the helper shown above), and add to `ForYouProps`:
+Import `autoPlayableFilm` from `../../util/releasePick`, and add to `ForYouProps`:
 
 ```ts
   /** Absent means the pane behaves exactly as it did before. */
@@ -1994,7 +2046,7 @@ Every decision about what to show and what to send lives here. `app.ts` is DOM w
   - `function prefsFromWire(p: PublicQualityPrefs): QualityPrefs`
   - `function prefsToWire(p: QualityPrefs): PublicQualityPrefs`
   - `function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent | null`
-  - `function autoPlayableFilm(omdbType: "movie" | "series" | null | undefined, filter: "all" | "movie" | "tv"): boolean` — **the same name and signature as the helper Task 8 exports from `ForYou.tsx`**. Two implementations of one rule is the copy-then-drift bug this codebase has hit four times, but `src/web` may not import `src/ui`, so the browser gets its own copy here and both are tested against the same cases. If a third consumer appears, move it down into `src/util/releasePick.ts`.
+  - Nothing for the film rule — **`autoPlayableFilm` is re-exported from `src/util/releasePick.ts`, not reimplemented.** See the note under Task 7c.
   - `type PickPhase = { kind: "idle" } | { kind: "searching"; title: string } | { kind: "playing"; note: string } | { kind: "none"; title: string }`
   - `function createPickController(fx: PickEffects): PickController`
 
@@ -2004,7 +2056,7 @@ Create `src/web/static/pickModel.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { prefsFromWire, prefsToWire, intentForHistoryRow, autoPlayableFilm } from "./pickModel";
+import { prefsFromWire, prefsToWire, intentForHistoryRow } from "./pickModel";
 import type { PublicStreamHistoryItem } from "../wire";
 
 const row = (over: Partial<PublicStreamHistoryItem>): PublicStreamHistoryItem => ({
@@ -2037,18 +2089,9 @@ describe("intentForHistoryRow", () => {
   });
 });
 
-describe("autoPlayableFilm", () => {
-  it("trusts OMDb's medium over the filter", () => {
-    expect(autoPlayableFilm("movie", "all")).toBe(true);
-    expect(autoPlayableFilm("series", "movie")).toBe(false);
-  });
-
-  it("falls back to the filter when OMDb said nothing", () => {
-    expect(autoPlayableFilm(null, "movie")).toBe(true);
-    expect(autoPlayableFilm(undefined, "all")).toBe(false);
-    expect(autoPlayableFilm(null, "tv")).toBe(false);
-  });
-});
+// `autoPlayableFilm` is NOT tested again here — it lives in
+// `src/util/releasePick.ts` and is covered by its own tests (Task 7c). This
+// module only re-exports it so callers in this directory have one import site.
 ```
 
 - [ ] **Step 2: Run the test and confirm it fails**
@@ -2087,26 +2130,10 @@ export function intentForHistoryRow(item: PublicStreamHistoryItem): PickIntent |
   return item.next ? { kind: "episode", season: item.next.season, episode: item.next.episode } : null;
 }
 
-/**
- * Whether a For You row can be auto-played. Only a film has an unambiguous
- * intent — a show needs the season/episode picker (spec D).
- *
- * `omdbType` is per-item and wins when known. The pane's filter is the fallback
- * for when there is no OMDb key, and it can only ever say "yes, film": "all"
- * means the medium is genuinely unknown, because reccd sends no per-item type.
- *
- * DELIBERATELY IDENTICAL to the helper of the same name in
- * `src/ui/components/ForYou.tsx`, down to the argument order. `src/web` cannot
- * import `src/ui`, so the rule exists twice; keeping the name and the tests
- * identical is what makes a divergence obvious in review.
- */
-export function autoPlayableFilm(
-  omdbType: "movie" | "series" | null | undefined,
-  filter: "all" | "movie" | "tv",
-): boolean {
-  if (omdbType) return omdbType === "movie";
-  return filter === "movie";
-}
+// The film rule lives in `src/util/releasePick.ts` (Task 7c) because both
+// front ends need it and `src/web` may not import `src/ui`. Re-export it so
+// callers in this directory have one import site:
+export { autoPlayableFilm } from "../../util/releasePick";
 ```
 
 - [ ] **Step 4: Run the tests and confirm they pass**
