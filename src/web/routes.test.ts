@@ -2041,6 +2041,35 @@ describe("GET /api/saved — continueWatching", () => {
     expect(JSON.stringify(body)).not.toContain("magnet:");
   });
 
+  // `SavedResponse.continueWatching` documents "newest first", and the browser
+  // deliberately does not re-sort. Ordering is guaranteed by construction
+  // (recordStream prepends), so this pins that the route passes the store's
+  // order STRAIGHT THROUGH. The fixture's stored order is the reverse of its
+  // alphabetical and of its startedAt-ascending order, so any re-sort fails.
+  it("passes the store's newest-first order through untouched", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadStreamHistoryImpl: async () => [
+          { key: "kepler|series", title: "Kepler", type: "series", season: 2, episode: 4,
+            rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`, startedAt: 1_700_000_000_000 },
+          { key: "ashfall|1999|movie", title: "Ashfall", type: "movie", year: 1999,
+            rawName: "Ashfall.1999.1080p", infoHash: "b".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`, startedAt: 1_600_000_000_000 },
+          { key: "harrowgate|series", title: "Harrowgate", type: "series", season: 3,
+            rawName: "Harrowgate.S03.1080p", infoHash: "c".repeat(40),
+            magnet: `magnet:?xt=urn:btih:${"c".repeat(40)}`, startedAt: 1_500_000_000_000 },
+        ],
+      }),
+      "GET", "/api/saved", new URLSearchParams(), undefined, "",
+    );
+    expect((res.json as SavedResponse).continueWatching.map((e) => e.key)).toEqual([
+      "kepler|series",
+      "ashfall|1999|movie",
+      "harrowgate|series",
+    ]);
+  });
+
   it("answers an empty list when nothing has been streamed", async () => {
     const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
     expect((res.json as SavedResponse).continueWatching).toEqual([]);
@@ -2509,43 +2538,94 @@ describe("handleWebApi — POST /api/library", () => {
 describe("POST /api/stream — records stream history", () => {
   const HASH = "c".repeat(40);
 
-  it("records the title and posts started to reccd", async () => {
+  // Recording hangs off the session's own resolution, so every test here drives
+  // a FAKE registry: with the default one these would each join a real swarm.
+  function streamDeps(over: Partial<WebDeps> = {}, sessionsOver = {}) {
+    const sessions = registry(sessionsOver);
+    return { d: deps({ runtime: runtime(sessions), ...over }), sessions };
+  }
+
+  it("records the title and posts started to reccd once the session resolves", async () => {
     const saved: StreamHistoryItem[][] = [];
     const events: ReccEvent[] = [];
-    const res = await handleWebApi(
-      deps({
-        loadConfigImpl: async () => ({
-          ...defaultConfig, downloadDir: "/tmp/dl", reccUrl: "http://localhost:4100",
-        }),
-        loadStreamHistoryImpl: async () => [],
-        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
-        postEventImpl: async (_c, e) => { events.push(e); },
+    const { d } = streamDeps({
+      loadConfigImpl: async () => ({
+        ...defaultConfig, downloadDir: "/tmp/dl", reccUrl: "http://localhost:4100",
       }),
-      "POST", "/api/stream", new URLSearchParams(), undefined,
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+      postEventImpl: async (_c, e) => { events.push(e); },
+    });
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
     );
 
     expect(res.status).toBeLessThan(500);
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0]?.[0]?.title).toBe("Kepler");
     expect(saved[0]?.[0]?.episode).toBe(4);
     // The web posted NO started event before this change — a browser stream
     // taught reccd nothing about having begun.
+    await vi.waitFor(() => expect(events).toHaveLength(1));
     expect(events).toEqual([
       expect.objectContaining({ type: "started", rawName: "Kepler.S02E04.1080p.WEB-DL" }),
     ]);
   });
 
+  // The finding this fixes: begin() hands back a `resolving` session, so
+  // recording at request time left a permanent unplayable Continue-watching row
+  // for a dead magnet. The TUI records only AFTER the resolve returns files, so
+  // the same gesture in a terminal wrote nothing. Two front ends, one gesture.
+  it("writes nothing when the session never resolves", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    let loadCalls = 0;
+    const { d, sessions } = streamDeps(
+      {
+        loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
+        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+      },
+      { streamTorrentImpl: async () => { throw new Error("dead swarm"); } },
+    );
+    const res = await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("error"));
+    expect(saved).toHaveLength(0);
+    // As in the no-title case below: an untouched load seam is what separates a
+    // clean skip from a crash the catch swallowed.
+    expect(loadCalls).toBe(0);
+  });
+
+  it("writes exactly one row for one resolved stream", async () => {
+    const saved: StreamHistoryItem[][] = [];
+    const { d, sessions } = streamDeps({
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+    });
+    await handleWebApi(
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p.WEB-DL", confirm: true }),
+    );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toHaveLength(1);
+  });
+
   it("does not write history for a name with no title in it", async () => {
     const saved: StreamHistoryItem[][] = [];
     let loadCalls = 0;
+    const { d, sessions } = streamDeps({
+      loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
+      saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
+    });
     await handleWebApi(
-      deps({
-        loadStreamHistoryImpl: async () => { loadCalls += 1; return []; },
-        saveStreamHistoryImpl: async (items) => { saved.push([...items]); },
-      }),
-      "POST", "/api/stream", new URLSearchParams(), undefined,
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "1080p.WEB-DL.x265", confirm: true }),
     );
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
     expect(saved).toHaveLength(0);
     // `saved` staying empty alone doesn't distinguish "the null guard worked"
     // from "recordStream threw on a null item and the try/catch swallowed
@@ -2558,17 +2638,19 @@ describe("POST /api/stream — records stream history", () => {
 
   it("survives a history write that rejects", async () => {
     // History is a convenience. It must never take a stream down with it.
-    // Note: this only proves the RESPONSE survives — the outer .catch on
-    // recordStreamStart would absorb this too even if the inner try/catch
-    // were removed, so it doesn't pin the inner catch specifically.
+    // Now that the write happens AFTER the response, "survives" is about the
+    // process: the rejection lands in a promise nobody awaits, so vitest would
+    // report an unhandled rejection if either the inner try/catch or the outer
+    // .catch were removed.
+    const { d, sessions } = streamDeps({
+      loadStreamHistoryImpl: async () => [],
+      saveStreamHistoryImpl: async () => { throw new Error("disk full"); },
+    });
     const res = await handleWebApi(
-      deps({
-        loadStreamHistoryImpl: async () => [],
-        saveStreamHistoryImpl: async () => { throw new Error("disk full"); },
-      }),
-      "POST", "/api/stream", new URLSearchParams(), undefined,
+      d, "POST", "/api/stream", new URLSearchParams(), undefined,
       JSON.stringify({ infoHash: HASH, name: "Kepler.S02E04.1080p", confirm: true }),
     );
     expect(res.status).toBeLessThan(500);
+    await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
   });
 });

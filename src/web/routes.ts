@@ -378,10 +378,11 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
   }
 
   // begin(), not start(): a Real-Debrid cache can take minutes and the answer
-  // has to come back now, with a `resolving` session the client polls. `done`
-  // is deliberately dropped — it never rejects, and every outcome it has is
-  // written onto the session the client is already holding an id for.
-  const { session } = deps.runtime.sessions.begin({
+  // has to come back now, with a `resolving` session the client polls. The
+  // client learns every outcome from the session object it holds an id for;
+  // `done` is used below only to know WHEN that outcome landed, so the history
+  // write can wait for it instead of guessing.
+  const { session, done } = deps.runtime.sessions.begin({
     infoHash: parsed.infoHash,
     magnet: parsed.magnet,
     name,
@@ -395,15 +396,30 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
     capability: session.capability,
     session: toPublicSession(session),
   };
-  // History and the reccd `started` event. The TUI has posted `started` from
-  // its two stream branches all along; the web posted nothing, so a browser
-  // stream taught the recommender nothing about having begun. Recorded when
-  // the session RESOLVES — the moment the user asked to watch something —
-  // not when a file is picked. Awaited so both writes are ordered before the
-  // response goes out (both are local/fast); errors from either are swallowed
-  // inside recordStreamStart and the reccd dispatch itself is fire-and-forget,
-  // so neither can take the stream response down with it.
-  await recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
+  // History and the reccd `started` event, both hung off `done` — the session
+  // RESOLVING, not the request arriving. `begin()` returns a `resolving`
+  // session, so recording here would leave a permanent unplayable
+  // Continue-watching row for a dead magnet or a Real-Debrid cache that never
+  // fills. The TUI records only after `streamTorrent`/`resolveMagnet` returned
+  // files (App.tsx), and posts `started` on the same line, so this is what
+  // makes one gesture mean one thing in both front ends.
+  //
+  // `done` never rejects and this is the second reader of it (the first is the
+  // client's polling), so nothing here can delay or fail the response the
+  // browser is waiting for. The `.catch` is belt-and-braces on top of the
+  // swallow inside recordStreamStart: an unhandled rejection in the server
+  // process is not a price a convenience list gets to charge.
+  void done.then(
+    (resolved) => {
+      // `ready` with no files is not something the user can watch, which is the
+      // same bar the TUI's non-empty `streamCandidates` check applies (that
+      // helper lives in src/ui, so this cannot import it — it filters to
+      // playable extensions, where this only asks whether anything resolved).
+      if (resolved.state !== "ready" || resolved.files.length === 0) return;
+      return recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
+    },
+    () => {},
+  );
   return { status: 200, json: out };
 }
 
