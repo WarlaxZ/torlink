@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ACTION_EVENT,
+  ACTION_LABEL,
   createReccController,
   DEFAULT_FILTERS,
   dismissesPick,
+  isRatingAction,
   pickSub,
   reasonLine,
   reasonTitle,
+  RECC_ACTIONS,
   reccEventBody,
   reccItems,
   reccPosterHint,
@@ -321,32 +324,46 @@ describe("createReccController — dismiss", () => {
   });
 });
 
-describe("the action → event mapping", () => {
-  /**
-   * A swap here is invisible on screen — the button highlights, the card leaves
-   * the list — and teaches the recommender the opposite of what the user said.
-   */
-  it("maps each button to the event it means", () => {
-    expect(ACTION_EVENT).toEqual({
-      watched: "watched",
-      like: "liked",
-      dislike: "disliked",
-      watchlist: "favourited",
-    });
+describe("the card's actions", () => {
+  it("maps only the three ratings to reccd events", () => {
+    expect(ACTION_EVENT.watched).toBe("watched");
+    expect(ACTION_EVENT.like).toBe("liked");
+    expect(ACTION_EVENT.dislike).toBe("disliked");
+    // A swap in this table is invisible on screen and teaches the recommender
+    // the opposite of what the user said, which is why it is asserted.
+    expect(Object.keys(ACTION_EVENT)).toHaveLength(3);
+  });
+
+  it("narrows rating actions and excludes the local one", () => {
+    expect(isRatingAction("watched")).toBe(true);
+    expect(isRatingAction("like")).toBe(true);
+    expect(isRatingAction("dislike")).toBe(true);
+    // saveSearch is local: it writes config.savedSearches and tells reccd
+    // nothing. If it reached reccEventBody it would post `type: undefined`.
+    expect(isRatingAction("saveSearch")).toBe(false);
+  });
+
+  it("still offers four actions, with saveSearch last", () => {
+    expect(RECC_ACTIONS).toEqual(["watched", "like", "dislike", "saveSearch"]);
+  });
+
+  it("captions saveSearch as save search", () => {
+    expect(ACTION_LABEL.saveSearch).toBe("save search");
+  });
+
+  it("does not dismiss the pick when saving a search", () => {
+    // Saving a search should no more remove a pick from the feed than the old
+    // Library action did.
+    expect(dismissesPick("saveSearch")).toBe(false);
+    expect(dismissesPick("watched")).toBe(true);
+    expect(dismissesPick("like")).toBe(true);
+    expect(dismissesPick("dislike")).toBe(true);
   });
 
   it("posts the pick's own title as the name", () => {
     expect(reccEventBody("like", pick())).toEqual({ type: "liked", rawName: "Ashfall" });
     expect(reccEventBody("dislike", pick())).toEqual({ type: "disliked", rawName: "Ashfall" });
     expect(reccEventBody("watched", pick())).toEqual({ type: "watched", rawName: "Ashfall" });
-    expect(reccEventBody("watchlist", pick())).toEqual({ type: "favourited", rawName: "Ashfall" });
-  });
-
-  it("drops a rated pick from the feed but keeps a watchlisted one", () => {
-    expect(dismissesPick("watched")).toBe(true);
-    expect(dismissesPick("like")).toBe(true);
-    expect(dismissesPick("dislike")).toBe(true);
-    expect(dismissesPick("watchlist")).toBe(false);
   });
 });
 

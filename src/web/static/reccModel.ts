@@ -267,12 +267,19 @@ export function pickSub(item: PublicRecommendation): string {
   return String(item.year);
 }
 
+/** The three actions that post a rating to reccd. */
+export type ReccRatingAction = "watched" | "like" | "dislike";
+
 /**
- * What the buttons on a card do. Named for the user's intent, not for the wire:
- * "watchlist" is not a reccd event type and the mapping below is the only place
- * that translation happens.
+ * Every action a card offers: the three ratings, plus one LOCAL action.
+ *
+ * `saveSearch` saves the pick's title as a search — which is what the TUI's `w`
+ * on a For You pick has always done. The web used to label this button for the
+ * Library and post `favourited`, so the same gesture put the pick in your
+ * Library here and in your saved searches there. Same card, same button,
+ * different result depending on which front end you opened.
  */
-export type ReccAction = "watched" | "like" | "dislike" | "watchlist";
+export type ReccAction = ReccRatingAction | "saveSearch";
 
 /**
  * Intent → the event reccd is told about.
@@ -280,42 +287,52 @@ export type ReccAction = "watched" | "like" | "dislike" | "watchlist";
  * THE MAPPING IS THE WHOLE POINT OF THIS TABLE. `like` is `"liked"` and
  * `dislike` is `"disliked"` — a swap here is invisible on screen (the button
  * still highlights, the card still leaves the list) and quietly teaches the
- * recommender the opposite of what the user said. `watchlist` posts
- * `"favourited"`, which is the event the TUI's own favourite toggle posts.
+ * recommender the opposite of what the user said.
+ *
+ * `saveSearch` IS DELIBERATELY ABSENT. It is local — it writes
+ * `config.savedSearches` and reccd hears nothing. Keying it here would let
+ * `reccEventBody` post `type: undefined`, which is why the record is typed on
+ * `ReccRatingAction` rather than `ReccAction`.
  */
-export const ACTION_EVENT: Record<ReccAction, PublicReccEventType> = {
+export const ACTION_EVENT: Record<ReccRatingAction, PublicReccEventType> = {
   watched: "watched",
   like: "liked",
   dislike: "disliked",
-  watchlist: "favourited",
 };
+
+export function isRatingAction(action: ReccAction): action is ReccRatingAction {
+  return action !== "saveSearch";
+}
 
 /** The button caption for each action. */
 export const ACTION_LABEL: Record<ReccAction, string> = {
   watched: "watched",
   like: "like",
   dislike: "dislike",
-  watchlist: "watchlist",
+  saveSearch: "save search",
 };
 
-/** The order the buttons appear in: the three ratings, then the watchlist. */
-export const RECC_ACTIONS: readonly ReccAction[] = ["watched", "like", "dislike", "watchlist"];
+/** The order the buttons appear in: the three ratings, then saveSearch. */
+export const RECC_ACTIONS: readonly ReccAction[] = ["watched", "like", "dislike", "saveSearch"];
 
 /**
  * True when acting removes the pick from the feed.
  *
  * The three ratings do — the TUI dismisses a rated pick immediately rather than
  * waiting on reccd, because the event is fire-and-forget and there is nothing
- * to wait for. Adding to the watchlist does not: it is not a verdict on the
- * pick, and a card that vanished when you saved it for later would read as an
+ * to wait for. Saving a search does not: it is not a verdict on the pick, and a
+ * card that vanished when you saved its title for later would read as an
  * error.
  */
 export function dismissesPick(action: ReccAction): boolean {
-  return action !== "watchlist";
+  return action !== "saveSearch";
 }
 
-/** The `POST /api/recc-event` body for one action on one pick. */
-export function reccEventBody(action: ReccAction, item: PublicRecommendation): ReccEventRequest {
+/** The `POST /api/recc-event` body for one rating on one pick. */
+export function reccEventBody(
+  action: ReccRatingAction,
+  item: PublicRecommendation,
+): ReccEventRequest {
   // reccd matches on the name it gave us, so the pick's own title goes back
   // unchanged — not a release name, and not something the browser rewrote.
   return { type: ACTION_EVENT[action], rawName: item.title };
@@ -323,7 +340,7 @@ export function reccEventBody(action: ReccAction, item: PublicRecommendation): R
 
 /** What to tell the user after an action lands. */
 export function actionNotice(action: ReccAction, item: PublicRecommendation): string {
-  if (action === "watchlist") return `Added “${item.title}” to your watchlist.`;
+  if (action === "saveSearch") return `Saved “${item.title}” as a search.`;
   return `Thanks — noted “${item.title}” as ${ACTION_EVENT[action]}.`;
 }
 
@@ -391,3 +408,4 @@ export function searchGroupForType(type: ReccType, sources: SourcesResponse | nu
   const wanted = type === "movie" ? "Movies" : "TV";
   return categoryTabs(sources).includes(wanted) ? wanted : ALL_TAB;
 }
+

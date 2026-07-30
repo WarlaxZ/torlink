@@ -70,6 +70,7 @@ import {
   createReccController,
   dismissesPick,
   actionNotice,
+  isRatingAction,
   pickSub,
   reasonLine,
   reasonTitle,
@@ -1429,6 +1430,17 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
 async function actOnPick(action: ReccAction, item: PublicRecommendation): Promise<void> {
+  // The local action never reaches reccd. Its title is the pick's own, exactly
+  // as the TUI's `w` uses `item.title` — not a release name.
+  if (!isRatingAction(action)) {
+    const title = item.title.trim();
+    if (!title) {
+      showNotice("That pick has no title to save.");
+      return;
+    }
+    await toggleSavedSearch(title);
+    return;
+  }
   // Optimistic, exactly as the TUI is: the event is fire-and-forget on both
   // sides of the wire, so there is nothing to wait for before the card goes.
   if (dismissesPick(action)) recc.dismiss(item.imdbId);
