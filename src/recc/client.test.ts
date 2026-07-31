@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { postEvent, fetchRecommendations, fetchTitleSuggestions } from "./client.js";
+import { postEvent, fetchRecommendations, fetchTitleSuggestions, claimReccAccount } from "./client.js";
 import type { FetchImpl } from "../util/net";
 
 function jsonRes(status: number, body: unknown = {}) {
@@ -369,5 +369,95 @@ describe("fetchTitleSuggestions", () => {
     await fetchTitleSuggestions({ reccUrl: "http://r" }, { q: "kes" }, { fetchImpl });
     const [, init] = fetchImpl.mock.calls[0] as [string, { headers: Record<string, string> }];
     expect(init.headers.authorization).toBe("Bearer ");
+  });
+});
+
+describe("claimReccAccount", () => {
+  const CFG = { reccUrl: "https://reccd.stream", reccToken: "tok" };
+
+  function reply(status: number, body: unknown) {
+    return (async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    }) as unknown as Response) as unknown as FetchImpl;
+  }
+
+  it("returns the claimed name on 200", async () => {
+    const res = await claimReccAccount(CFG, "chosen", "correcthorsebattery", {
+      fetchImpl: reply(200, { name: "chosen" }),
+    });
+    expect(res).toEqual({ ok: true, name: "chosen" });
+  });
+
+  it("POSTs name and password to /claim with the bearer token", async () => {
+    let seenUrl = "";
+    let seenInit: { headers?: Record<string, string>; body?: string; method?: string } = {};
+    const impl = (async (url: string, init: typeof seenInit) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return { ok: true, status: 200, json: async () => ({ name: "chosen" }) } as unknown as Response;
+    }) as unknown as FetchImpl;
+    await claimReccAccount(CFG, "chosen", "correcthorsebattery", { fetchImpl: impl });
+    expect(seenUrl).toBe("https://reccd.stream/claim");
+    expect(seenInit.method).toBe("POST");
+    expect(seenInit.headers?.authorization).toBe("Bearer tok");
+    expect(JSON.parse(seenInit.body!)).toEqual({ name: "chosen", password: "correcthorsebattery" });
+  });
+
+  it("maps 409 to nameTaken", async () => {
+    const res = await claimReccAccount(CFG, "taken", "correcthorsebattery", {
+      fetchImpl: reply(409, { error: "name already taken" }),
+    });
+    expect(res).toEqual({ ok: false, reason: "nameTaken", message: "That username is taken — try another." });
+  });
+
+  it("maps 400 account already claimed to alreadyClaimed", async () => {
+    const res = await claimReccAccount(CFG, "x", "correcthorsebattery", {
+      fetchImpl: reply(400, { error: "account already claimed" }),
+    });
+    expect(res.ok).toBe(false);
+    expect((res as { reason: string }).reason).toBe("alreadyClaimed");
+  });
+
+  it("passes any other 400's own message through, so validation reads clearly", async () => {
+    const res = await claimReccAccount(CFG, "x", "short", {
+      fetchImpl: reply(400, { error: "password must be at least 8 characters" }),
+    });
+    expect(res).toEqual({ ok: false, reason: "invalid", message: "password must be at least 8 characters" });
+  });
+
+  it("falls back to a readable message when a 400 carries no error string", async () => {
+    const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(400, {}) });
+    expect(res).toEqual({ ok: false, reason: "invalid", message: "reccd rejected that username or password." });
+  });
+
+  it("maps 401 to unauthorized", async () => {
+    const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(401, {}) });
+    expect((res as { reason: string }).reason).toBe("unauthorized");
+  });
+
+  it("maps a 500 to unreachable", async () => {
+    const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(500, {}) });
+    expect((res as { reason: string }).reason).toBe("unreachable");
+  });
+
+  it("maps a network error to unreachable rather than throwing", async () => {
+    const impl = (async () => { throw new Error("ENOTFOUND"); }) as unknown as FetchImpl;
+    const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: impl });
+    expect((res as { reason: string }).reason).toBe("unreachable");
+  });
+
+  it("reports unreachable rather than calling out when no reccUrl is configured", async () => {
+    let called = false;
+    const impl = (async () => { called = true; return {} as unknown as Response; }) as unknown as FetchImpl;
+    const res = await claimReccAccount({}, "x", "correcthorsebattery", { fetchImpl: impl });
+    expect(called).toBe(false);
+    expect(res.ok).toBe(false);
+  });
+
+  it("never puts the password in a log-shaped return value", async () => {
+    const res = await claimReccAccount(CFG, "x", "supersecretpassword", { fetchImpl: reply(500, {}) });
+    expect(JSON.stringify(res)).not.toContain("supersecretpassword");
   });
 });

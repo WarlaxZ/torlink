@@ -235,3 +235,66 @@ export async function fetchTitleSuggestions(
     return { ok: false, error: "couldn't reach reccd" };
   }
 }
+
+export type ClaimReccResult =
+  | { ok: true; name: string }
+  | {
+      ok: false;
+      reason: "nameTaken" | "alreadyClaimed" | "invalid" | "unauthorized" | "unreachable";
+      message: string;
+    };
+
+// Claims an anonymous account: sets the username and password the user chose,
+// keeping the account's id, token and history.
+//
+// Blocking and reporting, unlike postEvent: the user is watching a prompt and
+// needs to be told what happened. `message` is what the pane prints, so it is a
+// sentence rather than a status code — except for a plain validation 400, where
+// reccd's own wording ("password must be at least 8 characters") is better than
+// anything this layer could invent, so it is passed through.
+export async function claimReccAccount(
+  config: ReccClientConfig,
+  name: string,
+  password: string,
+  opts: { fetchImpl?: FetchImpl; timeoutMs?: number } = {},
+): Promise<ClaimReccResult> {
+  if (!config.reccUrl) {
+    return { ok: false, reason: "unreachable", message: "reccd is not configured." };
+  }
+  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
+  try {
+    const res = await fetchImpl(`${config.reccUrl}/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${config.reccToken ?? ""}`,
+      },
+      body: JSON.stringify({ name, password }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10000),
+    });
+    if (res.ok) return { ok: true, name };
+    if (res.status === 409) {
+      return { ok: false, reason: "nameTaken", message: "That username is taken — try another." };
+    }
+    if (res.status === 401) {
+      return { ok: false, reason: "unauthorized", message: "reccd rejected the token — check the connection." };
+    }
+    if (res.status === 400) {
+      const body: unknown = await res.json().catch(() => ({}));
+      const error = typeof (body as { error?: unknown }).error === "string" ? (body as { error: string }).error : "";
+      if (error === "account already claimed") {
+        return {
+          ok: false,
+          reason: "alreadyClaimed",
+          message: "This account already has a username and password.",
+        };
+      }
+      return { ok: false, reason: "invalid", message: error || "reccd rejected that username or password." };
+    }
+    return { ok: false, reason: "unreachable", message: `reccd couldn't claim the account (HTTP ${res.status}).` };
+  } catch (err) {
+    // Never the password, and never the name — this string reaches the log.
+    log.debug(`recc claimReccAccount: ${err instanceof Error ? err.message : String(err)}`);
+    return { ok: false, reason: "unreachable", message: "couldn't reach reccd" };
+  }
+}
