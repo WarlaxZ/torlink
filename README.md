@@ -167,7 +167,17 @@ read out of the release name, so you don't have to parse a 70-character filename
 Grouping and the badges are in **both** front ends: in the terminal, **`g`** turns grouping on or off and
 **space** expands the group under the cursor. The grouping key knows that an episode, a season pack and a
 film are different things, so `Kepler S02E04` never merges with `Kepler S02E05` or with a `Harrowgate S03`
-pack.
+pack — and each heading **says which one it is** (`Harrowgate S03`, `Kepler S02E04`, `Tin Rivers (2024)`),
+because a whole season's worth of headings all reading just the show's name looks like the list failed to
+group at all.
+
+**A show nests the way a show does.** One row per season, newest first, holding the season packs and then
+each episode in order — so a search for a show is a handful of rows rather than forty siblings in seeder
+order. The season you are most likely to want opens itself; the rest stay shut until you ask. Acting on a
+collapsed season acts on its best **season pack**, so `play` on `Harrowgate S03` gets the season and not
+episode one. Inside a season the show's name is stated once, by the season row, and its children read
+`Season pack`, `S03E01`, `S03E02`. The **group** control still turns all of it off and gives you every
+release as its own row.
 
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers

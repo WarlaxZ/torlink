@@ -23,14 +23,51 @@ export interface ResultGroup<T> {
   /** Display title, from the parser — "Tin Rivers", not "Tin.Rivers.2024…". */
   title: string;
   year?: number;
+  /**
+   * What the group covers, when it is a series. THESE EXIST TO BE RENDERED.
+   * Without them every heading of a show is the bare title, so a season pack and
+   * five episodes of that season — six correctly distinct groups — draw six rows
+   * that all read "Harrowgate", and the list looks duplicated when it is not.
+   * `seasonEnd` is set only for a span ("S01-S03"); `episode` only for a single
+   * episode, so a season pack is `season` with no `episode`.
+   */
+  season?: number;
+  seasonEnd?: number;
+  episode?: number;
   /** Never empty. In the order the caller supplied. */
   members: T[];
 }
 
-/** One line of the rendered list: a group heading, or a release. */
+/**
+ * One line of the rendered list: a season heading, a group heading, or a release.
+ *
+ * `depth` is how far the row is indented — 0 top level, 1 inside an open season,
+ * 2 a release inside an episode group inside an open season. Both front ends
+ * read it rather than deriving indent themselves.
+ */
 export type GroupRow<T> =
-  | { kind: "group"; key: string; title: string; year?: number; members: T[]; expanded: boolean }
-  | { kind: "release"; key: string; result: T; inGroup: boolean };
+  | {
+      kind: "season";
+      key: string;
+      title: string;
+      season: number;
+      members: T[];
+      expanded: boolean;
+      depth: number;
+    }
+  | {
+      kind: "group";
+      key: string;
+      title: string;
+      year?: number;
+      season?: number;
+      seasonEnd?: number;
+      episode?: number;
+      members: T[];
+      expanded: boolean;
+      depth: number;
+    }
+  | { kind: "release"; key: string; result: T; inGroup: boolean; depth: number };
 
 /**
  * Normalise a parsed title before it becomes a key.
@@ -41,19 +78,70 @@ export type GroupRow<T> =
  * first, and splits off into a group of its own.
  */
 function normaliseTitle(raw: string): string {
-  return (
-    raw
-      // "www.uindex.org    -    Kestrel 2010": a tracker stamps its own domain on
-      // the front of the release name. Five of 129 live results for one film were
-      // stranded in a group of their own by this alone.
-      .replace(/^\s*(?:www\.)?[a-z0-9-]+\.[a-z]{2,12}\s*[-–—]\s*/i, "")
-      .replace(/\.(?:mkv|mp4|m4v|avi|7z|zip|iso)$/i, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim()
-      .replace(/^(?:the|a|an)\s+/, "")
-      .trim()
-  );
+  const base = raw
+    // "www.uindex.org    -    Kestrel 2010": a tracker stamps its own domain on
+    // the front of the release name. Five of 129 live results for one film were
+    // stranded in a group of their own by this alone.
+    .replace(/^\s*(?:www\.)?[a-z0-9-]+\.[a-z]{2,12}\s*[-–—]\s*/i, "")
+    // "[Judas] Harrowgate S03": see BRACKET_PREFIX.
+    .replace(BRACKET_PREFIX, "")
+    .replace(/\.(?:mkv|mp4|m4v|avi|7z|zip|iso)$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/^(?:the|a|an)\s+/, "")
+    .trim();
+  // "Harrowgate Complete Series" is the same show as "Harrowgate": the parser
+  // leaves pack words in the title when no season number follows them to anchor
+  // on. Stripped only from the END and never down to nothing, so a title that is
+  // genuinely one of these words survives.
+  const trimmed = base.replace(PACK_FILLER, "").trim();
+  return trimmed || base;
+}
+
+const PACK_FILLER = /(?:[\s._-]+(?:complete|full|series|seasons?|packs?))+$/i;
+
+/**
+ * A release group in brackets on the front, the convention for fansubbed shows.
+ *
+ * The lookahead demands a LETTER in what is left, not merely a non-space: a film
+ * actually titled "(Ashfall) 1999" would otherwise reduce to "1999", and a title
+ * eaten down to a bare number groups with every other numeric residue. Bracketed
+ * junk in front of nothing is not a prefix, it IS the name.
+ */
+const BRACKET_PREFIX = /^\s*[[({][^\])}]*[\])}]\s*(?=[^a-z]*[a-z])/i;
+
+/**
+ * The same two strips, on the DISPLAY title, which keeps its own case.
+ *
+ * A heading reading "Harrowgate COMPLETE SERIES" while the group beside it reads
+ * "Harrowgate" is the duplicate-looking-rows complaint again, one layer up: the
+ * key already treats them as one thing, so the label has to as well.
+ */
+function tidyTitle(raw: string): string {
+  const base = raw.replace(BRACKET_PREFIX, "").trim();
+  return base.replace(PACK_FILLER, "").trim() || base;
+}
+
+/**
+ * The season the NAME ITSELF states, which beats the parser when they disagree.
+ *
+ * "Harrowgate.S03.COMPLETE.SEASON.1080p" parses as season 10 — the parser sees
+ * "SEASON" and takes the "10" out of "1080p" — and that one release then sits in
+ * a group of its own. The name's first explicit marker is the honest answer.
+ *
+ * Returns a span for "S01-S03", which is a multi-season pack and must not land
+ * in the same group as season 1 alone.
+ */
+function seasonFromName(name: string): { season: number; seasonEnd?: number } | null {
+  const marker = /(?:^|[^a-z0-9])s(?:eason)?[\s._-]*(\d{1,2})(?![\d])/i.exec(name);
+  if (!marker?.[1]) return null;
+  const season = Number(marker[1]);
+  // "S01-S03", "S01-03": a range, from the marker we just matched onwards.
+  const rest = name.slice(marker.index + marker[0].length);
+  const span = /^[\s._-]*[-–—][\s._-]*s?(\d{1,2})(?![\d])/i.exec(rest);
+  const end = span?.[1] ? Number(span[1]) : undefined;
+  return end !== undefined && end > season ? { season, seasonEnd: end } : { season };
 }
 
 /**
@@ -65,21 +153,96 @@ function normaliseTitle(raw: string): string {
  * and year (so `Ashfall.1999` and `Ashfall.2024` stay apart); episodes key down
  * to the episode; a season pack keys distinctly from any episode within it.
  */
-export function groupKeyFor(name: string, hint?: OmdbType): string {
+interface GroupFacts {
+  key: string;
+  title: string;
+  year?: number;
+  season?: number;
+  seasonEnd?: number;
+  episode?: number;
+}
+
+/**
+ * Everything a group needs from one release name, parsed once.
+ *
+ * One function rather than a `groupKeyFor` and a second parse inside
+ * `groupResults`: the key and the heading have to agree about which season a
+ * release is in, and two call sites deriving that separately is how they drift.
+ */
+function factsFor(name: string, hint?: OmdbType): GroupFacts {
   const parsed = parseRelease(name, hint);
   // parseRelease returns null for some real names (a Korean-titled release in
   // live data). A group of one is the right answer, not a crash.
-  if (!parsed) return `raw|${normaliseTitle(name) || name.trim().toLowerCase()}`;
-  const title = normaliseTitle(parsed.title) || parsed.title.trim().toLowerCase();
-  if (parsed.type === "series") {
-    const season = parsed.season !== undefined ? `s${parsed.season}` : "s";
-    // No episode number on a series release means a season pack — the edge case
-    // that catches "next episode" bugs elsewhere in this codebase, and the one
-    // that must not share a key with S03E01.
-    const episode = parsed.episode !== undefined ? `e${parsed.episode}` : "pack";
-    return `${title}|series|${season}|${episode}`;
+  if (!parsed) {
+    const raw = normaliseTitle(name) || name.trim().toLowerCase();
+    return { key: `raw|${raw}`, title: name };
   }
-  return `${title}|${parsed.year ?? ""}|${parsed.type ?? ""}`;
+  const norm = normaliseTitle(parsed.title) || parsed.title.trim().toLowerCase();
+  const facts: GroupFacts = { key: "", title: tidyTitle(parsed.title) || parsed.title };
+  if (parsed.year !== undefined) facts.year = parsed.year;
+  if (parsed.type !== "series") {
+    facts.key = `${norm}|${parsed.year ?? ""}|${parsed.type ?? ""}`;
+    return facts;
+  }
+  const stated = seasonFromName(name);
+  const season = stated?.season ?? parsed.season;
+  if (season !== undefined) facts.season = season;
+  if (stated?.seasonEnd !== undefined) facts.seasonEnd = stated.seasonEnd;
+  if (parsed.episode !== undefined) facts.episode = parsed.episode;
+  const span = facts.seasonEnd !== undefined ? `-${facts.seasonEnd}` : "";
+  const seasonPart = season !== undefined ? `s${season}${span}` : "s";
+  // No episode number on a series release means a season pack — the edge case
+  // that catches "next episode" bugs elsewhere in this codebase, and the one
+  // that must not share a key with S03E01.
+  const episodePart = facts.episode !== undefined ? `e${facts.episode}` : "pack";
+  facts.key = `${norm}|series|${seasonPart}|${episodePart}`;
+  return facts;
+}
+
+export function groupKeyFor(name: string, hint?: OmdbType): string {
+  return factsFor(name, hint).key;
+}
+
+/** Zero-padded to two digits, the form every release name uses. */
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * What a group heading says.
+ *
+ * Shared by both front ends because the alternative — each formatting its own —
+ * is exactly the copy-then-drift this codebase records four bugs from. The
+ * season and episode are the point: `title` alone made a pack and every episode
+ * of one season render as identical rows.
+ *
+ * `underSeason` is the form for a row nested inside a season heading, which
+ * already states the show and the season. Repeating both at every level reads as
+ * noise; "S03E01" and "Season pack" say the only thing that differs.
+ */
+export function groupHeading(
+  group: {
+    title: string;
+    year?: number;
+    season?: number;
+    seasonEnd?: number;
+    episode?: number;
+  },
+  opts?: { underSeason?: boolean },
+): string {
+  if (opts?.underSeason && group.season !== undefined) {
+    return group.episode !== undefined
+      ? `S${pad(group.season)}E${pad(group.episode)}`
+      : "Season pack";
+  }
+  if (group.season !== undefined) {
+    const span = group.seasonEnd !== undefined ? `-S${pad(group.seasonEnd)}` : "";
+    const episode = group.episode !== undefined ? `E${pad(group.episode)}` : "";
+    return `${group.title} S${pad(group.season)}${span}${episode}`;
+  }
+  // A film. The year is what tells two films sharing a title apart, which is the
+  // same job the season does for a show.
+  return group.year !== undefined ? `${group.title} (${group.year})` : group.title;
 }
 
 /**
@@ -96,22 +259,128 @@ export function groupResults<T extends GroupableResult>(
 ): ResultGroup<T>[] {
   const byKey = new Map<string, ResultGroup<T>>();
   for (const item of list) {
-    const key = groupKeyFor(item.name, hint);
-    const existing = byKey.get(key);
+    const facts = factsFor(item.name, hint);
+    const existing = byKey.get(facts.key);
     if (existing) {
       existing.members.push(item);
       continue;
     }
-    const parsed = parseRelease(item.name, hint);
-    const group: ResultGroup<T> = {
-      key,
-      title: parsed?.title ?? item.name,
-      members: [item],
-    };
-    if (parsed?.year !== undefined) group.year = parsed.year;
-    byKey.set(key, group);
+    const group: ResultGroup<T> = { key: facts.key, title: facts.title, members: [item] };
+    if (facts.year !== undefined) group.year = facts.year;
+    if (facts.season !== undefined) group.season = facts.season;
+    if (facts.seasonEnd !== undefined) group.seasonEnd = facts.seasonEnd;
+    if (facts.episode !== undefined) group.episode = facts.episode;
+    byKey.set(facts.key, group);
   }
   return [...byKey.values()];
+}
+
+/**
+ * A season of one show, holding its packs and its episode groups.
+ *
+ * `members` is every child's members concatenated in child order, which is what
+ * lets `resultAtRow` keep working untouched: packs sort first, so the first
+ * member of a collapsed season row is the best season pack.
+ */
+export interface SeasonNode<T> {
+  kind: "season";
+  key: string;
+  title: string;
+  season: number;
+  /** Packs first, then episodes ascending. Never empty. */
+  children: ResultGroup<T>[];
+  /** Never empty. */
+  members: T[];
+}
+
+/** A top-level node: a season of a show, or a group with no season to sit under. */
+export type TreeNode<T> = SeasonNode<T> | ResultGroup<T>;
+
+/** True for a `SeasonNode`. `ResultGroup` has no `kind`, which is the discriminator. */
+export function isSeasonNode<T>(node: TreeNode<T>): node is SeasonNode<T> {
+  return "kind" in node;
+}
+
+/**
+ * Which groups fold under a season.
+ *
+ * A group naming ONE season. A span pack ("S01-S03") names three and filing it
+ * under season 1 would claim it is a season-1 release; a "complete series" pack
+ * names none. Both stay top-level. Only the series branch of `factsFor` ever
+ * sets `season`, so this needs no separate "is a series" flag.
+ */
+function foldsUnderSeason<T>(group: ResultGroup<T>): boolean {
+  return group.season !== undefined && group.seasonEnd === undefined;
+}
+
+/** "harrowgate" out of "harrowgate|series|s3|e1" — the show's identity. */
+function showOf(key: string): string {
+  const at = key.indexOf("|series|");
+  return at === -1 ? key : key.slice(0, at);
+}
+
+/** Packs before episodes; episodes ascending. */
+function compareSeasonChild<T>(a: ResultGroup<T>, b: ResultGroup<T>): number {
+  if (a.episode === undefined && b.episode === undefined) return 0;
+  if (a.episode === undefined) return -1;
+  if (b.episode === undefined) return 1;
+  return a.episode - b.episode;
+}
+
+/**
+ * Fold a show's single-season groups under season nodes.
+ *
+ * ORDER IS PRESERVED at the top level: a show's whole season block is emitted at
+ * the position of its FIRST group, so `groupResults`' promise that groups sit
+ * where their best member sits — which every sort depends on — still holds.
+ * Within a show, seasons are newest first.
+ *
+ * The sort control therefore orders releases INSIDE a group, and orders
+ * unrelated results against each other. A series' internal structure is
+ * structural and not re-sortable: "order these episodes by seeders" is not a
+ * thing anyone wants.
+ */
+export function seasonTree<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+): TreeNode<T>[] {
+  const byShow = new Map<string, Map<number, ResultGroup<T>[]>>();
+  for (const group of groups) {
+    if (!foldsUnderSeason(group)) continue;
+    const show = showOf(group.key);
+    let seasons = byShow.get(show);
+    if (!seasons) {
+      seasons = new Map();
+      byShow.set(show, seasons);
+    }
+    const bucket = seasons.get(group.season!) ?? [];
+    bucket.push(group);
+    seasons.set(group.season!, bucket);
+  }
+
+  const out: TreeNode<T>[] = [];
+  const done = new Set<string>();
+  for (const group of groups) {
+    if (!foldsUnderSeason(group)) {
+      out.push(group);
+      continue;
+    }
+    const show = showOf(group.key);
+    if (done.has(show)) continue;
+    done.add(show);
+    const seasons = byShow.get(show)!;
+    for (const season of [...seasons.keys()].sort((a, b) => b - a)) {
+      const children = [...seasons.get(season)!].sort(compareSeasonChild);
+      out.push({
+        kind: "season",
+        key: `${show}|series|s${season}`,
+        title: children[0]!.title,
+        season,
+        children,
+        members: children.flatMap((child) => child.members),
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -131,38 +400,117 @@ export function groupRowPlan<T extends GroupableResult>(
   expanded: ReadonlySet<string>,
 ): GroupRow<T>[] {
   const rows: GroupRow<T>[] = [];
-  for (const group of groups) {
-    const first = group.members[0];
-    if (first === undefined) continue;
-    if (group.members.length === 1) {
-      rows.push({ kind: "release", key: group.key, result: first, inGroup: false });
+  for (const node of seasonTree(groups)) {
+    if (!isSeasonNode(node)) {
+      pushGroupRows(rows, node, expanded, 0);
       continue;
     }
-    const isOpen = expanded.has(group.key);
-    const row: GroupRow<T> = {
-      kind: "group",
-      key: group.key,
-      title: group.title,
-      members: group.members,
+    // A season node holding a SINGLE child is dropped and its child emitted in
+    // its place: wrapping one episode in a season row is the same noise as a
+    // disclosure over "1 release", and without this a search returning one
+    // release of one show would grow a heading it never had.
+    const only = node.children.length === 1 ? node.children[0] : undefined;
+    if (only) {
+      pushGroupRows(rows, only, expanded, 0);
+      continue;
+    }
+    const isOpen = expanded.has(node.key);
+    rows.push({
+      kind: "season",
+      key: node.key,
+      title: node.title,
+      season: node.season,
+      members: node.members,
       expanded: isOpen,
-    };
-    if (group.year !== undefined) row.year = group.year;
-    rows.push(row);
-    if (!isOpen) continue;
-    group.members.forEach((member, i) => {
-      rows.push({ kind: "release", key: `${group.key}#${i}`, result: member, inGroup: true });
+      depth: 0,
     });
+    if (!isOpen) continue;
+    for (const child of node.children) pushGroupRows(rows, child, expanded, 1);
   }
   return rows;
 }
 
 /**
+ * The keys a fresh result set should start with open.
+ *
+ * The highest-ranked season node, and only that one. Without it a search for one
+ * season collapses to a single line, which reads as the list having failed.
+ *
+ * "Highest-ranked" rather than "the only one": a real search for one season of
+ * one show also returned a different show's season and two unrelated episodes,
+ * so a rule asking whether the season is alone would have left it shut on the
+ * very query that motivated this. Ranking needs no counting and strays cannot
+ * defeat it.
+ *
+ * A season the row plan DROPS (one child) is skipped — there is no row to open.
+ *
+ * A SEED, not a running rule: the caller puts these into the expansion set it
+ * already owns, so collapsing one behaves like collapsing anything else.
+ */
+export function defaultExpandedKeys<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+): string[] {
+  for (const node of seasonTree(groups)) {
+    if (isSeasonNode(node) && node.children.length > 1) return [node.key];
+  }
+  return [];
+}
+
+/**
+ * One group's rows, at a given depth. The "group of one" rule is here: a
+ * disclosure arrow over "1 release" is noise, and it would make the common case
+ * — a search where nothing duplicates — look like a different feature.
+ */
+function pushGroupRows<T extends GroupableResult>(
+  rows: GroupRow<T>[],
+  group: ResultGroup<T>,
+  expanded: ReadonlySet<string>,
+  depth: number,
+): void {
+  const first = group.members[0];
+  if (first === undefined) return;
+  if (group.members.length === 1) {
+    rows.push({ kind: "release", key: group.key, result: first, inGroup: depth > 0, depth });
+    return;
+  }
+  const isOpen = expanded.has(group.key);
+  const row: GroupRow<T> = {
+    kind: "group",
+    key: group.key,
+    title: group.title,
+    members: group.members,
+    expanded: isOpen,
+    depth,
+  };
+  if (group.year !== undefined) row.year = group.year;
+  if (group.season !== undefined) row.season = group.season;
+  if (group.seasonEnd !== undefined) row.seasonEnd = group.seasonEnd;
+  if (group.episode !== undefined) row.episode = group.episode;
+  rows.push(row);
+  if (!isOpen) return;
+  group.members.forEach((member, i) => {
+    rows.push({
+      kind: "release",
+      key: `${group.key}#${i}`,
+      result: member,
+      inGroup: true,
+      depth: depth + 1,
+    });
+  });
+}
+
+/**
  * The release a row acts on.
  *
- * A collapsed header resolves to its FIRST member, which under the current sort
- * is its best one. That is what lets every existing action keep working
- * untouched: play, add, favourite and the preview lookup all take a release, and
- * a header hands them one without any new picking logic.
+ * A collapsed header resolves to its FIRST member. For a group that is its best
+ * one under the current sort; for a SEASON row it is the best season pack,
+ * because `seasonTree` sorts packs ahead of episodes for exactly this reason —
+ * `play`/`add` on a collapsed season must grab the season, not episode one. Do
+ * not "fix" that ordering away.
+ *
+ * That is what lets every existing action keep working untouched: play, add,
+ * favourite and the preview lookup all take a release, and a header hands them
+ * one without any new picking logic.
  */
 export function resultAtRow<T>(row: GroupRow<T>): T | null {
   return row.kind === "release" ? row.result : (row.members[0] ?? null);

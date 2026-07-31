@@ -358,6 +358,50 @@ describe("Results grouping", () => {
     expect(u.frame()).not.toContain("WEB-DL");
   });
 
+  // The complaint this answers, in the terminal half: a season pack and every
+  // episode of that season are correctly separate groups, but while a heading was
+  // the bare parsed title they all rendered as the same row, and one search read
+  // as five identical copies of the show.
+  it("names the season and episode on a show's headings, so two never read alike", async () => {
+    const u = await mountWide(
+      [
+        t("p1", "Harrowgate.S03.1080p.WEB-DL"),
+        t("p2", "Harrowgate.S03.2160p.WEB-DL"),
+        t("e1", "Harrowgate.S03E01.1080p.WEB-DL"),
+        t("e2", "Harrowgate.S03E01.2160p.WEB-DL"),
+      ],
+      120,
+    );
+    // Under the season tree the show is named once, by the season row, and its
+    // children take the short form. Before the tree these were sibling rows both
+    // reading "Harrowgate" — which is the bug this test was written for, and it
+    // still catches it: two rows that say nothing distinguishing would fail here.
+    await vi.waitFor(() => expect(u.frame()).toContain("Season pack"));
+    expect(u.frame()).toMatch(/Harrowgate S03(?!E)/);
+    expect(u.frame()).toContain("S03E01");
+  });
+
+  it("renders a season row above its episodes, with the show named once", async () => {
+    const u = await mountWide(
+      [
+        t("p1", "Harrowgate.S03.1080p.WEB-DL"),
+        t("p2", "Harrowgate.S03.2160p.WEB-DL"),
+        t("e1", "Harrowgate.S03E01.1080p.WEB-DL"),
+        t("e2", "Harrowgate.S03E01.2160p.WEB-DL"),
+        t("f1", "Harrowgate.S03E02.1080p.WEB-DL"),
+        t("f2", "Harrowgate.S03E02.2160p.WEB-DL"),
+      ],
+      120,
+    );
+    // The highest-ranked season is seeded open, so its children are on screen.
+    // Seeded in an effect, so the frame settles a tick after the first render.
+    await vi.waitFor(() => expect(u.frame()).toContain("Season pack"));
+    expect(u.frame()).toContain("Harrowgate S03");
+    expect(u.frame()).toContain("S03E01");
+    // The show's name is stated once, by the season row — not repeated per child.
+    expect(u.frame()).not.toContain("Harrowgate S03E01");
+  });
+
   it("leaves a lone release as a plain row", async () => {
     const u = await mountGrouped();
     // No heading, no count — the release name itself is the row.

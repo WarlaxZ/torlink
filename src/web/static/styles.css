@@ -763,8 +763,16 @@ select:focus-visible {
 /* A release inside an open group. Indented with a spine so the belonging is
    visible without a second colour — and the name keeps the weight it always had,
    so an expanded group looks like the list it is. */
-.result-member {
+.result-depth-1 {
   margin-left: 1.25rem;
+  border-left: 2px solid var(--line);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* One step further in: an episode's releases, inside an open season. */
+.result-depth-2 {
+  margin-left: 2.5rem;
   border-left: 2px solid var(--line);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
@@ -773,7 +781,8 @@ select:focus-visible {
 /* The indent and spine are a LIST idiom. In the grid every card is the same size
    by definition, so an indented one just breaks the columns — belonging is shown
    there by the member cards following their group card instead. */
-.results-grid .result-member {
+.results-grid .result-depth-1,
+.results-grid .result-depth-2 {
   margin-left: 0;
   border-left: 1px solid var(--line);
   border-radius: 0.5rem;
