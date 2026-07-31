@@ -308,7 +308,7 @@ import crypto from "node:crypto";
 export const ADJECTIVES = [
   "quiet", "amber", "hollow", "drifting", "copper", "steady", "distant", "gentle",
   "narrow", "silver", "patient", "ochre", "pebbled", "russet", "brisk", "muted",
-  "woven", "faded", "wandering", "modest", "glassy", "sable", "tranquil", "misty",
+  "woven", "faded", "wandering", "modest", "glassy", "pewter", "tranquil", "misty",
 ];
 
 export const NOUNS = [
