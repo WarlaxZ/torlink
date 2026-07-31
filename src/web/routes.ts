@@ -746,6 +746,13 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // browser must agree with the TUI about whether reccd is on, and the TUI
     // resolves it the same way. A boolean, never the URL or the token.
     reccConfigured: resolveReccConfig(config).reccUrl !== undefined,
+    // From config, never from reccd: /api/sources is the one payload the
+    // browser fetches before it can render anything, and hanging a network
+    // round trip off it to learn a fact that changes once per account lifetime
+    // is the wrong trade. The TUI's status check is what keeps this current.
+    reccAccount: config.reccAccountName
+      ? { name: config.reccAccountName, claimed: config.reccAccountClaimed === true }
+      : null,
     // Read only. `POST /api/preferences` is the write path; this is here so
     // fetching it costs no extra round trip on the page the browser loads first.
     preferences: toPublicQualityPrefs(config),
