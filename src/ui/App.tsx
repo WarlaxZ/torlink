@@ -1090,7 +1090,18 @@ export function App({
       const url = rawUrl.trim().replace(/\/+$/, "");
       const token = rawToken.trim();
       if (url) {
-        persistConfig({ reccUrl: url, reccToken: token || undefined });
+        // Clear the remembered account only when the host is genuinely
+        // changing: the account name belongs to whoever is at the old URL, and
+        // /api/sources would otherwise keep publishing it. Deliberately NOT
+        // unconditional — re-pasting a token for the SAME host is the
+        // documented recovery after reccd's sign-in reissues one, and the
+        // stored name is what names the account while offline.
+        const switchingHost = url !== config?.reccUrl;
+        persistConfig({
+          reccUrl: url,
+          reccToken: token || undefined,
+          ...(switchingHost ? { reccAccountName: undefined, reccAccountClaimed: undefined } : {}),
+        });
         setNotice(`${ICON.done} reccd set to ${url}`);
       } else {
         if (reccSetByEnv()) {
@@ -1101,7 +1112,7 @@ export function App({
         setNotice(RECC_CLEARED_NOTICE);
       }
     },
-    [closeReccPrompt, persistConfig],
+    [closeReccPrompt, persistConfig, config?.reccUrl],
   );
 
   const clearReccConfig = useCallback(() => {

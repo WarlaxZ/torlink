@@ -299,11 +299,12 @@ export async function claimReccAccount(
           message: "This account already has a username and password.",
         };
       }
-      // Pass reccd's own wording through — it is better than anything this
-      // layer could synthesise. But never a string that contains the password:
-      // reccd should not phrase an error that way, and if it ever does, that
-      // string must not reach the screen or a log.
-      const safe = error && !error.includes(password) ? error : "";
+      // Pass reccd's own wording through — it beats anything this layer could
+      // synthesise. But never a string containing the password. The length gate
+      // is load-bearing: "".includes() is always true, so without it a blank
+      // password — the most likely first mistake — loses the one message that
+      // would tell the user what to do.
+      const safe = error && (password.length < 8 || !error.includes(password)) ? error : "";
       return { ok: false, reason: "invalid", message: safe || "reccd rejected that username or password." };
     }
     return { ok: false, reason: "unreachable", message: `reccd couldn't claim the account (HTTP ${res.status}).` };

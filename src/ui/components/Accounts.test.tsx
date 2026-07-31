@@ -165,7 +165,7 @@ describe("Accounts", () => {
     // Not every row fits, so the last one starts off screen.
     expect(lastFrame() ?? "").not.toContain("omdbapi.com");
     // Up from the first row wraps to the last, which must scroll into view.
-    stdin.write("[A");
+    stdin.write("\x1b[A");
     await flush();
     expect(lastFrame() ?? "").toContain("omdbapi.com");
   });

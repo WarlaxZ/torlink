@@ -456,6 +456,15 @@ describe("claimReccAccount", () => {
     expect(res).toEqual({ ok: false, reason: "invalid", message: "reccd rejected that username or password." });
   });
 
+  it("passes reccd's message through for a blank password, the most likely first mistake", async () => {
+    // "".includes("") is always true in JS, so without a length gate this is
+    // indistinguishable from the leak case below and the message is dropped.
+    const res = await claimReccAccount(CFG, "x", "", {
+      fetchImpl: reply(400, { error: "password must be at least 8 characters" }),
+    });
+    expect(res).toEqual({ ok: false, reason: "invalid", message: "password must be at least 8 characters" });
+  });
+
   it("maps 401 to unauthorized", async () => {
     const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(401, {}) });
     expect(res).toEqual({
