@@ -8,7 +8,6 @@
   },
   "files": [
     "dist",
-    "preview",
     "scripts/ensure-webrtc.cjs"
   ],
   "engines": {

@@ -73,6 +73,14 @@ const RD_STATUS: DebridStatus = {
   expiresAt: new Date(NOW_MS + 60 * 86_400_000),
 };
 
+const TB_STATUS: DebridStatus = {
+  provider: "torbox",
+  username: "you",
+  active: true,
+  planLabel: "pro",
+  expiresAt: new Date(NOW_MS + 128 * 86_400_000),
+};
+
 function fakeQueue(
   items: QueueItem[],
   history: HistoryItem[],
@@ -378,13 +386,15 @@ save(
 
 save(
   "accounts",
-  makeStore({ section: "accounts", region: "content", contentWidth: CONTENT_WIDTH, listRows: 14, cols: COLS, rows: 24 }),
-  <Box flexDirection="column" width={COLS} paddingX={1}>
+  // Tall enough for all five providers at two lines each — below ~18 the pane
+  // windows and the last rows scroll out of the shot.
+  makeStore({ section: "accounts", region: "content", contentWidth: BROWSE_CW, listRows: 19, cols: BROWSE_COLS, rows: 30 }),
+  <Box flexDirection="column" width={BROWSE_COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
-    <Rule width={RULE_WIDTH} />
-    <Box height={14} marginTop={1}>
+    <Rule width={BROWSE_RULE} />
+    <Box height={18} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Accounts
@@ -398,8 +408,8 @@ save(
             },
             {
               provider: "torbox",
-              token: "",
-              status: null,
+              token: "tb_live_xxx",
+              status: TB_STATUS,
               onManage: () => {},
               onSignOut: () => {},
             },
@@ -422,6 +432,7 @@ save(
     </Box>
     <Footer hints={footerHints("content", "accounts")} />
   </Box>,
+  { cols: BROWSE_COLS },
 );
 
 const PROMPT_WIDTH = Math.max(24, Math.min(COLS - 4, 62));

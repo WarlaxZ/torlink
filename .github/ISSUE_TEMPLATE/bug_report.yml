@@ -1,0 +1,102 @@
+name: Bug report
+description: Something behaves differently to how it's documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The fields below are the ones that usually decide
+        whether a bug can be reproduced — a report with them filled in is often fixed
+        without a single follow-up question.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `torlnk --version`.
+      placeholder: "1.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Standalone executable from Releases
+        - install.sh one-liner
+        - npm install -g torlnk-rd
+        - npx torlnk-rd
+        - Built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where does it happen?
+      description: >-
+        torlink has two front ends over one core. Knowing which one you were in — or
+        that it happens in both — narrows this down a lot.
+      options:
+        - Terminal UI
+        - Browser UI
+        - Both
+        - A headless mode (watch / serve / files / attach)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and terminal
+      description: >-
+        Include your terminal emulator for a terminal-UI bug, or your browser for a
+        browser-UI bug. On Windows, say whether you're in WSL.
+      placeholder: "macOS 15.3, iTerm2 — or Windows 11 (WSL2), Chrome 133"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: debrid
+    attributes:
+      label: Debrid provider
+      description: >-
+        Streaming and downloading take completely different routes with and without a
+        provider, so this matters even when it doesn't look related.
+      options:
+        - None (peer-to-peer)
+        - Real-Debrid
+        - TorBox
+        - Both configured
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Search for …
+        2. Press …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Anything from `torlink.log` in your config directory. **Please redact API
+        tokens** — a Real-Debrid, TorBox or reccd token is a credential.
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,13 @@
+# Blank issues stay available on purpose: Discussions are off, so a plain question
+# needs somewhere to go rather than being forced into a bug template.
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing a change
+    url: https://github.com/WarlaxZ/torlink/blob/main/CONTRIBUTING.md
+    about: The house style, with examples from real merged PRs. Worth a skim before opening a PR.
+  - name: A source is offline, or a specific file is wrong
+    url: https://github.com/WarlaxZ/torlink/blob/main/README.md#what-it-searches
+    about: >-
+      torlink hosts no content and runs no index of its own — it queries public sites and
+      shows you what they return. Anything about one specific file belongs to the site
+      serving it. Do open an issue if a source has changed shape and torlink parses it wrong.
