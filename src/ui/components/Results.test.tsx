@@ -547,9 +547,15 @@ describe("Results search suggestions", () => {
   it("leaves the search box on tab when there is nothing to complete", async () => {
     // reccd configured, and ONE character typed \u2014 below the two reccd will answer
     // \u2014 so there is no list and tab must behave exactly as it did before
-    // suggestions existed. A character really is typed: with an empty box the
-    // emptiness of `urls` would follow from nothing having happened at all.
-    const { impl, urls } = suggestStub();
+    // suggestions existed. The subject is tab, and `editing` is what pins it.
+    //
+    // Deliberately asserts NOTHING about requests. This describe runs on real
+    // timers, where `vi.waitFor` resolves in tens of milliseconds and the
+    // debounce is 250ms, so "no request fired" here would only mean "the timer
+    // has not fired yet" \u2014 vacuous, as the comment above the fake-timer describe
+    // below says. The min-length gate is covered there instead, by
+    // "clears the rows when backspacing below the minimum query length".
+    const { impl } = suggestStub();
     const u = await mountSuggest(impl);
 
     u.press("/");
@@ -558,7 +564,6 @@ describe("Results search suggestions", () => {
     await vi.waitFor(() => expect(u.frame()).toContain("\u276f k"));
     u.press("\t");
     await vi.waitFor(() => expect(editing(u)).toBe(false));
-    expect(urls).toHaveLength(0);
   });
 
   it("still recalls the previous search on the up arrow with a list on screen", async () => {
