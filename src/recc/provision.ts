@@ -1,4 +1,8 @@
-import { resolveReccConfig, type Config } from "../config/config";
+import { promises as fs } from "node:fs";
+import { loadConfig, resolveReccConfig, saveConfig, type Config } from "../config/config";
+import { reccProvisionLockFile } from "../config/paths";
+import type { FetchImpl } from "../util/net";
+import { log } from "../util/logger";
 
 /**
  * The hosted reccd. Defined here and imported everywhere else — a second copy
@@ -43,4 +47,140 @@ export function shouldProvision(config: Config): boolean {
   if (reccToken) return false;
   if (reccUrl && normaliseUrl(reccUrl) !== DEFAULT_RECC_URL) return false;
   return true;
+}
+
+/** What provisioning wrote. Handed to `onProvisioned` and applied to config. */
+export interface ProvisionedPatch {
+  reccUrl: string;
+  reccToken: string;
+  reccAccountName: string;
+  reccAccountClaimed: false;
+}
+
+export interface EnsureReccAccountOptions {
+  fetchImpl?: FetchImpl;
+  timeoutMs?: number;
+  lockFile?: string;
+  loadConfigImpl?: () => Promise<Config>;
+  saveConfigImpl?: (config: Config) => Promise<void>;
+  /**
+   * Called after a successful write, with what was written.
+   *
+   * The TUI MUST pass this. `App.tsx`'s persistConfig writes the whole config
+   * object from React state, so a config.json written behind that state's back
+   * is reverted by the next unrelated setting change — the user's brand-new
+   * account, silently deleted when they change the sort. The callback applies
+   * the patch to React state WITHOUT re-saving, so the two agree.
+   *
+   * `runServe` passes nothing: it holds no equivalent snapshot, and routes.ts
+   * calls loadConfig() per request.
+   */
+  onProvisioned?: (patch: ProvisionedPatch) => void;
+}
+
+const LOCK_STALE_MS = 60_000;
+
+/** True if the lock was taken. Never throws. */
+async function takeLock(lockFile: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = await fs.open(lockFile, "wx");
+      await handle.close();
+      return true;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code !== "EEXIST") return false; // unwritable dir, permissions — give up quietly
+      let ageMs = 0;
+      try {
+        ageMs = Date.now() - (await fs.stat(lockFile)).mtimeMs;
+      } catch {
+        continue; // vanished between open and stat — try to take it
+      }
+      if (ageMs < LOCK_STALE_MS) return false; // another process is mid-signup
+      // Stale: a process died holding it. Clear it and try once more.
+      try {
+        await fs.unlink(lockFile);
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function isAnonSignupBody(v: unknown): v is { name: string; token: string } {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return typeof r.name === "string" && typeof r.token === "string" && r.token.length > 0;
+}
+
+/**
+ * Create an anonymous reccd account on the hosted service, once, if the user
+ * has nothing configured. Fire-and-forget: resolves to nothing, never rejects,
+ * and a failure means recommendations stay unavailable and nothing else.
+ *
+ * Call it as `void ensureReccAccount({...}).catch(() => {})` — the explicit
+ * catch is what stops an unhandled rejection taking the process down, which is
+ * the exact hazard routes.ts documents for reccd's other fire-and-forget calls.
+ *
+ * Single attempt, deliberately, and NOT fetchResilient: retrying into a rate
+ * limit or an outage piles up concurrent requests at the worst possible moment.
+ * The next launch tries again, which is one request per launch and
+ * self-limiting.
+ */
+export async function ensureReccAccount(opts: EnsureReccAccountOptions = {}): Promise<void> {
+  const load = opts.loadConfigImpl ?? loadConfig;
+  const save = opts.saveConfigImpl ?? saveConfig;
+  const lockFile = opts.lockFile ?? reccProvisionLockFile;
+  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
+
+  try {
+    if (!shouldProvision(await load())) return;
+    if (!(await takeLock(lockFile))) {
+      log.debug("recc provision: another process holds the lock, skipping");
+      return;
+    }
+    try {
+      const res = await fetchImpl(`${DEFAULT_RECC_URL}/signup/anonymous`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 8000),
+      });
+      if (!res.ok) {
+        log.debug(`recc provision: signup returned ${res.status}`);
+        return;
+      }
+      const body: unknown = await res.json();
+      if (!isAnonSignupBody(body)) {
+        log.debug("recc provision: unexpected signup response shape");
+        return;
+      }
+
+      // Read-modify-write, per CLAUDE.md: never a snapshot held across the
+      // network call. If a token appeared while we were waiting, the new
+      // account is discarded — an orphan account on reccd is a far smaller
+      // problem than a lost token.
+      const fresh = await load();
+      if (resolveReccConfig(fresh).reccToken) {
+        log.debug("recc provision: a token appeared meanwhile, discarding the new account");
+        return;
+      }
+      const patch: ProvisionedPatch = {
+        reccUrl: DEFAULT_RECC_URL,
+        reccToken: body.token,
+        reccAccountName: body.name,
+        reccAccountClaimed: false,
+      };
+      await save({ ...fresh, ...patch });
+      opts.onProvisioned?.(patch);
+      log.debug(`recc provision: created anonymous account ${body.name}`);
+    } finally {
+      await fs.unlink(lockFile).catch(() => {});
+    }
+  } catch (err) {
+    // Spec §0. Everything — a filesystem error, a malformed body, an aborted
+    // request, a failed save — ends here, and torlink carries on unchanged.
+    log.debug(`recc provision: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
