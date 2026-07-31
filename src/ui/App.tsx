@@ -187,6 +187,18 @@ const RECC_CLEARED: Partial<Config> = {
   reccAutoSignup: false,
 };
 
+/**
+ * True when reccd's connection comes from the environment, which config cannot
+ * override — so both clear paths must refuse rather than write a change that
+ * will not take effect and a notice that would be a lie.
+ */
+function reccSetByEnv(): boolean {
+  return Boolean(process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim());
+}
+
+const RECC_CLEARED_NOTICE = "reccd connection cleared. Recommendations stay off until you set it up again.";
+const RECC_ENV_VAR_NOTICE = "reccd is set via TORLINK_RECC_* env vars — unset them to clear it.";
+
 export function App({
   initialMagnet,
   initialTorrent,
@@ -1081,8 +1093,12 @@ export function App({
         persistConfig({ reccUrl: url, reccToken: token || undefined });
         setNotice(`${ICON.done} reccd set to ${url}`);
       } else {
+        if (reccSetByEnv()) {
+          setNotice(RECC_ENV_VAR_NOTICE);
+          return;
+        }
         persistConfig(RECC_CLEARED);
-        setNotice("reccd connection cleared. Recommendations stay off until you set it up again.");
+        setNotice(RECC_CLEARED_NOTICE);
       }
     },
     [closeReccPrompt, persistConfig],
@@ -1090,12 +1106,12 @@ export function App({
 
   const clearReccConfig = useCallback(() => {
     closeReccPrompt();
-    if (process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim()) {
-      setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
+    if (reccSetByEnv()) {
+      setNotice(RECC_ENV_VAR_NOTICE);
       return;
     }
     persistConfig(RECC_CLEARED);
-    setNotice("reccd connection cleared. Recommendations stay off until you set it up again.");
+    setNotice(RECC_CLEARED_NOTICE);
   }, [closeReccPrompt, persistConfig]);
 
   const closeOmdbPrompt = useCallback(() => setEditingOmdb(false), []);
