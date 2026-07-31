@@ -1399,29 +1399,71 @@ git commit -m "feat(web): suggestion list model for the search box"
 
 In `src/web/static/index.html`, inside `<form id="search" class="card">`, immediately after the `<input id="query" …>` line, add:
 
+In `src/web/static/index.html`, wrap the input and the list together — the wrapper is
+load-bearing, see the CSS note below:
+
 ```html
-          <!-- Title suggestions from reccd, when it is configured. A full-width
-               row inside the card's flex layout so it sits under the input
-               rather than beside it. Empty and `hidden` until there is
-               something to show; app.ts fills it with createElement +
-               textContent, never innerHTML. -->
-          <ul id="suggest" class="suggest" role="listbox" aria-label="Title suggestions" hidden></ul>
+          <div class="suggest-wrap">
+            <input id="query" type="search" placeholder="…" autocomplete="off" />
+            <!-- Title suggestions from reccd, when it is configured. An OVERLAY,
+                 positioned against .suggest-wrap: opening it must never push the
+                 Search / save-search buttons around while the user is still
+                 typing. Empty and `hidden` until there is something to show;
+                 app.ts fills it with createElement + textContent, never
+                 innerHTML. -->
+            <ul id="suggest" class="suggest" role="listbox" aria-label="Title suggestions" hidden></ul>
+          </div>
 ```
 
 In `src/web/static/styles.css`, append:
 
 ```css
-/* The search box's title suggestions. `flex: 1 0 100%` breaks it onto its own
-   row inside .card, which lays its children out as a strip of controls. */
+/* An overlay, not a flow row. The first cut used `flex: 1 0 100%` to break the
+   list onto its own row inside .card — which reflowed the Search / save-search
+   buttons down a row every time the list opened, moving click targets under the
+   user's cursor mid-keystroke. Verified in a browser, then changed.
+   .suggest is positioned against this wrapper rather than .card, because #query
+   is a flex CHILD of .card and positioning against .card would misalign the
+   list with the input. */
+.suggest-wrap {
+  position: relative;
+  flex: 1;
+  /* NOT min-width: 0. The bare #query used to occupy this flex slot carrying
+     `input { flex: 1; min-width: 12rem }` (styles.css:237), and that 12rem is
+     what makes .card wrap instead of crushing the search box. The wrapper holds
+     that slot now, so it inherits the job. */
+  min-width: 12rem;
+}
+
+.suggest-wrap #query {
+  width: 100%;
+  /* The generic `input` rule's min-width: 12rem beats width: 100% once the
+     wrapper is narrower than 12rem — the input then overflows the wrapper and
+     the overlay comes out narrower than the input above it (measured: 91px list
+     under a 192px input). The wrapper enforces the floor; the input just fills
+     it. Do not "simplify" this line away. */
+  min-width: 0;
+}
+
 .suggest {
-  flex: 1 0 100%;
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  /* Opaque, or the tab strip shows through the suggestions. */
+  background: var(--raised);
+  max-height: 16rem;
+  overflow-y: auto;
   list-style: none;
   margin: 0;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 0.5rem;
-  overflow: hidden;
 }
+/* Never set `display` on .suggest — `[hidden] { display: none !important }` at
+   the top of the file is what makes the hidden attribute work against author
+   rules, and a display declaration here would defeat it. */
 
 .suggest li {
   padding: 0.4rem 0.6rem;
