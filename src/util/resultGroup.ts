@@ -14,6 +14,8 @@ import { parseRelease } from "./release";
 // One definition of "the same show" — the history key uses the same one.
 import { normaliseTitle, tidyTitle } from "./titleKey";
 import type { OmdbType } from "../recc/omdb";
+// episode.ts imports nothing, so this costs the browser bundle nothing.
+import type { EpisodeRef } from "./episode";
 
 export interface GroupableResult {
   name: string;
@@ -261,10 +263,44 @@ function foldsUnderSeason<T>(group: ResultGroup<T>): boolean {
   return group.season !== undefined && group.seasonEnd === undefined;
 }
 
-/** "harrowgate" out of "harrowgate|series|s3|e1" — the show's identity. */
-function showOf(key: string): string {
-  const at = key.indexOf("|series|");
-  return at === -1 ? key : key.slice(0, at);
+/**
+ * "harrowgate" out of any group key — the show's identity, and what a watch
+ * position is keyed on. Exported so the front ends build their lookup with the
+ * same rule rather than each slicing the key their own way.
+ */
+export function showKeyOf(groupKey: string): string {
+  const at = groupKey.indexOf("|series|");
+  return at === -1 ? groupKey : groupKey.slice(0, at);
+}
+
+/** Where the user is in a show, by normalised show key. Null when unknown. */
+export type PositionLookup = (showKey: string) => EpisodeRef | null;
+
+/** The episode after a position. `nextEpisode` in src/core owns the public one. */
+function nextOf(at: EpisodeRef): EpisodeRef {
+  return { season: at.season, episode: at.episode + 1 };
+}
+
+/**
+ * The group key of the episode to land on, or null.
+ *
+ * NULL WHEN THE RESULTS DO NOT HAVE IT. A position is a suggestion — nothing has
+ * asked a tracker whether the next episode exists — so a season aired up to E07
+ * that returns no E08 must not grow a phantom row. The results are the authority
+ * on what can be selected.
+ */
+export function nextUpRowKey<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  positionFor: PositionLookup,
+): string | null {
+  for (const group of groups) {
+    if (group.season === undefined || group.episode === undefined) continue;
+    const at = positionFor(showKeyOf(group.key));
+    if (!at) continue;
+    const want = nextOf(at);
+    if (group.season === want.season && group.episode === want.episode) return group.key;
+  }
+  return null;
 }
 
 /** Packs before episodes; episodes ascending. */
@@ -294,7 +330,7 @@ export function seasonTree<T extends GroupableResult>(
   const byShow = new Map<string, Map<number, ResultGroup<T>[]>>();
   for (const group of groups) {
     if (!foldsUnderSeason(group)) continue;
-    const show = showOf(group.key);
+    const show = showKeyOf(group.key);
     let seasons = byShow.get(show);
     if (!seasons) {
       seasons = new Map();
@@ -312,7 +348,7 @@ export function seasonTree<T extends GroupableResult>(
       out.push(group);
       continue;
     }
-    const show = showOf(group.key);
+    const show = showKeyOf(group.key);
     if (done.has(show)) continue;
     done.add(show);
     const seasons = byShow.get(show)!;
@@ -381,7 +417,9 @@ export function groupRowPlan<T extends GroupableResult>(
 /**
  * The keys a fresh result set should start with open.
  *
- * The highest-ranked season node, and only that one. Without it a search for one
+ * WITH a position: the season holding the next episode.
+ *
+ * WITHOUT one: the highest-ranked season node, and only that one. Without it a search for one
  * season collapses to a single line, which reads as the list having failed.
  *
  * "Highest-ranked" rather than "the only one": a real search for one season of
@@ -397,8 +435,19 @@ export function groupRowPlan<T extends GroupableResult>(
  */
 export function defaultExpandedKeys<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
+  positionFor?: PositionLookup,
 ): string[] {
-  for (const node of seasonTree(groups)) {
+  const nodes = seasonTree(groups);
+  // WITH a position: the season holding the next episode, which is the whole
+  // point — you searched a show to carry on watching it.
+  if (positionFor) {
+    for (const node of nodes) {
+      if (!isSeasonNode(node) || node.children.length <= 1) continue;
+      const at = positionFor(showKeyOf(node.key));
+      if (at && nextOf(at).season === node.season) return [node.key];
+    }
+  }
+  for (const node of nodes) {
     if (isSeasonNode(node) && node.children.length > 1) return [node.key];
   }
   return [];
