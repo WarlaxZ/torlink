@@ -833,6 +833,13 @@ async function play(
       stop: stopSession,
       confirm: (message) => confirm(message),
       notice: showNotice,
+      // TEMPORARY: the next commit gives this its own viewport-anchored pill,
+      // which is the whole point of splitting it from `notice`. Pointing it at
+      // the notice line for one commit keeps this file compiling without
+      // pretending the split has landed.
+      progress: (line) => {
+        if (line !== null) showNotice(line);
+      },
       // Closes over THIS row's hash, not a module-level variable — see
       // showPicker's comment for why that distinction is load-bearing.
       choose: (sessionId, capability, name, files, preselect) =>
@@ -841,7 +848,7 @@ async function play(
       sleep,
       now: () => Date.now(),
       onUnresolved,
-    }, wanted);
+    }, { wanted });
   } finally {
     playing.delete(row.id);
   }
