@@ -18,6 +18,11 @@ export const defaultDownloadDir = path.join(os.homedir(), "Downloads", APP_NAME)
 
 export const configFile = path.join(configDir, "config.json");
 
+// Guards auto-provisioning against a concurrent TUI and `serve --web`, which
+// are separate processes sharing one config.json. In configDir rather than
+// dataDir because what it protects is a config write.
+export const reccProvisionLockFile = path.join(configDir, "recc-provision.lock");
+
 export const queueFile = path.join(dataDir, "queue.json");
 
 export const historyFile = path.join(dataDir, "history.json");

@@ -36,6 +36,30 @@ describe("config recc fields", () => {
     expect(cfg.reccUrl).toBe("http://localhost:4100");
     expect(cfg.reccToken).toBe("recc-abc123");
   });
+
+  it("round-trips the account name, claim state and opt-out", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      reccUrl: "https://reccd.stream",
+      reccToken: "recc-abc123",
+      reccAccountName: "quiet-heron-4f2a",
+      reccAccountClaimed: false,
+      reccAutoSignup: false,
+      trackers: [],
+    });
+    const cfg = await loadConfig();
+    expect(cfg.reccAccountName).toBe("quiet-heron-4f2a");
+    expect(cfg.reccAccountClaimed).toBe(false);
+    expect(cfg.reccAutoSignup).toBe(false);
+  });
+
+  // Absent has to mean "auto-provision", because a fresh install has no
+  // config.json at all -- so the default must not be a stored `true`.
+  it("leaves reccAutoSignup undefined when nothing set it", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [] });
+    const cfg = await loadConfig();
+    expect(cfg.reccAutoSignup).toBeUndefined();
+  });
 });
 
 describe("config UI preferences", () => {
