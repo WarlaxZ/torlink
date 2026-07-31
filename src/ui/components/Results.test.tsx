@@ -453,6 +453,17 @@ describe("Results grouping keeps the cursor put", () => {
 // exactly the escape hatch ForYou's tests use \u2014 so nothing here dials out.
 const SUGGEST_CFG = { reccUrl: "http://recc.invalid:4100", reccToken: "tok" };
 const KESTREL = { imdbId: "tt1", title: "Kestrel", year: 2010, type: "movie", matchedAka: null };
+// Enough hits to fill SUGGEST_ROWS_TERMINAL, for the height-budget test.
+const KEPLER = { imdbId: "tt2", title: "Kepler", year: 2019, type: "tv", matchedAka: null };
+const ASHFALL = { imdbId: "tt3", title: "Ashfall", year: 1999, type: "movie", matchedAka: null };
+const HARROWGATE = { imdbId: "tt4", title: "Harrowgate", year: 2021, type: "tv", matchedAka: null };
+const TIN_RIVERS = { imdbId: "tt5", title: "Tin Rivers", year: 2024, type: "movie", matchedAka: null };
+// The row budget App.tsx hands this view (it passes `listRows === bodyH`), stated
+// here rather than inherited from the harness default so the assertions below and
+// the store cannot drift apart. Roomy enough that `resultsPanelOuter`'s 5-row
+// floor is not what is being measured — on a terminal too short for both the
+// panel minimum and a full list, the floor wins and clipping is unavoidable.
+const TEST_LIST_ROWS = 24;
 
 // `fetchTitleSuggestions` validates EVERY element and fails the whole reply on
 // one bad one, which the hook renders as an empty list \u2014 so `matchedAka` is not
@@ -620,6 +631,53 @@ describe("Results search suggestions", () => {
     await vi.waitFor(() => expect(editing(u)).toBe(true));
     u.press(KEY.esc);
     await vi.waitFor(() => expect(editing(u)).toBe(false));
+  });
+
+  /**
+   * THE HEIGHT BUDGET, which had no coverage at all.
+   *
+   * App.tsx gives this view a `height={bodyH}` box with `overflow="hidden"`, and
+   * `listRows === bodyH`. `resultsPanelOuter` subtracts `searchH + 2` from that
+   * budget, and `searchH + 2` is exactly the SearchBar's rendered rows plus its
+   * one-row `marginTop` — so the column consumes precisely the budget with the
+   * deliberate one row of slack (see `resultsPanelOuter`'s own comment on issue
+   * #21) and nothing to spare. The suggestion rows sit ABOVE the results panel,
+   * so rows they add come out of the panel below them: Yoga shrinks it, or the
+   * parent's clip takes its bottom border off. Either way the results panel
+   * loses rows while a list is open and gets them back when it closes — jitter
+   * per keystroke, which the spec explicitly promises does not happen.
+   *
+   * Asserted against `listRows` from the store rather than a literal, and the
+   * closed-list height is asserted too, so this cannot pass by the view being
+   * uniformly short.
+   */
+  it("keeps the results panel inside the row budget while a list is open", async () => {
+    const { impl } = suggestStub([KESTREL, KEPLER, ASHFALL, HARROWGATE, TIN_RIVERS]);
+    const u = await mountSuggest(impl, { listRows: TEST_LIST_ROWS });
+    const height = (): number => u.frame().split("\n").length;
+    // Two: the search bar's and the results panel's. The results panel's is the
+    // LAST line of the view, so losing it to a clip or a shrink shows up here.
+    const bottomBorders = (): number => u.frame().split("\n").filter((l) => l.includes("╰")).length;
+    const endsWithPanelBottom = (): boolean => (u.frame().split("\n").at(-1) ?? "").includes("╰");
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    const closedHeight = height();
+    // The whole budget, exactly — this view has no slack in it to lend.
+    expect(closedHeight).toBe(TEST_LIST_ROWS);
+    expect(bottomBorders()).toBe(2);
+    expect(endsWithPanelBottom()).toBe(true);
+
+    u.press("ke");
+    await vi.waitFor(() => expect(u.frame()).toContain("Tin Rivers (2024) · film"), {
+      timeout: 5000,
+    });
+    // Five suggestion rows are on screen and the view is still inside its budget.
+    expect(u.frame()).toContain("Kestrel (2010) · film");
+    expect(height()).toBe(closedHeight);
+    // And the panel is intact rather than clipped out of its own bottom border.
+    expect(bottomBorders()).toBe(2);
+    expect(endsWithPanelBottom()).toBe(true);
   });
 });
 

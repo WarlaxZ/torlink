@@ -421,7 +421,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     if (byHash >= 0) setCursor(byHash);
   }, [rows]);
 
-  const searchH = 3;
+  // The SearchBar's own rows PLUS whatever suggestion rows it is currently
+  // emitting, because those sit above the results panel in the same column and
+  // the parent gives this view exactly `listRows` rows with overflow hidden. Left
+  // at a constant 3, an open list pushed the panel out by its own row count: Yoga
+  // shrank the panel or the clip took its bottom border, and it grew back when the
+  // list closed — jitter per keystroke.
+  //
+  // `resultsPanelOuter` floors the panel at 5 rows, so on a very short terminal a
+  // long list still cannot fit and the floor wins. That is the pre-existing
+  // minimum rather than something this adds, and shrinking a panel to nothing
+  // would be worse than clipping.
+  const searchH = 3 + suggest.items.length;
   const filterH = mode === "filter" || textFilter.trim() ? 1 : 0;
   const panelOuter = resultsPanelOuter(listRows, searchH + filterH);
   const listHeight = Math.max(3, panelOuter - 4);
