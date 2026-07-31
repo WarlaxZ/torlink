@@ -84,6 +84,28 @@ export function shouldQueryFor(state: SuggestState, raw: string): boolean {
 }
 
 /**
+ * Whether a search box's live draft is worth suggesting on at all, given the last
+ * SUBMITTED query in the same box.
+ *
+ * False when they are the same text: the user has typed nothing new, so a list
+ * would be an unbidden dropdown over their own previous search — and one they
+ * would then need two escapes to get out of, since the first would only close it.
+ *
+ * This is deliberately DERIVED rather than latched at the moment the box is
+ * entered. A latch set on entry holds only while every path into the box
+ * remembers to set it, and a path that forgets fails silently; this is re-read on
+ * every render, so it holds however the box was entered — including at mount,
+ * where nothing runs at all.
+ *
+ * The one thing it gives up: clearing the box and retyping the previous search
+ * character-for-character yields no suggestions. That is barely reachable, and
+ * worth an invariant that cannot rot.
+ */
+export function shouldSuggestFor(draft: string, submitted: string): boolean {
+  return draft.trim() !== submitted.trim();
+}
+
+/**
  * Fold a reply into the state, ignoring it if a newer one already landed.
  *
  * THIS GUARD IS LOAD-BEARING. reccd answers a two-character query in ~311ms

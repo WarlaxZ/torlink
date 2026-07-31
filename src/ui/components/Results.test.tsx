@@ -668,4 +668,53 @@ describe("Results search suggestions on entering the box", () => {
     expect(urls).toHaveLength(0);
     expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
   });
+
+  it("holds when the box reaches the submitted text without entering search mode", async () => {
+    // THE POINT OF THE DERIVED GUARD. `enterSearch` resyncing the draft is not
+    // what keeps the list shut \u2014 the `draft === query` condition is, and it is
+    // re-read every render. This drives the box to `draft === query` by TYPING,
+    // so `enterSearch` is provably not the thing suppressing anything, and no
+    // latch is involved either (no tab, no escape, so `suppressedText` stays
+    // null). Whatever path a future caller takes into search mode, it lands in
+    // this same state and gets this same answer.
+    //
+    // It doubles as documentation of the one behaviour the guard gives up:
+    // clearing the box and retyping your last search exactly gets no suggestions.
+    const { impl, urls } = suggestStub();
+    searchState.current = settled(LIST);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "kestrel" })}>
+        <Results reccConfig={SUGGEST_CFG} fetchImpl={impl} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await settleFrames();
+
+    u.press("/");
+    await tick(1000);
+    expect(urls).toHaveLength(0); // nothing asked for the text already there
+
+    // Clear it and type most of the same search back: the drafts differ, so
+    // suggestions work normally. The two presses are separated by a tick because
+    // TextField's input closure only refreshes on render \u2014 same-batch keys apply
+    // against the pre-clear value (a pre-existing trait this file already
+    // documents on the filter tests), which would insert into "kestrel" rather
+    // than into an empty box.
+    u.press(KEY.ctrlU);
+    await tick(1000);
+    u.press("kestre");
+    await tick(1000);
+    // Pinned with the trailing separator so it cannot be satisfied by a longer
+    // query that merely starts the same way \u2014 the first version of this
+    // assertion passed against "q=kestrelkestre".
+    expect(urls).toEqual([expect.stringContaining("q=kestre&limit=")]);
+    expect(u.frame()).toContain("Kestrel (2010) \u00b7 film");
+
+    // One more character and the draft equals the submitted search again. The
+    // list must close and nothing more may be asked \u2014 reached purely by typing.
+    u.press("l");
+    await tick(1000);
+    expect(urls).toHaveLength(1);
+    expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
+  });
 });

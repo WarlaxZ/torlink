@@ -9,6 +9,7 @@ import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { useTitlePreview } from "../hooks/useTitlePreview";
 import { useTitleSuggest } from "../hooks/useTitleSuggest";
+import { shouldSuggestFor } from "../../util/titleSuggest";
 import { PreviewPane } from "./PreviewPane";
 import { parseRelease, hintForSection } from "../../util/release";
 // The same badges the browser's rows show, from the same table the quality
@@ -286,7 +287,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   const suggest = useTitleSuggest({
     reccConfig,
     query: draft,
-    enabled: mode === "search",
+    // Editing, AND the text has actually moved on from the last submitted search.
+    // The second half is what stops `/` popping a list over the search you are
+    // already looking at — see `shouldSuggestFor` for why it is derived here
+    // rather than latched when the box is entered.
+    enabled: mode === "search" && shouldSuggestFor(draft, query),
     fetchImpl,
   });
   const [cursor, setCursor] = useState(0);
@@ -347,35 +352,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     if (!focused) setMode("list");
   }, [focused]);
 
-  // EVERY path into search mode goes through here — there is no bare
-  // `setMode("search")` in this file, on purpose.
+  // Entering search mode remounts the TextField with `query` in it, so the draft
+  // is resynced to match. Otherwise leaving the box with text in it and arrowing
+  // back up into it would suggest against the abandoned text while the box shows
+  // something else.
   //
-  // Two things have to happen in the same batch as the mode change:
-  //
-  // 1. The draft is resynced, because entering search mode remounts the
-  //    TextField with `query` in it. Otherwise leaving the box with text in it
-  //    and arrowing back up into it would suggest against the abandoned text
-  //    while the box shows something else.
-  // 2. That same text is suppressed. Text already sitting in the box is not a
-  //    question the user just asked, so opening a list for it would pop an
-  //    unbidden dropdown on every `/` after a search — and then cost two escapes
-  //    to get back out of a box you never typed in. Typing anything new changes
-  //    the text, which clears the latch and suggests normally.
-  //
-  // `accept` here means "treat this text as already resolved", which is what the
-  // latch is for generally (`dismiss` is its other caller); it does not imply the
-  // user picked a suggestion.
-  //
-  // THIS CANNOT BE AN EFFECT, and that was measured rather than assumed. By the
-  // time an effect runs, the hook has already seen `enabled` flip true for a
-  // draft that equals `query` and has scheduled its debounced request; setting
-  // the latch afterwards changes none of that effect's dependencies, so nothing
-  // cancels the timeout and the reply still lands and still opens the list.
-  // Setting it here puts `suppressedText` in place during the very render in
-  // which `enabled` becomes true, which is the only point early enough.
+  // This is about draft CORRECTNESS only. It is deliberately not what stops a
+  // list opening over text the user did not just type — that is
+  // `shouldSuggestFor` in the `enabled` argument above, which is re-derived every
+  // render and so cannot be defeated by a path into search mode that forgets to
+  // call this.
   const enterSearch = (): void => {
     setDraft(query);
-    suggest.accept(query);
     setMode("search");
   };
 

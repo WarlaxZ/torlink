@@ -3,6 +3,7 @@ import {
   emptySuggestState,
   shouldQuery,
   shouldQueryFor,
+  shouldSuggestFor,
   applyReply,
   suppressFor,
   topSuggestion,
@@ -144,6 +145,50 @@ describe("shouldQueryFor", () => {
   it("queries again as soon as the text changes", () => {
     const s = suppressFor(emptySuggestState(), "Kestrel 2010");
     expect(shouldQueryFor(s, "Kestrel 2010 1080p")).toBe(true);
+  });
+});
+
+describe("shouldSuggestFor", () => {
+  // The whole reason this is a derived predicate rather than a latch set when the
+  // search box is entered: a latch holds only while every path into the box
+  // remembers to set it, and a path that forgets fails silently and invisibly.
+  // Everything below is a property of the two strings and nothing else, so it
+  // holds however — and whether or not — the box was entered.
+  it("refuses a draft that still equals the submitted search", () => {
+    expect(shouldSuggestFor("Kestrel 2010", "Kestrel 2010")).toBe(false);
+  });
+
+  it("allows a draft the user has actually changed", () => {
+    expect(shouldSuggestFor("Kestrel 2010 1080p", "Kestrel 2010")).toBe(true);
+    expect(shouldSuggestFor("Kestrel 201", "Kestrel 2010")).toBe(true);
+  });
+
+  it("ignores surrounding whitespace on either side", () => {
+    // Whichever side it lands on, this is the same text and must not re-ask.
+    expect(shouldSuggestFor("  Kestrel 2010  ", "Kestrel 2010")).toBe(false);
+    expect(shouldSuggestFor("Kestrel 2010", "  Kestrel 2010  ")).toBe(false);
+  });
+
+  it("refuses an empty box that has never been searched", () => {
+    // The state at mount on a fresh browse: nothing typed, nothing submitted.
+    expect(shouldSuggestFor("", "")).toBe(false);
+  });
+
+  it("allows the first thing typed into a box with no submitted search", () => {
+    expect(shouldSuggestFor("ke", "")).toBe(true);
+  });
+
+  it("allows an emptied box after a search, so the rows can be cleared", () => {
+    // The length gate downstream is what stops a request here; this predicate's
+    // job is only "has the text moved on", and it has.
+    expect(shouldSuggestFor("", "Kestrel 2010")).toBe(true);
+  });
+
+  it("is case sensitive, matching the text the box actually holds", () => {
+    // reccd's results differ by query, and "kestrel" is a different question from
+    // "Kestrel" as far as the box is concerned — so this must not fold case and
+    // silently withhold suggestions for a retyped title.
+    expect(shouldSuggestFor("kestrel 2010", "Kestrel 2010")).toBe(true);
   });
 });
 
