@@ -122,7 +122,7 @@ function suggestStub(items: unknown[] = [KESTREL]): { impl: FetchImpl; urls: str
   const urls: string[] = [];
   const impl = (async (url: string) => {
     urls.push(String(url));
-    return { ok: true, status: 200, json: async () => items } as unknown as Response;
+    return { ok: true, status: 200, json: async () => ({ results: items }) } as unknown as Response;
   }) as unknown as FetchImpl;
   return { impl, urls };
 }

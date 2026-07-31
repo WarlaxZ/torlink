@@ -520,6 +520,11 @@ torlink can suggest what to watch next in a **For You** tab. Connect it from the
 reccd, enter its URL and the bearer token from reccd's `user:add`. (Prefer to keep it off disk? Set
 `TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your environment instead.)
 
+This version of torlink expects reccd's list endpoints to answer with its newer `results`
+envelope, so upgrade reccd and torlink together. Against an older reccd, the For You tab reports
+an error instead of showing recommendations, and title suggestions (below) stay silently empty
+rather than failing loudly.
+
 The browser's **for you** tab shows the same recommendations the TUI does — poster, year, and why it
 picked each one ("because you liked Harrowgate"). Rate a pick watched, liked or disliked, or **save
 search** to add it to your Saved searches — the same choice the terminal's `w` makes on a For You pick,
