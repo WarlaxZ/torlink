@@ -214,12 +214,13 @@ export async function fetchTitleSuggestions(
     if (res.status === 404) return { ok: false, error: "this reccd has no title search" };
     if (!res.ok) return { ok: false, error: `title search unavailable (HTTP ${res.status})` };
     const body: unknown = await res.json();
-    if (!Array.isArray(body) || !body.every(isTitleSuggestion)) {
+    const results = resultsOf(body);
+    if (results === null || !results.every(isTitleSuggestion)) {
       return { ok: false, error: "unexpected response from reccd" };
     }
     // Narrowed deliberately: reccd also sends genres, rating and votes, and
     // nothing here renders them.
-    const items: TitleSuggestion[] = body.map((r) => ({
+    const items: TitleSuggestion[] = results.map((r) => ({
       imdbId: r.imdbId,
       title: r.title,
       year: r.year,
