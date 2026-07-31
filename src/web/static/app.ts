@@ -57,6 +57,7 @@ import {
   type SearchView,
   type SourcesResponse,
 } from "./searchModel";
+import { focusTargetAfterRender, type FocusSnapshot } from "./resultFocus";
 import {
   createPreviewController,
   posterPath,
@@ -326,6 +327,56 @@ function metaLine(row: DashRow): string {
 }
 
 // Every node below is built with createElement and filled with textContent.
+// ---- focus across a re-render ----
+//
+// Two lists here are rebuilt wholesale under the user: the results list on every
+// snapshot frame of a search (up to 23 of them), and the queue four times a
+// second whether or not anything was touched. `replaceChildren` discards the
+// focused node, so without this focus falls to <body> — measured, and it makes
+// both lists unusable from the keyboard.
+
+// Tags a row's focusable control with the row it belongs to and which control it
+// is. Two data attributes rather than a WeakMap because the nodes being matched
+// afterwards are the NEW ones; there is nothing to have kept a reference to.
+function tagControl(control: HTMLElement, rowKey: string, name: string): void {
+  control.dataset.rowKey = rowKey;
+  control.dataset.control = name;
+}
+
+// Where focus is right now, if it is inside `list`. Read before the list is
+// replaced; handed to focusTargetAfterRender once the new rows exist.
+function captureRowFocus(list: HTMLElement): FocusSnapshot | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return null;
+  if (!list.contains(active)) return null;
+  const rowKey = active.dataset.rowKey;
+  const control = active.dataset.control;
+  if (!rowKey || !control) return null;
+  return { rowKey, control };
+}
+
+function restoreRowFocus(
+  list: HTMLElement,
+  before: FocusSnapshot | null,
+  rowKeys: readonly string[],
+): void {
+  const target = focusTargetAfterRender(before, rowKeys);
+  if (!target) return;
+  const key = CSS.escape(target.rowKey);
+  const next =
+    list.querySelector<HTMLElement>(
+      `[data-row-key="${key}"][data-control="${CSS.escape(target.control)}"]`,
+    ) ??
+    // The row survived but that particular control did not — a group heading has
+    // a disclosure button where a release row has none, and a queue row's
+    // buttons change with its status. Any control on the right row beats <body>.
+    list.querySelector<HTMLElement>(`[data-row-key="${key}"]`);
+  // preventScroll is NOT optional: without it, restoring focus scrolls the row
+  // into view, and this runs on every streamed frame and four times a second in
+  // the queue — it would fight the user's own scrolling.
+  next?.focus({ preventScroll: true });
+}
+
 // A torrent's display name comes from a magnet link, i.e. from whoever wrote
 // the magnet — so an innerHTML path here is stored XSS. There is no innerHTML,
 // insertAdjacentHTML, or document.write anywhere in this file, and there must
@@ -366,6 +417,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.type = "button";
     playButton.className = "play";
     playButton.textContent = "play";
+    tagControl(playButton, row.id, "play");
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
@@ -374,6 +426,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action;
+    tagControl(button, row.id, action);
     button.addEventListener("click", () => {
       if (!confirmAction(action, row.name)) return;
       void control(row.id, action);
@@ -389,7 +442,16 @@ function render(): void {
   emptyNote.classList.remove("error");
   emptyNote.textContent = EMPTY_TEXT;
   emptyNote.hidden = rows.length > 0;
+  // Same treatment as the results list, and needed more urgently: this runs four
+  // times a second, so without it a queue button cannot be reached by keyboard
+  // at all — focus is destroyed within 250ms of arriving.
+  const focusBefore = captureRowFocus(rowsList);
   rowsList.replaceChildren(...rows.map(renderRow));
+  restoreRowFocus(
+    rowsList,
+    focusBefore,
+    rows.map((r) => r.id),
+  );
   // The queue tab carries its own count so a search that added something shows
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
@@ -1259,7 +1321,7 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
 // The four buttons a result offers, built once and used by both layouts: a
 // grid card that offered fewer of them than the list row would be a downgrade
 // dressed as a view option.
-function resultActions(result: PublicSearchResult): HTMLDivElement {
+function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivElement {
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
@@ -1267,12 +1329,14 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  tagControl(playButton, rowKey, "play");
   playButton.addEventListener("click", () => void play(rowForPlay(result)));
   actions.append(playButton);
 
   const addButton = document.createElement("button");
   addButton.type = "button";
   addButton.textContent = "add";
+  tagControl(addButton, rowKey, "add");
   addButton.addEventListener("click", () => void addResult(result, "p2p"));
   actions.append(addButton);
 
@@ -1284,6 +1348,7 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   favButton.type = "button";
   favButton.textContent = favouriteLabel(inLibrary);
   favButton.setAttribute("aria-pressed", String(inLibrary));
+  tagControl(favButton, rowKey, "favourite");
   favButton.addEventListener("click", () => {
     const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
     if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
@@ -1300,6 +1365,7 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
     debridButton.textContent = debridAddLabel(sources.debridProvider);
+    tagControl(debridButton, rowKey, "debrid");
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
@@ -1332,6 +1398,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   posterButton.type = "button";
   posterButton.className = "recc-poster";
   posterButton.title = result.name;
+  tagControl(posterButton, result.infoHash, "poster");
   const frame = document.createElement("div");
   frame.className = "poster";
   posterButton.append(frame);
@@ -1345,6 +1412,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   name.className = "result-name row-name";
   name.textContent = result.name;
   name.title = result.name;
+  tagControl(name, result.infoHash, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const meta = document.createElement("span");
@@ -1352,7 +1420,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   meta.textContent = resultMeta(result, sources);
   appendCachedBadge(meta, result);
 
-  li.append(posterButton, name, meta, resultActions(result));
+  li.append(posterButton, name, meta, resultActions(result, result.infoHash));
   return li;
 }
 
@@ -1372,6 +1440,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   name.className = "result-name";
   name.textContent = result.name;
   name.title = result.name;
+  tagControl(name, result.infoHash, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const badge = document.createElement("span");
@@ -1384,7 +1453,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   meta.textContent = resultMeta(result, sources);
   appendCachedBadge(meta, result);
 
-  const actions = resultActions(result);
+  const actions = resultActions(result, result.infoHash);
 
   const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
   if (!withPoster) {
@@ -1423,8 +1492,16 @@ function renderResults(): void {
 
   resultsList.classList.toggle("recc-grid", effective === "grid");
   resultsList.classList.toggle("results-grid", effective === "grid");
+  // Read BEFORE replaceChildren: afterwards the focused node is detached and
+  // document.activeElement has already fallen back to <body>.
+  const focusBefore = captureRowFocus(resultsList);
   resultsList.replaceChildren(
     ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
+  );
+  restoreRowFocus(
+    resultsList,
+    focusBefore,
+    shown.map((r) => r.infoHash),
   );
 
   const status = searchStatus(searchView, shown.length);
