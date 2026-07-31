@@ -249,6 +249,12 @@ export function App({
   const [claimingRecc, setClaimingRecc] = useState(false);
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimError, setClaimError] = useState<string | undefined>(undefined);
+  // Bumped whenever the claim overlay opens or closes. Same generation guard as
+  // netflixImportGen / traktImportGen below: a claim request can't be aborted, so
+  // a late one must not flash stale state onto a reopened overlay — and, worse
+  // than a flash, must not clear `claimBusy` while a second attempt is still in
+  // flight, which would invite a third.
+  const claimGen = useRef(0);
   const [editingOmdb, setEditingOmdb] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
   const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
@@ -1154,6 +1160,7 @@ export function App({
   const closeImportChooser = useCallback(() => setImportChooser(false), []);
 
   const openClaimPrompt = useCallback(() => {
+    claimGen.current++; // supersede any in-flight claim so it can't touch this overlay
     setView("browser");
     setShowHelp(false);
     // Clearing the error here is what stops a failure that landed after an esc
@@ -1163,6 +1170,7 @@ export function App({
   }, []);
 
   const closeClaimPrompt = useCallback(() => {
+    claimGen.current++; // as above: esc does not cancel the request, so supersede it
     setClaimingRecc(false);
     setClaimBusy(false);
     setClaimError(undefined);
@@ -1171,39 +1179,58 @@ export function App({
   const submitClaim = useCallback(
     (name: string, password: string) => {
       if (!config) return;
+      const gen = ++claimGen.current;
+      const isCurrent = (): boolean => claimGen.current === gen;
       setClaimBusy(true);
       setClaimError(undefined);
       void (async () => {
-        const result = await claimReccAccount(resolveReccConfig(config), name, password);
-        setClaimBusy(false);
-        if (result.ok) {
-          // Deliberately unguarded by "is the prompt still open": esc closes the
-          // overlay without cancelling the request, and a claim that succeeded on
-          // the server must still be recorded and reported.
-          closeClaimPrompt();
-          const claimed = { reccAccountName: result.name, reccAccountClaimed: true };
-          persistConfig(claimed);
-          setNotice(`${ICON.done} reccd account claimed as ${result.name}.`);
-          // The POST-CLAIM config, not `config`. Passing the stale one means the
-          // differs-only check in refreshReccStatus compares /profile's
-          // `claimed: true` against a snapshot still saying false, and writes the
-          // whole config a second time for no reason — defeating the very rule
-          // that check exists to enforce.
-          refreshReccStatus({ ...config, ...claimed });
-          return;
+        try {
+          const result = await claimReccAccount(resolveReccConfig(config), name, password);
+          // The guard is asymmetric ON PURPOSE, and a uniform one would be a bug.
+          // Only this overlay's own state — busy and the error message — belongs
+          // to the attempt that is currently on screen, so only those are gated.
+          // What reccd already did is not ours to discard: a claim that succeeded
+          // must be persisted and reported even if the user pressed esc while it
+          // was in flight, so the branches below stay ungated.
+          if (isCurrent()) setClaimBusy(false);
+          if (result.ok) {
+            closeClaimPrompt();
+            const claimed = { reccAccountName: result.name, reccAccountClaimed: true };
+            persistConfig(claimed);
+            setNotice(`${ICON.done} reccd account claimed as ${result.name}.`);
+            // The POST-CLAIM config, not `config`. Passing the stale one means the
+            // differs-only check in refreshReccStatus compares /profile's
+            // `claimed: true` against a snapshot still saying false, and writes the
+            // whole config a second time for no reason — defeating the very rule
+            // that check exists to enforce.
+            refreshReccStatus({ ...config, ...claimed });
+            return;
+          }
+          if (result.reason === "alreadyClaimed") {
+            // Claimed from another machine. Local state was simply stale, so close
+            // and let the status check correct it rather than nagging. Ungated for
+            // the same reason as the success branch: it is reccd's word, not this
+            // overlay's state.
+            closeClaimPrompt();
+            persistConfig({ reccAccountClaimed: true });
+            setNotice(result.message);
+            refreshReccStatus({ ...config, reccAccountClaimed: true });
+            return;
+          }
+          // nameTaken / invalid / unauthorized / unreachable: keep the prompt open
+          // with the message so the user can try again without retyping.
+          if (isCurrent()) setClaimError(result.message);
+        } catch {
+          // Unreachable as things stand — claimReccAccount catches everything and
+          // always returns a result. Kept because the cost of being wrong is a
+          // prompt that can never be submitted again: ReccClaimPrompt's submit()
+          // returns early while busy, so a leaked `claimBusy` wedges it until the
+          // user escapes out.
+          if (isCurrent()) {
+            setClaimBusy(false);
+            setClaimError("couldn't reach reccd");
+          }
         }
-        if (result.reason === "alreadyClaimed") {
-          // Claimed from another machine. Local state was simply stale, so close
-          // and let the status check correct it rather than nagging.
-          closeClaimPrompt();
-          persistConfig({ reccAccountClaimed: true });
-          setNotice(result.message);
-          refreshReccStatus({ ...config, reccAccountClaimed: true });
-          return;
-        }
-        // nameTaken / invalid / unauthorized / unreachable: keep the prompt open
-        // with the message so the user can try again without retyping.
-        setClaimError(result.message);
       })();
     },
     [config, closeClaimPrompt, persistConfig, refreshReccStatus],
