@@ -158,7 +158,7 @@ import {
   prefsFromWire,
   type PickState,
 } from "./pickModel";
-import type { PreferencesResponse, PublicQualityPrefs } from "../wire";
+import type { PreferencesResponse, PublicQualityPrefs, PublicTitleSuggestions } from "../wire";
 import {
   emptyListState,
   isOpen as suggestOpen,
@@ -171,7 +171,6 @@ import {
   type ListState,
 } from "./suggestModel";
 import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
-import type { PublicTitleSuggestions } from "../wire";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
