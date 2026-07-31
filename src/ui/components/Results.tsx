@@ -8,6 +8,7 @@ import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { useTitlePreview } from "../hooks/useTitlePreview";
+import { useTitleSuggest } from "../hooks/useTitleSuggest";
 import { PreviewPane } from "./PreviewPane";
 import { parseRelease, hintForSection } from "../../util/release";
 // The same badges the browser's rows show, from the same table the quality
@@ -26,6 +27,8 @@ import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatCount, formatRelative, stripControl, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
+import type { FetchImpl } from "../../util/net";
+import type { ReccClientConfig } from "../../recc/client";
 
 type Mode = "list" | "search" | "detail" | "filter";
 
@@ -199,7 +202,18 @@ function Detail({
   );
 }
 
-export function Results() {
+interface ResultsProps {
+  /**
+   * reccd's address, for title suggestions in the search box. A prop rather than
+   * a `Store` field for the reason `ForYou`'s is: a `Store` field needs matching
+   * entries in `makeStore` and `makeTestStore`, and no other pane reads this.
+   */
+  reccConfig: ReccClientConfig;
+  /** Only ever set by tests, so they never dial out. Same as `ForYou`'s. */
+  fetchImpl?: FetchImpl;
+}
+
+export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   const {
     query,
     submitQuery,
@@ -265,6 +279,16 @@ export function Results() {
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
+  // The live draft in the search box, which is what suggestions are for —
+  // `query` is the last SUBMITTED search, and suggesting against that would lag
+  // a whole search behind.
+  const [draft, setDraft] = useState(query);
+  const suggest = useTitleSuggest({
+    reccConfig,
+    query: draft,
+    enabled: mode === "search",
+    fetchImpl,
+  });
   const [cursor, setCursor] = useState(0);
   // Many releases of one title collapse to one row. ON by default, matching the
   // browser's checkbox: a browse routinely returns four uploads of every film.
@@ -322,6 +346,14 @@ export function Results() {
   useEffect(() => {
     if (!focused) setMode("list");
   }, [focused]);
+
+  // Entering search mode remounts the TextField with `query` in it, so the draft
+  // has to be reset to match. Without this, leaving the box with text in it and
+  // arrowing back up into it would suggest against the abandoned text while the
+  // box shows something else.
+  useEffect(() => {
+    if (mode === "search") setDraft(query);
+  }, [mode, query]);
 
   // The rows on screen: group headings and releases, in order. The SAME
   // groupRowPlan the browser's list renders — "which rows are there" is one
@@ -582,7 +614,15 @@ export function Results() {
 
   useInput(
     (_input, key) => {
-      if (key.escape) setMode("list");
+      if (!key.escape) return;
+      // Escape escalates: the first one puts the suggestion list away, the
+      // second leaves the box. Doing both at once would make dismissing a list
+      // cost you your place in the pane.
+      if (mode === "search" && suggest.open) {
+        suggest.dismiss();
+        return;
+      }
+      setMode("list");
     },
     { isActive: focused && (mode === "search" || mode === "filter") },
   );
@@ -711,6 +751,13 @@ export function Results() {
         editing={mode === "search"}
         placeholder={PLACEHOLDER}
         history={searchHistory}
+        suggestions={suggest.items}
+        completion={suggest.completion}
+        onChange={setDraft}
+        onComplete={(text) => {
+          setDraft(text);
+          suggest.accept(text);
+        }}
         onSubmit={onSubmit}
         onExitDown={() => setMode("list")}
         onExitLeft={() => setRegion("sidebar")}

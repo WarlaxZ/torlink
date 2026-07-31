@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Box, Text, useInput, useStdin } from "ink";
 import { Logo } from "../components/Logo";
 import { UpdateBanner } from "../components/UpdateBanner";
@@ -7,7 +8,11 @@ import { useStore } from "../store";
 import { sourcesByGroup } from "../../sources/registry";
 import { withoutToken } from "../../web/links";
 import { getDebridProvider } from "../../integrations/debrid";
+import { useTitleSuggest } from "../hooks/useTitleSuggest";
+import { tabHintLabel } from "../../util/titleSuggest";
 import { COLOR, ICON } from "../theme";
+import type { FetchImpl } from "../../util/net";
+import type { ReccClientConfig } from "../../recc/client";
 
 const categoryLine = (adultEnabled: boolean): string =>
   sourcesByGroup(adultEnabled)
@@ -26,11 +31,22 @@ export function Splash({
   updateVersion,
   recovered,
   webStatus,
+  reccConfig,
+  fetchImpl,
 }: {
   updateVersion?: string | null;
   recovered?: boolean;
   webStatus?: SplashWebStatus | null;
-} = {}) {
+  /**
+   * reccd's address, for title suggestions under the search box. A prop rather
+   * than a `Store` field for the reason `ForYou`'s is: a `Store` field needs
+   * matching entries in `makeStore` and `makeTestStore`, and nothing else reads
+   * this.
+   */
+  reccConfig: ReccClientConfig;
+  /** Only ever set by tests, so they never dial out. Same as `ForYou`'s. */
+  fetchImpl?: FetchImpl;
+}) {
   const {
     submitQuery,
     searchHistory,
@@ -56,6 +72,11 @@ export function Splash({
   const activeUsername =
     debridStatus && debridStatus.provider === debridProvider ? debridStatus.username : undefined;
 
+  // The live draft in the search box. The splash has no submitted query of its
+  // own — enter hands one to the app — so this is the only text to suggest on.
+  const [draft, setDraft] = useState("");
+  const suggest = useTitleSuggest({ reccConfig, query: draft, enabled: true, fetchImpl });
+
   useInput(
     (input, key) => {
       // The search field is always focused on the splash, so it owns every
@@ -63,8 +84,19 @@ export function Splash({
       // like "alex" would trigger them. Tab drops into the app's sidebar menu
       // (where the shortcuts live); esc / ^c quit.
       if (key.tab) {
+        // With something to complete, tab belongs to the field: TextField reads
+        // the same `completion` value this does, so which handler Ink runs first
+        // does not matter.
+        if (suggest.completion !== null) return;
         setView("browser");
         setRegion("sidebar");
+        return;
+      }
+      // Escape escalates rather than quitting outright — putting a suggestion
+      // list away must not be able to close the app. With no list open it still
+      // quits, which is the behaviour this guard must not swallow.
+      if (key.escape && suggest.open) {
+        suggest.dismiss();
         return;
       }
       if (key.escape || (key.ctrl && input === "c")) quitAll();
@@ -131,6 +163,13 @@ export function Splash({
           editing
           placeholder="Search or paste a magnet link…"
           history={searchHistory}
+          suggestions={suggest.items}
+          completion={suggest.completion}
+          onChange={setDraft}
+          onComplete={(text) => {
+            setDraft(text);
+            suggest.accept(text);
+          }}
           onSubmit={submitQuery}
           onExitDown={() => submitQuery("")}
         />
@@ -141,7 +180,8 @@ export function Splash({
           <Text dimColor> search</Text>
           <Text dimColor>{`  ${ICON.dot}  `}</Text>
           <Text color={COLOR.alt}>⇥</Text>
-          <Text dimColor> browse</Text>
+          {/* Tab's meaning changes while a list is open, so the hint does too. */}
+          <Text dimColor>{` ${tabHintLabel(suggest.open)}`}</Text>
           <Text dimColor>{`  ${ICON.dot}  `}</Text>
           <Text color={COLOR.alt}>^c</Text>
           <Text dimColor> quit</Text>

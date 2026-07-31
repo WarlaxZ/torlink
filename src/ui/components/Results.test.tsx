@@ -11,6 +11,7 @@ import {
 import { Results } from "./Results";
 import type { ConcurrentSearchState } from "../hooks/useConcurrentSearch";
 import type { TorrentResult } from "../../sources/types";
+import type { FetchImpl } from "../../util/net";
 
 const searchState = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -81,7 +82,7 @@ async function mount(results: TorrentResult[] = LIST): Promise<RenderedUI> {
   searchState.current = settled(results);
   ui = renderUI(
     <StoreContext.Provider value={makeTestStore({ query: "linux iso" })}>
-      <Results />
+      <Results reccConfig={{}} />
     </StoreContext.Provider>,
   );
   const u = ui;
@@ -215,7 +216,7 @@ describe("Results preview pane", () => {
       <StoreContext.Provider
         value={makeTestStore({ query: "harrowgate", omdbApiKey: "KEY", contentWidth: 96, ...overrides })}
       >
-        <Results />
+        <Results reccConfig={{}} />
       </StoreContext.Provider>,
       { cols: 110 },
     );
@@ -284,7 +285,7 @@ async function mountWide(results: TorrentResult[], contentWidth: number): Promis
   searchState.current = settled(results);
   ui = renderUI(
     <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth, cols: contentWidth + 19 })}>
-      <Results />
+      <Results reccConfig={{}} />
     </StoreContext.Provider>,
     { cols: contentWidth + 19 },
   );
@@ -400,7 +401,7 @@ describe("Results grouping", () => {
     searchState.current = settled(GROUPABLE);
     ui = renderUI(
       <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth: 120, cols: 139, copyMagnet })}>
-        <Results />
+        <Results reccConfig={{}} />
       </StoreContext.Provider>,
       { cols: 139 },
     );
@@ -439,5 +440,148 @@ describe("Results grouping keeps the cursor put", () => {
 
     // Still on the member, not yanked up to the heading above it.
     expect(u.frame()).toMatch(/\u276f.*BluRay/);
+  });
+});
+
+// Title suggestions. reccd's replies are injected through the `fetchImpl` prop \u2014
+// exactly the escape hatch ForYou's tests use \u2014 so nothing here dials out.
+const SUGGEST_CFG = { reccUrl: "http://recc.invalid:4100", reccToken: "tok" };
+const KESTREL = { imdbId: "tt1", title: "Kestrel", year: 2010, type: "movie", matchedAka: null };
+
+// `fetchTitleSuggestions` validates EVERY element and fails the whole reply on
+// one bad one, which the hook renders as an empty list \u2014 so `matchedAka` is not
+// optional decoration here, it is what makes the stub a valid reply.
+function suggestStub(items: unknown[] = [KESTREL]): { impl: FetchImpl; urls: string[] } {
+  const urls: string[] = [];
+  const impl = (async (url: string) => {
+    urls.push(String(url));
+    return { ok: true, status: 200, json: async () => items } as unknown as Response;
+  }) as unknown as FetchImpl;
+  return { impl, urls };
+}
+
+// Browsing (an empty submitted query) so the draft starts empty and the only
+// request the hook makes is the one the test types.
+async function mountSuggest(
+  impl: FetchImpl,
+  overrides: Parameters<typeof makeTestStore>[0] = {},
+): Promise<RenderedUI> {
+  searchState.current = settled(LIST);
+  ui = renderUI(
+    <StoreContext.Provider value={makeTestStore({ query: "", ...overrides })}>
+      <Results reccConfig={SUGGEST_CFG} fetchImpl={impl} />
+    </StoreContext.Provider>,
+  );
+  const u = ui;
+  await vi.waitFor(() => expect(u.frame()).toContain(`Latest (${LIST.length})`));
+  return u;
+}
+
+describe("Results search suggestions", () => {
+  // Escape has two jobs now, and the order matters to the user: the first
+  // escape puts the list away, the second leaves the box. Collapsing both into
+  // one keypress would make dismissing a list cost you your place.
+  it("dismisses the suggestion list before leaving the search box", async () => {
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl);
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("ke");
+    // Polls the whole keystroke -> debounce -> reply -> repaint chain rather
+    // than sleeping past it, which is fragile on a loaded machine.
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
+
+    // First escape: the list goes, the box stays.
+    u.press(KEY.esc);
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel (2010)"));
+    expect(editing(u)).toBe(true);
+
+    // Second escape: now the pane leaves search mode.
+    u.press(KEY.esc);
+    await vi.waitFor(() => expect(editing(u)).toBe(false));
+  });
+
+  it("completes the field to the top suggestion on tab instead of leaving the box", async () => {
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl);
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("ke");
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
+
+    u.press("\t");
+    // Title AND year \u2014 the whole point of canonicalising through a catalog.
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel 2010"));
+    // Still editing: tab completed rather than exiting downward.
+    expect(editing(u)).toBe(true);
+    // Accepting suppresses the text just taken, so the list does not
+    // immediately reopen on it.
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film"));
+  });
+
+  it("leaves the search box on tab when there is nothing to complete", async () => {
+    // reccd configured, but two characters never typed \u2014 so no list, and tab
+    // must behave exactly as it did before suggestions existed.
+    const { impl, urls } = suggestStub();
+    const u = await mountSuggest(impl);
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("\t");
+    await vi.waitFor(() => expect(editing(u)).toBe(false));
+    expect(urls).toHaveLength(0);
+  });
+
+  it("still recalls the previous search on the up arrow with a list on screen", async () => {
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl, { searchHistory: ["harrowgate s03"] });
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("ke");
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
+
+    // The suggestion rows are not a list the arrows walk \u2014 history recall still
+    // owns the up arrow inside the field.
+    u.press(`${KEY.esc}[A`);
+    await vi.waitFor(() => expect(u.frame()).toContain("harrowgate s03"));
+  });
+
+  it("does not reopen the list on abandoned text when the box is re-entered", async () => {
+    // The draft is separate state from the submitted query, and entering search
+    // mode REMOUNTS the TextField with `query` in it. Without a resync, leaving
+    // the box with text in it and coming back would suggest against the
+    // abandoned text under a box showing something else.
+    //
+    // Committed with ENTER, not escape, on purpose: escape sets `suppressedText`
+    // and would make this pass whether the resync exists or not.
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl);
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("ke");
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
+    u.press(KEY.enter);
+    await vi.waitFor(() => expect(editing(u)).toBe(false));
+
+    // Back into an empty box: nothing to suggest on, so no list. A waitFor, not
+    // a bare assertion \u2014 the rows the previous visit left in state can survive
+    // one frame, and without the resync they never go away at all.
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
   });
 });
