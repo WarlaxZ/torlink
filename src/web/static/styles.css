@@ -366,9 +366,47 @@ button:hover {
 }
 
 /* The stream file picker. Overrides .card's row layout — it is a heading above
-   a list, not a form — in the same way .fallback does on the player page. */
-.picker {
+   a list, not a form — in the same way .fallback does on the player page.
+
+   SCOPED TO [open], and that is load-bearing rather than tidy: a bare
+   `.picker { display: block }` overrides the UA's own
+   `dialog:not([open]) { display: none }` and leaves the closed picker sitting
+   visible at the top of the page for good. */
+.picker[open] {
   display: block;
+}
+
+/* And the closed case stated explicitly, because scoping the rule above is not
+   on its own enough: this element is also a `.card`, which sets
+   `display: flex` — and THAT overrides the UA's `dialog:not([open])` rule just
+   as surely. Measured, not theorised: the closed dialog rendered 72px tall at
+   the top of the page until this rule existed. Written against the element
+   rather than against `.card` so it holds however the class list changes. */
+.picker:not([open]) {
+  display: none;
+}
+
+/* A dialog carries a UA border, padding and `margin: auto`; .card supplies the
+   first two, and the third has to be restored — `.card`'s own
+   `margin-bottom: 1.5rem` beats the UA's `auto` on that one edge, which leaves
+   the vertical centring lopsided: measured at 392px above and 24px below in a
+   639px viewport, i.e. sitting near the bottom rather than in the middle.
+
+   max-height keeps a forty-episode pack scrollable INSIDE the dialog rather than
+   taller than the viewport — which would put Cancel off screen, the very problem
+   this whole change exists to fix. */
+.picker {
+  margin: auto;
+  border: 1px solid var(--line);
+  max-height: min(80vh, 40rem);
+  max-width: min(46rem, calc(100vw - 2rem));
+  overflow-y: auto;
+}
+
+/* Dim rather than opaque: the list behind is context — which release this is a
+   pack of — not something to hide. */
+.picker::backdrop {
+  background: rgb(0 0 0 / 55%);
 }
 
 .picker-title {

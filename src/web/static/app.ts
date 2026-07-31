@@ -206,7 +206,7 @@ const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
 const conn = el<HTMLSpanElement>("conn");
-const picker = el<HTMLDivElement>("picker");
+const picker = el<HTMLDialogElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
@@ -671,25 +671,29 @@ function openPlayer(path: string): void {
   location.assign(path);
 }
 
+// Closes the picker WITHOUT stopping its session — the caller is handing that
+// session to the player. Clearing `pickerSession` before `close()` is what tells
+// the `close` listener below to leave it alone, so the two ways out of a picker
+// (chose a file / walked away) stay distinguishable with no extra flag. The rest
+// of the teardown lives in that listener, because Escape reaches it and does not
+// reach here.
 function hidePicker(): void {
   pickerSession = null;
-  drawPicker = null;
-  picker.hidden = true;
-  pickerFiles.replaceChildren();
+  if (picker.open) picker.close();
 }
 
 // Same createElement/textContent rule as renderRow, and for a stronger reason:
 // these strings are filenames from inside a stranger's torrent.
 //
 // `infoHash` is a PARAMETER, not a module-level variable read when a file is
-// chosen. The picker is an inline card, not a modal (index.html's `.picker` is
-// `display: block`), so the results list stays clickable while it is open —
-// clicking play on a different row opens a second picker for a different
-// torrent. A module-level "current picker hash" would be overwritten by that
-// second play(), and choosing a file from the FIRST picker would then record
-// its filename as watched against the SECOND torrent's favourite. Closing over
-// the hash at the call site (see play()) makes that impossible: each picker's
-// callbacks carry the hash they were opened with, for good.
+// chosen, and it stays one. The hazard it was written against — a second play()
+// opening a picker for a different torrent while this one is open, so that
+// choosing a file from the FIRST records its filename as watched against the
+// SECOND torrent's favourite — is now unreachable twice over: the picker is a
+// modal, and isBusy refuses a second play while one is in flight at all (the
+// terminal's own one-at-a-time rule, src/ui/App.tsx). Closing over the hash at
+// the call site costs nothing and remains the correct shape, so the belt stays on
+// with the braces.
 //
 // `preselect` is streamOutcome's decision (streamFlow.ts), never one made here:
 // which file is the next episode is shared with the TUI's picker, and app.ts is
@@ -708,6 +712,12 @@ function showPicker(
   files: PublicStreamFile[],
   preselect: number | null,
 ): void {
+  // A session already on offer here is one nobody is going to answer now, and it
+  // has a torrent attached. Releasing it fixes a leak that predates the modal:
+  // the old code overwrote `pickerSession` and left the previous session running
+  // until the idle reaper. Guarded on inequality so a redraw of the same session
+  // can never stop the session it is redrawing.
+  if (pickerSession !== null && pickerSession !== sessionId) stopSession(pickerSession);
   pickerSession = sessionId;
   pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
 
@@ -766,7 +776,9 @@ function showPicker(
     }
   };
 
-  picker.hidden = false;
+  // showModal(), not show(): the backdrop and the focus trap are the point. It
+  // throws if the dialog is already open, which a second choose() can do.
+  if (!picker.open) picker.showModal();
   // Only a re-sort has a file to keep; opening the picker follows the preselect.
   drawPicker = () => draw(focusedPickerFile(files));
   draw();
@@ -783,9 +795,21 @@ function focusedPickerFile(files: PublicStreamFile[]): number | null {
   return found >= 0 ? found : null;
 }
 
-pickerCancel.addEventListener("click", () => {
+pickerCancel.addEventListener("click", () => picker.close());
+
+// EVERY way out of the picker lands here — the Cancel button, Escape, and
+// hidePicker(). Escape is the reason this is a `close` listener rather than more
+// work in the click handler: a <dialog> closes on Escape natively, bypassing any
+// button handler, and the session it was offering has a torrent attached. Left
+// running, it would sit there until the idle reaper collected it.
+//
+// `pickerSession` being null means a file was chosen and the session now belongs
+// to the player (hidePicker cleared it first, on purpose) — nothing to release.
+picker.addEventListener("close", () => {
   const sessionId = pickerSession;
-  hidePicker();
+  pickerSession = null;
+  drawPicker = null;
+  pickerFiles.replaceChildren();
   if (sessionId) stopSession(sessionId);
 });
 
