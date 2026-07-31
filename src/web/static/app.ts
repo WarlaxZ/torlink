@@ -41,6 +41,7 @@ import {
   debridAddLabel,
   emptyView,
   groupCountLabel,
+  groupHeading,
   modeForQuery,
   parseGrouping,
   parseLayout,
@@ -1533,13 +1534,22 @@ interface GroupFacts {
   key: string;
   title: string;
   year?: number;
+  season?: number;
+  seasonEnd?: number;
+  episode?: number;
   count: number;
   expanded: boolean;
 }
 
-/** The heading's display title: "Tin Rivers (2024)", or just the title. */
+/**
+ * The heading's display title: "Tin Rivers (2024)", "Harrowgate S03E01".
+ *
+ * The formatting itself is `groupHeading` in src/util/resultGroup.ts, shared
+ * with the terminal — a show's season is what tells one heading from the next,
+ * and two front ends deciding that separately is how they drift apart.
+ */
 function groupHeadingText(facts: GroupFacts): string {
-  return facts.year ? `${facts.title} (${facts.year})` : facts.title;
+  return groupHeading(facts);
 }
 
 /**
@@ -1555,7 +1565,10 @@ function groupToggleButton(facts: GroupFacts): HTMLButtonElement {
   toggle.setAttribute("aria-expanded", String(facts.expanded));
   toggle.setAttribute(
     "aria-label",
-    `${facts.expanded ? "Collapse" : "Expand"} ${groupCountLabel(facts.count)} of ${facts.title}`,
+    // The heading, not the bare title: a screen reader hearing "Expand 8
+    // releases of Harrowgate" three times in a row has the same problem the
+    // sighted list had.
+    `${facts.expanded ? "Collapse" : "Expand"} ${groupCountLabel(facts.count)} of ${groupHeadingText(facts)}`,
   );
   tagControl(toggle, facts.key, "disclosure");
   toggle.addEventListener("click", () => {
@@ -1575,6 +1588,9 @@ function groupFactsFor(row: Extract<GroupRow<PublicSearchResult>, { kind: "group
     expanded: row.expanded,
   };
   if (row.year !== undefined) facts.year = row.year;
+  if (row.season !== undefined) facts.season = row.season;
+  if (row.seasonEnd !== undefined) facts.seasonEnd = row.seasonEnd;
+  if (row.episode !== undefined) facts.episode = row.episode;
   return facts;
 }
 

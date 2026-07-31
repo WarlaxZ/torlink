@@ -15,7 +15,7 @@ import { parseRelease, hintForSection } from "../../util/release";
 import { releaseBadges } from "../../util/releaseBadges";
 // The grouping engine, shared with the browser's results list. `groupCountLabel`
 // is deliberately NOT used here — see the "×5" comment on the count cell below.
-import { groupResults, groupRowPlan, resultAtRow } from "../../util/resultGroup";
+import { groupHeading, groupResults, groupRowPlan, resultAtRow } from "../../util/resultGroup";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -780,8 +780,11 @@ export function Results() {
                   // name cell rather than in columns of their own. At 80 columns
                   // the list has ~61 to spend and the name is already truncated;
                   // two more fixed columns would come straight out of it.
+                  // groupHeading, not a local format: the browser's headings go
+                  // through the same call, and a show's season is the only thing
+                  // telling one heading from the next.
                   const label = isGroup
-                    ? `${row.expanded ? ICON.caretDown : ICON.caretRight} ${row.year ? `${row.title} (${row.year})` : row.title}`
+                    ? `${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}`
                     : `${row.inGroup ? "  " : ""}${cleanText(r.name)}`;
                   return (
                     <Box key={row.key}>

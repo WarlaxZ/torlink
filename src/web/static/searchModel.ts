@@ -55,6 +55,7 @@ export {
 } from "../../util/resultSort";
 export {
   groupCountLabel,
+  groupHeading,
   resultAtRow,
   type GroupRow,
   type ResultGroup,

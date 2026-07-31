@@ -358,6 +358,26 @@ describe("Results grouping", () => {
     expect(u.frame()).not.toContain("WEB-DL");
   });
 
+  // The complaint this answers, in the terminal half: a season pack and every
+  // episode of that season are correctly separate groups, but while a heading was
+  // the bare parsed title they all rendered as the same row, and one search read
+  // as five identical copies of the show.
+  it("names the season and episode on a show's headings, so two never read alike", async () => {
+    const u = await mountWide(
+      [
+        t("p1", "Harrowgate.S03.1080p.WEB-DL"),
+        t("p2", "Harrowgate.S03.2160p.WEB-DL"),
+        t("e1", "Harrowgate.S03E01.1080p.WEB-DL"),
+        t("e2", "Harrowgate.S03E01.2160p.WEB-DL"),
+      ],
+      120,
+    );
+    expect(u.frame()).toContain("Harrowgate S03E01");
+    // The pack's heading, on its own line: "Harrowgate S03" is a prefix of
+    // "Harrowgate S03E01", so a plain toContain would pass without it.
+    expect(u.frame()).toMatch(/Harrowgate S03(?!E)/);
+  });
+
   it("leaves a lone release as a plain row", async () => {
     const u = await mountGrouped();
     // No heading, no count — the release name itself is the row.

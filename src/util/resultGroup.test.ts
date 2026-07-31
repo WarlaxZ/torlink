@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   groupCountLabel,
+  groupHeading,
   groupKeyFor,
   groupResults,
   groupRowPlan,
@@ -60,6 +61,40 @@ describe("groupKeyFor", () => {
   it("drops a leading article after punctuation is normalised, not before", () => {
     expect(groupKeyFor("(Кестрел) The Kestrel 2010 1080p")).toBe(
       groupKeyFor("Kestrel.2010.1080p.BluRay.x264"),
+    );
+  });
+
+  // Four shapes that each stranded one release of a season into a group of its
+  // own. They look like separate rows with the same heading, which is the whole
+  // complaint this file exists to answer.
+  it("strips a bracketed release-group prefix", () => {
+    expect(groupKeyFor("[Judas] Harrowgate S03 (1080p WEB-DL)")).toBe(
+      groupKeyFor("Harrowgate.S03.1080p.WEB-DL"),
+    );
+  });
+
+  it("does not strip a bracket when the title itself is the bracketed part", () => {
+    // The strip must not eat a title down to a bare number: every numeric residue
+    // would then share one group.
+    expect(groupKeyFor("(Ashfall) 1999 1080p")).toBe(groupKeyFor("Ashfall.1999.1080p"));
+  });
+
+  it("does not read a season number out of a resolution", () => {
+    // "COMPLETE.SEASON.1080p" parses as season 10: the parser reads "SEASON" and
+    // then the "10" of "1080p". The name's own S03 marker is the truth.
+    expect(groupKeyFor("Harrowgate.S03.COMPLETE.SEASON.1080p.WEB.DL")).toBe(
+      groupKeyFor("Harrowgate.S03.1080p.WEB-DL"),
+    );
+  });
+
+  it("keeps pack filler out of the title", () => {
+    expect(groupKeyFor("Harrowgate.Complete.Series.S01-S03.1080p")).toContain("harrowgate|");
+    expect(groupKeyFor("Harrowgate.Complete.Series.S01-S03.1080p")).not.toContain("complete");
+  });
+
+  it("keys a multi-season pack apart from the first season it contains", () => {
+    expect(groupKeyFor("Harrowgate.S01-S03.COMPLETE.1080p.WEB-DL")).not.toBe(
+      groupKeyFor("Harrowgate.S01.1080p.WEB-DL"),
     );
   });
 
@@ -134,6 +169,44 @@ describe("resultAtRow", () => {
     ]);
     const rows = groupRowPlan(groups, new Set());
     expect(resultAtRow(rows[0]!)?.name).toBe("Kestrel.2010.1080p.BluRay.x264");
+  });
+});
+
+// The bug this answers: a season pack and each episode of that season are
+// CORRECTLY separate groups, but every heading rendered as the bare parsed
+// title, so one search read as five identical rows saying "Harrowgate".
+describe("groupHeading", () => {
+  const headingOf = (...names: string[]) => {
+    const [group] = groupResults(names.map(r), "series");
+    return groupHeading(group!);
+  };
+
+  it("names the season on a season pack", () => {
+    expect(headingOf("Harrowgate.S03.1080p.WEB-DL")).toBe("Harrowgate S03");
+  });
+
+  it("names season and episode on an episode", () => {
+    expect(headingOf("Kepler.S02E04.1080p.WEB-DL")).toBe("Kepler S02E04");
+  });
+
+  it("gives a pack and an episode of the same season different headings", () => {
+    expect(headingOf("Harrowgate.S03.1080p.WEB-DL")).not.toBe(
+      headingOf("Harrowgate.S03E01.1080p.WEB-DL"),
+    );
+  });
+
+  it("spans a multi-season pack", () => {
+    expect(headingOf("Harrowgate.S01-S03.COMPLETE.1080p.WEB-DL")).toBe("Harrowgate S01-S03");
+  });
+
+  it("keeps the year form for a film, which has no season to name", () => {
+    const [group] = groupResults([r("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP")]);
+    expect(groupHeading(group!)).toBe("Tin Rivers (2024)");
+  });
+
+  it("falls back to the title alone when nothing is known", () => {
+    const [group] = groupResults([r("Harrowgate.COMPLETE.SERIES.1080p.WEB-DL")], "series");
+    expect(groupHeading(group!)).toBe("Harrowgate");
   });
 });
 
