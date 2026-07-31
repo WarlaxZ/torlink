@@ -74,6 +74,19 @@ curl -sI "$SEGMENT_URL" | grep -i "access-control-allow-origin\|^HTTP"
 
 A variant playlist at this level means it is a master playlist; follow it one more level to reach a real segment and check that.
 
+**FINDINGS, measured 2026-07-31 against a live Real-Debrid account. Verdict: both present — proceed.**
+
+- `POST /unrestrict/link` returns `id`, and also `streamable` (`1`/`0`) and `mimeType`. Response keys in full: `id,filename,mimeType,filesize,link,host,host_icon,chunks,crc,download,streamable`.
+- `GET /streaming/transcode/{id}` → `200` with keys `apple`, `dash`, `liveMP4`, `h264WebM`. `apple` carries the `.m3u8`.
+- **CORS is present on both the manifest and the segments**: `Access-Control-Allow-Origin: *`, manifest `Content-Type: application/vnd.apple.mpegurl`, segments `video/mp2t`. Rung 2 works as designed, with zero bytes through torlnk.
+- **The manifest is a complete VOD playlist** — 1988 segments and a closing `#EXT-X-ENDLIST`, so the full duration is known from the first request and **seeking works immediately**. Better than expected, and a further argument for keeping rung 2 above rung 3, whose event playlist has a growing scrub bar.
+- Segments are MPEG-TS, not fMP4. Both hls.js and native Safari HLS handle TS, so this needs no code.
+
+**Two corrections to the plan as written, both from this measurement:**
+
+1. **The quality label is `"full"`, not a resolution.** `apple` was `{ "full": "…/full.m3u8" }`. Task 7's `bestManifest` sorted labels with `Number(b) - Number(a)`, which is `NaN` for `"full"` — the sort is meaningless and only worked by accident with a single key. It must handle named labels as well as numeric ones.
+2. **`streamable: 0` still returns 200 with manifest URLs.** For a `.rar` the endpoint happily produced four URLs, and fetching the `.m3u8` then gave `404 {"error":"invalid_duration"}` — with CORS headers, so the browser would see it as a load failure rather than a network error. The endpoint's status therefore cannot be the availability signal. `streamable` must be captured in Task 6 alongside `id` and checked before rung 2 is offered.
+
 - [ ] **Step 5: Record the verdict and commit**
 
 Write one of these three findings into this file, with the captured headers:
