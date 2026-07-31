@@ -1073,8 +1073,17 @@ export function App({
       setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
       return;
     }
-    persistConfig({ reccUrl: undefined, reccToken: undefined });
-    setNotice("reccd connection cleared.");
+    persistConfig({
+      reccUrl: undefined,
+      reccToken: undefined,
+      reccAccountName: undefined,
+      reccAccountClaimed: undefined,
+      // Without this the next launch silently signs them straight back up,
+      // which is the most obvious way to make auto-provisioning feel broken:
+      // the user cleared it, and it came back. Clearing means cleared.
+      reccAutoSignup: false,
+    });
+    setNotice("reccd connection cleared. Recommendations stay off until you set it up again.");
   }, [closeReccPrompt, persistConfig]);
 
   const closeOmdbPrompt = useCallback(() => setEditingOmdb(false), []);
