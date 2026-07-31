@@ -59,6 +59,14 @@ async function startUpstream(): Promise<Upstream> {
       return;
     }
 
+    // Redirect chains: a provider's download URL can 302 to a specific CDN node.
+    if (req.url?.startsWith("/redirect/")) {
+      const hops = Number(req.url.slice("/redirect/".length));
+      res.writeHead(302, { Location: hops > 1 ? `/redirect/${hops - 1}` : "/media" });
+      res.end();
+      return;
+    }
+
     // Never-ending drip, for the teardown test: headers out immediately so the
     // client is reading, then a chunk forever.
     if (req.url?.startsWith("/slow")) {
@@ -339,6 +347,60 @@ describe("GET /stream/:sid/:idx — WebTorrent proxy", () => {
     const { base, capability, id } = await ready();
     await fetch(`${base}/stream/${id}/0?k=${capability}`).then((r) => r.arrayBuffer());
     await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 3000 });
+  });
+});
+
+describe("proxy redirects", () => {
+  it("follows a single redirect and serves the body", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+  });
+
+  it("re-sends the Range header on the redirected request", async () => {
+    // Dropping Range on a hop silently restarts a seek from byte zero, and the
+    // client gets bytes it will treat as the start of the file.
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`, {
+      headers: { Range: "bytes=100-199" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes 100-199/${MEDIA.length}`);
+    // Both hops saw it, not just the first.
+    expect(upstream.seen.filter((s) => s.range === "bytes=100-199").length).toBe(2);
+  });
+
+  it("502s rather than looping when a chain is too long", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/9`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: 1 },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(502);
+  });
+
+  it("still refuses an https upstream on the torrent path", async () => {
+    // The WebTorrent backend is loopback http and nothing else. This is the
+    // invariant the per-call allow-list exists to preserve.
+    const { reg, id, capability } = await torrentSession([
+      { url: "https://cdn.example/Kestrel.2010.1080p.BluRay.x264.mkv", filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: 1 },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(502);
+    expect(logs.join("\n")).toContain("https:");
+    // The scheme is loggable; the URL never is.
+    expect(logs.join("\n")).not.toContain("cdn.example");
   });
 });
 
