@@ -21,14 +21,25 @@
  * lower-casing mirrors `parseRelease`'s own (src/util/release.ts) so the two
  * agree on what "same title" means.
  *
+ * CHANGING THIS CHANGES STORED KEYS, and deliberately without a migration —
+ * the same answer this file already gives just below. A row written under an
+ * older key shows as its own Continue-watching entry until that title is
+ * streamed again, at which point it merges.
+ *
  * No migration needed — `removeStreamHistory` filters on the *stored* value, so
  * rows written under the old key keep working and merge into the new one the next
  * time that title is streamed. A consumer that re-derives a key to look a row up
  * must therefore treat a miss as ordinary.
  */
+import { normaliseTitle } from "./titleKey";
+
 export function historyKeyFor(
   parsed: { title: string; year?: number; type?: string; key: string },
 ): string {
   if (parsed.type !== "series") return parsed.key;
-  return `${parsed.title.toLowerCase()}|series`;
+  // normaliseTitle, NOT toLowerCase: this key and the results list's group key
+  // have to agree on what "the same show" means, and they had drifted. Four of
+  // six measured shapes disagreed, which showed up as a show with no watch
+  // position and a second Continue-watching row for it.
+  return `${normaliseTitle(parsed.title) || parsed.title.trim().toLowerCase()}|series`;
 }
