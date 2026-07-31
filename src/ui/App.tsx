@@ -34,7 +34,8 @@ import { getDebridProvider, DEBRID_PROVIDER_IDS } from "../integrations/debrid";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
-import { postEvent } from "../recc/client";
+import { postEvent, claimReccAccount } from "../recc/client";
+import { ensureReccAccount } from "../recc/provision";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
@@ -113,6 +114,7 @@ import { QualityPrompt } from "./components/QualityPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
+import { ReccClaimPrompt } from "./components/ReccClaimPrompt";
 import { OmdbPrompt } from "./components/OmdbPrompt";
 import { NetflixImportPrompt, type NetflixImportView } from "./components/NetflixImportPrompt";
 import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
@@ -243,6 +245,10 @@ export function App({
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState<{ provider: DebridProviderId } | null>(null);
   const [editingRecc, setEditingRecc] = useState(false);
+  // The claim overlay is local state, exactly as editingRecc is — no Store field.
+  const [claimingRecc, setClaimingRecc] = useState(false);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState<string | undefined>(undefined);
   const [editingOmdb, setEditingOmdb] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
   const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
@@ -985,18 +991,55 @@ export function App({
     [config, setConfig],
   );
 
-  const refreshReccStatus = useCallback((cfg: Config | null) => {
-    const rc = cfg ? resolveReccConfig(cfg) : {};
-    if (!rc.reccUrl) {
-      setReccStatus(null);
-      return;
-    }
-    void checkReccConnection(rc).then(setReccStatus);
-  }, []);
+  const refreshReccStatus = useCallback(
+    (cfg: Config | null) => {
+      const rc = cfg ? resolveReccConfig(cfg) : {};
+      if (!rc.reccUrl) {
+        setReccStatus(null);
+        return;
+      }
+      void checkReccConnection(rc).then((status) => {
+        setReccStatus(status);
+        const account = status.account;
+        if (!account) return;
+        // Differs-only, deliberately: this runs on every status refresh, and an
+        // unconditional write here would turn a network read into a config write
+        // on a timer — the same two-process race provision.ts takes a lock to
+        // avoid, reintroduced.
+        if (account.name !== cfg?.reccAccountName || account.claimed !== cfg?.reccAccountClaimed) {
+          persistConfig({ reccAccountName: account.name, reccAccountClaimed: account.claimed });
+        }
+      });
+    },
+    [persistConfig],
+  );
 
   useEffect(() => {
     refreshReccStatus(config);
   }, [config?.reccUrl, config?.reccToken, refreshReccStatus]);
+
+  // Auto-provision an anonymous reccd account on first run. Fire-and-forget and
+  // never awaited: reccd is a value-add, and nothing here may delay or break the
+  // TUI.
+  //
+  // onProvisioned is NOT optional here. persistConfig writes the whole config
+  // object from React state (see its definition above), so an account written to
+  // config.json behind that state's back is silently reverted by the next
+  // unrelated setting change. Applying the patch to state without re-saving
+  // keeps the two in agreement.
+  const provisionStarted = useRef(false);
+  useEffect(() => {
+    if (!config || provisionStarted.current) return;
+    provisionStarted.current = true;
+    void ensureReccAccount({
+      onProvisioned: (patch) => {
+        setConfigState((prev) => (prev ? { ...prev, ...patch } : prev));
+        setNotice(
+          `${ICON.done} Recommendations are on — reccd account ${patch.reccAccountName} created.`,
+        );
+      },
+    }).catch(() => {});
+  }, [config]);
 
   const closeReccPrompt = useCallback(() => setEditingRecc(false), []);
 
@@ -1110,12 +1153,61 @@ export function App({
 
   const closeImportChooser = useCallback(() => setImportChooser(false), []);
 
-  // Task 15 wires this to ReccClaimPrompt (already built in
-  // src/ui/components/ReccClaimPrompt.tsx, not yet reachable from here). The
-  // keypress and its hints land in this task so the Accounts pane's gating
-  // (claimable only when reccd reports an unclaimed account) is testable on
-  // its own; until the prompt is wired up, pressing c does nothing.
-  const onClaimRecc = useCallback(() => {}, []);
+  const openClaimPrompt = useCallback(() => {
+    setView("browser");
+    setShowHelp(false);
+    // Clearing the error here is what stops a failure that landed after an esc
+    // from greeting the user again the next time they open the prompt.
+    setClaimError(undefined);
+    setClaimingRecc(true);
+  }, []);
+
+  const closeClaimPrompt = useCallback(() => {
+    setClaimingRecc(false);
+    setClaimBusy(false);
+    setClaimError(undefined);
+  }, []);
+
+  const submitClaim = useCallback(
+    (name: string, password: string) => {
+      if (!config) return;
+      setClaimBusy(true);
+      setClaimError(undefined);
+      void (async () => {
+        const result = await claimReccAccount(resolveReccConfig(config), name, password);
+        setClaimBusy(false);
+        if (result.ok) {
+          // Deliberately unguarded by "is the prompt still open": esc closes the
+          // overlay without cancelling the request, and a claim that succeeded on
+          // the server must still be recorded and reported.
+          closeClaimPrompt();
+          const claimed = { reccAccountName: result.name, reccAccountClaimed: true };
+          persistConfig(claimed);
+          setNotice(`${ICON.done} reccd account claimed as ${result.name}.`);
+          // The POST-CLAIM config, not `config`. Passing the stale one means the
+          // differs-only check in refreshReccStatus compares /profile's
+          // `claimed: true` against a snapshot still saying false, and writes the
+          // whole config a second time for no reason — defeating the very rule
+          // that check exists to enforce.
+          refreshReccStatus({ ...config, ...claimed });
+          return;
+        }
+        if (result.reason === "alreadyClaimed") {
+          // Claimed from another machine. Local state was simply stale, so close
+          // and let the status check correct it rather than nagging.
+          closeClaimPrompt();
+          persistConfig({ reccAccountClaimed: true });
+          setNotice(result.message);
+          refreshReccStatus({ ...config, reccAccountClaimed: true });
+          return;
+        }
+        // nameTaken / invalid / unauthorized / unreachable: keep the prompt open
+        // with the message so the user can try again without retyping.
+        setClaimError(result.message);
+      })();
+    },
+    [config, closeClaimPrompt, persistConfig, refreshReccStatus],
+  );
 
   const closeTraktImport = useCallback(() => {
     traktImportGen.current++; // supersede any in-flight run so it can't update state after close
@@ -2068,7 +2160,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -2130,6 +2222,7 @@ export function App({
     editingFolder,
     editingToken,
     editingRecc,
+    claimingRecc,
     editingOmdb,
     editingPlayer,
     editingSources,
@@ -2186,6 +2279,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingRecc) return; // the reccd prompt owns input
+      if (claimingRecc) return; // the claim prompt owns input
       if (editingOmdb) return; // the OMDb key prompt owns input
       if (importingNetflix) return; // the Netflix import prompt owns input
       if (importChooser) return; // the import-source chooser owns input
@@ -2454,6 +2548,19 @@ export function App({
               status={reccStatus}
               onSubmit={saveReccConfig}
               onCancel={closeReccPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {claimingRecc ? (
+          <Box marginTop={1}>
+            <ReccClaimPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              accountName={reccStatus?.account?.name ?? store.config.reccAccountName}
+              error={claimError}
+              busy={claimBusy}
+              onSubmit={submitClaim}
+              onCancel={closeClaimPrompt}
             />
           </Box>
         ) : null}
@@ -2839,7 +2946,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2891,7 +2998,7 @@ export function App({
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
                 onImportRecc={openImportChooser}
-                onClaimRecc={onClaimRecc}
+                onClaimRecc={openClaimPrompt}
                 omdbConfigured={store.omdbConfigured}
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}
@@ -2929,7 +3036,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }
