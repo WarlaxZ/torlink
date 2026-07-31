@@ -331,14 +331,26 @@ describe("ensureReccAccount", () => {
       expect(store.get().reccToken).toBe("tok123");
     });
 
-    // §0 still needs a genuinely unwritable lock path. A path *under a file*
-    // cannot be mkdir'd on any platform (ENOTDIR), unlike a missing directory.
+    // §0 still needs a genuinely unusable lock path — one takeLock cannot rescue
+    // by creating the parent, unlike the merely-missing directory above.
+    //
+    // A path *under a real file* is that, on every platform: mkdir refuses
+    // (ENOTDIR or EEXIST) because a path component is not a directory. It has to
+    // be a file this test creates, though. An earlier version used
+    // `/dev/null/config/...`, reasoning that /dev/null is a file — which is true
+    // on POSIX and false on Windows, where it is an ordinary unused path that
+    // mkdir happily creates. Both Windows CI jobs failed on it: the lock was
+    // taken, the signup went through, and a token was written.
     it("resolves and writes nothing when the lock path is genuinely unusable", async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-provision-"));
+      tmpDirs.push(dir);
+      const notADirectory = path.join(dir, "occupied");
+      await fs.writeFile(notADirectory, "");
       const store = fakeStore(base());
       await expect(
         ensureReccAccount({
           fetchImpl: signupFetch({ n: 0 }),
-          lockFile: "/dev/null/config/recc-provision.lock",
+          lockFile: path.join(notADirectory, "config", "recc-provision.lock"),
           loadConfigImpl: store.load, saveConfigImpl: store.save,
         }),
       ).resolves.toBeUndefined();
