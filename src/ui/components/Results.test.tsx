@@ -272,3 +272,64 @@ describe("Results preview pane", () => {
     );
   });
 });
+
+// Quality badges. The invented cast from CLAUDE.md: Tin Rivers is the 4K entry
+// that carries features, Kestrel the plain 1080p film.
+const BADGED = [
+  t("t1", "Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP"),
+  t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+];
+
+async function mountWide(results: TorrentResult[], contentWidth: number): Promise<RenderedUI> {
+  searchState.current = settled(results);
+  ui = renderUI(
+    <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth, cols: contentWidth + 19 })}>
+      <Results />
+    </StoreContext.Provider>,
+    { cols: contentWidth + 19 },
+  );
+  const u = ui;
+  await vi.waitFor(() => expect(u.frame()).toContain(`Results (${results.length})`));
+  return u;
+}
+
+describe("Results quality badges", () => {
+  // ASSERTED VIA LABELS THE RELEASE NAME CANNOT PROVIDE. The name already
+  // contains "2160p" and "HDR", so `toContain` on those matches whether or not a
+  // badge rendered at all — the first version of this test passed vacuously.
+  // "Dolby Vision" is FEATURES' label for the name's "DV" and appears nowhere
+  // else, and a resolution badge shows up as a SECOND occurrence of "1080p".
+  it("shows the resolution as a badge beside the name", async () => {
+    const u = await mount([t("k1", "Kestrel.2010.1080p.BluRay.x264")]);
+    // SPACE-DELIMITED, which is what proves it is the badge column: in the
+    // release name "1080p" is surrounded by dots. Not a count of occurrences —
+    // the badge costs the name six columns, so at 80 columns the name truncates
+    // to "Kestrel.2010.1…" and the only "1080p" on the row is the badge.
+    expect(u.frame()).toContain(" 1080p ");
+  });
+
+  // The row is a fixed-column layout and the name is what you read before
+  // pressing `v`. At 80 columns there is no room for a spec sheet, so the
+  // resolution wins and the features are dropped rather than eating the name.
+  it("shows only the resolution at 80 columns", async () => {
+    const u = await mount(BADGED);
+    expect(u.frame()).not.toContain("Dolby Vision");
+    expect(u.frame()).not.toContain("Atmos");
+  });
+
+  it("never pushes a row past the content width", async () => {
+    const u = await mount(BADGED);
+    for (const l of lines(u)) expect(l.length).toBeLessThanOrEqual(TEST_CONTENT_WIDTH);
+  });
+
+  it("adds features when the terminal is wide enough to carry them", async () => {
+    const u = await mountWide(BADGED, 120);
+    expect(u.frame()).toContain("Dolby Vision");
+  });
+
+  it("shows nothing where the release name carries no quality facts", async () => {
+    const u = await mount([t("z9", "gentoo stage3 tarball")]);
+    expect(u.frame()).not.toContain("1080p");
+    expect(u.frame()).not.toContain("Dolby Vision");
+  });
+});

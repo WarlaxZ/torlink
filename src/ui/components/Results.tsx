@@ -10,6 +10,9 @@ import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { useTitlePreview } from "../hooks/useTitlePreview";
 import { PreviewPane } from "./PreviewPane";
 import { parseRelease, hintForSection } from "../../util/release";
+// The same badges the browser's rows show, from the same table the quality
+// preference under `P` reads — one vocabulary, two front ends.
+import { releaseBadges } from "../../util/releaseBadges";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -319,6 +322,24 @@ export function Results() {
     previewOn && omdbApiKey !== "" && previewSection && mode !== "detail" && contentWidth >= PREVIEW_MIN_WIDTH;
   const previewWidth = showPreview ? Math.min(46, Math.max(30, Math.round(contentWidth * 0.4))) : 0;
   const listWidth = showPreview ? contentWidth - previewWidth - 1 : contentWidth;
+
+  // How many quality badges a row can afford.
+  //
+  // The row is a fixed-column layout — number, mark, name, badges, size,
+  // seed:lch, source — so a badge DOES cost the name width: at 80 columns one
+  // badge shortens "Kestrel.2010.1080p.BluRay.x264" to "Kestrel.2010.1…". That is
+  // the deliberate trade, because the six columns it costs are the ones the
+  // resolution was hiding in anyway, and one badge is worth more than six more
+  // characters of a release name.
+  //
+  // It is why releaseBadges puts the resolution first: what survives this slice
+  // has to be the fact worth keeping.
+  //
+  // Measured against listWidth, not contentWidth: with the preview pane open the
+  // list has 40% less room and the budget has to follow.
+  const badgeBudget = listWidth >= 108 ? 3 : listWidth >= 88 ? 2 : listWidth >= 56 ? 1 : 0;
+  const rowBadges = (name: string): string[] =>
+    badgeBudget === 0 ? [] : releaseBadges(name, hintForSection(section)).slice(0, badgeBudget);
   const parsed = useMemo(
     () => (selectedResult ? parseRelease(selectedResult.name, hintForSection(section)) : null),
     [selectedResult, section],
@@ -677,6 +698,11 @@ export function Results() {
                           {cleanText(r.name)}
                         </Text>
                       </Box>
+                      {rowBadges(r.name).map((badge) => (
+                        <Box key={badge} flexShrink={0} marginLeft={1}>
+                          <Text dimColor>{badge}</Text>
+                        </Box>
+                      ))}
                       {cachedHashes.has(r.infoHash.toLowerCase()) ? (
                         <Box flexShrink={0} marginLeft={1}>
                           <Text color={COLOR.good}>cached</Text>
