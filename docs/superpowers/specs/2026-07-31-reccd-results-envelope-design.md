@@ -144,9 +144,19 @@ check instead, and would pass without `isRecommendation`/`isTitleSuggestion` exi
 
 ### Suite
 
-`npm test`, `npm run typecheck`, `npm run lint`, `npm run build`. `src/web/routes.test.ts`
-exercises the browser path through this client and must stay green — if it stubs reccd
-responses directly, those stubs need rewrapping too.
+`npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
+
+Three UI test files also stub reccd's HTTP body directly and will fail until rewrapped. Each has
+a single stub helper, so each is a one-line fix:
+
+- `src/ui/components/ForYou.test.tsx` — `fetchStub`, `fetchStubWithPlot`, `fetchStubFull`, and an
+  inline stub, all serving `[REC]` on the recommendations URL.
+- `src/ui/views/Splash.test.tsx` — `suggestStub`, serving `items`.
+- `src/ui/components/Results.test.tsx` — `suggestStub`, serving `items`.
+
+`src/web/routes.test.ts` does **not** need changing: it injects `fetchRecommendationsImpl` /
+`fetchTitleSuggestionsImpl` at the client boundary rather than stubbing HTTP, so it never sees a
+wire body. It must still be run, as the browser path's regression check.
 
 ## Documentation
 
