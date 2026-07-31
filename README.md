@@ -171,6 +171,14 @@ pack — and each heading **says which one it is** (`Harrowgate S03`, `Kepler S0
 because a whole season's worth of headings all reading just the show's name looks like the list failed to
 group at all.
 
+**A show nests the way a show does.** One row per season, newest first, holding the season packs and then
+each episode in order — so a search for a show is a handful of rows rather than forty siblings in seeder
+order. The season you are most likely to want opens itself; the rest stay shut until you ask. Acting on a
+collapsed season acts on its best **season pack**, so `play` on `Harrowgate S03` gets the season and not
+episode one. Inside a season the show's name is stated once, by the season row, and its children read
+`Season pack`, `S03E01`, `S03E02`. The **group** control still turns all of it off and gives you every
+release as its own row.
+
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers
 the terminal's preview pane. Without one everything still works; you just get the release names.

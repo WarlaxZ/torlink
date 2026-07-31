@@ -54,6 +54,7 @@ export {
   type SortField,
 } from "../../util/resultSort";
 export {
+  defaultExpandedKeys,
   groupCountLabel,
   groupHeading,
   resultAtRow,
@@ -211,6 +212,7 @@ export function resultRowPlan(
     return shown.map((result) => ({
       kind: "release" as const,
       key: result.infoHash,
+      depth: 0,
       result,
       inGroup: false,
     }));

@@ -40,6 +40,7 @@ import {
   debridAddedNotice,
   debridAddLabel,
   emptyView,
+  defaultExpandedKeys,
   groupCountLabel,
   groupHeading,
   modeForQuery,
@@ -57,6 +58,7 @@ import {
   sourceLabel,
   statusLineHidden,
   tabClickPlan,
+  visibleGroups,
   visibleResults,
   type AddVia,
   type GroupRow,
@@ -965,6 +967,9 @@ function readStoredGrouping(): boolean {
 // gesture, and a remembered set of keys from an earlier query would expand
 // nothing recognisable on the next one.
 const expandedGroups = new Set<string>();
+// Seeded once per search, not per frame: the set means "what is open", so a
+// running rule would reopen a season the user just collapsed.
+let seededExpansion = false;
 
 // The rows currently on screen, as the plan produced them. The keydown handler
 // navigates THIS, not `visibleResults` — with grouping on those two disagree
@@ -1103,6 +1108,7 @@ function startSearch(raw: string): void {
   // would expand whichever groups of the new search happen to key the same —
   // "Kestrel 2010" is the same key in every search that returns it.
   expandedGroups.clear();
+  seededExpansion = false;
   // The box and the state must not disagree: without this, submitting "   "
   // leaves #query showing whitespace while searchView.query (and the URL sent
   // to the server) is already trimmed.
@@ -1539,6 +1545,8 @@ interface GroupFacts {
   episode?: number;
   count: number;
   expanded: boolean;
+  /** 0 top level, 1 inside an open season. Chooses the heading's form. */
+  depth: number;
 }
 
 /**
@@ -1549,7 +1557,7 @@ interface GroupFacts {
  * and two front ends deciding that separately is how they drift apart.
  */
 function groupHeadingText(facts: GroupFacts): string {
-  return groupHeading(facts);
+  return groupHeading(facts, { underSeason: facts.depth > 0 });
 }
 
 /**
@@ -1579,14 +1587,21 @@ function groupToggleButton(facts: GroupFacts): HTMLButtonElement {
   return toggle;
 }
 
-/** The heading facts for a group row, so the row and the card agree. */
-function groupFactsFor(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): GroupFacts {
+/** The heading facts for a season or group row, so the row and the card agree. */
+function groupFactsFor(
+  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" }>,
+): GroupFacts {
   const facts: GroupFacts = {
     key: row.key,
     title: row.title,
     count: row.members.length,
     expanded: row.expanded,
+    depth: row.depth,
   };
+  if (row.kind === "season") {
+    facts.season = row.season;
+    return facts;
+  }
   if (row.year !== undefined) facts.year = row.year;
   if (row.season !== undefined) facts.season = row.season;
   if (row.seasonEnd !== undefined) facts.seasonEnd = row.seasonEnd;
@@ -1610,11 +1625,21 @@ function groupCountChip(count: number): HTMLSpanElement {
 // layout exists to show artwork, so a collapsed group has to stay a CARD here —
 // rendering the list-shaped heading into the grid turned a poster wall into 69
 // full-width rows, which is the list with extra steps.
+/**
+ * Marks a row nested under a heading. Purely structural — the CSS indents it and
+ * draws a spine rather than recolouring it: a nested row must still read as the
+ * same kind of row it was before grouping existed. Capped at 2, which is as deep
+ * as the plan goes (season > episode > release).
+ */
+function applyDepth(li: HTMLElement, depth: number): void {
+  if (depth > 0) li.classList.add(`result-depth-${Math.min(depth, 2)}`);
+}
+
 function renderResultCard(
   result: PublicSearchResult,
   rowKey: string,
   group?: GroupFacts,
-  inGroup = false,
+  depth = 0,
 ): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row result-card";
@@ -1622,7 +1647,7 @@ function renderResultCard(
   // A member card must say so as well. Without this an expanded group's cards
   // were indistinguishable from top-level ones — the grid just grew four more
   // posters with nothing to say they belonged to the card above.
-  if (inGroup) li.classList.add("result-member");
+  applyDepth(li, depth);
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   // The poster is the card's primary target and what it does is select the
@@ -1669,14 +1694,11 @@ function renderResultCard(
 function renderResult(
   result: PublicSearchResult,
   rowKey: string,
-  inGroup: boolean,
+  depth: number,
 ): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row";
-  // Marks a release that belongs to the heading above it. Purely structural — the
-  // CSS indents it and draws a spine, rather than recolouring it: a member row
-  // must still read as the same kind of row it was before grouping existed.
-  if (inGroup) li.classList.add("result-member");
+  applyDepth(li, depth);
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   const head = document.createElement("div");
@@ -1733,10 +1755,13 @@ function renderResult(
  * Every action here acts on `resultAtRow(row)`, the group's first member, which
  * under the current sort is its best one. No new picking logic.
  */
-function renderGroupRow(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): HTMLLIElement {
+function renderGroupRow(
+  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" }>,
+): HTMLLIElement {
   const best = row.members[0]!;
   const li = document.createElement("li");
   li.className = "row result-group";
+  applyDepth(li, row.depth);
   // ONLY WHILE COLLAPSED. A heading stands in for its best release, so it reads
   // as selected when that release is — but an EXPANDED group also renders that
   // same release as a member row, and both would claim the selection: two
@@ -1813,6 +1838,17 @@ function renderResults(): void {
   // them from here. Deriving them from `shown` instead compiles fine and passes
   // every unit test, and then silently pins the tab stop to row one, navigates
   // 210 results across ~40 rendered rows, and drops focus after every re-render.
+  // BEFORE the row plan: seeding after it renders one collapsed frame first.
+  // The season the user most likely wants opens itself once the first results
+  // land, into the set the toggles already own, so collapsing it behaves like
+  // collapsing anything else.
+  if (!seededExpansion) {
+    const groups = visibleGroups(searchView, reportsHealthLookup(sources));
+    if (groups.length > 0) {
+      seededExpansion = true;
+      for (const key of defaultExpandedKeys(groups)) expandedGroups.add(key);
+    }
+  }
   currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
   const rowKeys = currentRows.map((row) => row.key);
   // The selected ROW, not the selected hash: a heading's key is a group key, so
@@ -1825,7 +1861,8 @@ function renderResults(): void {
   const selectedRowKey =
     currentRows.find(
       (row) =>
-        !(row.kind === "group" && row.expanded) && resultAtRow(row)?.infoHash === selectedHash,
+        !((row.kind === "group" || row.kind === "season") && row.expanded) &&
+        resultAtRow(row)?.infoHash === selectedHash,
     )?.key ?? null;
 
   // Read BEFORE replaceChildren: afterwards the focused node is detached and
@@ -1833,16 +1870,16 @@ function renderResults(): void {
   const focusBefore = captureRowFocus(resultsList);
   resultsList.replaceChildren(
     ...currentRows.map((row) => {
-      if (row.kind === "group") {
-        // Grid layout keeps a group as a CARD — it exists to show artwork, and a
-        // list-shaped heading in there turns a poster wall back into a list.
+      if (row.kind === "group" || row.kind === "season") {
+        // Grid layout keeps a heading as a CARD — it exists to show artwork, and
+        // a list-shaped heading in there turns a poster wall back into a list.
         return effective === "grid"
-          ? renderResultCard(row.members[0]!, row.key, groupFactsFor(row))
+          ? renderResultCard(row.members[0]!, row.key, groupFactsFor(row), row.depth)
           : renderGroupRow(row);
       }
       return effective === "grid"
-        ? renderResultCard(row.result, row.key, undefined, row.inGroup)
-        : renderResult(row.result, row.key, row.inGroup);
+        ? renderResultCard(row.result, row.key, undefined, row.depth)
+        : renderResult(row.result, row.key, row.depth);
     }),
   );
   applyRovingTabIndex(rowKeys, selectedRowKey);
