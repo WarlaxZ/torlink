@@ -171,6 +171,22 @@ export type StartWebServerImpl = (
   options: WebServerOptions,
 ) => Promise<WebServerHandle>;
 
+/**
+ * Everything that must be unset to genuinely disconnect reccd. Shared by the
+ * two paths that can clear it — the `x` key on the Accounts row, and blanking
+ * both fields in the reccd prompt — because they make the same promise to the
+ * user and must therefore have the same effect. reccAutoSignup: false is the
+ * load-bearing part: without it the next launch signs them straight back up,
+ * and the user who cleared it watches it come back.
+ */
+const RECC_CLEARED: Partial<Config> = {
+  reccUrl: undefined,
+  reccToken: undefined,
+  reccAccountName: undefined,
+  reccAccountClaimed: undefined,
+  reccAutoSignup: false,
+};
+
 export function App({
   initialMagnet,
   initialTorrent,
@@ -1061,8 +1077,13 @@ export function App({
       closeReccPrompt();
       const url = rawUrl.trim().replace(/\/+$/, "");
       const token = rawToken.trim();
-      persistConfig({ reccUrl: url || undefined, reccToken: token || undefined });
-      setNotice(url ? `${ICON.done} reccd set to ${url}` : "reccd connection cleared.");
+      if (url) {
+        persistConfig({ reccUrl: url, reccToken: token || undefined });
+        setNotice(`${ICON.done} reccd set to ${url}`);
+      } else {
+        persistConfig(RECC_CLEARED);
+        setNotice("reccd connection cleared. Recommendations stay off until you set it up again.");
+      }
     },
     [closeReccPrompt, persistConfig],
   );
@@ -1073,16 +1094,7 @@ export function App({
       setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
       return;
     }
-    persistConfig({
-      reccUrl: undefined,
-      reccToken: undefined,
-      reccAccountName: undefined,
-      reccAccountClaimed: undefined,
-      // Without this the next launch silently signs them straight back up,
-      // which is the most obvious way to make auto-provisioning feel broken:
-      // the user cleared it, and it came back. Clearing means cleared.
-      reccAutoSignup: false,
-    });
+    persistConfig(RECC_CLEARED);
     setNotice("reccd connection cleared. Recommendations stay off until you set it up again.");
   }, [closeReccPrompt, persistConfig]);
 

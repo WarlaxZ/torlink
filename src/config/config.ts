@@ -52,8 +52,8 @@ export interface Config {
   reccAccountClaimed?: boolean;
   // Auto-provision an anonymous reccd account on first run. Absent or true
   // means yes -- absent has to mean yes, because the whole point is a fresh
-  // install with no config.json at all. Set false to opt out; clearing the
-  // reccd connection from the Accounts pane sets it, so "clear" stays cleared.
+  // install with no config.json at all. Set false to opt out; every path that
+  // clears the reccd connection sets it, so "clear" stays cleared.
   reccAutoSignup?: boolean;
   // OMDb API key, used to fetch short plot summaries for For You picks (reccd
   // deliberately carries no plot text). Stored as-is; a TORLINK_OMDB_KEY env
