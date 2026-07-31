@@ -347,13 +347,37 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     if (!focused) setMode("list");
   }, [focused]);
 
-  // Entering search mode remounts the TextField with `query` in it, so the draft
-  // has to be reset to match. Without this, leaving the box with text in it and
-  // arrowing back up into it would suggest against the abandoned text while the
-  // box shows something else.
-  useEffect(() => {
-    if (mode === "search") setDraft(query);
-  }, [mode, query]);
+  // EVERY path into search mode goes through here — there is no bare
+  // `setMode("search")` in this file, on purpose.
+  //
+  // Two things have to happen in the same batch as the mode change:
+  //
+  // 1. The draft is resynced, because entering search mode remounts the
+  //    TextField with `query` in it. Otherwise leaving the box with text in it
+  //    and arrowing back up into it would suggest against the abandoned text
+  //    while the box shows something else.
+  // 2. That same text is suppressed. Text already sitting in the box is not a
+  //    question the user just asked, so opening a list for it would pop an
+  //    unbidden dropdown on every `/` after a search — and then cost two escapes
+  //    to get back out of a box you never typed in. Typing anything new changes
+  //    the text, which clears the latch and suggests normally.
+  //
+  // `accept` here means "treat this text as already resolved", which is what the
+  // latch is for generally (`dismiss` is its other caller); it does not imply the
+  // user picked a suggestion.
+  //
+  // THIS CANNOT BE AN EFFECT, and that was measured rather than assumed. By the
+  // time an effect runs, the hook has already seen `enabled` flip true for a
+  // draft that equals `query` and has scheduled its debounced request; setting
+  // the latch afterwards changes none of that effect's dependencies, so nothing
+  // cancels the timeout and the reply still lands and still opens the list.
+  // Setting it here puts `suppressedText` in place during the very render in
+  // which `enabled` becomes true, which is the only point early enough.
+  const enterSearch = (): void => {
+    setDraft(query);
+    suggest.accept(query);
+    setMode("search");
+  };
 
   // The rows on screen: group headings and releases, in order. The SAME
   // groupRowPlan the browser's list renders — "which rows are there" is one
@@ -520,12 +544,12 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   useInput(
     (input, key) => {
       if (input === "/") {
-        setMode("search");
+        enterSearch();
         return;
       }
       if (key.upArrow || input === "k") {
         if (rows.length > 0 && clamped > 0) moveTo(clamped - 1);
-        else setMode("search");
+        else enterSearch();
         return;
       }
       if (input === "g") {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SOURCES } from "../../sources/registry";
 import { StoreContext } from "../store";
 import {
@@ -12,6 +12,12 @@ import { Results } from "./Results";
 import type { ConcurrentSearchState } from "../hooks/useConcurrentSearch";
 import type { TorrentResult } from "../../sources/types";
 import type { FetchImpl } from "../../util/net";
+
+// Captured BEFORE the fake timers installed by one describe near the bottom of
+// this file: `setImmediate` is faked too, and ink's React scheduler drains its
+// work through a MessageChannel message — a macrotask — so advancing fake timers
+// alone never repaints the frame. Same reasoning as ForYou.test.tsx.
+const yieldToLoop = setImmediate;
 
 const searchState = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -473,7 +479,9 @@ async function mountSuggest(
     </StoreContext.Provider>,
   );
   const u = ui;
-  await vi.waitFor(() => expect(u.frame()).toContain(`Latest (${LIST.length})`));
+  // The count, not the panel title: the title is "Latest" while browsing and
+  // "Results" once a query has been submitted, and these tests use both.
+  await vi.waitFor(() => expect(u.frame()).toContain(`(${LIST.length})`));
   return u;
 }
 
@@ -583,5 +591,81 @@ describe("Results search suggestions", () => {
     await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film"), {
       timeout: 5000,
     });
+  });
+
+  it("still opens a list once the text in the box is actually changed", async () => {
+    // The regression guard on the suppression above: "suppress everything
+    // forever" would satisfy the no-unbidden-dropdown test, and would also
+    // silently turn suggestions off on this screen for anyone who searched once.
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl, { query: "kestrel 2010" });
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    // One new character is enough: the text no longer equals the latched string.
+    u.press("x");
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel (2010) \u00b7 film"), {
+      timeout: 5000,
+    });
+  });
+
+  it("leaves the search box on a single escape when no list was ever opened", async () => {
+    // Half the point of suppressing the resynced text: escape escalates only
+    // when there is really something on screen to put away. Entering a box that
+    // shows a previous search must not cost two presses to leave.
+    const { impl } = suggestStub();
+    const u = await mountSuggest(impl, { query: "kestrel 2010" });
+
+    u.press("/");
+    await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press(KEY.esc);
+    await vi.waitFor(() => expect(editing(u)).toBe(false));
+  });
+});
+
+// The unbidden-dropdown fix can only be proved EXACTLY under fake time: on real
+// timers "no request fired" after a few awaits is unbounded, and therefore
+// vacuous. Scoped to this describe \u2014 the rest of the file polls with `vi.waitFor`
+// on real timers and a file-level install would change every test in it.
+describe("Results search suggestions on entering the box", () => {
+  beforeAll(() => {
+    vi.useFakeTimers();
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  // Lets ink's MessageChannel-scheduled render and the fetch promise chain drain
+  // without moving the clock.
+  const settleFrames = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) {
+      await Promise.resolve();
+      await new Promise<void>((r) => yieldToLoop(() => r()));
+    }
+  };
+  const tick = async (ms: number): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await settleFrames();
+  };
+
+  it("asks reccd nothing about text that was already in the box", async () => {
+    // Entering the box after a search resyncs the draft to the submitted query.
+    // That text is not a question the user just asked, so it must be suppressed
+    // as well as resynced \u2014 otherwise `/` pops a dropdown nobody opened.
+    const { impl, urls } = suggestStub();
+    searchState.current = settled(LIST);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "kestrel 2010" })}>
+        <Results reccConfig={SUGGEST_CFG} fetchImpl={impl} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await settleFrames();
+    u.press("/");
+    // A full second of fake time \u2014 four debounce windows \u2014 so nothing can still
+    // be pending. This is what makes the negative exact rather than hopeful.
+    await tick(1000);
+    expect(urls).toHaveLength(0);
+    expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
   });
 });
