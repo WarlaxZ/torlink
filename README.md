@@ -355,6 +355,9 @@ terminal row has space for: how long ago you streamed it and the last episode yo
 **When a torrent holds several files**, the file picker opens on the suggested next episode rather than
 the first file — which for a season pack is usually the one you just watched. That applies to any release
 of a show you're part-way through, whether you played it from here, from a search, or from your library.
+The list itself is in title order, so a season pack reads E01, E02, E03 whatever order the torrent happens
+to name its files in — press **s** in the terminal, or the **sort** button in the browser, to switch to
+largest-first instead.
 
 **There's no resume position.** torlink can't see into mpv, iina, vlc, or a browser tab, so this remembers
 *what* you were watching, not *where* you got to.

@@ -21,6 +21,13 @@
 // unit). That module is dependency-free and stays that way — `platform:
 // "browser"` in tsup.web.config.ts fails the build if it ever isn't.
 import { streamCandidates } from "../../util/videoFiles";
+// The fifth, same argument, and this one was a bug report rather than a
+// prediction: the ORDER a picker lists a torrent's files in used to be private to
+// `src/ui/components/StreamFilePrompt.tsx`, so the browser listed a season pack
+// in whatever order the torrent named its files — E08 above E02 — while the
+// terminal listed it E01…E10. The rule moved down to src/util rather than being
+// written a second time here.
+import { nextSort, sortStreamFiles, type StreamFileSort } from "../../util/streamFileSort";
 // The second, and the same argument: which
 // file is the next episode is a decision both front ends make, so it is shared
 // rather than copied. It pulls in `release.ts` (and so parse-torrent-title),
@@ -173,11 +180,76 @@ export function streamOutcome(
   if (session.state !== "ready") {
     return { kind: "error", message: "The stream is still starting." };
   }
-  const files = streamCandidates(session.files);
-  if (files.length === 0) return { kind: "empty" };
-  if (files.length === 1) return { kind: "single", file: files[0]! };
+  const candidates = streamCandidates(session.files);
+  if (candidates.length === 0) return { kind: "empty" };
+  if (candidates.length === 1) return { kind: "single", file: candidates[0]! };
+  // Sorted BEFORE the preselection is counted, because `preselect` is an index
+  // into the list the picker draws: counting it over the torrent's own order and
+  // then drawing a different order badges — and focuses — an unrelated episode.
+  // Safe to do here, unlike in the TUI (which sorts at display and remaps by
+  // `url`), because `nextEpisodeIndex`'s only position-sensitive branch is its
+  // `watched` fallback, and the browser is not given watched filenames — see the
+  // note above about the half of the preselection that stays TUI-only.
+  const files = sortStreamFiles(candidates, "name");
   return { kind: "choose", files, preselect: nextEpisodeIndex(files, { next }) };
 }
+
+/** One rendering of the picker list: what to draw, what to badge, where the keyboard goes. */
+export interface PickerRows {
+  /** The files in display order. */
+  files: PublicStreamFile[];
+  /** The row to badge "next", as an index into `files` above, or null. */
+  preselect: number | null;
+  /** The row to put the keyboard on, as an index into `files` above, or null. */
+  focus: number | null;
+}
+
+/**
+ * The picker's list for one sort mode — the browser's equivalent of the TUI
+ * picker's `s` key, and here rather than in app.ts because it is three decisions
+ * and app.ts is wiring.
+ *
+ * Both `marked` and `keep` are indexes into `files` AS GIVEN (`streamOutcome`'s
+ * list), and both are resolved to the FILE and looked up again in the sorted
+ * list: an index into an order the user is no longer looking at points at the
+ * wrong row. Same rule, and the same reason, as `StreamFilePrompt`'s remap by
+ * `url` — the identity here is the session's own file index.
+ *
+ * `keep` is the file the user already had focused and WINS over `marked`, so
+ * pressing sort re-orders the list under the keyboard instead of yanking it back
+ * to the "next" episode.
+ *
+ * OMITTING `keep` AND PASSING NULL MEAN DIFFERENT THINGS, and the difference is
+ * the sort button itself. Omitted is "opening the picker": focus follows the
+ * preselection, which is what makes Enter play the episode Continue-watching
+ * promised. Null — or an index naming a file not in the list, e.g. a stale one
+ * from a picker since replaced — is "asked, and the keyboard is not on a file
+ * row", which is exactly the state after clicking sort: `focus` is then null and
+ * nothing is stolen from the button that was just pressed.
+ */
+export function pickerRows(
+  files: readonly PublicStreamFile[],
+  mode: StreamFileSort,
+  marked: number | null,
+  keep?: number | null,
+): PickerRows {
+  const sorted = sortStreamFiles(files, mode);
+  const rowOf = (at: number | null | undefined): number | null => {
+    if (at === null || at === undefined) return null;
+    const file = files[at];
+    if (!file) return null;
+    const row = sorted.findIndex((f) => f.index === file.index);
+    return row >= 0 ? row : null;
+  };
+  const preselect = rowOf(marked);
+  const focus = keep === undefined ? preselect : rowOf(keep);
+  return { files: sorted, preselect, focus };
+}
+
+// Re-exported for app.ts, for the reason the file header gives: one import site,
+// and no opportunity for the browser bundle to redeclare either the mode union or
+// the toggle rule. See src/util/streamFileSort.ts.
+export { nextSort, type StreamFileSort };
 
 /**
  * Which episode to open the picker on for a release the user pressed Play on.

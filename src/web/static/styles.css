@@ -325,6 +325,14 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+/* Sort and Cancel sit on one row under the list, wrapping on a narrow phone
+   rather than stretching to full width the way .picker-file deliberately does. */
+.picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 /* The file the Continue-watching row said was next. It is also focused, so the
    keyboard is already on it; this is the same information for eyes. */
 .picker-file-next {

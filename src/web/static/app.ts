@@ -17,10 +17,13 @@ import {
 import {
   fileLabel,
   isPlayable,
+  nextSort,
+  pickerRows,
   playerPath,
   runPlay,
   wantedEpisodeFor,
   type EpisodeRef,
+  type StreamFileSort,
   type PublicStreamFile,
   type PublicStreamSession,
   type StartResult,
@@ -169,6 +172,7 @@ const picker = el<HTMLDivElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
+const pickerSort = el<HTMLButtonElement>("picker-sort");
 
 const prefsBlock = el<HTMLDetailsElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
@@ -451,6 +455,17 @@ const playing = new Set<string>();
 // without stopping it would leave that running until the idle reaper notices.
 let pickerSession: string | null = null;
 
+// How the open picker's list is ordered, and how to draw it again. Both are
+// module-level for the same reason `pickerSession` is: there is one picker card
+// in the page, so a second play() replaces the list wholesale and these follow
+// it. (The infoHash deliberately does NOT live up here — see showPicker.)
+//
+// The mode survives a second play() on purpose: someone who prefers biggest-first
+// prefers it for the next torrent too, exactly as the TUI's `s` sticks for as long
+// as its picker is open. It is not persisted to config — the TUI's isn't either.
+let pickerMode: StreamFileSort = "name";
+let drawPicker: (() => void) | null = null;
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
@@ -550,6 +565,7 @@ function openPlayer(path: string): void {
 
 function hidePicker(): void {
   pickerSession = null;
+  drawPicker = null;
   picker.hidden = true;
   pickerFiles.replaceChildren();
 }
@@ -572,6 +588,10 @@ function hidePicker(): void {
 // wiring. All this does with it is mark the row, say so in a word, and put the
 // keyboard on it — pressing Enter then plays the episode the Continue-watching
 // row promised, which is the browser's equivalent of the TUI's opening cursor.
+//
+// The ORDER rows appear in is `pickerRows`' decision for the same reason, and the
+// re-draw the sort button triggers goes through it too: which row is which after a
+// re-sort is exactly the sort of conditional that must not live in this file.
 function showPicker(
   infoHash: string,
   sessionId: string,
@@ -582,54 +602,91 @@ function showPicker(
 ): void {
   pickerSession = sessionId;
   pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
-  pickerFiles.replaceChildren(
-    ...files.map((file, index) => {
-      const li = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "picker-file";
-      button.textContent = fileLabel(file);
-      button.title = file.filename;
-      if (index === preselect) {
-        button.classList.add("picker-file-next");
-        button.setAttribute("aria-current", "true");
-        // createElement + textContent, as everywhere on this page.
-        const tag = document.createElement("span");
-        tag.className = "picker-next";
-        tag.textContent = "next";
-        button.append(tag);
-      }
-      button.addEventListener("click", () => {
-        // hidePicker() clears pickerSession, so the Cancel handler can no longer
-        // stop the session we are about to hand to the player.
-        hidePicker();
-        // Fire-and-forget, and only once a file was actually chosen. The server
-        // no-ops when this torrent is not favourited, so there is nothing to
-        // check here and nothing to wait for — the same shape as the TUI's
-        // markPlayed, which also records only after a player launches.
-        void postSaved(
-          "/api/library",
-          libraryBody({ infoHash, name }, "watched", file.filename),
-        );
-        openPlayer(playerPath(sessionId, file, capability));
-      });
-      li.append(button);
-      return li;
-    }),
-  );
+
+  // `keep` is the file the user already had the keyboard on, as an index into
+  // `files` — read out of the live DOM rather than tracked, so nothing here has
+  // to stay in step with focus moving by tab, click or arrow key. Omitted on the
+  // first draw, which is a different thing from "nothing focused"; pickerRows
+  // owns that distinction.
+  const draw = (keep?: number | null): void => {
+    const rows = pickerRows(files, pickerMode, preselect, keep);
+    pickerSort.textContent = `sort: ${pickerMode}`;
+    pickerFiles.replaceChildren(
+      ...rows.files.map((file, index) => {
+        const li = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "picker-file";
+        button.textContent = fileLabel(file);
+        button.title = file.filename;
+        // Which file this row is, for the focus lookup on the next re-sort.
+        // The session's own index, which is what identifies a file everywhere
+        // else on the wire.
+        button.dataset["file"] = String(file.index);
+        if (index === rows.preselect) {
+          button.classList.add("picker-file-next");
+          button.setAttribute("aria-current", "true");
+          // createElement + textContent, as everywhere on this page.
+          const tag = document.createElement("span");
+          tag.className = "picker-next";
+          tag.textContent = "next";
+          button.append(tag);
+        }
+        button.addEventListener("click", () => {
+          // hidePicker() clears pickerSession, so the Cancel handler can no longer
+          // stop the session we are about to hand to the player.
+          hidePicker();
+          // Fire-and-forget, and only once a file was actually chosen. The server
+          // no-ops when this torrent is not favourited, so there is nothing to
+          // check here and nothing to wait for — the same shape as the TUI's
+          // markPlayed, which also records only after a player launches.
+          void postSaved(
+            "/api/library",
+            libraryBody({ infoHash, name }, "watched", file.filename),
+          );
+          openPlayer(playerPath(sessionId, file, capability));
+        });
+        li.append(button);
+        return li;
+      }),
+    );
+    // After the list is in the document, and read back out of the DOM rather than
+    // closed over: a focus() on a hidden element does nothing at all.
+    if (rows.focus !== null) {
+      const target = pickerFiles.children[rows.focus]?.firstElementChild;
+      if (target instanceof HTMLElement) target.focus();
+    }
+  };
+
   picker.hidden = false;
-  // After un-hiding, and read back out of the DOM rather than closed over: a
-  // focus() on a hidden element does nothing at all.
-  if (preselect !== null) {
-    const target = pickerFiles.children[preselect]?.firstElementChild;
-    if (target instanceof HTMLElement) target.focus();
-  }
+  // Only a re-sort has a file to keep; opening the picker follows the preselect.
+  drawPicker = () => draw(focusedPickerFile(files));
+  draw();
+}
+
+// The row the keyboard is on, as an index into `files`, or null when focus is
+// somewhere else on the page entirely (the sort button itself, most often).
+function focusedPickerFile(files: PublicStreamFile[]): number | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return null;
+  const at = active.dataset["file"];
+  if (at === undefined) return null;
+  const found = files.findIndex((f) => String(f.index) === at);
+  return found >= 0 ? found : null;
 }
 
 pickerCancel.addEventListener("click", () => {
   const sessionId = pickerSession;
   hidePicker();
   if (sessionId) stopSession(sessionId);
+});
+
+// The TUI picker's `s` key. The mode flips (nextSort, shared with that picker) and
+// the open list is drawn again; with no picker open there is nothing to draw and
+// the button is not on screen to be pressed.
+pickerSort.addEventListener("click", () => {
+  pickerMode = nextSort(pickerMode);
+  drawPicker?.();
 });
 
 // The flow itself is runPlay in streamFlow.ts, where a unit test can reach it —

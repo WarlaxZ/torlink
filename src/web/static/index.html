@@ -70,7 +70,12 @@
       <div id="picker" class="card picker" hidden>
         <p id="picker-title" class="picker-title"></p>
         <ul id="picker-files" class="picker-files"></ul>
-        <button id="picker-cancel" type="button">Cancel</button>
+        <div class="picker-actions">
+          <!-- The terminal picker's "s" key, as a button: title order or
+               largest-first. Its label is set by app.js from the current mode. -->
+          <button id="picker-sort" type="button"></button>
+          <button id="picker-cancel" type="button">Cancel</button>
+        </div>
       </div>
 
       <!-- ---- search ------------------------------------------------------ -->

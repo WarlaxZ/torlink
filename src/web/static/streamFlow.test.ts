@@ -8,6 +8,7 @@ import {
   playerPath,
   pollDecision,
   runPlay,
+  pickerRows,
   streamOutcome,
   wantedEpisodeFor,
   type PlayEffects,
@@ -176,6 +177,52 @@ describe("streamOutcome", () => {
     expect(out.preselect).toBe(1);
   });
 
+  // THE REPORTED BUG: the browser listed the candidates in whatever order the
+  // torrent named them, so a season pack showed E08 above E02 while the TUI's
+  // picker showed the same pack in title order. One shared sort, both surfaces.
+  it("lists the candidates in the same title order the TUI's picker uses", () => {
+    const out = streamOutcome(
+      session({
+        files: [
+          file("Harrowgate - S03E08 - The Long Way Down.mkv", 0),
+          file("Harrowgate - S03E02 - Salt.mkv", 1),
+          file("Season 3 Gag Reel.mkv", 2),
+          file("Harrowgate - S03E01 - Low Tide.mkv", 3),
+          file("Harrowgate - S03E10 - Last Light.mkv", 4),
+        ],
+      }),
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.files.map((f) => f.filename)).toEqual([
+      "Harrowgate - S03E01 - Low Tide.mkv",
+      "Harrowgate - S03E02 - Salt.mkv",
+      "Harrowgate - S03E08 - The Long Way Down.mkv",
+      "Harrowgate - S03E10 - Last Light.mkv",
+      "Season 3 Gag Reel.mkv",
+    ]);
+  });
+
+  // The preselection is an index into the list the picker DRAWS, so it has to be
+  // counted after the sort — counting it before would badge, and focus, whatever
+  // file happened to land in that row.
+  it("counts the preselection over the sorted list, not the torrent's order", () => {
+    const out = streamOutcome(
+      session({
+        files: [
+          file("Harrowgate - S03E08 - The Long Way Down.mkv", 0),
+          file("Harrowgate - S03E01 - Low Tide.mkv", 1),
+          file("Harrowgate - S03E02 - Salt.mkv", 2),
+        ],
+      }),
+      { season: 3, episode: 2 },
+    );
+    expect(out.kind).toBe("choose");
+    if (out.kind !== "choose") return;
+    expect(out.preselect).toBe(1);
+    expect(out.files[out.preselect!]!.filename).toContain("S03E02");
+  });
+
   it("has no preselection without a wanted episode, or when nothing matches", () => {
     const files = [file("Harrowgate.S03E04.1080p.mkv", 0), file("Harrowgate.S03E05.1080p.mkv", 1)];
     const noNext = streamOutcome(session({ files }));
@@ -335,6 +382,63 @@ describe("wantedEpisodeFor", () => {
 describe("fileLabel", () => {
   it("shows the name and a human size", () => {
     expect(fileLabel(file("movie.mkv", 0, 1536))).toBe("movie.mkv · 1.50 KB");
+  });
+});
+
+// The browser's equivalent of the TUI picker's `s` key. Rows, the badge and the
+// keyboard target all come from here so app.ts stays wiring.
+describe("pickerRows", () => {
+  const pack = [
+    file("Harrowgate - S03E01 - Low Tide.mkv", 0, 2_000_000),
+    file("Harrowgate - S03E02 - Salt.mkv", 1, 3_000_000),
+    file("Season 3 Gag Reel.mkv", 2, 40_000),
+  ];
+
+  it("draws title order, and largest-first for size", () => {
+    expect(pickerRows(pack, "name", null).files.map((f) => f.index)).toEqual([0, 1, 2]);
+    expect(pickerRows(pack, "size", null).files.map((f) => f.index)).toEqual([1, 0, 2]);
+  });
+
+  // The badge follows the FILE across a re-sort, exactly as the TUI's highlight
+  // does. A preselect index left pointing at the old row would mark, and focus,
+  // an unrelated episode the moment someone pressed sort.
+  it("carries the preselected file across a re-sort", () => {
+    const rows = pickerRows(pack, "size", 0);
+    expect(rows.preselect).toBe(1);
+    expect(rows.files[rows.preselect!]!.index).toBe(0);
+    expect(rows.focus).toBe(1);
+  });
+
+  // `keep` is the file the user already had the keyboard on. It wins over the
+  // preselection, so toggling sort does not yank focus back to "next".
+  it("keeps the focused file focused, in preference to the preselection", () => {
+    const rows = pickerRows(pack, "size", 0, 2);
+    expect(rows.preselect).toBe(1);
+    expect(rows.focus).toBe(2);
+    expect(rows.files[rows.focus!]!.index).toBe(2);
+  });
+
+  // The state right after the sort button is clicked: the keyboard is on the
+  // button, not on a file. Focusing the "next" row then would steal it from under
+  // the press, so an explicit null keeps focus where it is.
+  it("focuses nothing when asked to keep a focus that is not on a file row", () => {
+    const rows = pickerRows(pack, "size", 0, null);
+    expect(rows.preselect).toBe(1);
+    expect(rows.focus).toBeNull();
+  });
+
+  it("has nothing to badge or focus when there is no preselection and nothing kept", () => {
+    const rows = pickerRows(pack, "name", null);
+    expect(rows.preselect).toBeNull();
+    expect(rows.focus).toBeNull();
+  });
+
+  // A file that is not in the list at all (a stale index from a picker that has
+  // since been replaced) is "no opinion", not a crash and not row 0.
+  it("ignores a preselection or a kept file that is not in the list", () => {
+    const rows = pickerRows(pack, "name", 99, 42);
+    expect(rows.preselect).toBeNull();
+    expect(rows.focus).toBeNull();
   });
 });
 

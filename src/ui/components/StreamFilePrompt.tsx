@@ -4,8 +4,11 @@ import { Panel } from "./Panel";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { formatBytes, cleanText, truncate } from "../../util/format";
 import type { StreamFile } from "../../util/player";
-
-type SortMode = "name" | "size";
+// The ordering rule itself, which used to be a `sortFiles` local to this file.
+// It moved down to src/util when the browser's picker needed it: a season pack
+// listed E01…E10 here and in torrent order there is the copy-then-drift bug this
+// codebase has recorded four times, arrived at by omission instead of by copy.
+import { nextSort, sortStreamFiles, type StreamFileSort } from "../../util/streamFileSort";
 
 interface StreamFilePromptProps {
   width: number;
@@ -41,22 +44,6 @@ interface StreamFilePromptProps {
   favourited?: boolean;
 }
 
-// Order the candidates by title (case/number-aware) or by size, largest-first.
-function sortFiles(files: StreamFile[], mode: SortMode): StreamFile[] {
-  const copy = [...files];
-  if (mode === "name") {
-    copy.sort((a, b) =>
-      cleanText(a.filename).localeCompare(cleanText(b.filename), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
-    );
-  } else {
-    copy.sort((a, b) => b.bytes - a.bytes);
-  }
-  return copy;
-}
-
 // Pick a file to stream when a torrent holds several videos. Defaults to sorting
 // by title; press "s" to toggle between title and size ordering.
 export function StreamFilePrompt({
@@ -74,8 +61,8 @@ export function StreamFilePrompt({
   // highlight. Any keypress makes the cursor a number and the preselection stops
   // being consulted.
   const [cursor, setCursor] = useState<number | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("name");
-  const sorted = useMemo(() => sortFiles(files, sortMode), [files, sortMode]);
+  const [sortMode, setSortMode] = useState<StreamFileSort>("name");
+  const sorted = useMemo(() => sortStreamFiles(files, sortMode), [files, sortMode]);
   const preselectUrl = preselect !== undefined ? files[preselect]?.url : undefined;
   const opening = preselectUrl !== undefined
     ? Math.max(0, sorted.findIndex((f) => f.url === preselectUrl))
@@ -95,10 +82,10 @@ export function StreamFilePrompt({
     if (input === "s" || input === "S") {
       // Keep the highlighted file selected across the re-sort.
       const current = sorted[clamped];
-      const next: SortMode = sortMode === "name" ? "size" : "name";
+      const next = nextSort(sortMode);
       setSortMode(next);
       if (current) {
-        const idx = sortFiles(files, next).findIndex((f) => f.url === current.url);
+        const idx = sortStreamFiles(files, next).findIndex((f) => f.url === current.url);
         if (idx >= 0) setCursor(idx);
       }
       return;
