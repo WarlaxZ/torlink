@@ -319,7 +319,7 @@ async function mountWideWithHistory(
         streamHistory,
       })}
     >
-      <Results />
+      <Results reccConfig={{}} />
     </StoreContext.Provider>,
     { cols: contentWidth + 19 },
   );
