@@ -14,6 +14,8 @@ import {
   type DashRow,
   type StatusPayload,
 } from "./dashboard";
+import { abortableSleep } from "./abortableSleep";
+import { isBusy, type FlowState } from "./streamBusy";
 import {
   fileLabel,
   isPlayable,
@@ -39,6 +41,7 @@ import {
   dashRowForPlay,
   debridAddedNotice,
   debridAddLabel,
+  debridProviderLabel,
   emptyView,
   defaultExpandedKeys,
   groupCountLabel,
@@ -212,6 +215,12 @@ const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 const pickerSort = el<HTMLButtonElement>("picker-sort");
 
+// The resolving-stream pill. Named `prepareBox` rather than `prepare` so it
+// cannot be confused with `prepareLine`, the shared helper that writes into it.
+const prepareBox = el<HTMLDivElement>("prepare");
+const prepareText = el<HTMLSpanElement>("prepare-line");
+const prepareCancel = el<HTMLButtonElement>("prepare-cancel");
+
 const prefsBlock = el<HTMLDetailsElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
 const prefsFeaturesBox = el<HTMLDivElement>("pref-features");
@@ -340,6 +349,36 @@ function showNotice(message: string): void {
     notice.hidden = true;
   }, NOTICE_MS);
 }
+
+// The waiting line, or null to take it down. This is runPlay's `progress` effect
+// — separate from `notice` because this one persists for the length of a resolve
+// (minutes) and carries a Cancel, while a notice hides itself after seconds.
+//
+// The line itself is prepareLine's (src/util/prepareLine.ts, via pollDecision):
+// nothing here decides what a waiting user reads.
+function showPrepare(line: string | null): void {
+  if (line === null) {
+    prepareBox.hidden = true;
+    prepareText.textContent = "";
+    return;
+  }
+  prepareText.textContent = line;
+  prepareBox.hidden = false;
+}
+
+// Repaints every Play control from `flow`. Filled in by the next commit, which
+// tags the six Play buttons it reads; a no-op here keeps this one green rather
+// than half-wiring the paint and the tags together.
+function paintPlayBusy(): void {}
+
+prepareCancel.addEventListener("click", () => {
+  // Feedback on the press itself. Aborting kills an in-flight fetch, but there
+  // is still a round trip before the pill comes down, and a Cancel that looks
+  // inert for a second gets pressed again — which is the habit this whole change
+  // is about. Re-enabled by play()'s next call, not here.
+  prepareCancel.disabled = true;
+  prepareAbort?.abort();
+});
 
 // Every action the row buttons can take. Downloads and seeds expose different
 // sets; `delete` also removes the files, which is why it is offered only where
@@ -552,11 +591,21 @@ async function control(id: string, action: string): Promise<void> {
 // Everything below to the next banner is the Play flow. The decisions live in
 // streamFlow.ts; what is here is fetch, timers and DOM.
 
-// Rows with a Play already in flight. Starting a session takes a round trip and
-// then up to minutes of polling, and the row's buttons are rebuilt four times a
-// second by the SSE tick — so without this a second tap starts a second session
-// (a second swarm, a second Real-Debrid job) for the same torrent.
-const playing = new Set<string>();
+// What the one in-flight play or pick is, if any. ONE, not a set: the terminal
+// allows one prepare or pick at a time (src/ui/App.tsx's
+// `if (preparing || streamFiles || activeStream) return`) and the browser's
+// per-row set let two rows resolve at once, each polling a session for up to ten
+// minutes, sharing one progress line that reported whichever wrote last.
+//
+// Every Play button on the page is repainted from this (paintPlayBusy), so the
+// rule is visible rather than enforced by a silent early return — a lit button
+// that does nothing when pressed is what taught people to press it repeatedly.
+const flow: FlowState = { prepare: null, picking: null };
+
+// Cancels the in-flight prepare. Held here so the pill's Cancel button can reach
+// it; runPlay threads the signal into its fetches and its sleep, and stops the
+// session on the way out.
+let prepareAbort: AbortController | null = null;
 
 // The session the picker is currently offering. Held so Cancel can stop it: the
 // session is live by then, with a torrent attached, and closing the picker
@@ -574,7 +623,11 @@ let pickerSession: string | null = null;
 let pickerMode: StreamFileSort = "name";
 let drawPicker: (() => void) | null = null;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+// runPlay's `sleep` effect. The abort handling is in abortableSleep.ts rather
+// than here because it has two failure modes reading cannot catch — never
+// resolving, and leaving its listener attached — and nothing in app.ts is
+// reachable by a test.
+const sleep = abortableSleep;
 
 async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
   let res: Response;
@@ -847,34 +900,52 @@ async function play(
   onUnresolved?: () => void,
   next?: EpisodeRef | null,
 ): Promise<void> {
-  if (playing.has(row.id)) return;
-  playing.add(row.id);
+  // One at a time, and the buttons say so (paintPlayBusy), so this early return
+  // is now a backstop rather than the whole mechanism.
+  if (isBusy(flow)) return;
   const wanted = wantedEpisodeFor(row.name, savedState.continueWatching, next);
+  const ac = new AbortController();
+  prepareAbort = ac;
+  prepareCancel.disabled = false;
+  flow.prepare = { key: row.id, title: row.name };
+  paintPlayBusy();
   try {
-    await runPlay(row, {
-      start: startSession,
-      poll: pollSession,
-      stop: stopSession,
-      confirm: (message) => confirm(message),
-      notice: showNotice,
-      // TEMPORARY: the next commit gives this its own viewport-anchored pill,
-      // which is the whole point of splitting it from `notice`. Pointing it at
-      // the notice line for one commit keeps this file compiling without
-      // pretending the split has landed.
-      progress: (line) => {
-        if (line !== null) showNotice(line);
+    await runPlay(
+      row,
+      {
+        start: startSession,
+        poll: pollSession,
+        stop: stopSession,
+        confirm: (message) => confirm(message),
+        notice: showNotice,
+        progress: showPrepare,
+        // Closes over THIS row's hash, not a module-level variable — see
+        // showPicker's comment for why that distinction is load-bearing.
+        choose: (sessionId, capability, name, files, preselect) =>
+          showPicker(row.id, sessionId, capability, name, files, preselect),
+        open: (path) => openPlayer(path),
+        sleep,
+        now: () => Date.now(),
+        onUnresolved,
       },
-      // Closes over THIS row's hash, not a module-level variable — see
-      // showPicker's comment for why that distinction is load-bearing.
-      choose: (sessionId, capability, name, files, preselect) =>
-        showPicker(row.id, sessionId, capability, name, files, preselect),
-      open: (path) => openPlayer(path),
-      sleep,
-      now: () => Date.now(),
-      onUnresolved,
-    }, { wanted });
+      {
+        wanted,
+        // The provider's display name for the waiting line, from the same
+        // DEBRID_LABELS table the add button reads (searchModel.ts) — not a
+        // second one written here.
+        providerLabel: sources?.debridProvider
+          ? debridProviderLabel(sources.debridProvider)
+          : null,
+        signal: ac.signal,
+      },
+    );
   } finally {
-    playing.delete(row.id);
+    prepareAbort = null;
+    flow.prepare = null;
+    // runPlay takes the pill down itself on every exit; this is belt and braces
+    // for a throw, which would skip it.
+    showPrepare(null);
+    paintPlayBusy();
   }
 }
 

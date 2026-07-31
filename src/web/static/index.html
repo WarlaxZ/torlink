@@ -88,6 +88,22 @@
       </div>
     </dialog>
 
+    <!-- The waiting line for a resolving stream, anchored to the viewport.
+         Resolving a torrent Real-Debrid has never seen genuinely takes minutes,
+         and the only progress report used to be #notice — a paragraph above
+         <main> that scrolls away, so a user 500px down a browse saw nothing at
+         all and pressed play again. Bottom LEFT because .to-top already owns
+         bottom right.
+
+         aria-live is OFF on purpose. The line changes every second (the elapsed
+         count moves even when the percent does not), so a live region would talk
+         over a screen-reader user continuously for minutes. #notice keeps the
+         milestones worth announcing: started, cancelled, failed. -->
+    <div id="prepare" class="prepare" role="status" aria-live="off" hidden>
+      <span id="prepare-line" class="prepare-line"></span>
+      <button id="prepare-cancel" type="button">Cancel</button>
+    </div>
+
     <main id="app" hidden>
       <!-- ---- search ------------------------------------------------------ -->
       <section id="pane-search">

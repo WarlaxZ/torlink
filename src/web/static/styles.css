@@ -1407,3 +1407,49 @@ select:focus-visible {
   font-size: 0.75rem;
   color: var(--dim);
 }
+
+/* The resolving-stream pill. Fixed bottom left; .to-top is bottom right at
+   z-index 4, and sharing a corner would overlap them.
+
+   Deliberately not a .card, even though it looks like one: this element is
+   `hidden` between resolves, and the global [hidden] rule at the top of this
+   file exists precisely because .card's `display: flex` used to defeat it. Its
+   own layout keeps it out of that argument entirely. */
+.prepare {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(30rem, calc(100vw - 7rem));
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--raised);
+  font-size: 0.75rem;
+}
+
+.prepare-line {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+  /* The elapsed seconds and the percent both tick; without this the whole line
+     jitters sideways once a second. */
+  font-variant-numeric: tabular-nums;
+}
+
+.prepare button {
+  flex-shrink: 0;
+}
+
+/* On a phone the pill and .to-top would sit side by side in 375px. Full width
+   above it instead. */
+@media (max-width: 30rem) {
+  .prepare {
+    left: 1rem;
+    right: 1rem;
+    bottom: 3.5rem;
+    max-width: none;
+  }
+}
