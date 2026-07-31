@@ -321,6 +321,78 @@ export async function unrestrictLink(
 }
 
 /**
+ * Pick the best manifest URL out of one delivery format's quality map.
+ *
+ * The labels are NOT reliably numeric. Measured against the live API, a file
+ * offered exactly `{ "full": "…/full.m3u8" }`; the documented alternative is a
+ * resolution like `"1080"`. So numeric labels sort highest-first and named ones
+ * come after them, rather than everything going through `Number()` — which is
+ * `NaN` for `"full"` and makes the comparison meaningless.
+ *
+ * Highest first because this is the browser's only playable route to the file:
+ * there is no reason to hand it a smaller one, and the provider serves what it
+ * has.
+ */
+function bestManifest(byQuality: Record<string, unknown>): string | null {
+  const labels = Object.keys(byQuality).sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    const aNum = Number.isFinite(na);
+    const bNum = Number.isFinite(nb);
+    if (aNum && bNum) return nb - na;
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return a.localeCompare(b);
+  });
+  for (const label of labels) {
+    const url = byQuality[label];
+    if (typeof url === "string" && url.startsWith("http")) return url;
+  }
+  return null;
+}
+
+/**
+ * The provider's own HLS manifest for an unrestricted file, or null.
+ *
+ * `fileId` is the `id` from `/unrestrict/link`, kept on `StreamFile` as
+ * `providerFileId`. Null is a normal answer with several causes — the provider
+ * will not transcode this file, the endpoint is unavailable, the account cannot
+ * — and none of them are worth distinguishing: the caller's next move is the
+ * same for all of them, which is to try the next rung.
+ *
+ * NOTE that a `200` here does not mean the manifest will work. For a file with
+ * `streamable: 0` the endpoint still returns four URLs, and fetching the `.m3u8`
+ * then gives `404 {"error":"invalid_duration"}`. Callers must check
+ * `providerStreamable` before offering this to a browser.
+ *
+ * `retries: 0`. This is not idempotent work worth repeating, and a page load is
+ * waiting on it; a retry budget here just buys a slower fallback.
+ */
+export async function transcodeManifest(
+  token: string,
+  fileId: string,
+  opts: RequestOptions = {},
+): Promise<string | null> {
+  try {
+    const res = await request(
+      token,
+      "GET",
+      `/streaming/transcode/${encodeURIComponent(fileId)}`,
+      undefined,
+      { ...opts, retries: 0 },
+    );
+    const parsed = (await res.json()) as Record<string, unknown>;
+    // `apple` is the HLS one. `dash`, `liveMP4` and `h264WebM` are the others the
+    // endpoint returns and none of them is an HLS manifest.
+    const apple = parsed.apple;
+    if (!apple || typeof apple !== "object") return null;
+    return bestManifest(apple as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Drive a magnet through the full Real-Debrid pipeline and return the direct,
  * downloadable file links:
  *   addMagnet → selectFiles(all) → poll info until `downloaded` → unrestrict each link.
@@ -452,6 +524,7 @@ export const realDebridProvider: DebridProvider = {
   validateToken: async (token, opts) => debridStatusFromRealDebridUser(await validateToken(token, opts), new Date()),
   resolveMagnet,
   // No checkCached: Real-Debrid withdrew /torrents/instantAvailability in 2024.
+  transcodeManifest,
   isTransient,
   isTokenRejection,
 };

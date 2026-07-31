@@ -13,6 +13,7 @@ import {
   isTransient,
   getInfo,
   unrestrictLink,
+  transcodeManifest,
   type RealDebridFetch,
 } from "./realdebrid";
 
@@ -211,6 +212,82 @@ describe("resolveMagnet", () => {
     const file = await unrestrictLink("tok", "https://rd/link1", { fetchImpl });
     expect(file.providerFileId).toBeUndefined();
     expect(file.providerStreamable).toBeUndefined();
+  });
+
+  describe("transcodeManifest", () => {
+    it("returns the apple HLS manifest, whatever the quality label is called", () => {
+      // Measured: the label is "full", not a resolution. A previous draft sorted
+      // labels with Number(b) - Number(a), which is NaN for "full".
+      const fetchImpl = router(() =>
+        jsonRes(200, {
+          apple: { full: "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8" },
+          dash: { full: "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.mpd" },
+        }),
+      );
+      return expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBe(
+        "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+      );
+    });
+
+    it("prefers the highest numeric quality when the labels are resolutions", async () => {
+      const fetchImpl = router(() =>
+        jsonRes(200, {
+          apple: {
+            "480": "https://s.example/480.m3u8",
+            "1080": "https://s.example/1080.m3u8",
+            "720": "https://s.example/720.m3u8",
+          },
+        }),
+      );
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBe(
+        "https://s.example/1080.m3u8",
+      );
+    });
+
+    it("prefers a numeric quality over a named one when both are offered", async () => {
+      const fetchImpl = router(() =>
+        jsonRes(200, { apple: { full: "https://s.example/full.m3u8", "1080": "https://s.example/1080.m3u8" } }),
+      );
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBe(
+        "https://s.example/1080.m3u8",
+      );
+    });
+
+    it("returns null when the provider offers no HLS for this file", async () => {
+      const fetchImpl = router(() => jsonRes(200, { dash: { full: "https://s.example/full.mpd" } }));
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBeNull();
+    });
+
+    it("returns null rather than throwing when the endpoint errors", async () => {
+      // A file the provider will not transcode is a normal outcome, not a
+      // failure the caller should have to catch — it means "use the next rung".
+      const fetchImpl = router(() => jsonRes(404, { error: "unknown_ressource" }));
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBeNull();
+    });
+
+    it("returns null on a response that is not the documented shape", async () => {
+      const fetchImpl = router(() => jsonRes(200, { error: "unavailable" }));
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBeNull();
+    });
+
+    it("ignores a non-http value where a url should be", async () => {
+      const fetchImpl = router(() => jsonRes(200, { apple: { full: 42 } }));
+      await expect(transcodeManifest("tok", "ID", { fetchImpl })).resolves.toBeNull();
+    });
+
+    it("does not retry — a page load is waiting on this", async () => {
+      const calls: Call[] = [];
+      const fetchImpl = router(() => jsonRes(503, { error: "busy" }), calls);
+      await transcodeManifest("tok", "ID", { fetchImpl });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("encodes the file id into the path", async () => {
+      const calls: Call[] = [];
+      const fetchImpl = router(() => jsonRes(200, {}), calls);
+      await transcodeManifest("tok", "a/b", { fetchImpl });
+      expect(calls[0]!.url).toContain("/streaming/transcode/a%2Fb");
+    });
   });
 
   it("runs addMagnet -> selectFiles -> poll -> unrestrict and returns files", async () => {

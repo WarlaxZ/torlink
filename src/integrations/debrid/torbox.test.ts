@@ -6,6 +6,7 @@ import {
   resolveMagnet,
   TOKEN_REJECTED_MESSAGE,
   TorBoxError,
+  torBoxProvider,
   validateToken,
 } from "./torbox";
 import { log } from "../../util/logger";
@@ -467,5 +468,18 @@ describe("TorBox checkCached", () => {
     const cached = await checkCached(TOKEN, [], { fetchImpl, sleepImpl: noSleep });
     expect(cached.size).toBe(0);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("capability flags on the provider object", () => {
+  it("has checkCached, which TorBox does support", () => {
+    expect(torBoxProvider.checkCached).toBeDefined();
+  });
+
+  it("has no transcodeManifest, so the player's ladder falls through to the next rung", () => {
+    // Absence is the flag, not a false boolean. Checked 2026-07-31: TorBox
+    // publishes no API endpoint returning an HLS manifest for a file, so a
+    // TorBox session skips rung 2. See the dated note in torbox.ts.
+    expect(torBoxProvider.transcodeManifest).toBeUndefined();
   });
 });
