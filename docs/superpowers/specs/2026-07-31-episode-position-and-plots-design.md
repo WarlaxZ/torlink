@@ -34,9 +34,18 @@ would claim something that data cannot support once someone jumps around. We mar
 **position** — "up to S04E07", and the next one highlighted — and let the plot do the
 memory work, which is what the owner described doing anyway.
 
-**Episodes keep the series poster.** OMDb's per-episode artwork is patchy, and a preview
-pane flickering between a poster and a blank frame as you arrow down a season is worse
-than a stable one. Only the plot changes.
+**Episodes show their own still, falling back to the series poster.** REVISED during
+implementation. The original decision was "episodes keep the series poster", on the
+grounds that OMDb's per-episode artwork is patchy and a pane flickering between a poster
+and a blank frame is worse than a stable one. That objection is real but a fallback
+answers it directly, and the better picture is worth keeping: an image that changes per
+episode tells you what you are looking at.
+
+So: the episode's own still when OMDb has one, the series poster when it does not, never
+blank. The fallback lives in `fetchTitleMetaByName` (`src/recc/omdb.ts`) because both
+front ends reach OMDb through it — the terminal directly, the browser via `/api/title` —
+so the two cannot drift on what a preview shows. It costs one extra lookup, and only for
+an episode that has no artwork of its own.
 
 ---
 
