@@ -128,7 +128,7 @@ export interface PublicStreamFile {
  */
 export interface PublicStreamSession {
   id: string;
-  backend: "realdebrid" | "torrent";
+  backend: "debrid" | "torrent";
   name: string;
   state: "resolving" | "ready" | "error";
   /** Integer percent, 0–100 (not a 0..1 fraction). */
@@ -167,7 +167,7 @@ export interface StartStreamResponse {
  */
 export interface StreamConfirmResponse {
   route: "torrent-confirm";
-  /** Human-readable, e.g. "your Real-Debrid premium isn't active". */
+  /** Human-readable, e.g. "your Real-Debrid plan isn't active". */
   reason: string;
 }
 
@@ -292,21 +292,36 @@ export interface SourcesResponse {
   /** Whether the adult category is on; when false no adult source appears above. */
   adultEnabled: boolean;
   /**
-   * Whether a Real-Debrid token is configured (file or `REALDEBRID_API_TOKEN`).
+   * Whether a debrid token is configured for whichever provider is active —
+   * Real-Debrid or TorBox (file or their respective env vars).
    *
    * A capability flag, not a credential — the token itself never crosses this
    * wire. It is here rather than on its own route because this response is the
    * one thing the search UI fetches before it can render anything, and the
    * decision it drives is a search-result decision: the TUI offers `r`
-   * (Real-Debrid) on a result only when `debridConfigured`, and warns about the
-   * swarm before a P2P add only when it is true. The browser has to make the
-   * same two choices and cannot read the user's config.
+   * (the active debrid provider) on a result only when `debridConfigured`, and
+   * warns about the swarm before a P2P add only when it is true. The browser
+   * has to make the same two choices and cannot read the user's config.
    *
    * It is NOT a health verdict. A configured-but-lapsed account still reports
-   * true here and fails at the add, with Real-Debrid's own message — the same
+   * true here and fails at the add, with the provider's own message — the same
    * thing the TUI does, and deliberately not a silent downgrade to P2P.
    */
   debridConfigured: boolean;
+  /**
+   * Which debrid service resolves magnets, or null when none is configured.
+   * A capability flag like `debridConfigured`, never a credential: it is what
+   * lets the browser label its add button the way the TUI labels `r`.
+   */
+  debridProvider: "realdebrid" | "torbox" | null;
+  /**
+   * Whether the active provider can answer "is this cached?".
+   *
+   * TorBox can; Real-Debrid cannot — it withdrew its instant-availability
+   * endpoint in 2024. When false the browser shows no cached marker at all,
+   * rather than an "unknown" state that would read as "not cached".
+   */
+  debridCachedCheck: boolean;
   /**
    * Whether an OMDb API key is configured (file or `TORLINK_OMDB_KEY`).
    *
@@ -637,4 +652,20 @@ export interface ContinueWatchingRequest {
 /** The 200 body of `POST /api/continue-watching`. Same contract as `LibraryResponse`: the caller renders what comes back. */
 export interface ContinueWatchingResponse {
   continueWatching: PublicStreamHistoryItem[];
+}
+
+/**
+ * `POST /api/cached` — which of these torrents the active debrid provider
+ * already has, so a result can be marked before the user commits to it.
+ *
+ * Info hashes only: a search result carries no magnet on this wire (that was a
+ * ~6MB-per-search decision) and a hash is all the provider needs.
+ */
+export interface CachedRequest {
+  hashes: string[];
+}
+
+/** Lowercase hex info hashes the provider has cached. A subset of the request. */
+export interface CachedResponse {
+  cached: string[];
 }

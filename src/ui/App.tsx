@@ -5,7 +5,8 @@ import os from "node:os";
 import {
   loadConfig,
   saveConfig,
-  resolveRealDebridToken,
+  resolveDebridTokenFor,
+  resolveActiveDebrid,
   resolveMediaPlayer,
   resolveDnsServers,
   resolveReccConfig,
@@ -16,15 +17,16 @@ import {
 } from "../config/config";
 import { setDnsServers } from "../util/dns";
 import { expandHome, normalizeDownloadDir } from "../config/folder";
-import { validateToken, isPremiumActive, resolveMagnet, isTokenRejection } from "../integrations/realdebrid";
-import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
+import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
+import { getDebridProvider, DEBRID_PROVIDER_IDS } from "../integrations/debrid";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
-import type { ResolvedFile } from "../integrations/realdebrid";
+import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { postEvent } from "../recc/client";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
+import { cachedHashesFor } from "../core/cachedHashes";
 import {
   forgetStreamHistory,
   historyItemFor,
@@ -77,7 +79,7 @@ import {
 } from "../util/favouriteList";
 import { toggleDisabledSource } from "../sources/registry";
 import { Logo } from "./components/Logo";
-import { RdBadge } from "./components/RdBadge";
+import { DebridBadge } from "./components/DebridBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
 import { Rule } from "./components/Rule";
 import { Footer } from "./components/Footer";
@@ -225,7 +227,7 @@ export function App({
   const [showHelp, setShowHelp] = useState(false);
   const [helpScroll, setHelpScroll] = useState(0);
   const [editingFolder, setEditingFolder] = useState(false);
-  const [editingToken, setEditingToken] = useState(false);
+  const [editingToken, setEditingToken] = useState<{ provider: DebridProviderId } | null>(null);
   const [editingRecc, setEditingRecc] = useState(false);
   const [editingOmdb, setEditingOmdb] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
@@ -280,7 +282,15 @@ export function App({
   const [lastDownloadToDir, setLastDownloadToDir] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  const [rdStatus, setRdStatus] = useState<RdStatus | null>(null);
+  const [debridStatus, setDebridStatus] = useState<DebridStatus | null>(null);
+  // Info hashes the active debrid provider has cached, for the results marker.
+  // Empty when the provider cannot answer — see cachedTag's reasoning in
+  // src/web/static/searchModel.ts, which this mirrors for the terminal.
+  const [cachedHashes, setCachedHashes] = useState<ReadonlySet<string>>(new Set());
+  // Guards an in-flight cached-hashes lookup landing after a newer search or a
+  // provider switch has already reset the set — a marker on the wrong row is
+  // worse than no marker.
+  const cachedRequestId = useRef(0);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
   // Episodes streamed from the current picker session (marked ✓, cleared when
   // the picker opens/closes). Union with the favourite's persisted watched list.
@@ -297,6 +307,9 @@ export function App({
     phase: "caching" | "fetching";
     pct: number;
     source: "rd" | "torrent";
+    // Only set for source === "rd"; names the provider actually caching this
+    // stream, so the spinner never says "Real-Debrid" for a TorBox user.
+    providerLabel?: string;
   } | null>(null);
   const [activeStream, setActiveStream] = useState<
     { session: TorrentStreamSession; name: string; input: DownloadInput } | null
@@ -360,11 +373,12 @@ export function App({
       // Restore remembered UI preferences (validated, so stale values degrade
       // to defaults rather than throwing).
       setSortState(parseSort(cfg.sort));
-      const launchToken = resolveRealDebridToken(cfg);
-      if (launchToken) {
-        void validateToken(launchToken)
-          .then((u) => {
-            if (alive) setRdStatus(rdStatusFromUser(u, new Date()));
+      const launchActive = resolveActiveDebrid(cfg);
+      if (launchActive) {
+        const meta = getDebridProvider(launchActive.provider);
+        void meta.validateToken(launchActive.token)
+          .then((status) => {
+            if (alive) setDebridStatus(status);
           })
           .catch(() => {
             /* offline or bad token at launch: leave the badge hidden, no toast */
@@ -433,7 +447,7 @@ export function App({
     };
   }, [queue]);
 
-  // If a Real-Debrid download fails because the token was rejected, clear the
+  // If a debrid download fails because the token was rejected, clear the
   // stale status and re-open the token prompt — once per failure, not on every
   // queue tick.
   const reauthSeen = useRef<Set<string>>(new Set());
@@ -443,14 +457,16 @@ export function App({
       const selecting = queue.getItems().find((it) => it.status === "selecting");
       setFileSelection(selecting ? { ...selecting } : null);
       for (const it of queue.getItems()) {
-        if (it.status !== "failed" || it.via !== "realdebrid" || !it.error) continue;
+        if (it.status !== "failed" || it.via !== "debrid" || !it.error) continue;
         if (reauthSeen.current.has(it.id)) continue;
-        if (isTokenRejection(it.error)) {
+        const provider = it.provider ?? "realdebrid";
+        const meta = getDebridProvider(provider);
+        if (meta.isTokenRejection(it.error)) {
           reauthSeen.current.add(it.id);
-          setRdStatus(null);
-          setNotice("Real-Debrid token expired — re-enter it.");
+          setDebridStatus(null);
+          setNotice(`${meta.label} token expired — re-enter it.`);
           setShowHelp(false);
-          setEditingToken(true);
+          setEditingToken({ provider });
         }
       }
     };
@@ -579,10 +595,12 @@ export function App({
     setNotice(`${orphans.join(", ")} ignored without --web`);
   }, [web, webPort, webHost, webToken]);
 
-  // Keep the queue's Real-Debrid token in step with config (and the env var), so
-  // a retry can re-run the pipeline without the UI handing it back in.
+  // Keep the queue's active debrid provider/token in step with config (and any
+  // env var), so a retry can re-run the pipeline without the UI handing it back in.
   useEffect(() => {
-    if (queue && config) queue.setRealDebridToken(resolveRealDebridToken(config));
+    if (!queue || !config) return;
+    const active = resolveActiveDebrid(config);
+    queue.setDebridToken(active?.provider ?? null, active?.token ?? "");
   }, [queue, config]);
 
   const quitAll = useCallback(() => {
@@ -823,54 +841,89 @@ export function App({
   );
 
   const closeTokenPrompt = useCallback(() => {
-    setEditingToken(false);
+    setEditingToken(null);
   }, []);
 
-  const openTokenPrompt = useCallback(() => {
+  const openTokenPrompt = useCallback((provider: DebridProviderId) => {
     setView("browser");
     setShowHelp(false);
-    setEditingToken(true);
+    setEditingToken({ provider });
   }, []);
 
-  const setRealDebridToken = useCallback(
-    (raw: string) => {
+  const setDebridToken = useCallback(
+    (provider: DebridProviderId, raw: string) => {
       closeTokenPrompt();
       if (!config) return;
+      const meta = getDebridProvider(provider);
       const token = raw.trim();
       if (!token) {
-        setNotice("Real-Debrid token unchanged.");
+        setNotice(`${meta.label} token unchanged.`);
         return;
       }
-      setConfig({ ...config, realDebridToken: token });
+      const field = provider === "torbox" ? "torBoxToken" : "realDebridToken";
+      // First token set also becomes the active provider: the user just
+      // configured it, so silently leaving the other one in charge would be
+      // the opposite of what they asked for.
+      const next: Config = { ...config, [field]: token };
+      if (!resolveActiveDebrid(config)) next.debridProvider = provider;
+      setConfig(next);
       void (async () => {
         try {
-          const user = await validateToken(token);
-          setRdStatus(rdStatusFromUser(user, new Date()));
-          if (!isPremiumActive(user)) {
-            setNotice(`Real-Debrid: ${user.username}'s account isn't premium — torrents need premium.`);
+          const status = await meta.validateToken(token);
+          setDebridStatus(status);
+          if (!status.active) {
+            setNotice(`${meta.label}: ${status.username}'s ${status.planLabel} account can't add torrents.`);
             return;
           }
-          setNotice(`${ICON.done} Real-Debrid connected as ${user.username}`);
+          setNotice(`${ICON.done} ${meta.label} connected as ${status.username}`);
         } catch (e) {
-          setRdStatus(null);
-          setNotice(`Real-Debrid: ${e instanceof Error ? e.message : "could not validate token"}`);
+          setDebridStatus(null);
+          setNotice(`${meta.label}: ${e instanceof Error ? e.message : "could not validate token"}`);
         }
       })();
     },
     [config, setConfig, closeTokenPrompt],
   );
 
-  const clearRealDebridToken = useCallback(() => {
-    closeTokenPrompt();
-    if (!config) return;
-    if (process.env["REALDEBRID_API_TOKEN"]?.trim()) {
-      setNotice("Token is set via REALDEBRID_API_TOKEN — unset the env var to clear it.");
-      return;
-    }
-    setConfig({ ...config, realDebridToken: undefined });
-    setRdStatus(null);
-    setNotice("Real-Debrid token cleared.");
-  }, [config, setConfig, closeTokenPrompt]);
+  const clearDebridToken = useCallback(
+    (provider: DebridProviderId) => {
+      closeTokenPrompt();
+      if (!config) return;
+      const meta = getDebridProvider(provider);
+      if (process.env[meta.tokenEnvVar]?.trim()) {
+        setNotice(`Token is set via ${meta.tokenEnvVar} — unset the env var to clear it.`);
+        return;
+      }
+      const field = provider === "torbox" ? "torBoxToken" : "realDebridToken";
+      const next: Config = { ...config, [field]: undefined };
+      // Never leave the preference pointing at a provider that has no token:
+      // resolveActiveDebrid would ignore it, but the accounts pane would still
+      // show it as active.
+      if (next.debridProvider === provider) next.debridProvider = undefined;
+      setConfig(next);
+      if (debridStatus?.provider === provider) setDebridStatus(null);
+      setNotice(`${meta.label} token cleared.`);
+    },
+    [config, setConfig, closeTokenPrompt, debridStatus],
+  );
+
+  const setActiveDebrid = useCallback(
+    (provider: DebridProviderId) => {
+      if (!config) return;
+      const meta = getDebridProvider(provider);
+      setConfig({ ...config, debridProvider: provider });
+      setDebridStatus(null); // re-probed below; a stale status is a wrong badge
+      setNotice(`${ICON.done} Using ${meta.label} for streams and debrid downloads.`);
+      void (async () => {
+        try {
+          setDebridStatus(await meta.validateToken(resolveDebridTokenFor(config, provider)));
+        } catch {
+          setDebridStatus(null);
+        }
+      })();
+    },
+    [config, setConfig],
+  );
 
   const refreshReccStatus = useCallback((cfg: Config | null) => {
     const rc = cfg ? resolveReccConfig(cfg) : {};
@@ -1059,14 +1112,15 @@ export function App({
   const startDebridDownload = useCallback(
     (input: DownloadInput) => {
       if (!config || !queue) return;
-      const token = resolveRealDebridToken(config);
-      if (!token) {
-        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
+      const active = resolveActiveDebrid(config);
+      if (!active) {
+        setNotice("Set a Real-Debrid or TorBox token first — open the Accounts tab.");
         return;
       }
+      const meta = getDebridProvider(active.provider);
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
-      void queue.addDebrid(input, config.downloadDir, token);
-      setNotice(`Real-Debrid: ${truncate(cleanText(input.name), 40)}`);
+      void queue.addDebrid(input, config.downloadDir, active.provider, active.token);
+      setNotice(`${meta.label}: ${truncate(cleanText(input.name), 40)}`);
     },
     [config, queue],
   );
@@ -1168,7 +1222,7 @@ export function App({
   }, []);
 
   // Open the file picker on a resolved multi-file torrent. Both stream paths
-  // (Real-Debrid and direct torrent) end here, so the cursor's opening position
+  // (debrid and direct torrent) end here, so the cursor's opening position
   // is decided once. `recorded` is the stream-history row this play just wrote,
   // whose `nextEpisode` is the same suggestion the Continue-watching pane shows.
   const openStreamPicker = useCallback(
@@ -1186,9 +1240,9 @@ export function App({
     [config],
   );
 
-  // Stream a torrent directly (no Real-Debrid): cache metadata, spin up a
+  // Stream a torrent directly (no debrid): cache metadata, spin up a
   // local HTTP server for the files, then hand off to the same player/picker
-  // path the Real-Debrid flow uses.
+  // path the debrid flow uses.
   const startTorrentStream = useCallback(
     (input: DownloadInput) => {
       if (!config) return;
@@ -1325,7 +1379,7 @@ export function App({
         setNotice("Stop the current stream first (x).");
         return;
       }
-      const route = classifyStreamRoute(config, rdStatus);
+      const route = classifyStreamRoute(config, debridStatus);
       if (route.kind === "torrent-auto") {
         if (config.torrentStreamAck) {
           startTorrentStream(input);
@@ -1338,23 +1392,26 @@ export function App({
         setTorrentPrompt({ input, reason: route.reason }); // always warn
         return;
       }
-      // route.kind === "realdebrid": fall through to the existing RD flow.
-      const token = resolveRealDebridToken(config);
+      // route.kind === "debrid": resolve via whichever provider
+      // classifyStreamRoute picked.
+      const provider = route.provider;
+      const meta = getDebridProvider(provider);
+      const token = resolveDebridTokenFor(config, provider);
       if (!token) {
-        setNotice("Set a Real-Debrid token first — open the Accounts tab.");
+        setNotice(`Set a ${meta.label} token first — open the Accounts tab.`);
         return;
       }
       const label = truncate(cleanText(input.name), 32);
       const controller = new AbortController();
       prepareAbort.current = controller;
-      setPreparing({ label, phase: "caching", pct: 0, source: "rd" });
+      setPreparing({ label, phase: "caching", pct: 0, source: "rd", providerLabel: meta.label });
       void (async () => {
         try {
-          const files = await resolveMagnet(token, input.magnet, {
+          const files = await meta.resolveMagnet(token, input.magnet, {
             knownHash: input.id,
             signal: controller.signal,
-            // 0<pct<100 means RD is still caching server-side; otherwise we're
-            // about to fetch the direct link.
+            // 0<pct<100 means the provider is still caching server-side;
+            // otherwise we're about to fetch the direct link.
             onProgress: (pct) =>
               setPreparing((p) =>
                 p ? { ...p, phase: pct > 0 && pct < 100 ? "caching" : "fetching", pct } : p,
@@ -1366,7 +1423,7 @@ export function App({
           const candidates = streamCandidates(files);
           if (candidates.length === 0) {
             setPreparing(null);
-            setNotice("Real-Debrid returned nothing to stream.");
+            setNotice(`${meta.label} returned nothing to stream.`);
             return;
           }
           void postEvent(
@@ -1388,21 +1445,21 @@ export function App({
           // A user-initiated cancel already surfaced its own notice; don't
           // clobber it with the cancellation error this throws.
           if (controller.signal.aborted) return;
-          if (isTokenRejection(e)) {
-            setRdStatus(null);
-            setNotice("Real-Debrid token expired — re-enter it.");
+          if (meta.isTokenRejection(e)) {
+            setDebridStatus(null);
+            setNotice(`${meta.label} token expired — re-enter it.`);
             setShowHelp(false);
-            setEditingToken(true);
+            setEditingToken({ provider });
             return;
           }
           setTorrentPrompt({
             input,
-            reason: `Real-Debrid couldn't prepare this stream (${e instanceof Error ? e.message : "unknown error"})`,
+            reason: `${meta.label} couldn't prepare this stream (${e instanceof Error ? e.message : "unknown error"})`,
           });
         }
       })();
     },
-    [config, finishStream, preparing, streamFiles, activeStream, rdStatus, startTorrentStream, markPlayed, recordStreamHistory, openStreamPicker],
+    [config, finishStream, preparing, streamFiles, activeStream, debridStatus, startTorrentStream, markPlayed, recordStreamHistory, openStreamPicker],
   );
 
   // Reopen a favourited series: re-resolve its magnet through the same stream
@@ -1609,11 +1666,11 @@ export function App({
     );
   }, []);
 
-  // The plain (P2P) download button: when Real-Debrid is configured, route
-  // through a warning first since P2P exposes the user's IP to the swarm.
+  // The plain (P2P) download button: when a debrid provider is configured,
+  // route through a warning first since P2P exposes the user's IP to the swarm.
   const requestP2PDownload = useCallback(
     (input: DownloadInput) => {
-      if (config && resolveRealDebridToken(config)) {
+      if (config && resolveActiveDebrid(config)) {
         setPendingP2P(input);
         return;
       }
@@ -1773,6 +1830,40 @@ export function App({
     return () => clearTimeout(t);
   }, [notice]);
 
+  // Stale cached markers are worse than none — a marker on the wrong row — so
+  // both triggers that mean "these results no longer apply" reset the set:
+  // a new query, and switching which debrid account is active.
+  useEffect(() => {
+    cachedRequestId.current += 1;
+    setCachedHashes(new Set());
+  }, [query]);
+
+  const activeCachedProvider = config ? (resolveActiveDebrid(config)?.provider ?? null) : null;
+  useEffect(() => {
+    cachedRequestId.current += 1;
+    setCachedHashes(new Set());
+  }, [activeCachedProvider]);
+
+  // Called by Results.tsx once a search settles with the hashes on screen.
+  // Lives here, not in Results.tsx, because only App.tsx holds the debrid
+  // token — Store deliberately carries no token (see Store's own comments) —
+  // and resolveActiveDebrid/getDebridProvider is the one place that already
+  // knows how to find both.
+  const refreshCachedHashes = useCallback(
+    (hashes: readonly string[]) => {
+      const requestId = ++cachedRequestId.current;
+      const active = config ? resolveActiveDebrid(config) : null;
+      if (!active || getDebridProvider(active.provider).checkCached === undefined || hashes.length === 0) {
+        setCachedHashes(new Set());
+        return;
+      }
+      void cachedHashesFor(getDebridProvider(active.provider), active.token, hashes).then((result) => {
+        if (cachedRequestId.current === requestId) setCachedHashes(result);
+      });
+    },
+    [config],
+  );
+
   const [prepElapsed, setPrepElapsed] = useState(0);
   useEffect(() => {
     if (!preparing) {
@@ -1844,13 +1935,16 @@ export function App({
       requestDownloadTo,
       startDebridDownload,
       streamResult,
-      debridConfigured: resolveRealDebridToken(config) !== "",
+      debridConfigured: resolveActiveDebrid(config) !== null,
+      debridProvider: resolveActiveDebrid(config)?.provider ?? null,
       reccConfigured: Boolean(resolveReccConfig(config).reccUrl),
       omdbConfigured: resolveOmdbApiKey(config) !== "",
       omdbApiKey: resolveOmdbApiKey(config),
       adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
-      rdStatus,
+      debridStatus,
+      cachedHashes,
+      refreshCachedHashes,
       copyLink,
       copyMagnet,
       openDownloadFolder,
@@ -1916,7 +2010,9 @@ export function App({
     requestDownloadTo,
     startDebridDownload,
     streamResult,
-    rdStatus,
+    debridStatus,
+    cachedHashes,
+    refreshCachedHashes,
     copyLink,
     copyMagnet,
     openDownloadFolder,
@@ -2098,6 +2194,11 @@ export function App({
     );
   }
 
+  // The active provider's display name, or undefined when none is configured —
+  // every "Real-Debrid" string below reads from this rather than a literal, so
+  // a TorBox-only account sees its own provider named back to it.
+  const activeDebridLabel = store.debridProvider ? getDebridProvider(store.debridProvider).label : undefined;
+
   return (
     <StoreContext.Provider value={store}>
       <TabTitle />
@@ -2109,7 +2210,7 @@ export function App({
             <Logo />
           </Box>
           <Box flexShrink={1} minWidth={0} marginLeft={2}>
-            <RdBadge status={rdStatus} />
+            <DebridBadge status={debridStatus} />
             {notice ? (
               <Text color={COLOR.good} wrap="truncate-end">{`  ${notice}`}</Text>
             ) : null}
@@ -2122,7 +2223,7 @@ export function App({
                 preparing.source === "torrent"
                   ? `Finding peers… ${preparing.label} · ${prepElapsed}s  (esc cancels)`
                   : preparing.phase === "caching"
-                    ? `Caching on Real-Debrid… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
+                    ? `Caching on ${preparing.providerLabel ?? "debrid"}… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
                     : `Fetching link… ${prepElapsed}s  (esc cancels)`
               }
             />
@@ -2158,10 +2259,15 @@ export function App({
           <Box marginTop={1}>
             <TokenPrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
-              value={store.config.realDebridToken ?? ""}
-              status={rdStatus}
-              onSubmit={setRealDebridToken}
-              onClear={clearRealDebridToken}
+              value={
+                (editingToken.provider === "torbox"
+                  ? store.config.torBoxToken
+                  : store.config.realDebridToken) ?? ""
+              }
+              status={debridStatus?.provider === editingToken.provider ? debridStatus : null}
+              provider={getDebridProvider(editingToken.provider)}
+              onSubmit={(raw) => setDebridToken(editingToken.provider, raw)}
+              onClear={() => clearDebridToken(editingToken.provider)}
               onCancel={closeTokenPrompt}
             />
           </Box>
@@ -2318,9 +2424,9 @@ export function App({
                 setStreamedFiles(new Set());
                 setStreamSource(null);
                 setStreamPreselect(null);
-                // The Real-Debrid path has no activeStream (files are hosted
-                // by RD, not a local torrent session), so this only fires for
-                // the torrent-stream path — leave that path unaffected.
+                // A debrid stream has no activeStream (files are hosted by the
+                // provider, not a local torrent session), so this only fires
+                // for the torrent-stream path — leave that path unaffected.
                 if (activeStream) {
                   void activeStream.session.stop();
                   activeStreamRef.current = null;
@@ -2357,9 +2463,9 @@ export function App({
             <ConfirmPrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
               title="peer-to-peer download"
-              message="This download uses peer-to-peer, so your IP is visible to the swarm. Real-Debrid keeps it private. Continue with P2P?"
+              message={`This download uses peer-to-peer, so your IP is visible to the swarm. ${activeDebridLabel ?? "A debrid service"} keeps it private. Continue with P2P?`}
               altKey="r"
-              altLabel="use Real-Debrid"
+              altLabel={`use ${activeDebridLabel ?? "debrid"}`}
               onConfirm={() => {
                 const input = pendingP2P;
                 setPendingP2P(null);
@@ -2379,16 +2485,19 @@ export function App({
           <Box marginTop={1}>
             <ConfirmPrompt
               width={Math.max(24, Math.min(cols - 4, 62))}
-              title={torrentPrompt.reason ? "Real-Debrid unavailable" : "Stream via torrent?"}
+              title={torrentPrompt.reason ? `${activeDebridLabel ?? "Debrid"} unavailable` : "Stream via torrent?"}
               message={
                 torrentPrompt.reason
                   ? `${torrentPrompt.reason}. Streaming via torrent connects you directly to peers, so your IP is visible to the swarm. Continue via torrent?`
-                  : "Streaming via torrent connects you directly to peers, so your IP is visible to the swarm (Real-Debrid keeps it private). Continue?"
+                  : `Streaming via torrent connects you directly to peers, so your IP is visible to the swarm (${activeDebridLabel ? `${activeDebridLabel} keeps it private` : "a debrid service keeps it private"}). Continue?`
               }
               onConfirm={() => {
                 const { input, reason } = torrentPrompt;
                 setTorrentPrompt(null);
-                // Remember the acknowledgement only for the no-RD one-time warning.
+                // Remember the acknowledgement only for the no-active-debrid
+                // one-time warning (torrent-auto); a torrent-confirm prompt
+                // (reason set — a configured-but-inactive Real-Debrid or
+                // TorBox account) always prompts again and is never persisted.
                 if (!reason && config) setConfig({ ...config, torrentStreamAck: true });
                 startTorrentStream(input);
               }}
@@ -2576,12 +2685,17 @@ export function App({
             </Box>
             <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
               <Accounts
-                rdToken={resolveRealDebridToken(store.config)}
-                rdStatus={rdStatus}
+                debrid={DEBRID_PROVIDER_IDS.map((provider) => ({
+                  provider,
+                  token: resolveDebridTokenFor(store.config, provider),
+                  status: debridStatus?.provider === provider ? debridStatus : null,
+                  onManage: () => openTokenPrompt(provider),
+                  onSignOut: () => clearDebridToken(provider),
+                }))}
+                activeDebrid={store.debridProvider}
+                onSetActiveDebrid={setActiveDebrid}
                 rutrackerUser={rutrackerUser}
                 streamActive={store.streamActive}
-                onManageRd={openTokenPrompt}
-                onSignOutRd={clearRealDebridToken}
                 onManageRutracker={openRutrackerPrompt}
                 onSignOutRutracker={signOutRutracker}
                 reccConfigured={store.reccConfigured}
@@ -2639,7 +2753,7 @@ export function App({
                 section,
                 downloadFocus,
                 seedFocus,
-                store.debridConfigured,
+                activeDebridLabel,
                 store.streamActive,
               )}
             />

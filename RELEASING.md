@@ -15,7 +15,7 @@ open a PR, merge it, and push the tag.
 
 | Thing | Value | Why |
 | --- | --- | --- |
-| npm package | `torlnk-rd` | `torlnk` is upstream's; unscoped `torlink` is rejected by npm's similarity filter (too close to `comlink`). `-rd` calls out the Real-Debrid support. |
+| npm package | `torlnk-rd` | `torlnk` is upstream's; unscoped `torlink` is rejected by npm's similarity filter (too close to `comlink`). `-rd` calls out the Real-Debrid support that originally justified the fork. TorBox support arrived later, but the package name doesn't follow: renaming a published package orphans every existing install (`npm i -g torlnk-rd` keeps working, a new name doesn't), so the `-rd` suffix stays even though it now only names one of two debrid providers. |
 | CLI command | `torlnk` | What users type. Independent of the package name (it's the `bin` key). |
 | GitHub repo | `WarlaxZ/torlink` | Where releases and the update check point. |
 
@@ -99,3 +99,12 @@ The tag is the single source of truth, which keeps every install path in step:
   across filesystems (`/tmp` is often a separate tmpfs) throws `EXDEV`. Windows
   can't overwrite a running `node.exe`, so it stages and swaps via an on-exit
   `.cmd` helper (best-effort; Unix is seamless).
+- **Downgrading past the TorBox release is not clean.** `normalizeVia`
+  (`src/download/types.ts`) migrates a persisted `via: "realdebrid"` forward to
+  `{via: "debrid", provider: "realdebrid"}`, but only forward — there is no
+  companion step that migrates back. A user who downgrades to a pre-TorBox
+  build reads `via: "debrid"` as an unrecognised value, falls back to `p2p`,
+  and `restore()` would hand that item's magnet straight to webtorrent instead
+  of failing it as a retryable debrid item. Not a concern for a normal forward
+  release; worth remembering before ever recommending a user roll back across
+  this boundary.

@@ -14,6 +14,7 @@ import {
   truncate,
 } from "../../util/format";
 import { deliveryMethod } from "../downloadState";
+import { getDebridProvider } from "../../integrations/debrid";
 import type { QueueItem } from "../../download/types";
 import type { HistoryItem } from "../../download/history";
 import type { SourceId } from "../../sources/types";
@@ -39,17 +40,17 @@ function statusIcon(status: QueueItem["status"]): string {
 function rightStats(it: QueueItem): string {
   if (it.status === "selecting") return `choose files  ${it.files ?? 0} available`;
   if (it.status === "downloading") {
-    // Real-Debrid first caches the torrent on its cloud (resolving), then we
-    // pull it over HTTP — no swarm, so no peer count.
-    if (it.via === "realdebrid" && it.phase === "queued") {
-      return "queued — waiting for Real-Debrid";
+    // A debrid provider first caches the torrent on its cloud (resolving), then
+    // we pull it over HTTP — no swarm, so no peer count.
+    if (it.via === "debrid" && it.phase === "queued") {
+      return `queued — waiting for ${getDebridProvider(it.provider ?? "realdebrid").label}`;
     }
-    if (it.via === "realdebrid" && it.phase === "resolving") {
-      return `preparing on Real-Debrid… ${it.progress}%`;
+    if (it.via === "debrid" && it.phase === "resolving") {
+      return `preparing on ${getDebridProvider(it.provider ?? "realdebrid").label}… ${it.progress}%`;
     }
     const speed = formatBytesPerSec(it.speed) || "…";
     const eta = it.eta ? `  ${formatEtaShort(it.eta)}` : "";
-    if (it.via === "realdebrid") return `${it.progress}%  ${speed}${eta}`;
+    if (it.via === "debrid") return `${it.progress}%  ${speed}${eta}`;
     return `${it.progress}%  ${speed}  ${ICON.peer}${it.peers}${eta}`;
   }
   if (it.status === "paused") return `paused  ${it.progress}%`;
@@ -66,12 +67,12 @@ function SourceBadge({
   source,
   dim,
 }: {
-  method: "RD" | "P2P" | null;
+  method: "RD" | "TB" | "P2P" | null;
   source?: SourceId;
   dim?: boolean;
 }) {
   const ss = source ? SOURCE_STYLE[source] : undefined;
-  const methodColor = method === "RD" ? COLOR.good : COLOR.warn;
+  const methodColor = method === "RD" || method === "TB" ? COLOR.good : COLOR.warn;
   if (!method && !ss) return <Text dimColor>mag</Text>;
   return (
     <Text>
@@ -111,7 +112,7 @@ export function Downloads() {
 
   const total = active.length + recent.length;
   const [cursor, setCursor] = useState(0);
-  // An active Real-Debrid item whose direct link the user asked to copy before
+  // An active debrid item whose direct link the user asked to copy before
   // it had resolved — we copy it automatically the moment it's ready.
   const [copyWhenReady, setCopyWhenReady] = useState<string | null>(null);
 
@@ -156,9 +157,9 @@ export function Downloads() {
         } else if (input === "p") queue.togglePause(it.id);
         else if (input === "y") {
           if (it.directUrl) copyLink(it.directUrl, it.name);
-          else if (it.via === "realdebrid") {
+          else if (it.via === "debrid") {
             setCopyWhenReady(it.id);
-            setNotice("Will copy the link once Real-Debrid is ready…");
+            setNotice(`Will copy the link once ${getDebridProvider(it.provider ?? "realdebrid").label} is ready…`);
           } else setNotice("No direct link — that's a peer-to-peer download.");
         }
       } else {
@@ -269,7 +270,7 @@ export function Downloads() {
                 <Text dimColor>{it.totalBytes > 0 ? formatBytes(it.totalBytes) : "-"}</Text>
               </Box>
               <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                <SourceBadge method={deliveryMethod(it.via)} source={it.source} dim={!here} />
+                <SourceBadge method={deliveryMethod(it.via, it.provider)} source={it.source} dim={!here} />
               </Box>
             </Box>
             <Box>
@@ -327,7 +328,7 @@ export function Downloads() {
             </Box>
             <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
               <SourceBadge
-                method={h.via === undefined ? null : deliveryMethod(h.via)}
+                method={h.via === undefined ? null : deliveryMethod(h.via, h.provider)}
                 source={h.source}
                 dim={!here}
               />

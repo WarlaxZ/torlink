@@ -4,7 +4,7 @@ import type { DownloadQueue } from "../download/queue";
 import type { HistoryItem } from "../download/history";
 import type { QueueItem, SeedItem } from "../download/types";
 import type { SourceGroup, SourceId } from "../sources/types";
-import type { RdStatus } from "../integrations/rdStatus";
+import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
 import type { Sort } from "./sort";
 import type { StreamHistoryItem } from "../core/streamHistory";
 
@@ -131,7 +131,7 @@ export interface Store {
     sizeBytes?: number;
   }) => void;
   // The plain (P2P) download button. Gated behind an IP-safety warning when a
-  // Real-Debrid token is configured; otherwise downloads immediately.
+  // debrid provider is configured; otherwise downloads immediately.
   requestP2PDownload: (input: {
     id: string;
     name: string;
@@ -148,7 +148,7 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
-  // Download via Real-Debrid (resolve magnet -> direct links -> HTTP).
+  // Download via the active debrid provider (resolve magnet -> direct links -> HTTP).
   startDebridDownload: (input: {
     id: string;
     name: string;
@@ -156,7 +156,7 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
-  // Stream via Real-Debrid: resolve, then play the largest video in a player.
+  // Stream via the active debrid provider: resolve, then play in a player.
   streamResult: (input: {
     id: string;
     name: string;
@@ -164,8 +164,10 @@ export interface Store {
     source?: SourceId;
     sizeBytes?: number;
   }) => void;
-  // True when an RD token is available (config or env var).
+  // True when a debrid token is available (config or env var).
   debridConfigured: boolean;
+  // Which debrid service resolves magnets, or null when none is configured.
+  debridProvider: DebridProviderId | null;
   // True when a recc (recommendation engine) URL is configured.
   reccConfigured: boolean;
   // True when an OMDb API key is configured (enables For You plot summaries).
@@ -180,8 +182,18 @@ export interface Store {
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.
   streamActive: boolean;
-  // The validated Real-Debrid account, or null when unknown/not connected.
-  rdStatus: RdStatus | null;
+  // The validated debrid account (whichever provider is active), or null when
+  // unknown/not connected.
+  debridStatus: DebridStatus | null;
+  // Info hashes the active debrid provider has cached, for the results marker.
+  // Empty when the provider cannot answer — see cachedTag's reasoning in
+  // src/web/static/searchModel.ts, which this mirrors for the terminal.
+  cachedHashes: ReadonlySet<string>;
+  // Called once a search settles with the hashes on screen. Resolves and
+  // clears `cachedHashes` itself; App.tsx owns this rather than the caller
+  // because it is the one place holding the debrid token (Store deliberately
+  // does not).
+  refreshCachedHashes: (hashes: readonly string[]) => void;
   // Copy an arbitrary link (e.g. a resolved RD direct URL) to the clipboard.
   copyLink: (url: string, name: string) => void;
   copyMagnet: (input: { name: string; magnet: string }) => void;

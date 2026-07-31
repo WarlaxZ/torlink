@@ -31,8 +31,11 @@ import {
   addBody,
   addPlan,
   ALL_TAB,
+  cachedTag,
   categoryTabs,
   dashRowForPlay,
+  debridAddedNotice,
+  debridAddLabel,
   emptyView,
   modeForQuery,
   parseLayout,
@@ -671,6 +674,14 @@ let view: ViewName = "search";
 let searchView: SearchView = emptyView();
 let sources: SourcesResponse | null = null;
 let searchStream: EventSource | null = null;
+// Lowercase info hashes the active provider has cached, straight from
+// POST /api/cached. Empty whenever the provider can't answer (see cachedTag) —
+// there is no "unknown" state, only cached or not-shown.
+let cachedHashes: ReadonlySet<string> = new Set();
+// Bumped on every startSearch so a cached-check answer that lands after a newer
+// search has already begun cannot paint stale badges onto this search's rows —
+// the same failure mode a marker on the wrong row would be.
+let cachedGeneration = 0;
 // The info hash of the row whose preview is showing, so a re-render can restore
 // the selection: the results list is rebuilt on every snapshot frame, and up to
 // 23 of those arrive during one search.
@@ -765,6 +776,41 @@ function stopSearch(): void {
   searchStream = null;
 }
 
+/**
+ * `POST /api/cached` for the settled search's rows, fired after results are
+ * already on screen — never awaited by anything that would delay rendering.
+ *
+ * Skipped entirely when `sources?.debridCachedCheck` is false, which is how a
+ * Real-Debrid browser never asks a question the server would 409: the browser
+ * already knows the capability from `/api/sources` and doesn't have to find
+ * out the hard way. `cachedGeneration` guards the async reply landing after a
+ * newer search has started — a badge from a discarded query answered on this
+ * one's rows would be worse than no badge at all.
+ */
+function refreshCachedHashes(): void {
+  if (sources?.debridCachedCheck !== true) return;
+  const hashes = [...new Set((searchView.snapshot?.results ?? []).map((r) => r.infoHash))];
+  if (hashes.length === 0) return;
+  const generation = cachedGeneration;
+  void (async () => {
+    let res: Response;
+    try {
+      res = await fetch("/api/cached", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ hashes }),
+      });
+    } catch {
+      return;
+    }
+    if (!res.ok || generation !== cachedGeneration) return;
+    const body = await readJson(res);
+    if (!Array.isArray(body.cached) || generation !== cachedGeneration) return;
+    cachedHashes = new Set(body.cached.filter((h): h is string => typeof h === "string"));
+    renderResults();
+  })();
+}
+
 function startSearch(raw: string): void {
   stopSearch();
   // Trimmed here, once, so every caller — including searchForPick, which hands
@@ -784,6 +830,11 @@ function startSearch(raw: string): void {
   // A new search is the only moment the whole set of rows changes, so it is the
   // only moment every blob is certainly dead.
   resultPosters.clear();
+  // Stale cached markers are worse than none: a marker on the wrong row. Bump
+  // the generation FIRST so an in-flight /api/cached reply from the previous
+  // search cannot land after this reset and repaint badges onto these rows.
+  cachedGeneration += 1;
+  cachedHashes = new Set();
   paintSearchHint();
   renderResults();
 
@@ -814,6 +865,7 @@ function startSearch(raw: string): void {
     // silently re-run the whole 23-source fan-out.
     stopSearch();
     renderResults();
+    refreshCachedHashes();
   });
   source.addEventListener("error", (event) => {
     if (source !== searchStream) return;
@@ -1058,17 +1110,30 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   });
   actions.append(favButton);
 
-  // Offered only where the TUI offers `r`: when a Real-Debrid token is actually
+  // Offered only where the TUI offers `r`: when a debrid token is actually
   // configured. A button that always answered "set a token first" is noise.
-  if (sources?.debridConfigured) {
+  // `debridProvider` guards against `debridConfigured: true` with a null
+  // provider producing a button labelled "add via null".
+  if (sources?.debridConfigured && sources.debridProvider) {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
-    debridButton.textContent = "add via RD";
+    debridButton.textContent = debridAddLabel(sources.debridProvider);
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
 
   return actions;
+}
+
+// createElement + textContent only — see the file-level rule. `cachedTag`
+// already folds in `debridCachedCheck`, so this is a straight append-or-not.
+function appendCachedBadge(meta: HTMLElement, result: PublicSearchResult): void {
+  const tag = cachedTag(result.infoHash, cachedHashes, sources?.debridCachedCheck === true);
+  if (!tag) return;
+  const badge = document.createElement("span");
+  badge.className = "tag-cached";
+  badge.textContent = tag;
+  meta.append(badge);
 }
 
 // Same createElement/textContent rule as every other list here: a release name
@@ -1103,6 +1168,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   const meta = document.createElement("span");
   meta.className = "row-meta";
   meta.textContent = resultMeta(result, sources);
+  appendCachedBadge(meta, result);
 
   li.append(posterButton, name, meta, resultActions(result));
   return li;
@@ -1134,6 +1200,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   const meta = document.createElement("span");
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
+  appendCachedBadge(meta, result);
 
   const actions = resultActions(result);
 
@@ -1207,7 +1274,12 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
   // The prompt-or-go decision is addPlan's, not this function's: it is a
   // decision about whether the user's IP is about to enter a public swarm, and
   // it belongs somewhere a test can reach.
-  const plan = addPlan(via, sources?.debridConfigured === true, result.name);
+  const plan = addPlan(
+    via,
+    sources?.debridConfigured === true,
+    result.name,
+    sources?.debridProvider ?? undefined,
+  );
   if (plan.kind === "confirm" && !confirm(plan.message)) {
     showNotice("Nothing was added.");
     return;
@@ -1239,7 +1311,11 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
     showNotice("Already in the queue.");
     return;
   }
-  showNotice(plan.via === "debrid" ? "Added via Real-Debrid." : "Added to the queue.");
+  showNotice(
+    plan.via === "debrid" && sources?.debridProvider
+      ? debridAddedNotice(sources.debridProvider)
+      : "Added to the queue.",
+  );
 }
 
 // ---- preview ----

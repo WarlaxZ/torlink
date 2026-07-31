@@ -1,12 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
-import { resolveMagnet } from "../integrations/realdebrid";
-import type { ResolveOptions } from "../integrations/realdebrid";
+import { getDebridProvider } from "../integrations/debrid";
+import type { DebridProviderId, ResolveOptions } from "../integrations/debrid/types";
 import type { StreamFile } from "../util/player";
 import type { StreamRoute } from "./streamRoute";
 
 export type StreamSessionState = "resolving" | "ready" | "error";
-export type StreamBackend = "realdebrid" | "torrent";
+export type StreamBackend = "debrid" | "torrent";
 
 export interface StreamSession {
   id: string;
@@ -17,6 +17,8 @@ export interface StreamSession {
   // Which backend actually serves this session. Distinct from StartStreamInput's
   // `route`, which is the three-way routing decision that led here.
   backend: StreamBackend;
+  // Which debrid service served it, when `backend` is "debrid".
+  provider?: DebridProviderId;
   name: string;
   state: StreamSessionState;
   // Upstream URLs: a Real-Debrid link, or a localhost WebTorrent URL. These stay
@@ -33,6 +35,7 @@ export type StreamTorrentImpl = (
 ) => Promise<TorrentStreamSession>;
 
 export type ResolveDebridImpl = (
+  provider: DebridProviderId,
   token: string,
   magnet: string,
   opts: ResolveOptions,
@@ -51,18 +54,18 @@ export interface StartStreamInput {
   magnet: string;
   name: string;
   route: StreamRoute;
-  // Required for the realdebrid route. Absent is an error, never a silent
+  // Required for the debrid route. Absent is an error, never a silent
   // downgrade to P2P: that would expose the user's IP after they deliberately
-  // configured Real-Debrid.
+  // configured a debrid service.
   debridToken?: string;
 }
 
-export const NO_DEBRID_TOKEN = "No Real-Debrid token configured for this stream.";
+export const NO_DEBRID_TOKEN = "No debrid token configured for this stream.";
 
 /**
  * Owns live stream sessions for the whole process, so the TUI and the browser
  * see one list: a session started in the terminal is playable in a browser and
- * vice versa. One session type covers both backends — a Real-Debrid resolve and
+ * vice versa. One session type covers both backends — a debrid resolve and
  * a local WebTorrent swarm differ only in where `files` come from.
  */
 export class StreamSessionRegistry {
@@ -79,7 +82,9 @@ export class StreamSessionRegistry {
 
   constructor(deps: StreamSessionDeps = {}) {
     this.streamTorrentImpl = deps.streamTorrentImpl ?? streamTorrent;
-    this.resolveDebridImpl = deps.resolveDebridImpl ?? resolveMagnet;
+    this.resolveDebridImpl =
+      deps.resolveDebridImpl ??
+      ((provider, token, magnet, opts) => getDebridProvider(provider).resolveMagnet(token, magnet, opts));
     this.idFactory = deps.idFactory ?? (() => randomUUID());
     this.capabilityFactory = deps.capabilityFactory ?? (() => randomBytes(24).toString("base64url"));
     this.now = deps.now ?? Date.now;
@@ -118,12 +123,13 @@ export class StreamSessionRegistry {
    * rejects, so a caller that drops it cannot produce an unhandled rejection.
    */
   begin(input: StartStreamInput): { session: StreamSession; done: Promise<StreamSession> } {
-    const viaDebrid = input.route.kind === "realdebrid";
+    const viaDebrid = input.route.kind === "debrid";
     const session: StreamSession = {
       id: this.idFactory(),
       capability: this.capabilityFactory(),
       backendHandle: null,
-      backend: viaDebrid ? "realdebrid" : "torrent",
+      backend: viaDebrid ? "debrid" : "torrent",
+      ...(viaDebrid && input.route.kind === "debrid" ? { provider: input.route.provider } : {}),
       name: input.name,
       state: "resolving",
       files: [],
@@ -144,11 +150,16 @@ export class StreamSessionRegistry {
     input: StartStreamInput,
     abort: AbortController,
   ): Promise<StreamSession> {
-    const viaDebrid = input.route.kind === "realdebrid";
+    const viaDebrid = input.route.kind === "debrid";
     try {
       if (viaDebrid) {
-        if (!input.debridToken) throw new Error(NO_DEBRID_TOKEN);
-        session.files = await this.resolveDebridImpl(input.debridToken, input.magnet, {
+        // Derived the same way, and from the same expression, as the `provider`
+        // stamped onto the session in begin() — one source of truth (the route
+        // classifyStreamRoute produced), so the session can never record a
+        // provider other than the one it actually resolves through.
+        const provider = input.route.kind === "debrid" ? input.route.provider : undefined;
+        if (!input.debridToken || !provider) throw new Error(NO_DEBRID_TOKEN);
+        session.files = await this.resolveDebridImpl(provider, input.debridToken, input.magnet, {
           knownHash: input.infoHash,
           signal: abort.signal,
           onProgress: (percent) => {

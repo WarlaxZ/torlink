@@ -1,6 +1,9 @@
-import { fetchResilient, HttpError, USER_AGENT, type FetchImpl } from "../util/net";
-import { log } from "../util/logger";
-import type { StreamFile } from "../util/player";
+import { fetchResilient, HttpError, USER_AGENT, type FetchImpl } from "../../util/net";
+import { log } from "../../util/logger";
+import type { StreamFile } from "../../util/player";
+import type { DebridProvider, DebridStatus, RequestOptions, ResolveOptions } from "./types";
+
+export type { RequestOptions, ResolveOptions };
 
 export type RealDebridFetch = FetchImpl;
 
@@ -81,26 +84,6 @@ export function isTokenRejection(e: unknown): boolean {
   if (e instanceof RealDebridError && (e.status === 401 || e.status === 403)) return true;
   const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
   return msg.includes(TOKEN_REJECTED_MESSAGE);
-}
-
-export interface RequestOptions {
-  fetchImpl?: RealDebridFetch;
-  sleepImpl?: (ms: number) => Promise<void>;
-  signal?: AbortSignal;
-  // Retry budget for this call. Defaults to a couple of retries; set 0 for
-  // non-idempotent calls (addMagnet) where a retry could duplicate work.
-  retries?: number;
-}
-
-export interface ResolveOptions extends RequestOptions {
-  onProgress?: (percent: number) => void;
-  pollIntervalMs?: number;
-  // The torrent's infoHash (hex). When given, an already-added torrent with the
-  // same hash is reused instead of adding a duplicate to the user's RD account
-  // (and a cached one resolves instantly).
-  knownHash?: string;
-  // Fail if RD-side caching makes no progress for this many ms (default 3 min).
-  stallMs?: number;
 }
 
 function realSleep(ms: number): Promise<void> {
@@ -422,3 +405,39 @@ export async function resolveMagnet(
   }
   return files;
 }
+
+/** `RealDebridUser` → the provider-blind `DebridStatus`. */
+export function debridStatusFromRealDebridUser(user: RealDebridUser, now: Date): DebridStatus {
+  const active = isPremiumActive(user);
+  let expiresAt: Date | null = null;
+  if (active) {
+    const fromSeconds = new Date(now.getTime() + (user.premium ?? 0) * 1000);
+    if (user.expiration) {
+      const parsed = new Date(user.expiration);
+      expiresAt = Number.isNaN(parsed.getTime()) ? fromSeconds : parsed;
+    } else {
+      expiresAt = fromSeconds;
+    }
+  }
+  return {
+    provider: "realdebrid",
+    username: user.username,
+    active,
+    planLabel: active ? "premium" : "free",
+    expiresAt,
+  };
+}
+
+export const realDebridProvider: DebridProvider = {
+  id: "realdebrid",
+  label: "Real-Debrid",
+  shortLabel: "RD",
+  homepage: "real-debrid.com",
+  tokenUrl: "https://real-debrid.com/apitoken",
+  tokenEnvVar: "REALDEBRID_API_TOKEN",
+  validateToken: async (token, opts) => debridStatusFromRealDebridUser(await validateToken(token, opts), new Date()),
+  resolveMagnet,
+  // No checkCached: Real-Debrid withdrew /torrents/instantAvailability in 2024.
+  isTransient,
+  isTokenRejection,
+};

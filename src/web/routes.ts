@@ -14,9 +14,9 @@ import {
 } from "../core/streamHistory";
 import {
   loadConfig,
+  resolveActiveDebrid,
   resolveAdultContent,
   resolveOmdbApiKey,
-  resolveRealDebridToken,
   resolveReccConfig,
   saveConfig,
   type Config,
@@ -31,8 +31,8 @@ import {
   type ReccEventType,
   type RecommendationQuery,
 } from "../recc/client";
-import { rdStatusFromUser, type RdStatus } from "../integrations/rdStatus";
-import { validateToken } from "../integrations/realdebrid";
+import { getDebridProvider } from "../integrations/debrid";
+import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
 import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
 import {
   isFavourited,
@@ -43,6 +43,7 @@ import {
 import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
 import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
 import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
+import { cachedHashesFor } from "../core/cachedHashes";
 import {
   fetchTitleMeta,
   fetchTitleMetaByName,
@@ -57,6 +58,7 @@ import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
   AddResponse,
+  CachedResponse,
   ContinueWatchingResponse,
   LibraryResponse,
   PublicFavourite,
@@ -107,19 +109,21 @@ export interface WebDeps {
   /** Injected for the reason `saveConfigImpl` is: the real one writes the developer's own data dir. */
   saveStreamHistoryImpl?: (items: readonly StreamHistoryItem[]) => Promise<void>;
   /**
-   * Last-known Real-Debrid account status for a token, or null when it can't be
-   * determined. Only consulted when a token is configured (see the route).
+   * Last-known account status for the active debrid provider's token, or null
+   * when it can't be determined. Only consulted when a token is configured
+   * (see the route).
    *
    * The default hits the network, because the alternative is worse: the TUI
-   * keeps a live `rdStatus` in React state and the web layer has no equivalent,
-   * so hardcoding null here would mean `classifyStreamRoute` could never return
-   * `torrent-confirm` from a browser, and a lapsed premium account would route
-   * straight to P2P — silently, which is the one outcome that decision exists
-   * to prevent. A failure (offline, RD down) is null, not an error: that lets
-   * the RD attempt proceed and fail with its own message rather than
-   * downgrading to a swarm because a status probe timed out.
+   * keeps a live `debridStatus` in React state and the web layer has no
+   * equivalent, so hardcoding null here would mean `classifyStreamRoute` could
+   * never return `torrent-confirm` from a browser, and a lapsed premium
+   * account would route straight to P2P — silently, which is the one outcome
+   * that decision exists to prevent. A failure (offline, provider down) is
+   * null, not an error: that lets the provider attempt proceed and fail with
+   * its own message rather than downgrading to a swarm because a status probe
+   * timed out.
    */
-  rdStatusImpl?: (token: string) => Promise<RdStatus | null>;
+  debridStatusImpl?: (provider: DebridProviderId, token: string) => Promise<DebridStatus | null>;
   /**
    * How one source is queried during `/api/search`. Passed straight through to
    * `runSearch`, so the default (`cachedSearch`) and every behaviour around it —
@@ -153,6 +157,14 @@ export interface WebDeps {
    * route for why nothing awaits it.
    */
   postEventImpl?: (config: ReccClientConfig, event: ReccEvent) => Promise<void>;
+  /**
+   * Which of a batch of info hashes the active provider has cached, for
+   * `POST /api/cached`. Defaults to `cachedHashesFor` against the real
+   * provider client; injected so a test never dials out to TorBox or
+   * Real-Debrid. Takes the provider id (not a `DebridProvider` object) so the
+   * seam matches every other injected dep here, which is keyed on primitives.
+   */
+  checkCachedImpl?: (provider: DebridProviderId, token: string, hashes: string[]) => Promise<Set<string>>;
 }
 
 /** The path a client fetches to read one file of a session: `/stream/:sid/:idx`. */
@@ -218,20 +230,19 @@ export function toPublicSession(session: StreamSession): PublicStreamSession {
 }
 
 // The status probe is advisory and sits in front of a user's click, so it is
-// bounded and gets no retries: the Real-Debrid client has no request timeout of
-// its own, and without this a stalled RD API would hold POST /api/stream open
-// for as long as the socket stayed alive. An unanswered probe is "unknown"
-// (null), which routes to Real-Debrid and lets the resolve report its own
+// bounded and gets no retries: the provider client has no request timeout of
+// its own, and without this a stalled provider API would hold POST /api/stream
+// open for as long as the socket stayed alive. An unanswered probe is "unknown"
+// (null), which routes to the provider and lets the resolve report its own
 // failure — never a silent downgrade to a swarm because a probe timed out.
-const RD_STATUS_PROBE_MS = 4000;
+const DEBRID_STATUS_PROBE_MS = 4000;
 
-async function fetchRdStatus(token: string): Promise<RdStatus | null> {
+async function fetchDebridStatus(provider: DebridProviderId, token: string): Promise<DebridStatus | null> {
   try {
-    const user = await validateToken(token, {
+    return await getDebridProvider(provider).validateToken(token, {
       retries: 0,
-      signal: AbortSignal.timeout(RD_STATUS_PROBE_MS),
+      signal: AbortSignal.timeout(DEBRID_STATUS_PROBE_MS),
     });
-    return rdStatusFromUser(user, new Date());
   } catch {
     return null;
   }
@@ -333,13 +344,14 @@ function parseStartBody(bodyText: string): StartStreamBody | null {
  * and its (public) state.
  *
  * Routing is `classifyStreamRoute`, the same decision the TUI makes, for the
- * same reason: a configured Real-Debrid account should be used, and one that is
- * configured but not working must not be quietly swapped for a P2P swarm. The
- * `torrent-confirm` case is reported to the client as its own status and its
- * own body and NOT downgraded to `torrent-auto` here — the user set Real-Debrid
- * up precisely so their IP would stay out of swarms, and a server that decides
- * "close enough" on their behalf exposes it without them ever seeing a prompt.
- * The client asks, and comes back with `confirm: true` if they accept.
+ * same reason: a configured debrid account (Real-Debrid or TorBox) should be
+ * used, and one that is configured but not working must not be quietly
+ * swapped for a P2P swarm. The `torrent-confirm` case is reported to the
+ * client as its own status and its own body and NOT downgraded to
+ * `torrent-auto` here — the user set a debrid provider up precisely so their
+ * IP would stay out of swarms, and a server that decides "close enough" on
+ * their behalf exposes it without them ever seeing a prompt. The client asks,
+ * and comes back with `confirm: true` if they accept.
  */
 async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse> {
   const body = parseStartBody(bodyText);
@@ -358,13 +370,15 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : parsed.name;
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const debridToken = resolveRealDebridToken(config);
+  const active = resolveActiveDebrid(config);
   // Only probe the account when there is a token to probe. classifyStreamRoute
   // would ignore the status in that case anyway, and this route is reached by a
   // click: a network round trip that cannot change the answer is one the user
   // waits through for nothing.
-  const rdStatus = debridToken ? await (deps.rdStatusImpl ?? fetchRdStatus)(debridToken) : null;
-  const classified = classifyStreamRoute(config, rdStatus);
+  const debridStatus = active
+    ? await (deps.debridStatusImpl ?? fetchDebridStatus)(active.provider, active.token)
+    : null;
+  const classified = classifyStreamRoute(config, debridStatus);
 
   let route: StreamRoute = classified;
   if (classified.kind === "torrent-confirm") {
@@ -388,7 +402,7 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
     magnet: parsed.magnet,
     name,
     route,
-    debridToken: debridToken || undefined,
+    debridToken: active?.token,
   });
   const out: StartStreamResponse = {
     sessionId: session.id,
@@ -680,6 +694,7 @@ export function startSearchStream(
  */
 export function sourcesResponse(config: Config, health: Map<SourceId, Health>, now: number): SourcesResponse {
   const adultEnabled = resolveAdultContent(config);
+  const active = resolveActiveDebrid(config);
   const disabled = new Set(config.disabledSources ?? []);
   const visible = SOURCES.filter((s) => adultEnabled || !s.adult);
   const sources: PublicSource[] = visible.map((s) => ({
@@ -703,11 +718,12 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     })),
     sources,
     adultEnabled,
-    // A boolean, never the token. resolveRealDebridToken, not
-    // `config.realDebridToken`, so REALDEBRID_API_TOKEN counts — the browser
-    // must agree with the TUI about whether Real-Debrid is on, and the TUI
-    // resolves it the same way.
-    debridConfigured: resolveRealDebridToken(config) !== "",
+    // Booleans and an id, never a token. resolveActiveDebrid, not the raw
+    // config fields, so both env vars count — the browser must agree with the
+    // TUI about which provider is on, and the TUI resolves it the same way.
+    debridConfigured: active !== null,
+    debridProvider: active?.provider ?? null,
+    debridCachedCheck: active ? getDebridProvider(active.provider).checkCached !== undefined : false,
     // resolveOmdbApiKey, not config.omdbApiKey, so TORLINK_OMDB_KEY counts —
     // the browser must agree with the TUI about whether artwork is available,
     // and the TUI resolves it the same way.
@@ -778,11 +794,15 @@ async function addToQueue(
 
   if (rawVia === "debrid") {
     const config = await (deps.loadConfigImpl ?? loadConfig)();
-    const debridToken = resolveRealDebridToken(config);
-    if (!debridToken) {
-      return { status: 400, json: { error: "Set a Real-Debrid token first — open the Accounts tab." } };
+    const active = resolveActiveDebrid(config);
+    if (!active) {
+      return {
+        status: 400,
+        json: { error: "Set a Real-Debrid or TorBox token first — open the Accounts tab." },
+      };
     }
-    options.debridToken = debridToken;
+    options.debridToken = active.token;
+    options.debridProvider = active.provider;
   }
 
   const outcome = await addInput(deps.runtime, input, options);
@@ -1402,6 +1422,42 @@ async function reccEvent(deps: WebDeps, bodyText: string): Promise<WebResponse> 
   return { status: 200, json: out };
 }
 
+/**
+ * Which of the posted hashes the active provider has cached.
+ *
+ * 409, not an empty list, when the active provider cannot answer: an empty
+ * `cached` array is a claim ("none of these are cached") and Real-Debrid — which
+ * withdrew its instant-availability endpoint in 2024 — cannot make it. The
+ * browser learns the same thing from `/api/sources`'s `debridCachedCheck` and
+ * does not render the marker at all; this status is the guard for a client that
+ * asks anyway.
+ */
+async function checkCached(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+  if (!Array.isArray(body.hashes)) {
+    return { status: 400, json: { error: "hashes must be an array of info hashes" } };
+  }
+  const hashes = body.hashes.filter((h): h is string => typeof h === "string" && h.length > 0);
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const active = resolveActiveDebrid(config);
+  if (!active || getDebridProvider(active.provider).checkCached === undefined) {
+    return { status: 409, json: { error: "the active debrid provider cannot check cached availability" } };
+  }
+  if (hashes.length === 0) {
+    const empty: CachedResponse = { cached: [] };
+    return { status: 200, json: empty };
+  }
+  const cached = await (deps.checkCachedImpl ??
+    ((p: DebridProviderId, t: string, h: string[]) => cachedHashesFor(getDebridProvider(p), t, h)))(
+    active.provider,
+    active.token,
+    hashes,
+  );
+  const out: CachedResponse = { cached: hashes.map((h) => h.toLowerCase()).filter((h) => cached.has(h)) };
+  return { status: 200, json: out };
+}
+
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
 export function isApiPath(urlPath: string): boolean {
   return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
@@ -1484,6 +1540,10 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/title") {
     return titleMeta(deps, query);
+  }
+
+  if (method === "POST" && urlPath === "/api/cached") {
+    return checkCached(deps, bodyText);
   }
 
   // Both past the token gate above, and both need it: neither delegates to

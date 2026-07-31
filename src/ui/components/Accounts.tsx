@@ -5,12 +5,25 @@ import { Panel } from "./Panel";
 import { wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { truncate } from "../../util/format";
-import { formatAccountStatus, type RdStatus } from "../../integrations/rdStatus";
+import { formatAccountStatus } from "../../integrations/debrid/status";
+import { getDebridProvider } from "../../integrations/debrid";
+import type { DebridProviderId, DebridStatus } from "../../integrations/debrid/types";
 import { formatReccStatus, type ReccStatus } from "../../recc/status";
 
+export interface DebridAccountProps {
+  provider: DebridProviderId;
+  token: string;
+  status: DebridStatus | null;
+  envOverride?: boolean;
+  onManage: () => void;
+  onSignOut: () => void;
+}
+
 interface AccountsProps {
-  rdToken: string;
-  rdStatus: RdStatus | null;
+  debrid: DebridAccountProps[];
+  /** Which provider actually resolves magnets, or null when none is configured. */
+  activeDebrid: DebridProviderId | null;
+  onSetActiveDebrid: (provider: DebridProviderId) => void;
   rutrackerUser?: string;
   reccConfigured: boolean;
   reccStatus: ReccStatus | null;
@@ -18,8 +31,6 @@ interface AccountsProps {
   // True while a torrent stream is active; "x" is reserved for stopping it
   // globally, so sign-out must not also fire on the same keystroke.
   streamActive?: boolean;
-  onManageRd: () => void;
-  onSignOutRd: () => void;
   onManageRutracker: () => void;
   onSignOutRutracker: () => void;
   onManageRecc: () => void;
@@ -49,18 +60,20 @@ interface Row {
   onSignOut: () => void;
   importable?: boolean;
   onImport?: () => void;
+  activatable?: boolean;
+  isActive?: boolean;
+  onActivate?: () => void;
 }
 
 export function Accounts({
-  rdToken,
-  rdStatus,
+  debrid,
+  activeDebrid,
+  onSetActiveDebrid,
   rutrackerUser,
   reccConfigured,
   reccStatus,
   reccEnvOverride = false,
   streamActive = false,
-  onManageRd,
-  onSignOutRd,
   onManageRutracker,
   onSignOutRutracker,
   onManageRecc,
@@ -76,21 +89,28 @@ export function Accounts({
   const [cursor, setCursor] = useState(0);
 
   const rows: Row[] = [
-    {
-      tag: "RD",
-      color: COLOR.good,
-      label: "Real-Debrid",
-      homepage: "real-debrid.com",
-      signedIn: rdToken !== "",
-      ok: rdToken !== "",
-      status: formatAccountStatus(rdStatus, new Date()),
-      emptyStatus: "Not connected",
-      verbSignedIn: "switch",
-      verbSignOut: "sign out",
-      verbSignedOut: "sign in",
-      onManage: onManageRd,
-      onSignOut: onSignOutRd,
-    },
+    ...debrid.map((d): Row => {
+      const meta = getDebridProvider(d.provider);
+      const isActive = activeDebrid === d.provider;
+      return {
+        tag: meta.shortLabel,
+        color: COLOR.good,
+        label: isActive ? `${meta.label}  ${ICON.dot} active` : meta.label,
+        homepage: meta.homepage,
+        signedIn: d.token !== "",
+        ok: d.token !== "",
+        status: `${formatAccountStatus(d.status, new Date())}${d.envOverride ? " · env override active" : ""}`,
+        emptyStatus: "Not connected",
+        verbSignedIn: "switch",
+        verbSignOut: "sign out",
+        verbSignedOut: "sign in",
+        onManage: d.onManage,
+        onSignOut: d.onSignOut,
+        activatable: d.token !== "" && !isActive,
+        isActive,
+        onActivate: () => onSetActiveDebrid(d.provider),
+      };
+    }),
     {
       tag: "RUT",
       color: "#8fce5a",
@@ -149,6 +169,7 @@ export function Accounts({
       else if (key.return) rows[clamped]!.onManage();
       else if (input === "x" && !streamActive && rows[clamped]!.signedIn) rows[clamped]!.onSignOut();
       else if (input === "i" && rows[clamped]!.importable && rows[clamped]!.signedIn) rows[clamped]!.onImport?.();
+      else if (input === "a" && rows[clamped]!.activatable) rows[clamped]!.onActivate?.();
     },
     { isActive: focused },
   );
@@ -198,6 +219,13 @@ export function Accounts({
                         <Text dimColor>{`  ${ICON.dot}  `}</Text>
                         <Text color={COLOR.alt}>i</Text>
                         <Text dimColor> import</Text>
+                      </Text>
+                    ) : null}
+                    {r.activatable ? (
+                      <Text>
+                        <Text dimColor>{`  ${ICON.dot}  `}</Text>
+                        <Text color={COLOR.alt}>a</Text>
+                        <Text dimColor> use</Text>
                       </Text>
                     ) : null}
                   </Text>

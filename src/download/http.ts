@@ -3,7 +3,7 @@ import { createWriteStream, promises as fs } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import type { ResolvedFile } from "../integrations/realdebrid";
+import type { StreamFile } from "../util/player";
 import type { FetchImpl } from "../util/net";
 
 export interface DownloadProgress {
@@ -50,7 +50,7 @@ async function cleanup(paths: string[]): Promise<void> {
  * (so the next run can resume) and deleted for any other reason.
  */
 export async function downloadFiles(
-  files: ResolvedFile[],
+  files: StreamFile[],
   destDir: string,
   opts: DownloadFilesOptions = {},
 ): Promise<string[]> {

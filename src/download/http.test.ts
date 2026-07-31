@@ -3,7 +3,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { downloadFiles } from "./http";
-import type { ResolvedFile } from "../integrations/realdebrid";
+import type { StreamFile } from "../util/player";
 
 const tmpRoots: string[] = [];
 
@@ -19,7 +19,7 @@ afterEach(async () => {
   tmpRoots.length = 0;
 });
 
-function file(url: string, filename: string, bytes: number): ResolvedFile {
+function file(url: string, filename: string, bytes: number): StreamFile {
   return { url, filename, bytes };
 }
 

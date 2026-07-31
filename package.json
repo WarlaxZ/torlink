@@ -1,7 +1,7 @@
 {
   "name": "torlnk-rd",
   "version": "1.9.0",
-  "description": "Search, stream and download torrents — in your terminal or your browser. Zero setup, optional Real-Debrid.",
+  "description": "Search, stream and download torrents — in your terminal or your browser. Zero setup, optional Real-Debrid or TorBox.",
   "type": "module",
   "bin": {
     "torlnk": "dist/cli.cjs"
@@ -42,6 +42,7 @@
     "streaming",
     "torrent-streaming",
     "real-debrid",
+    "torbox",
     "debrid",
     "web-ui",
     "dashboard",

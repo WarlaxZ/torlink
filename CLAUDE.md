@@ -15,7 +15,8 @@ reason. Two reasons that actually qualify:
 
 - **Configuration.** Tokens, sources, limits, folders and DNS are TUI-only on purpose. The web
   is a client of that config. `/api/sources` reports capability flags (`debridConfigured`,
-  `omdbConfigured`) so the browser can adapt without offering to change settings.
+  `debridProvider`, `debridCachedCheck`, `omdbConfigured`) so the browser can adapt without
+  offering to change settings.
 - **A surface can't express it.** The terminal has no posters; the browser has no keybindings.
 
 "I ran out of time" is not one of them. Half a feature is worse than a filed issue.

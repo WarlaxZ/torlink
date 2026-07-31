@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { StreamFilePrompt } from "./StreamFilePrompt";
-import type { ResolvedFile } from "../../integrations/realdebrid";
+import type { StreamFile } from "../../util/player";
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 const UP = `${String.fromCharCode(27)}[A`;
@@ -9,7 +9,7 @@ const UP = `${String.fromCharCode(27)}[A`;
 // Deliberately NOT in title order, and deliberately not in size order either:
 // the picker sorts for display, so a test that fed it a pre-sorted list would
 // prove nothing about which file the cursor is actually on.
-const files: ResolvedFile[] = [
+const files: StreamFile[] = [
   { filename: "Harrowgate.S03E06.1080p.WEB-DL.mkv", bytes: 300, url: "http://x/6" },
   { filename: "Harrowgate.S03E04.1080p.WEB-DL.mkv", bytes: 100, url: "http://x/4" },
   { filename: "Harrowgate.S03E05.1080p.WEB-DL.mkv", bytes: 200, url: "http://x/5" },

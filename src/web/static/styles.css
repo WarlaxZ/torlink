@@ -485,6 +485,18 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* The TorBox-cached marker. Only ever rendered when the active provider can
+   actually answer the question (see cachedTag) — there is no "not cached"
+   styling here because that state does not exist on screen. --accent, not
+   --dim: this is the one positive fact in the meta line and should read as
+   one, the same way .result-source already does. */
+.tag-cached {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Overrides .card's row layout: the preview is a stack, not a form. */
 .preview {
   display: block;

@@ -3,8 +3,12 @@ import {
   addBody,
   addPlan,
   ALL_TAB,
+  cachedTag,
   categoryTabs,
   dashRowForPlay,
+  debridAddedNotice,
+  debridAddLabel,
+  debridProviderLabel,
   emptyView,
   erroredSources,
   modeForQuery,
@@ -93,6 +97,8 @@ const sourcesResponse = (over: Partial<SourcesResponse> = {}): SourcesResponse =
   ],
   adultEnabled: false,
   debridConfigured: false,
+  debridProvider: null,
+  debridCachedCheck: false,
   omdbConfigured: false,
   ...over,
 });
@@ -433,28 +439,76 @@ describe("rowForPlay", () => {
 
 describe("addPlan", () => {
   it("adds straight away when Real-Debrid is not configured", () => {
-    expect(addPlan("p2p", false, "Kestrel")).toEqual({ kind: "add", via: "p2p" });
+    expect(addPlan("p2p", false, "Kestrel", undefined)).toEqual({ kind: "add", via: "p2p" });
   });
 
   it("prompts before a P2P add when Real-Debrid is configured", () => {
-    const plan = addPlan("p2p", true, "Kestrel");
+    const plan = addPlan("p2p", true, "Kestrel", "realdebrid");
     expect(plan.kind).toBe("confirm");
     expect(plan.via).toBe("p2p");
     if (plan.kind !== "confirm") throw new Error("unreachable");
     // The consequence is spelled out. "Continue anyway?" is not informed
     // consent when the thing consented to is publishing your IP.
     expect(plan.message).toContain("IP address will be visible");
+    expect(plan.message).toContain("Real-Debrid is configured");
+    // The prompt must point at the button the user is actually looking at —
+    // "add via RD", not the full "Real-Debrid" name.
+    expect(plan.message).toContain("add via RD");
   });
 
   it("never prompts for an explicit Real-Debrid add", () => {
-    expect(addPlan("debrid", true, "Kestrel")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Kestrel", "realdebrid")).toEqual({ kind: "add", via: "debrid" });
   });
 
   it("clips a very long release name out of the prompt", () => {
-    const plan = addPlan("p2p", true, "x".repeat(200));
+    const plan = addPlan("p2p", true, "x".repeat(200), "realdebrid");
     if (plan.kind !== "confirm") throw new Error("unreachable");
     expect(plan.message).toContain("…");
     expect(plan.message).not.toContain("x".repeat(70));
+  });
+});
+
+describe("debrid copy", () => {
+  it("labels the button after the active provider", () => {
+    expect(debridAddLabel("realdebrid")).toBe("add via RD");
+    expect(debridAddLabel("torbox")).toBe("add via TorBox");
+  });
+
+  it("names the provider in the added notice", () => {
+    expect(debridAddedNotice("torbox")).toBe("Added via TorBox.");
+    expect(debridAddedNotice("realdebrid")).toBe("Added via Real-Debrid.");
+  });
+
+  it("names the provider in the swarm-exposure prompt", () => {
+    const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", "torbox");
+    expect(plan.kind).toBe("confirm");
+    expect(plan.kind === "confirm" && plan.message).toContain("TorBox");
+  });
+
+  it("still never prompts for an explicit debrid add", () => {
+    expect(addPlan("debrid", true, "Ashfall.1999.1080p", "torbox")).toEqual({ kind: "add", via: "debrid" });
+  });
+
+  it("still never prompts when no debrid is configured", () => {
+    expect(addPlan("p2p", false, "Ashfall.1999.1080p", undefined)).toEqual({ kind: "add", via: "p2p" });
+  });
+
+  // This is the assertion that makes the two-sources-for-one-fact bug
+  // impossible to reintroduce: the prompt's quoted button text must equal
+  // debridAddLabel(provider) for BOTH providers, not just coincidentally
+  // match one of them.
+  it("names the exact button text on screen, for every provider", () => {
+    for (const provider of ["realdebrid", "torbox"] as const) {
+      const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", provider);
+      if (plan.kind !== "confirm") throw new Error("unreachable");
+      expect(plan.message).toContain(`“${debridAddLabel(provider)}”`);
+      expect(plan.message).toContain(debridProviderLabel(provider));
+    }
+  });
+
+  it("provides the full display label for wiring into app.ts", () => {
+    expect(debridProviderLabel("realdebrid")).toBe("Real-Debrid");
+    expect(debridProviderLabel("torbox")).toBe("TorBox");
   });
 });
 
@@ -554,5 +608,25 @@ describe("tabClickPlan", () => {
     const view: SearchView = { ...emptyView(), mode: "search", query: "tin rivers", group: "Movies" };
     expect(tabClickPlan(view, "Movies", "tin rivers")).toEqual({ action: "ignore" });
     expect(tabClickPlan(emptyView(), "All", "")).toEqual({ action: "ignore" });
+  });
+});
+
+describe("cachedTag", () => {
+  it("marks a cached result when the provider can check", () => {
+    expect(cachedTag("aabb", new Set(["aabb"]), true)).toBe("cached");
+  });
+
+  it("shows nothing for an uncached result — absence is not a claim", () => {
+    expect(cachedTag("aabb", new Set(["ccdd"]), true)).toBeNull();
+  });
+
+  it("shows nothing at all when the provider cannot check", () => {
+    // Real-Debrid withdrew its instant-availability endpoint; an "unknown"
+    // state would read as "not cached", which is a claim we cannot make.
+    expect(cachedTag("aabb", new Set(["aabb"]), false)).toBeNull();
+  });
+
+  it("matches case-insensitively", () => {
+    expect(cachedTag("AABB", new Set(["aabb"]), true)).toBe("cached");
   });
 });

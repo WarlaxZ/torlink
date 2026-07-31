@@ -302,31 +302,75 @@ export type AddPlan =
   /** Go ahead. */
   | { kind: "add"; via: AddVia }
   /**
-   * Ask first. Real-Debrid is configured and the user pressed the plain add, so
-   * this is about to put their IP in a public swarm when they are paying for
-   * something that keeps it out of one — the same prompt the TUI shows.
+   * Ask first. A debrid provider is configured and the user pressed the plain
+   * add, so this is about to put their IP in a public swarm when they are
+   * paying for something that keeps it out of one — the same prompt the TUI
+   * shows.
    */
   | { kind: "confirm"; via: AddVia; message: string };
+
+/**
+ * A debrid provider id as it crosses the wire. Mirrors `DebridProviderId`.
+ *
+ * Repeated here rather than imported from `src/integrations/debrid` (or even
+ * `SourcesResponse`'s field) because this module is bundled for the browser
+ * and must import nothing from `node:*` — the literal union below is the same
+ * guard `wire.ts` uses for the same reason.
+ */
+export type WireDebridProvider = "realdebrid" | "torbox";
+
+/** Display copy per provider. */
+const DEBRID_LABELS: Record<WireDebridProvider, { label: string; short: string }> = {
+  realdebrid: { label: "Real-Debrid", short: "RD" },
+  torbox: { label: "TorBox", short: "TorBox" },
+};
+
+/** The full provider name, for prose ("Real-Debrid is configured…"). */
+export function debridProviderLabel(provider: WireDebridProvider): string {
+  return DEBRID_LABELS[provider].label;
+}
+
+/** The add button's own text, e.g. "add via RD" or "add via TorBox". */
+export function debridAddLabel(provider: WireDebridProvider): string {
+  return `add via ${DEBRID_LABELS[provider].short}`;
+}
+
+/** The post-add notice, e.g. "Added via TorBox." */
+export function debridAddedNotice(provider: WireDebridProvider): string {
+  return `Added via ${DEBRID_LABELS[provider].label}.`;
+}
 
 /**
  * The TUI's `requestP2PDownload` decision, and it is a decision about the
  * user's IP address rather than a convenience.
  *
- * A plain add with Real-Debrid configured PROMPTS; it does not silently switch
- * to Real-Debrid (which would spend their account without asking) and it does
- * not silently proceed over P2P (which is the exposure they configured
- * Real-Debrid to avoid). An explicit Real-Debrid add never prompts — the user
+ * A plain add with a debrid provider configured PROMPTS; it does not silently
+ * switch to debrid (which would spend the user's account without asking) and
+ * it does not silently proceed over P2P (which is the exposure debrid is
+ * configured to avoid). An explicit debrid add never prompts — the user
  * already said which network they wanted.
+ *
+ * Takes the provider id, not a caller-derived label — both strings in the
+ * message come from the same {@link DEBRID_LABELS} table the button itself
+ * reads, via {@link debridProviderLabel} and {@link debridAddLabel}, so the
+ * prompt can never name a button label that is not the one on screen.
  */
-export function addPlan(via: AddVia, debridConfigured: boolean, name: string): AddPlan {
+export function addPlan(
+  via: AddVia,
+  debridConfigured: boolean,
+  name: string,
+  provider: WireDebridProvider | undefined,
+): AddPlan {
   if (via === "debrid" || !debridConfigured) return { kind: "add", via };
+  const label = provider ? debridProviderLabel(provider) : "your debrid provider";
+  const addLabel = provider ? debridAddLabel(provider) : "the debrid add button";
   return {
     kind: "confirm",
     via: "p2p",
     message:
       `Download “${clip(name)}” peer-to-peer?\n\n` +
-      "Your IP address will be visible to everyone in the swarm. Real-Debrid is " +
-      "configured and keeps it private — cancel and use “add via RD” instead.",
+      `Your IP address will be visible to everyone in the swarm. ${label} is ` +
+      `configured and keeps it private — cancel and use “${addLabel}” instead.`,
   };
 }
 
@@ -398,6 +442,20 @@ export function tabClickPlan(view: SearchView, group: string, boxValue: string):
 // limit a two-line prompt can carry.
 function clip(name: string): string {
   return name.length > 60 ? `${name.slice(0, 59)}…` : name;
+}
+
+/**
+ * The cached marker for one result, or null for no marker.
+ *
+ * `canCheck` false means the active provider cannot answer — Real-Debrid
+ * withdrew its instant-availability endpoint in 2024 — so nothing is rendered.
+ * An "unknown" badge would read as "not cached", which is a claim torlink is
+ * not in a position to make. Absence of a marker on an uncached result is the
+ * same principle at result level.
+ */
+export function cachedTag(infoHash: string, cached: ReadonlySet<string>, canCheck: boolean): "cached" | null {
+  if (!canCheck) return null;
+  return cached.has(infoHash.toLowerCase()) ? "cached" : null;
 }
 
 /** How the results are laid out. */

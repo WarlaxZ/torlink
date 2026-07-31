@@ -1,4 +1,5 @@
 import type { DownloadVia } from "../download/types";
+import type { DebridProviderId } from "../integrations/debrid/types";
 
 export type DownloadState = "downloading" | "paused" | "failed" | "done";
 
@@ -21,7 +22,12 @@ export function downloadStateFor(
 }
 
 // Which delivery method a download uses, for the downloads-list badge. Absent
-// `via` means a legacy/plain magnet, i.e. peer-to-peer.
-export function deliveryMethod(via: DownloadVia | undefined): "RD" | "P2P" {
-  return via === "realdebrid" ? "RD" : "P2P";
+// `via` means a legacy/plain magnet, i.e. peer-to-peer. A debrid item with no
+// `provider` predates that field and is Real-Debrid.
+export function deliveryMethod(
+  via: DownloadVia | undefined,
+  provider: DebridProviderId | undefined,
+): "RD" | "TB" | "P2P" {
+  if (via !== "debrid") return "P2P";
+  return provider === "torbox" ? "TB" : "RD";
 }

@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { pickStreamFile, detectPlayer, streamCandidates, attemptAutoPlay, detectAndPlay } from "./player";
-import type { ResolvedFile } from "../integrations/realdebrid";
+import { pickStreamFile, detectPlayer, streamCandidates, attemptAutoPlay, detectAndPlay, type StreamFile } from "./player";
 
-function f(filename: string, bytes: number): ResolvedFile {
+function f(filename: string, bytes: number): StreamFile {
   return { url: `https://dl/${filename}`, filename, bytes };
 }
 

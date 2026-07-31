@@ -63,19 +63,21 @@ function deps(over: Partial<WebDeps> = {}): WebDeps {
     saveStreamHistoryImpl: async () => {
       throw new Error("test must inject saveStreamHistoryImpl");
     },
-    rdStatusImpl: async () => null,
+    debridStatusImpl: async () => null,
     ...over,
   };
 }
 
 const AUTH = "Bearer secret";
 
-// REALDEBRID_API_TOKEN overrides the config file inside resolveRealDebridToken,
-// so a developer who happens to have one exported would see the stream routes
-// take the Real-Debrid path no matter what config these tests inject. Cleared
-// for every test; the empty string reads as "not set".
+// REALDEBRID_API_TOKEN and TORBOX_API_TOKEN override the config file inside
+// resolveRealDebridToken/resolveTorBoxToken (and so inside resolveActiveDebrid),
+// so a developer who happens to have either exported would see the stream
+// routes take that provider's path no matter what config these tests inject.
+// Cleared for every test; the empty string reads as "not set".
 beforeEach(() => {
   vi.stubEnv("REALDEBRID_API_TOKEN", "");
+  vi.stubEnv("TORBOX_API_TOKEN", "");
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -435,21 +437,47 @@ describe("POST /api/stream", () => {
       deps({
         runtime: runtime(sessions),
         loadConfigImpl: async () => ({ ...defaultConfig, realDebridToken: "rd-token" }),
-        rdStatusImpl: async () => ({ username: "u", premium: true, premiumUntil: null }),
+        debridStatusImpl: async () => ({
+          provider: "realdebrid",
+          username: "u",
+          active: true,
+          planLabel: "premium",
+          expiresAt: null,
+        }),
       }),
       { magnet: MAGNET },
     );
 
     expect(res.status).toBe(200);
-    expect(res.json).toMatchObject({ session: { backend: "realdebrid" } });
-    expect(resolveDebridImpl).toHaveBeenCalledWith("rd-token", MAGNET, expect.anything());
+    expect(res.json).toMatchObject({ session: { backend: "debrid" } });
+    expect(resolveDebridImpl).toHaveBeenCalledWith("realdebrid", "rd-token", MAGNET, expect.anything());
     expect(streamTorrentImpl).not.toHaveBeenCalled();
   });
 
-  it("does not probe the Real-Debrid account when no token is configured", async () => {
-    const rdStatusImpl = vi.fn(async () => null);
-    await post(deps({ runtime: runtime(registry()), rdStatusImpl }), { magnet: MAGNET });
-    expect(rdStatusImpl).not.toHaveBeenCalled();
+  it("does not probe the debrid account when no token is configured", async () => {
+    const debridStatusImpl = vi.fn(async () => null);
+    await post(deps({ runtime: runtime(registry()), debridStatusImpl }), { magnet: MAGNET });
+    expect(debridStatusImpl).not.toHaveBeenCalled();
+  });
+
+  it("routes a stream through the active provider", async () => {
+    const seen: string[] = [];
+    const resolveDebridImpl = vi.fn((provider: string) => {
+      seen.push(provider);
+      return Promise.resolve([{ url: "https://cdn.torbox.app/dl/a.mkv", filename: "a.mkv", bytes: 1 }]);
+    });
+    const sessions = registry({ resolveDebridImpl });
+    const res = await post(
+      deps({
+        runtime: runtime(sessions),
+        loadConfigImpl: async () => ({ ...defaultConfig, torBoxToken: "tb-1" }),
+        debridStatusImpl: async () => null,
+      }),
+      { magnet: MAGNET },
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ session: { backend: "debrid" } });
+    expect(seen).toEqual(["torbox"]);
   });
 });
 
@@ -459,7 +487,13 @@ describe("POST /api/stream — torrent-confirm", () => {
   function confirmDeps(over: Partial<WebDeps> = {}) {
     return deps({
       loadConfigImpl: async () => ({ ...defaultConfig, realDebridToken: "rd-token" }),
-      rdStatusImpl: async () => ({ username: "u", premium: false, premiumUntil: null }),
+      debridStatusImpl: async () => ({
+        provider: "realdebrid",
+        username: "u",
+        active: false,
+        planLabel: "free",
+        expiresAt: null,
+      }),
       ...over,
     });
   }
@@ -476,7 +510,7 @@ describe("POST /api/stream — torrent-confirm", () => {
     expect(res.status).toBe(409);
     expect(res.json).toEqual({
       route: "torrent-confirm",
-      reason: "your Real-Debrid premium isn't active",
+      reason: "your Real-Debrid plan isn't active",
     });
     expect(streamTorrentImpl).not.toHaveBeenCalled();
     expect(sessions.list()).toEqual([]);
@@ -1128,6 +1162,33 @@ describe("GET /api/sources", () => {
     expect((await get()).debridConfigured).toBe(true);
   });
 
+  it("reports which debrid provider is active, and whether it can check cached", async () => {
+    const body = await get({ loadConfigImpl: async () => searchConfig({ torBoxToken: "tb-1" }) });
+    expect(body).toMatchObject({
+      debridConfigured: true,
+      debridProvider: "torbox",
+      debridCachedCheck: true,
+    });
+  });
+
+  it("reports no cached check when Real-Debrid is active", async () => {
+    const body = await get({ loadConfigImpl: async () => searchConfig({ realDebridToken: "rd-1" }) });
+    expect(body).toMatchObject({ debridProvider: "realdebrid", debridCachedCheck: false });
+  });
+
+  it("reports nothing configured when there is no token", async () => {
+    const body = await get();
+    expect(body).toMatchObject({ debridConfigured: false, debridProvider: null, debridCachedCheck: false });
+  });
+
+  it("never puts a TorBox token in any response", async () => {
+    const TB = "tb-super-secret-token";
+    const body = await get({ loadConfigImpl: async () => searchConfig({ torBoxToken: TB }) });
+    expect(JSON.stringify(body)).not.toContain(TB);
+    // Proves the assertion is not vacuous: the response DOES describe TorBox.
+    expect(JSON.stringify(body)).toContain("torbox");
+  });
+
   it("hides adult sources and the Porn tab while the adult category is off", async () => {
     const body = await get();
     expect(body.adultEnabled).toBe(false);
@@ -1597,7 +1658,12 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
       { infoHash: HASH, name: "Kestrel", via: "debrid" },
     );
     expect(res.status).toBe(200);
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), "/tmp/dl", "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel" }),
+      "/tmp/dl",
+      "realdebrid",
+      "rd-tok",
+    );
     expect(add).not.toHaveBeenCalled();
   });
 
@@ -1607,7 +1673,7 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
     const { runtime: rt, add, addDebrid } = addRuntime();
     const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel", via: "debrid" });
     expect(res.status).toBe(400);
-    expect(res.json).toMatchObject({ error: expect.stringContaining("Real-Debrid token") });
+    expect(res.json).toMatchObject({ error: expect.stringContaining("Real-Debrid or TorBox token") });
     expect(add).not.toHaveBeenCalled();
     expect(addDebrid).not.toHaveBeenCalled();
   });
@@ -2750,5 +2816,66 @@ describe("POST /api/stream — records stream history", () => {
     );
     expect(res.status).toBeLessThan(500);
     await vi.waitFor(() => expect(sessions.get("sess1")?.state).toBe("ready"));
+  });
+});
+
+describe("POST /api/cached", () => {
+  const HASH_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const HASH_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  function post(path: string, body: unknown, over: Partial<WebDeps> = {}) {
+    return handleWebApi(deps(over), "POST", path, new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
+  it("answers which hashes the active provider has cached", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A, HASH_B] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+      checkCachedImpl: () => Promise.resolve(new Set([HASH_A])),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ cached: [HASH_A] });
+  });
+
+  it("refuses when the active provider cannot check", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, realDebridToken: "rd-1" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("refuses when no debrid is configured", async () => {
+    const res = await post("/api/cached", { hashes: [HASH_A] }, {
+      loadConfigImpl: () => Promise.resolve(defaultConfig),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("answers an empty list for an empty request without calling the provider", async () => {
+    const checkCachedImpl = vi.fn();
+    const res = await post("/api/cached", { hashes: [] }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+      checkCachedImpl,
+    });
+    expect(res.json).toEqual({ cached: [] });
+    expect(checkCachedImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-array hashes field", async () => {
+    const res = await post("/api/cached", { hashes: "aabb" }, {
+      loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("401s an unauthenticated caller when a token is set", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret", loadConfigImpl: () => Promise.resolve({ ...defaultConfig, torBoxToken: "tb-1" }) }),
+      "POST",
+      "/api/cached",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ hashes: [HASH_A] }),
+    );
+    expect(res.status).toBe(401);
   });
 });

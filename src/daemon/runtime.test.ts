@@ -7,6 +7,7 @@ import { StreamSessionRegistry } from "../core/streamSession";
 import { TorrentEngine } from "../download/engine";
 import { saveConfig } from "../config/config";
 import { saveQueue, saveSeeds } from "../download/persist";
+import type { QueueItem } from "../download/types";
 import { saveHistory } from "../download/history";
 import { disarmBootMarker } from "../download/bootguard";
 import { configFile, historyFile, queueFile, seedsFile } from "../config/paths";
@@ -106,7 +107,12 @@ describe("addInput", () => {
     // Not awaited: addDebrid's promise resolves when the whole download does,
     // which is minutes away. The queue row exists synchronously, which is what
     // "added" claims.
-    expect(addDebrid).toHaveBeenCalledWith(expect.objectContaining({ name: "Kestrel" }), dir, "rd-tok");
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel" }),
+      dir,
+      "realdebrid",
+      "rd-tok",
+    );
     expect(add).not.toHaveBeenCalled();
   });
 });
@@ -121,8 +127,8 @@ describe("startRuntime — stream sessions", () => {
 
 // A resumed Real-Debrid item re-runs the pipeline; hang resolveMagnet so the
 // test never touches the network and the item stays where resume() put it.
-vi.mock("../integrations/realdebrid", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../integrations/realdebrid")>()),
+vi.mock("../integrations/debrid/realdebrid", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../integrations/debrid/realdebrid")>()),
   resolveMagnet: vi.fn(() => new Promise(() => {})),
 }));
 
@@ -181,11 +187,12 @@ describe("startRuntime — applied config", () => {
   it("applies the resolved Real-Debrid token, so a restored paused RD item resumes", async () => {
     await saveConfig({ downloadDir: dir, trackers: [], realDebridToken: "cfg-token" });
     await saveQueue([
+      // Legacy on-disk shape (pre-provider): via is the bare string "realdebrid".
       {
         id: HASH, name: "Example", magnet: MAGNET, dir, via: "realdebrid",
         status: "paused", progress: 40, totalBytes: 1000, downloadedBytes: 400,
         speed: 0, peers: 0, addedAt: Date.now(),
-      },
+      } as unknown as QueueItem,
     ]);
     const runtime = await startRuntime();
     expect(runtime.queue.getItems()[0]?.status).toBe("paused");
@@ -201,11 +208,12 @@ describe("startRuntime — applied config", () => {
     vi.stubEnv("REALDEBRID_API_TOKEN", "env-token");
     await saveConfig({ downloadDir: dir, trackers: [] });
     await saveQueue([
+      // Legacy on-disk shape (pre-provider): via is the bare string "realdebrid".
       {
         id: HASH, name: "Example", magnet: MAGNET, dir, via: "realdebrid",
         status: "paused", progress: 0, totalBytes: 1000, downloadedBytes: 0,
         speed: 0, peers: 0, addedAt: Date.now(),
-      },
+      } as unknown as QueueItem,
     ]);
     const runtime = await startRuntime();
     runtime.queue.resume(HASH);
@@ -215,19 +223,40 @@ describe("startRuntime — applied config", () => {
 });
 
 describe("policySummary", () => {
-  // Neutralise a real token in the developer's own environment.
-  beforeEach(() => vi.stubEnv("REALDEBRID_API_TOKEN", ""));
+  // Neutralise a real token in the developer's own environment. resolveActiveDebrid
+  // now reads TorBox's env var too, so a dev with a real TorBox token locally
+  // would otherwise flip these to "on" while CI stays green.
+  beforeEach(() => {
+    vi.stubEnv("REALDEBRID_API_TOKEN", "");
+    vi.stubEnv("TORBOX_API_TOKEN", "");
+  });
   afterEach(() => vi.unstubAllEnvs());
 
   it("names the limits it applied so a capped daemon says so at startup", () => {
     expect(
       policySummary({ downloadDir: "/d", trackers: [], downloadLimitKbps: 500, seedRatio: 2 }),
-    ).toBe("policy: down 500 KB/s · up unlimited · seed ratio 2 · seed time off · real-debrid off");
+    ).toBe("policy: down 500 KB/s · up unlimited · seed ratio 2 · seed time off · debrid off");
+  });
+
+  it("names Real-Debrid when it's the active provider", () => {
+    expect(
+      policySummary({ downloadDir: "/d", trackers: [], realDebridToken: "rd-tok" }),
+    ).toBe("policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid real-debrid");
+  });
+
+  // MUTATION GUARD: a hardcoded "real-debrid on/off" label reads this as
+  // configured (torBoxToken is set) and would still print "real-debrid on"
+  // for a TorBox-only user — this pins that the banner names the ACTIVE
+  // provider, not a fixed one.
+  it("names TorBox when it's the active provider", () => {
+    expect(
+      policySummary({ downloadDir: "/d", trackers: [], torBoxToken: "tb-tok" }),
+    ).toBe("policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid torbox");
   });
 
   it("reports an unconfigured daemon as unlimited", () => {
     expect(policySummary({ downloadDir: "/d", trackers: [] })).toBe(
-      "policy: down unlimited · up unlimited · seed ratio off · seed time off · real-debrid off",
+      "policy: down unlimited · up unlimited · seed ratio off · seed time off · debrid off",
     );
   });
 });

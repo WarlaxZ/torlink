@@ -219,7 +219,7 @@ describe("StreamSessionRegistry — torrent route", () => {
   });
 });
 
-describe("StreamSessionRegistry — Real-Debrid route", () => {
+describe("StreamSessionRegistry — debrid route", () => {
   const RD_FILES: StreamFile[] = [
     { url: "https://dl.real-debrid.com/d/XYZ/big.mkv", filename: "big.mkv", bytes: 900 },
   ];
@@ -231,7 +231,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     // is what pins the callback actually being wired into the session.
     let progressDuringResolve: number | null = null;
     const registry: StreamSessionRegistry = new StreamSessionRegistry({
-      resolveDebridImpl: async (_token, _magnet, opts) => {
+      resolveDebridImpl: async (_provider, _token, _magnet, opts) => {
         opts.onProgress?.(50);
         progressDuringResolve = registry.list()[0]!.progress;
         return RD_FILES;
@@ -242,11 +242,11 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
 
     const session = await registry.start({
       ...INPUT,
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "tok",
     });
 
-    expect(session.backend).toBe("realdebrid");
+    expect(session.backend).toBe("debrid");
     expect(session.state).toBe("ready");
     expect(session.files).toEqual(RD_FILES);
     expect(progressDuringResolve).toBe(50);
@@ -256,9 +256,10 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     const resolveDebridImpl = vi.fn(async () => RD_FILES);
     const registry = new StreamSessionRegistry({ resolveDebridImpl });
 
-    await registry.start({ ...INPUT, route: { kind: "realdebrid" }, debridToken: "tok" });
+    await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" }, debridToken: "tok" });
 
     expect(resolveDebridImpl).toHaveBeenCalledWith(
+      "realdebrid",
       "tok",
       INPUT.magnet,
       expect.objectContaining({ knownHash: "abc" }),
@@ -270,7 +271,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     const streamTorrentImpl = vi.fn(async () => fakeTorrentSession());
     const registry = new StreamSessionRegistry({ resolveDebridImpl, streamTorrentImpl });
 
-    const session = await registry.start({ ...INPUT, route: { kind: "realdebrid" } });
+    const session = await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" } });
 
     expect(session.state).toBe("error");
     // By identity, not by shape: the constant is exported so the web layer can
@@ -278,6 +279,41 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
     expect(session.error).toBe(NO_DEBRID_TOKEN);
     expect(resolveDebridImpl).not.toHaveBeenCalled();
     expect(streamTorrentImpl).not.toHaveBeenCalled();
+  });
+
+  it("records which provider served the session and passes it to the resolver", async () => {
+    const seen: string[] = [];
+    const registry = new StreamSessionRegistry({
+      resolveDebridImpl: (provider, _token, _magnet) => {
+        seen.push(provider);
+        return Promise.resolve([{ url: "https://cdn.torbox.app/dl/a.mkv", filename: "a.mkv", bytes: 1 }]);
+      },
+    });
+    const session = await registry.start({
+      infoHash: "aabb",
+      magnet: "magnet:?xt=urn:btih:aabb",
+      name: "Kepler.S02E04.1080p.WEB-DL",
+      route: { kind: "debrid", provider: "torbox" },
+      debridToken: "tb-1",
+    });
+    expect(session.backend).toBe("debrid");
+    expect(session.provider).toBe("torbox");
+    expect(session.state).toBe("ready");
+    expect(seen).toEqual(["torbox"]);
+  });
+
+  it("errors rather than falling back to P2P when the token is missing", async () => {
+    const registry = new StreamSessionRegistry({
+      resolveDebridImpl: () => Promise.reject(new Error("should not be called")),
+    });
+    const session = await registry.start({
+      infoHash: "aabb",
+      magnet: "magnet:?xt=urn:btih:aabb",
+      name: "Harrowgate.S03.1080p.WEB-DL",
+      route: { kind: "debrid", provider: "torbox" },
+    });
+    expect(session.state).toBe("error");
+    expect(session.error).toBe(NO_DEBRID_TOKEN);
   });
 
   it("forgets a ready RD session without a backend handle to stop", async () => {
@@ -288,7 +324,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
       idFactory: () => "sess1",
     });
 
-    await registry.start({ ...INPUT, route: { kind: "realdebrid" }, debridToken: "tok" });
+    await registry.start({ ...INPUT, route: { kind: "debrid", provider: "realdebrid" }, debridToken: "tok" });
     await expect(registry.stop("sess1")).resolves.toBeUndefined();
 
     expect(registry.get("sess1")).toBeNull();
@@ -304,7 +340,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
       release = r;
     });
     const registry = new StreamSessionRegistry({
-      resolveDebridImpl: async (_token, _magnet, opts) => {
+      resolveDebridImpl: async (_provider, _token, _magnet, opts) => {
         seen = opts.signal;
         await gate;
         return RD_FILES;
@@ -314,7 +350,7 @@ describe("StreamSessionRegistry — Real-Debrid route", () => {
 
     const starting = registry.start({
       ...INPUT,
-      route: { kind: "realdebrid" },
+      route: { kind: "debrid", provider: "realdebrid" },
       debridToken: "tok",
     });
     await Promise.resolve();

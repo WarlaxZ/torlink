@@ -3,12 +3,14 @@ import { TextField } from "./TextField";
 import { Panel } from "./Panel";
 import { COLOR, ICON } from "../theme";
 import { hyperlink } from "../../util/terminal";
-import { formatAccountStatus, type RdStatus } from "../../integrations/rdStatus";
+import { formatAccountStatus } from "../../integrations/debrid/status";
+import type { DebridProvider, DebridStatus } from "../../integrations/debrid/types";
 
 interface TokenPromptProps {
   width: number;
   value: string;
-  status: RdStatus | null;
+  status: DebridStatus | null;
+  provider: DebridProvider;
   onSubmit: (value: string) => void;
   onClear: () => void;
   onCancel: () => void;
@@ -22,7 +24,7 @@ function masked(token: string): string {
   return `${"•".repeat(token.length - 4)}${token.slice(-4)}`;
 }
 
-export function TokenPrompt({ width, value, status, onSubmit, onClear, onCancel }: TokenPromptProps) {
+export function TokenPrompt({ width, value, status, provider, onSubmit, onClear, onCancel }: TokenPromptProps) {
   useInput((input, key) => {
     if (key.escape) onCancel();
     else if (key.ctrl && input === "x") onClear();
@@ -30,7 +32,7 @@ export function TokenPrompt({ width, value, status, onSubmit, onClear, onCancel 
 
   return (
     <Box flexDirection="column" width={width}>
-      <Panel title="real-debrid token" width={width} focused height={2}>
+      <Panel title={`${provider.label.toLowerCase()} token`} width={width} focused height={2}>
         <Box>
           <Text color={COLOR.accent}>{`${ICON.pointer} `}</Text>
           <Box flexGrow={1} minWidth={0}>
@@ -60,7 +62,7 @@ export function TokenPrompt({ width, value, status, onSubmit, onClear, onCancel 
         </Box>
         <Text dimColor>
           Get a token at{" "}
-          {hyperlink("https://real-debrid.com/apitoken", "real-debrid.com/apitoken")}
+          {hyperlink(provider.tokenUrl, provider.tokenUrl.replace(/^https?:\/\//, ""))}
         </Text>
       </Box>
     </Box>

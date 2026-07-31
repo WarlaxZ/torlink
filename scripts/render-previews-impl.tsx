@@ -28,7 +28,7 @@ import type { DownloadQueue } from "../src/download/queue";
 import type { QueueItem, SeedItem } from "../src/download/types";
 import type { HistoryItem } from "../src/download/history";
 import type { SourceId, TorrentResult } from "../src/sources/types";
-import type { RdStatus } from "../src/integrations/rdStatus";
+import type { DebridStatus } from "../src/integrations/debrid/types";
 
 const COLS = 80;
 const CONTENT_WIDTH = Math.max(24, COLS - RAIL_WIDTH - 3);
@@ -65,10 +65,12 @@ const SEEDS: SeedItem[] = [
   { id: "h2", name: "Fedora Workstation 40 x86_64 Live", magnet: "", dir: "", sizeBytes: 2.1e9, status: "paused", uploadSpeed: 0, uploaded: 4.1e8, peers: 0 },
 ];
 
-const RD_STATUS: RdStatus = {
+const RD_STATUS: DebridStatus = {
+  provider: "realdebrid",
   username: "you",
-  premium: true,
-  premiumUntil: new Date(NOW_MS + 60 * 86_400_000),
+  active: true,
+  planLabel: "premium",
+  expiresAt: new Date(NOW_MS + 60 * 86_400_000),
 };
 
 function fakeQueue(
@@ -138,12 +140,15 @@ function makeStore(
     startDebridDownload: noop,
     streamResult: noop,
     debridConfigured: false,
+    debridProvider: null,
     reccConfigured: false,
     omdbConfigured: false,
     omdbApiKey: "",
     adultEnabled: false,
     streamActive: false,
-    rdStatus: null,
+    debridStatus: null,
+    cachedHashes: new Set(),
+    refreshCachedHashes: noop,
     copyLink: noop,
     copyMagnet: noop,
     openDownloadFolder: noop,
@@ -382,13 +387,27 @@ save(
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Accounts
-          rdToken="rd_live_xxx"
-          rdStatus={RD_STATUS}
+          debrid={[
+            {
+              provider: "realdebrid",
+              token: "rd_live_xxx",
+              status: RD_STATUS,
+              onManage: () => {},
+              onSignOut: () => {},
+            },
+            {
+              provider: "torbox",
+              token: "",
+              status: null,
+              onManage: () => {},
+              onSignOut: () => {},
+            },
+          ]}
+          activeDebrid="realdebrid"
+          onSetActiveDebrid={() => {}}
           rutrackerUser="you"
           reccConfigured
           reccStatus={{ state: "connected", host: "reccd.local:4100" }}
-          onManageRd={() => {}}
-          onSignOutRd={() => {}}
           onManageRutracker={() => {}}
           onSignOutRutracker={() => {}}
           onManageRecc={() => {}}
