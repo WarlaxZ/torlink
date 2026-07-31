@@ -70,6 +70,14 @@ This is a torrent client. Fixtures that name real films read badly whatever the 
 user-facing copy. Reuse this cast rather than inventing more — a shared cast is greppable, and
 each of these is verified to parse the way the title it replaced did:
 
+**The one exception is README screenshots of the running app** (`preview/web-*.jpg|png`). Those show a
+live search, and the whole point of the browser UI is poster art — OMDb has no artwork for an invented
+cast, so a compliant screenshot is an empty grid, which sells nothing. Real titles there are a
+deliberate call by the repo owner. **Don't "fix" them to use the cast below**, and don't extend the
+exception to anything else: a screenshot is a photograph of real behaviour, whereas a fixture is text we
+choose to write. One further rule for screenshots — **never show the app playing something that isn't
+free to share.** The player shot uses a Blender open movie for exactly this reason.
+
 | Title | Shape | Use it for |
 | --- | --- | --- |
 | `Kestrel.2010.1080p.BluRay.x264` | one-word title + year | a plain film |
