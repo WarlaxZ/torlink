@@ -564,7 +564,23 @@ export async function runPlay(
     return;
   }
 
+  // Every `await fx.start(...)` is followed by this, and it has to come BEFORE
+  // the confirm/failed branches below. An aborted POST throws inside the effect,
+  // which reports it as `failed` — indistinguishable from a dead server. Left to
+  // fall through, a cancel would exit with no "Stream cancelled." at all AND
+  // fire `onUnresolved`, whose Continue-watching binding launches a fallback
+  // search: pressing Cancel would start a search.
+  //
+  // Stops the session when one came back regardless, since an abort that landed
+  // just after the POST succeeded still owes it a stop.
+  const abortedAfterStart = (result: StartResult): boolean => {
+    if (!signal?.aborted) return false;
+    cancel(result.kind === "started" ? result.sessionId : null);
+    return true;
+  };
+
   let start = await fx.start(row, false, signal);
+  if (abortedAfterStart(start)) return;
 
   if (start.kind === "confirm") {
     if (!fx.confirm(confirmFallbackMessage(start.reason, row.name))) {
@@ -573,6 +589,7 @@ export async function runPlay(
       return;
     }
     start = await fx.start(row, true, signal);
+    if (abortedAfterStart(start)) return;
     // A second 409 means the server didn't accept the confirmation. Do not loop
     // asking: one prompt per click.
     if (start.kind === "confirm") {
@@ -588,15 +605,6 @@ export async function runPlay(
   }
 
   const { sessionId, capability } = start;
-  // From here on a session EXISTS, so every early return owes it a stop — an
-  // abort included. This is the leak the "abort lands after it was started" test
-  // guards: cancelling at the worst possible moment must not be the one path
-  // that keeps a torrent running.
-  if (signal?.aborted) {
-    cancel(sessionId);
-    return;
-  }
-
   let session = start.session;
   const began = fx.now();
   for (;;) {

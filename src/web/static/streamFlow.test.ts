@@ -843,6 +843,46 @@ describe("runPlay", () => {
       expect(calls.notices).toContain("Stream cancelled.");
     });
 
+    // An aborted POST comes back as `failed` — the fetch threw and the caller
+    // cannot tell a cancel from a dead server. Checked BEFORE the failed branch,
+    // or a cancel exits with no "Stream cancelled." and fires onUnresolved, whose
+    // Continue-watching binding launches a fallback SEARCH. Pressing Cancel would
+    // start a search.
+    it("reports a cancel during the initial POST as a cancel, and fires no fallback", async () => {
+      const ac = new AbortController();
+      let fallbacks = 0;
+      const { fx, calls } = harness({
+        start: async () => {
+          ac.abort();
+          return { kind: "failed" };
+        },
+        onUnresolved: () => fallbacks++,
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.notices).toEqual(["Stream cancelled."]);
+      expect(fallbacks).toBe(0);
+      expect(calls.stopped).toEqual([]);
+    });
+
+    // Same rule on the second POST, the one after a human accepted the
+    // torrent-confirm prompt.
+    it("reports a cancel during the confirmed retry as a cancel", async () => {
+      const ac = new AbortController();
+      let fallbacks = 0;
+      const { fx, calls } = harness({
+        start: async (_row, confirmed) => {
+          if (!confirmed) return { kind: "confirm", reason: "no premium" };
+          ac.abort();
+          return { kind: "failed" };
+        },
+        confirm: () => true,
+        onUnresolved: () => fallbacks++,
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.notices).toEqual(["Stream cancelled."]);
+      expect(fallbacks).toBe(0);
+    });
+
     it("hands the signal to start, poll and sleep, so an in-flight fetch dies too", async () => {
       const ac = new AbortController();
       const seen: { start?: boolean; poll?: boolean } = {};

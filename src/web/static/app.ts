@@ -674,7 +674,11 @@ let drawPicker: (() => void) | null = null;
 // reachable by a test.
 const sleep = abortableSleep;
 
-async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
+async function startSession(
+  row: DashRow,
+  confirmed: boolean,
+  signal?: AbortSignal,
+): Promise<StartResult> {
   let res: Response;
   try {
     res = await fetch("/api/stream", {
@@ -689,8 +693,17 @@ async function startSession(row: DashRow, confirmed: boolean): Promise<StartResu
         name: row.name,
         ...(confirmed ? { confirm: true } : {}),
       }),
+      // So Cancel kills the request rather than waiting it out. Resolving a
+      // torrent can hold this POST open for a while.
+      signal,
     });
   } catch {
+    // AN ABORT LANDS HERE TOO, and it is not a dead server. Saying so would
+    // blame the backend for something the user just asked for, and — worse —
+    // setConn("lost") repaints the whole header as disconnected. runPlay checks
+    // `signal.aborted` immediately after this returns and reports the cancel
+    // itself, so this stays silent and lets it.
+    if (signal?.aborted) return { kind: "failed" };
     showNotice("Play failed — the server is not responding.");
     setConn("lost");
     return { kind: "failed" };
@@ -732,10 +745,17 @@ async function startSession(row: DashRow, confirmed: boolean): Promise<StartResu
   };
 }
 
-async function pollSession(sessionId: string): Promise<PublicStreamSession | null> {
+// Null on anything unreadable, an abort included — runPlay's `if (!next)` branch
+// checks `signal.aborted` before reporting a lost session, so a cancel mid-poll
+// is not mistaken for one.
+async function pollSession(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<PublicStreamSession | null> {
   try {
     const res = await fetch(`/api/stream/${encodeURIComponent(sessionId)}`, {
       headers: authHeaders(),
+      signal,
     });
     if (!res.ok) return null;
     const body = (await res.json()) as unknown;
@@ -953,7 +973,19 @@ async function play(
   prepareAbort = ac;
   prepareCancel.disabled = false;
   flow.prepare = { key: row.id, title: row.name };
+  // Read BEFORE the paint: paintPlayBusy is about to disable this control, and
+  // disabling the focused element drops focus to <body> — where captureRowFocus
+  // finds nothing, so focusTargetAfterRender has nothing to restore and the list
+  // stays unreachable by keyboard for the whole prepare. That is the exact
+  // failure resultFocus.ts was written for.
+  const pressedWasFocused = document.activeElement instanceof HTMLElement &&
+    document.activeElement.dataset["playKey"] === row.id;
   paintPlayBusy();
+  // Focus follows the user's next action, which is now Cancel — the browser's
+  // stand-in for the terminal's `esc`. Only when they were driving from the
+  // keyboard: a mouse user has no focus ring to lose and would be surprised to
+  // find Enter now cancelling their stream.
+  if (pressedWasFocused) prepareCancel.focus();
   try {
     await runPlay(
       row,
