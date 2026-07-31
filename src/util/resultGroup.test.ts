@@ -5,6 +5,7 @@ import {
   groupKeyFor,
   groupResults,
   groupRowPlan,
+  defaultExpandedKeys,
   isSeasonNode,
   resultAtRow,
   seasonTree,
@@ -328,5 +329,141 @@ describe("seasonTree", () => {
       ),
     );
     expect(isSeasonNode(tree[0]!)).toBe(false);
+  });
+});
+
+describe("groupRowPlan with seasons", () => {
+  const SEASON = [
+    r("Harrowgate.S03.1080p.WEB-DL"),
+    r("Harrowgate.S03.2160p.WEB-DL"),
+    r("Harrowgate.S03E01.1080p.WEB-DL"),
+    r("Harrowgate.S03E01.2160p.WEB-DL"),
+  ];
+
+  it("collapses a season to one row", () => {
+    const rows = groupRowPlan(groupResults(SEASON, "series"), new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("season");
+    expect(rows[0]!.depth).toBe(0);
+  });
+
+  it("shows the pack and the episode indented when the season is open", () => {
+    const rows = groupRowPlan(groupResults(SEASON, "series"), new Set(["harrowgate|series|s3"]));
+    expect(rows.map((row) => `${row.kind}@${row.depth}`)).toEqual([
+      "season@0",
+      "group@1",
+      "group@1",
+    ]);
+  });
+
+  it("puts a release at depth 2 under an open episode inside an open season", () => {
+    const rows = groupRowPlan(
+      groupResults(SEASON, "series"),
+      new Set(["harrowgate|series|s3", "harrowgate|series|s3|e1"]),
+    );
+    const releases = rows.filter((row) => row.kind === "release");
+    expect(releases.length).toBeGreaterThan(0);
+    expect(releases.every((row) => row.depth === 2)).toBe(true);
+  });
+
+  it("acts on the best season pack when the season row is collapsed", () => {
+    const rows = groupRowPlan(groupResults(SEASON, "series"), new Set());
+    expect(resultAtRow(rows[0]!)?.name).toBe("Harrowgate.S03.1080p.WEB-DL");
+  });
+
+  it("falls through to the first episode when the season has no pack", () => {
+    const rows = groupRowPlan(
+      groupResults(
+        [
+          r("Harrowgate.S03E02.1080p.WEB-DL"),
+          r("Harrowgate.S03E02.2160p.WEB-DL"),
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E01.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+      new Set(),
+    );
+    expect(resultAtRow(rows[0]!)?.name).toBe("Harrowgate.S03E01.1080p.WEB-DL");
+  });
+
+  it("drops a season node holding only one child, so a lone release stays a plain row", () => {
+    const rows = groupRowPlan(
+      groupResults([r("Harrowgate.S03E01.1080p.WEB-DL")], "series"),
+      new Set(),
+    );
+    expect(rows.map((row) => row.kind)).toEqual(["release"]);
+    expect(rows[0]!.depth).toBe(0);
+  });
+
+  it("leaves a film's rows exactly as they were", () => {
+    const rows = groupRowPlan(
+      groupResults([r("Kestrel.2010.1080p.BluRay.x264"), r("Kestrel.2010.2160p.WEB-DL")]),
+      new Set(),
+    );
+    expect(rows.map((row) => row.kind)).toEqual(["group"]);
+    expect(rows[0]!.depth).toBe(0);
+  });
+
+  it("gives every row a unique key at three levels", () => {
+    const rows = groupRowPlan(
+      groupResults(SEASON, "series"),
+      new Set(["harrowgate|series|s3", "harrowgate|series|s3|e1", "harrowgate|series|s3|pack"]),
+    );
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+  });
+});
+
+describe("groupHeading under a season", () => {
+  it("drops the show name a season row already states", () => {
+    const [group] = groupResults([r("Kepler.S02E04.1080p.WEB-DL")], "series");
+    expect(groupHeading(group!, { underSeason: true })).toBe("S02E04");
+  });
+
+  it("names a pack as what it is", () => {
+    const [group] = groupResults([r("Harrowgate.S03.1080p.WEB-DL")], "series");
+    expect(groupHeading(group!, { underSeason: true })).toBe("Season pack");
+  });
+
+  it("is unchanged without the option", () => {
+    const [group] = groupResults([r("Kepler.S02E04.1080p.WEB-DL")], "series");
+    expect(groupHeading(group!)).toBe("Kepler S02E04");
+  });
+});
+
+describe("defaultExpandedKeys", () => {
+  it("opens the highest-ranked season even when strays share the result set", () => {
+    // Shaped after a real search: the season asked for, ANOTHER show's season,
+    // and unrelated episodes matching on a word. Four top-level rows, so a rule
+    // counting "is it the only row" would leave the season shut.
+    const groups = groupResults(
+      [
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.2160p.WEB-DL"),
+        r("Harrowgate.S03.1080p.WEB-DL"),
+        r("Harrowgate.S03.2160p.WEB-DL"),
+        r("Kepler.S04E02.1080p.WEB-DL"),
+        r("Kepler.S04E02.2160p.WEB-DL"),
+        r("Tin.Rivers.S01E03.1080p.WEB-DL"),
+        r("Ashfall.1999.1080p"),
+      ],
+      "series",
+    );
+    expect(defaultExpandedKeys(groups)).toEqual(["harrowgate|series|s3"]);
+  });
+
+  it("opens nothing when there is no season to open", () => {
+    expect(
+      defaultExpandedKeys(groupResults([r("Kestrel.2010.1080p"), r("Kestrel.2010.2160p")])),
+    ).toEqual([]);
+  });
+
+  it("skips a season that the row plan drops for holding one child", () => {
+    // One episode group means no season row exists to open.
+    const groups = groupResults(
+      [r("Harrowgate.S03E01.1080p.WEB-DL"), r("Harrowgate.S03E01.2160p.WEB-DL")],
+      "series",
+    );
+    expect(defaultExpandedKeys(groups)).toEqual([]);
   });
 });

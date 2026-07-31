@@ -38,8 +38,23 @@ export interface ResultGroup<T> {
   members: T[];
 }
 
-/** One line of the rendered list: a group heading, or a release. */
+/**
+ * One line of the rendered list: a season heading, a group heading, or a release.
+ *
+ * `depth` is how far the row is indented — 0 top level, 1 inside an open season,
+ * 2 a release inside an episode group inside an open season. Both front ends
+ * read it rather than deriving indent themselves.
+ */
 export type GroupRow<T> =
+  | {
+      kind: "season";
+      key: string;
+      title: string;
+      season: number;
+      members: T[];
+      expanded: boolean;
+      depth: number;
+    }
   | {
       kind: "group";
       key: string;
@@ -50,8 +65,9 @@ export type GroupRow<T> =
       episode?: number;
       members: T[];
       expanded: boolean;
+      depth: number;
     }
-  | { kind: "release"; key: string; result: T; inGroup: boolean };
+  | { kind: "release"; key: string; result: T; inGroup: boolean; depth: number };
 
 /**
  * Normalise a parsed title before it becomes a key.
@@ -199,14 +215,26 @@ function pad(n: number): string {
  * is exactly the copy-then-drift this codebase records four bugs from. The
  * season and episode are the point: `title` alone made a pack and every episode
  * of one season render as identical rows.
+ *
+ * `underSeason` is the form for a row nested inside a season heading, which
+ * already states the show and the season. Repeating both at every level reads as
+ * noise; "S03E01" and "Season pack" say the only thing that differs.
  */
-export function groupHeading(group: {
-  title: string;
-  year?: number;
-  season?: number;
-  seasonEnd?: number;
-  episode?: number;
-}): string {
+export function groupHeading(
+  group: {
+    title: string;
+    year?: number;
+    season?: number;
+    seasonEnd?: number;
+    episode?: number;
+  },
+  opts?: { underSeason?: boolean },
+): string {
+  if (opts?.underSeason && group.season !== undefined) {
+    return group.episode !== undefined
+      ? `S${pad(group.season)}E${pad(group.episode)}`
+      : "Season pack";
+  }
   if (group.season !== undefined) {
     const span = group.seasonEnd !== undefined ? `-S${pad(group.seasonEnd)}` : "";
     const episode = group.episode !== undefined ? `E${pad(group.episode)}` : "";
@@ -372,41 +400,117 @@ export function groupRowPlan<T extends GroupableResult>(
   expanded: ReadonlySet<string>,
 ): GroupRow<T>[] {
   const rows: GroupRow<T>[] = [];
-  for (const group of groups) {
-    const first = group.members[0];
-    if (first === undefined) continue;
-    if (group.members.length === 1) {
-      rows.push({ kind: "release", key: group.key, result: first, inGroup: false });
+  for (const node of seasonTree(groups)) {
+    if (!isSeasonNode(node)) {
+      pushGroupRows(rows, node, expanded, 0);
       continue;
     }
-    const isOpen = expanded.has(group.key);
-    const row: GroupRow<T> = {
-      kind: "group",
-      key: group.key,
-      title: group.title,
-      members: group.members,
+    // A season node holding a SINGLE child is dropped and its child emitted in
+    // its place: wrapping one episode in a season row is the same noise as a
+    // disclosure over "1 release", and without this a search returning one
+    // release of one show would grow a heading it never had.
+    const only = node.children.length === 1 ? node.children[0] : undefined;
+    if (only) {
+      pushGroupRows(rows, only, expanded, 0);
+      continue;
+    }
+    const isOpen = expanded.has(node.key);
+    rows.push({
+      kind: "season",
+      key: node.key,
+      title: node.title,
+      season: node.season,
+      members: node.members,
       expanded: isOpen,
-    };
-    if (group.year !== undefined) row.year = group.year;
-    if (group.season !== undefined) row.season = group.season;
-    if (group.seasonEnd !== undefined) row.seasonEnd = group.seasonEnd;
-    if (group.episode !== undefined) row.episode = group.episode;
-    rows.push(row);
-    if (!isOpen) continue;
-    group.members.forEach((member, i) => {
-      rows.push({ kind: "release", key: `${group.key}#${i}`, result: member, inGroup: true });
+      depth: 0,
     });
+    if (!isOpen) continue;
+    for (const child of node.children) pushGroupRows(rows, child, expanded, 1);
   }
   return rows;
 }
 
 /**
+ * The keys a fresh result set should start with open.
+ *
+ * The highest-ranked season node, and only that one. Without it a search for one
+ * season collapses to a single line, which reads as the list having failed.
+ *
+ * "Highest-ranked" rather than "the only one": a real search for one season of
+ * one show also returned a different show's season and two unrelated episodes,
+ * so a rule asking whether the season is alone would have left it shut on the
+ * very query that motivated this. Ranking needs no counting and strays cannot
+ * defeat it.
+ *
+ * A season the row plan DROPS (one child) is skipped — there is no row to open.
+ *
+ * A SEED, not a running rule: the caller puts these into the expansion set it
+ * already owns, so collapsing one behaves like collapsing anything else.
+ */
+export function defaultExpandedKeys<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+): string[] {
+  for (const node of seasonTree(groups)) {
+    if (isSeasonNode(node) && node.children.length > 1) return [node.key];
+  }
+  return [];
+}
+
+/**
+ * One group's rows, at a given depth. The "group of one" rule is here: a
+ * disclosure arrow over "1 release" is noise, and it would make the common case
+ * — a search where nothing duplicates — look like a different feature.
+ */
+function pushGroupRows<T extends GroupableResult>(
+  rows: GroupRow<T>[],
+  group: ResultGroup<T>,
+  expanded: ReadonlySet<string>,
+  depth: number,
+): void {
+  const first = group.members[0];
+  if (first === undefined) return;
+  if (group.members.length === 1) {
+    rows.push({ kind: "release", key: group.key, result: first, inGroup: depth > 0, depth });
+    return;
+  }
+  const isOpen = expanded.has(group.key);
+  const row: GroupRow<T> = {
+    kind: "group",
+    key: group.key,
+    title: group.title,
+    members: group.members,
+    expanded: isOpen,
+    depth,
+  };
+  if (group.year !== undefined) row.year = group.year;
+  if (group.season !== undefined) row.season = group.season;
+  if (group.seasonEnd !== undefined) row.seasonEnd = group.seasonEnd;
+  if (group.episode !== undefined) row.episode = group.episode;
+  rows.push(row);
+  if (!isOpen) return;
+  group.members.forEach((member, i) => {
+    rows.push({
+      kind: "release",
+      key: `${group.key}#${i}`,
+      result: member,
+      inGroup: true,
+      depth: depth + 1,
+    });
+  });
+}
+
+/**
  * The release a row acts on.
  *
- * A collapsed header resolves to its FIRST member, which under the current sort
- * is its best one. That is what lets every existing action keep working
- * untouched: play, add, favourite and the preview lookup all take a release, and
- * a header hands them one without any new picking logic.
+ * A collapsed header resolves to its FIRST member. For a group that is its best
+ * one under the current sort; for a SEASON row it is the best season pack,
+ * because `seasonTree` sorts packs ahead of episodes for exactly this reason —
+ * `play`/`add` on a collapsed season must grab the season, not episode one. Do
+ * not "fix" that ordering away.
+ *
+ * That is what lets every existing action keep working untouched: play, add,
+ * favourite and the preview lookup all take a release, and a header hands them
+ * one without any new picking logic.
  */
 export function resultAtRow<T>(row: GroupRow<T>): T | null {
   return row.kind === "release" ? row.result : (row.members[0] ?? null);
