@@ -88,14 +88,14 @@ export interface WebServerOptions {
   /**
    * Overrides for the stream handle's injectable seams — today the ffprobe call
    * behind `.info`, the debrid transcode lookup, and the debrid-proxying branch
-   * a test drives without a real provider. `sessions`, `log` and `probeCache`
-   * are owned by this server and cannot be overridden.
+   * a test drives without a real provider. `sessions`, `log`, `probeCache` and
+   * `trustProxy` are owned by this server and cannot be overridden.
    *
    * Same reasoning as `webDeps`: without it, a test of `.info` would spawn
    * ffprobe against a URL that does not exist, and the interesting cases (no
    * binary, a probe that disagrees with the filename) would be unreachable.
    */
-  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache">;
+  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache" | "trustProxy">;
 }
 
 export interface WebServerHandle {

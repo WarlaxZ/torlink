@@ -439,9 +439,12 @@ export async function handleStreamRequest(
   return proxyUpstream(deps, req, res, file.url, { allowedProtocols: HTTP_ONLY });
 }
 
-// How many redirects a provider may send us through. Three is enough for the
-// "unrestrict → CDN region → node" shape seen in practice and small enough that
-// a loop costs three requests rather than a hang.
+// How many requests this proxy may make for one client request — the original
+// plus MAX_PROXY_HOPS - 1 followed redirects, so 3 means 2 followed redirects.
+// That is enough for the "unrestrict → CDN region → node" shape seen in
+// practice, because the "unrestrict" step itself is an API call rather than an
+// HTTP hop this proxy follows — and small enough that a loop costs three
+// requests rather than a hang.
 const MAX_PROXY_HOPS = 3;
 
 export interface ProxyOptions {
@@ -460,8 +463,9 @@ export interface ProxyOptions {
  * failed — not when the body finishes. The caller only needs the status.
  *
  * Two things this does beyond a single request: it refuses any scheme outside
- * `opts.allowedProtocols`, and it follows up to MAX_PROXY_HOPS redirects because
- * `http.request` does not and a debrid download URL can 302 to a CDN node.
+ * `opts.allowedProtocols`, and it follows up to MAX_PROXY_HOPS - 1 (2) redirects
+ * — MAX_PROXY_HOPS requests in total — because `http.request` does not and a
+ * debrid download URL can 302 to a CDN node.
  */
 function proxyUpstream(
   deps: StreamDeps,
@@ -509,8 +513,8 @@ function proxyUpstream(
     // because destroying the first one after a redirect would leak the second.
     let current: http.ClientRequest | null = null;
 
-    const fail = (reason: ProxyRefusal | "socket"): void => {
-      deps.log(`stream: upstream failed (${reason})`);
+    const fail = (reason: ProxyRefusal | "socket", scheme = ""): void => {
+      deps.log(`stream: upstream failed (${reason})${scheme}`);
       if (settled || res.headersSent || res.writableEnded || res.destroyed) {
         res.destroy();
         done(502);
@@ -544,7 +548,18 @@ function proxyUpstream(
             up.resume();
             const next = resolveRedirect(location, url, opts.allowedProtocols, hopsRemaining - 1);
             if (!next.ok) {
-              fail(next.reason);
+              // Same reasoning as the initial refusal above: the scheme carries
+              // no secret, and naming it here too is what makes a redirect
+              // refusal actionable instead of just a bare category.
+              let scheme = "";
+              if (next.reason === "scheme") {
+                try {
+                  scheme = ` ${new URL(location, url).protocol}`;
+                } catch {
+                  // Unreachable: a "scheme" refusal means resolveRedirect parsed it.
+                }
+              }
+              fail(next.reason, scheme);
               return;
             }
             send(next.url, hopsRemaining - 1);

@@ -416,6 +416,9 @@ describe("proxy redirects", () => {
     const base = await start(reg);
     const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
     expect(res.status).toBe(502);
+    // Ties the bound to what MAX_PROXY_HOPS actually produces: 3 requests, so 2
+    // followed redirects — not just that some bound exists.
+    expect(upstream.seen.length).toBe(3);
   });
 
   it("still refuses an https upstream on the torrent path", async () => {
@@ -780,7 +783,11 @@ describe("stream handle — Real-Debrid", () => {
     // Manual, not "follow": a regression to the 302 branch would hand the
     // secret-bearing URL to the fetch client as a Location header rather than
     // logging it, and this test would pass despite the regression.
-    await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    // Without this, the log assertion below is vacuous: a 502 (or any other
+    // failure to actually proxy) would also leave the upstream url out of the
+    // logs, and the test would pass while proving nothing about proxying.
+    expect(res.status).toBe(200);
     expect(logs.join("\n")).not.toContain("SECRETTOKEN123");
   });
 });

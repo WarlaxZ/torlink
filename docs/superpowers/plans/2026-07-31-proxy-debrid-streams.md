@@ -1408,3 +1408,20 @@ The PR body must state:
 - **Two things the spec left to the plan, decided here.** The TUI key is `R` ("relay"), verified free against every binding in `keymap.ts`. `StreamDeps` gains `proxyDebrid?: boolean` rather than `stream.ts` loading config, because that module is handed what it needs and must not read the filesystem.
 - **One conditional task.** Task 3 Step 7 applies only if PR #57 has merged, with the check spelled out. Increment 2 is blocked on it entirely.
 - **Naming consistency.** `resolveProxyTarget`, `resolveRedirect`, `HTTP_ONLY`, `HTTP_AND_HTTPS`, `ProxyRefusal`, `ProxyOptions.allowedProtocols`, `MAX_PROXY_HOPS`, `Config.proxyDebridStreams`, `StreamDeps.proxyDebrid`, `rewriteManifest`, `RewrittenManifest`, `HlsSegmentCache` (`get`/`set`/`urlAt`), `isHlsProviderPath`, `parseHlsProviderPath`, `hlsProviderManifestPath`, `handleHlsProviderRequest` — each defined in exactly one task and used by that name everywhere after.
+
+## Corrections
+
+Recorded after the final whole-branch review, without editing the task steps above — anyone
+re-running this plan from scratch should know these three diverged during implementation:
+
+- **Task 4's key is `N`, not `R`.** `R` turned out to be a retired credential hotkey (guarded by
+  a live `keymap.test.ts` assertion, `not.toContain("R")`), so the actual binding — in
+  `src/ui/keymap.ts` and the `input === "N"` handler in `src/ui/App.tsx` — is `N`, not the `R`
+  ("relay") used throughout Task 4's steps and code samples.
+- **Task 3 Step 5's snippet is unconditional; the shipped code has a test seam.** The code reads
+  `options.streamDeps?.proxyDebrid ?? (await (options.webDeps?.loadConfigImpl ?? loadConfig)()).proxyDebridStreams === true`
+  in `src/web/server.ts`, not a bare config read — so a test can drive the proxying branch via
+  `streamDeps: { proxyDebrid: true }` without a real config file.
+- **Task 4's test snippet used the wrong shape.** `HELP_GROUPS` entries expose `.hints`, not
+  `.items`, and there is no group titled "global" in `src/ui/keymap.ts` — the snippet as written
+  would not compile against the real module.
