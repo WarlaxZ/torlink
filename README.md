@@ -53,7 +53,7 @@ Three reasons people stick with it:
 - **[Downloads and seeding](#downloads-and-seeding)** — the queue, file picking, limits, giving back
 - **[Recommendations](#recommendations-optional)** — a For You tab, from your own reccd server
 - **[Privacy and staying safe](#privacy-and-staying-safe)** — what's exposed, and the VPN kill switch
-- **[Reference](#reference)** — remote access, tokens, DNS, headless modes, the three names
+- **[Reference](#reference)** — remote access, tokens, DNS, headless modes, containers, the three names
 - **[Contributing](#contributing)** — build from source, house style
 
 ## Get started
@@ -603,6 +603,36 @@ Add `--daemon` to keep watch, serve, or files running after you log out, or `--w
 [browser dashboard](#in-your-browser) on the same port as the add API; `torlnk --help` has the full list
 of modes and flags.
 
+### In a container
+
+For a seedbox, a NAS, or anywhere you'd rather not install Node, there's a `Dockerfile` and a
+`docker-compose.yml` that bring up the browser interface and nothing else:
+
+```sh
+TORLINK_API_TOKEN=$(openssl rand -hex 24) docker compose up -d
+```
+
+Open `http://127.0.0.1:9162/#k=<that token>` and you're in. Compose publishes on **loopback only**, so
+starting it doesn't put your library on the LAN until you change that line yourself.
+
+Four things in there are decisions rather than defaults, and are worth knowing before you tune it:
+
+- **Set the token.** torlink would boot without one — given `--web` it mints a token and prints the link
+  to its log rather than refusing. But a minted token is new on every restart, so with
+  `restart: unless-stopped` your bookmark breaks the first time the container bounces.
+- **One volume, `/state`.** `TORLINK_STATE_DIR` puts config, data and cache under a single directory, so
+  that one mount holds your tokens, the queue, watch history, seeds and the poster cache. Downloads land
+  in `/state/Downloads/torlink` — repoint that mount at a bigger disk and the files follow.
+- **`ffmpeg` is in the image.** It's what lets the player [know a release's real codecs](#press-play) up
+  front instead of guessing from its name. It stays optional in the code — torlink runs fine without it —
+  but a container is a controlled environment, so there's no reason to ship one without.
+- **Debian, not Alpine.** The WebRTC module ships prebuilt binaries for glibc and not musl, and its
+  install is deliberately fail-soft, so an Alpine image would hand you a *working* torlink that had
+  quietly lost WebRTC peers. The cost is size: about 700 MB, most of it ffmpeg's codec libraries.
+
+No BitTorrent port is published. Outbound peers connect fine, so the swarm works — but nothing can dial
+in, so seeding ratios suffer. Publish the port you've configured if that matters to you.
+
 ### Posters
 
 Posters are fetched once and cached on disk. The browser gets the full-quality image; the TUI
@@ -618,40 +648,6 @@ The project is **torlink** — and so is your config directory and every `TORLIN
 command is `torlnk` and the npm package is `torlnk-rd`. Plain `torlnk` on npm is the upstream project
 this forked from, and npm rejects `torlink` as too similar to it, so the short spellings are the ones
 that were actually available.
-
-### In a container
-
-There's a `Dockerfile` and a `docker-compose.yml` for the browser dashboard:
-
-    TORLINK_API_TOKEN=$(openssl rand -hex 24) docker compose up -d
-
-Then `http://127.0.0.1:9162/#k=<that token>`. Compose publishes the port on
-loopback only, so bringing it up doesn't put your library on the LAN until you
-change that line yourself.
-
-A few things worth knowing, because each of them is a decision rather than a
-default:
-
-- **The token.** torlnk would boot without one — given `--web` it mints a token
-  and prints the link to its log rather than refusing. But a minted token is new
-  on every restart, so with `restart: unless-stopped` your bookmark breaks the
-  first time the container bounces. Set it.
-- **One volume, `/state`.** `TORLINK_STATE_DIR` puts config, data and cache under
-  a single directory, so that one mount holds your tokens, the queue, watch
-  history, seeds and the poster cache. Downloads land in
-  `/state/Downloads/torlink`; repoint that mount at a bigger disk and the files
-  follow.
-- **ffmpeg is in the image.** `ffprobe` is what lets the player know a file's real
-  container and codecs up front rather than guessing from its name. It stays
-  optional in the code — torlnk runs fine without it — but a container is a
-  controlled environment, so there's no reason to ship one without it.
-- **Not Alpine, on purpose.** The WebRTC native module ships prebuilt binaries for
-  glibc and not musl, and its install is deliberately fail-soft — so an Alpine
-  image gives you a *working* torlnk that has quietly lost WebRTC peers. The
-  image is Debian slim and about 700 MB, most of it ffmpeg's codec libraries.
-- **No BitTorrent port is published.** Outbound peers connect fine, so the swarm
-  works; nobody can dial in, so seeding ratios suffer. Publish the port you've
-  configured if that matters.
 
 ## Contributing
 
