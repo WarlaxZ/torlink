@@ -7,6 +7,7 @@ import {
   historyItemFor,
   loadStreamHistory,
   nextEpisode,
+  recordPlayedFile,
   recordStream,
   removeStreamHistory,
   saveStreamHistory,
@@ -1008,6 +1009,23 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
     const favourites = markWatched(current, infoHash, filename);
     if (favourites !== current) {
       await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+    }
+
+    // The same moment, for the same reason as the TUI's markPlayed: this is the
+    // first point at which we know WHICH episode was opened. `historyItemFor`
+    // ran at stream start, hung off the session resolving, before the user had
+    // picked a file at all — so for a season pack it stored no episode, and
+    // there was no "next" to offer.
+    //
+    // Read-modify-write, never a held snapshot: a TUI may be running against
+    // this same file in another process. Same reference back means nothing
+    // moved, which is the write gate.
+    try {
+      const history = await loadStreamHistory();
+      const advanced = recordPlayedFile(history, infoHash, filename);
+      if (advanced !== history) await saveStreamHistory(advanced);
+    } catch {
+      // A convenience list must never fail a play the user already started.
     }
     const out: LibraryResponse = {
       // Not an error when absent: the browser fires this after a successful
