@@ -110,6 +110,28 @@ If you ever bulk-rename fixtures, the full suite is the only thing that will tel
   `not.toContain` / `not.toBe` for the old names and confirm each still names something the test
   actually puts in play.
 
+## The fork-parent remote is called `forked-from` on purpose — don't rename it to `upstream`
+
+`WarlaxZ/torlink` is a fork of `baairon/torlink`. `gh` chooses a base repo by remote *name*,
+preferring `upstream`, then `github`, then `origin`. So while the parent remote was called `upstream`,
+a bare `gh pr create` opened the PR **against `baairon/torlink`** — a stranger's repository. That
+happened once, as `baairon/torlink#128`; closing such a PR does not delete it, and their watchers were
+notified.
+
+The parent remote is therefore named **`forked-from`**, which leaves `origin` as the preferred base:
+
+    origin       https://github.com/WarlaxZ/torlink.git
+    forked-from  https://github.com/baairon/torlink.git
+
+Pull the fork point in with `git fetch forked-from`. **Renaming it back to `upstream` reintroduces the
+bug**, so don't — nothing here depends on that name, and `@{upstream}` branch tracking is a different
+mechanism that works either way.
+
+`gh repo set-default WarlaxZ/torlink` is pinned too, as a second line of defence if someone re-adds an
+`upstream` remote. It lives in `.git/config`, so it covers this clone and its worktrees but does not
+travel to a fresh clone or to CI. In a fresh clone, check `git remote -v` before your first
+`gh pr create`, or pass `--repo WarlaxZ/torlink --base main` explicitly.
+
 ## Before you say it's done
 
 `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`. There is one known pre-existing
