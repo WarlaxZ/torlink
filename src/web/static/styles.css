@@ -28,11 +28,19 @@
   display: none !important;
 }
 
+/* 78rem, up from 60rem. At 1440px the old cap left roughly a third of the screen
+   empty, and grouping made that harder to justify — a heading carries more per
+   row than a release does, and the grid fits four posters across instead of
+   three.
+
+   NOT a full-width layout: the cards, the prose and the search form all read
+   worse stretched, so the extra room goes to the results column and the preview
+   (see .split) and the measure stays civilised. */
 body {
   margin: 0;
   margin-inline: auto;
   padding: 1.5rem;
-  max-width: 60rem;
+  max-width: 78rem;
   background: var(--bg);
   color: var(--fg);
   font-size: 0.9rem;
@@ -540,6 +548,15 @@ select:focus-visible {
   align-items: start;
 }
 
+/* Above the old 60rem cap there is room to spend, and the preview is where it
+   buys the most: a poster and a plot in 16rem is a narrow column of short lines.
+   The results column keeps the rest. */
+@media (min-width: 76rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+  }
+}
+
 .result-head {
   display: flex;
   gap: 0.75rem;
@@ -592,6 +609,37 @@ select:focus-visible {
    styling here because that state does not exist on screen. --accent, not
    --dim: this is the one positive fact in the meta line and should read as
    one, the same way .result-source already does. */
+/* Back to top. A browse is 25,000px of document; the pinned toolbar removes most
+   of the need to go back up, but not the wish to. */
+.to-top {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--raised);
+}
+
+.to-top:hover {
+  color: var(--accent);
+}
+
+/* Above the narrow preview bar rather than on top of it — but only while that bar
+   is actually up. `:has` on the pane's own `hidden` attribute is what keeps this
+   honest: raising the button whenever the window is narrow would leave it
+   floating mid-screen for the common case of nothing selected. Where `:has` is
+   unsupported the button keeps its corner and the two can overlap, which is a
+   mild degradation rather than a broken control. */
+@media (max-width: 46rem) {
+  body:has(#preview:not([hidden])) .to-top {
+    bottom: calc(45vh + 1.5rem);
+  }
+}
+
 /* ---- grouped results ---------------------------------------------------- */
 
 /* A heading stands in for every release of one title. It differs from a release

@@ -220,6 +220,7 @@ const reccList = el<HTMLUListElement>("recc-list");
 // see publishStickyHeights.
 const pageHeader = el<HTMLElement>("page-header");
 const searchToolbar = el<HTMLDivElement>("toolbar");
+const toTopButton = el<HTMLButtonElement>("to-top");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
@@ -1838,6 +1839,30 @@ const stickyObserver: ResizeObserver | null =
   typeof ResizeObserver === "function" ? new ResizeObserver(() => publishStickyHeights()) : null;
 stickyObserver?.observe(pageHeader);
 stickyObserver?.observe(searchToolbar);
+
+// ---- back to top ----
+//
+// Two viewports of scroll before it appears: any less and it is in the way on a
+// page that never needed it. `passive` because the handler only reads.
+const TO_TOP_AFTER_VIEWPORTS = 2;
+
+function updateToTop(): void {
+  toTopButton.hidden = window.scrollY < window.innerHeight * TO_TOP_AFTER_VIEWPORTS;
+}
+
+window.addEventListener("scroll", () => updateToTop(), { passive: true });
+updateToTop();
+
+toTopButton.addEventListener("click", () => {
+  // Honour the OS setting rather than always animating: a 25,000px smooth scroll
+  // is a long ride, and for someone who asked for less motion it is worse than
+  // long.
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+  // Focus follows the scroll, so a keyboard user is not left at the bottom of the
+  // document tabbing through rows they can no longer see.
+  queryInput.focus({ preventScroll: true });
+});
 
 // Wrapping in the layout-affecting moments rather than trusting the observer:
 // unlocking the page (which reveals #app), the tab bar being built from

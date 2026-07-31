@@ -258,6 +258,11 @@
       </section>
     </main>
 
+    <!-- Shown by app.ts after roughly two viewports of scroll. Outside <main> so
+         it is not hidden with a pane, and fixed rather than sticky so it does not
+         need a positioned ancestor to travel in. -->
+    <button id="to-top" class="to-top" type="button" hidden>↑ top</button>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>
