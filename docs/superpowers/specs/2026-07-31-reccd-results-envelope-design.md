@@ -75,7 +75,7 @@ and although torlink does not request `plot=true` today, a validator that demand
 
 ### `fetchRecommendations`
 
-Replace the current check at `src/recc/client.ts:134`:
+Replace the current check at the parse site in `fetchRecommendations`:
 
 ```
 if (!Array.isArray(body) || !body.every(isRecommendation)) {
@@ -91,7 +91,7 @@ contract change, and rendering the half we parsed would hide it.
 
 ### `fetchTitleSuggestions`
 
-The same substitution at `src/recc/client.ts:202`, keeping:
+The same substitution at the parse site in `fetchTitleSuggestions`, keeping:
 
 - the 401 branch (`"reccd rejected the token — check reccToken"`),
 - the 404 branch (`"this reccd has no title search"`) — this is about a *missing endpoint*, not
@@ -161,7 +161,14 @@ wire body. It must still be run, as the browser path's regression check.
 ## Documentation
 
 `README.md` describes what reccd gives the user (a For You tab, title autocomplete, Netflix and
-Trakt import) and never states a wire format or a version. No README change is needed.
+Trakt import) and never states a wire format or a version, so the original conclusion here was
+that no README change is needed. That answered the wrong question: it's true the README doesn't
+document a wire format, but the strict envelope means torlink and reccd must now be upgraded
+together, and that user-facing prerequisite had nowhere durable to live — a PR body isn't read by
+someone setting up torlink months later. The README's Recommendations section now says so
+directly: this build expects reccd's `results` envelope, the two should be upgraded together, and
+what an older reccd looks like from the user's side (For You reports an error, title suggestions
+stay empty).
 
 ## PR body must state
 

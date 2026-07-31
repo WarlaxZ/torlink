@@ -94,12 +94,6 @@ describe("fetchRecommendations", () => {
     expect(res).toEqual({ ok: true, items: [REC] });
   });
 
-  it("reads the items out of reccd's results envelope", async () => {
-    const { impl } = fakeFetch(() => ({ status: 200, body: { results: [REC] } }));
-    const res = await fetchRecommendations(CONFIG, { limit: 5 }, { fetchImpl: impl });
-    expect(res).toEqual({ ok: true, items: [REC] });
-  });
-
   // The envelope exists so an attribution block can accompany plot text. torlink
   // never asks for plots, but a parser that demanded EXACTLY `results` would
   // break the day it did — so unknown siblings are ignored, not rejected.
