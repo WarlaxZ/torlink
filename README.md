@@ -519,8 +519,8 @@ title, not the alias you typed.
 
 Suggestions are **titles, not releases**: reccd's catalog holds films and shows, so you'll be
 offered `Harrowgate` and never `Harrowgate S03` — narrow to a season yourself once the results
-are in. There's no typo tolerance either; the match is on the start of any word, so `dark kni`
-finds a `Dark Knight…`-shaped title but `dark knght` finds nothing.
+are in. There's no typo tolerance either; the match is on the start of any word, so `tin riv`
+finds `Tin Rivers` but `tin rivrs` finds nothing.
 
 Without reccd, both boxes behave exactly as they always have — nothing is requested and nothing
 changes on screen.
