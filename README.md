@@ -159,9 +159,25 @@ Results stream in as each source answers — you'll see `12/23 sources` climb ra
 spinner. Category tabs, sort orders and the alive-only filter are the same code the terminal uses, so the
 two never disagree about what a result is or how the list is ordered.
 
+**Many uploads of one film collapse to one row.** A browse of a single category routinely returns four
+copies of everything — one live search for a popular film came back with 129 results that were 21 actual
+things — so releases are grouped under their title, with a count you can expand to see every copy. Turn
+it off with the **group** control. Each row also carries short quality badges (`2160p`, `HDR`, `Remux`)
+read out of the release name, so you don't have to parse a 70-character filename to see what it is.
+Grouping and the badges are in **both** front ends: in the terminal, **`g`** turns grouping on or off and
+**space** expands the group under the cursor. The grouping key knows that an episode, a season pack and a
+film are different things, so `Kepler S02E04` never merges with `Kepler S02E05` or with a `Harrowgate S03`
+pack.
+
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers
 the terminal's preview pane. Without one everything still works; you just get the release names.
+
+That pane stays where you can see it: on a wide screen it pins below the toolbar and scrolls its own plot,
+and on a phone it becomes a bar across the bottom of the window rather than something 25,000 pixels below
+the list. The header, the category tabs and the sort controls are pinned too, so you can change tab or
+re-sort without scrolling back to the top of a long browse. Press **`/`** to jump to the search box from
+anywhere, and drive the list with the arrow keys.
 
 From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid
 provider is configured, or **play** it straight away. Under TorBox, a result already on their servers
@@ -211,6 +227,11 @@ you want and press `d` to save it, or `shift+d` to pick a different folder for j
 Press `s` to re-sort by seeders, size, or source, and `↑` in the search box to bring back a recent
 search. torlink remembers your sort and the tab you were on between runs, so it opens right where you
 left off.
+
+Many uploads of the same film collapse to one row, showing its title, year and how many copies there are —
+press **space** to open one up, or **`g`** to switch grouping off entirely. Acting on a collapsed row acts
+on its best copy, so `v` streams the pick you'd have chosen anyway. Rows carry short quality badges
+(`2160p`, `HDR`, `Remux`) as far as the terminal's width allows, resolution first.
 
 On a wide enough terminal a preview pane opens beside the results: highlight a film or show and torlink
 fetches its poster and plot and renders them right in the terminal (bring your own free

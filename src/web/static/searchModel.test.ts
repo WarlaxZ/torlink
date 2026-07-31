@@ -705,3 +705,31 @@ describe("parseGrouping", () => {
     expect(parseGrouping("off")).toBe(false);
   });
 });
+
+describe("grouping parity with the terminal", () => {
+  // The TUI groups with hintForSection(section); the browser must group with the
+  // equivalent hint for its tab names, or the same feed groups differently in the
+  // two front ends.
+  //
+  // NON-VACUOUS BY CONSTRUCTION. parseRelease only consults the hint when the
+  // name has no episode markers of its own (`type = isSeries ? "series" : hint ??
+  // …`), so a fixture like "Kepler 01x04" keys as a series with or without it —
+  // the first version of this test asserted exactly that and proved nothing. A
+  // bare title with no year and no markers is the case where the hint decides,
+  // and the assertion is that the tab changes the key.
+  it("passes the tab's parser hint through to the grouping key", () => {
+    const bare = [result({ name: "Harrowgate", infoHash: "a".repeat(40) })];
+    const onTv = visibleGroups(view({ group: "TV", snapshot: snapshot(bare) }), () => true);
+    const onAll = visibleGroups(view({ group: ALL_TAB, snapshot: snapshot(bare) }), () => true);
+    expect(onTv[0]!.key).toContain("|series|");
+    // The All tab has no medium to assume, so the same name keys differently.
+    expect(onAll[0]!.key).not.toContain("|series|");
+    expect(onTv[0]!.key).not.toBe(onAll[0]!.key);
+  });
+
+  it("groups a Movies tab with the film-shaped key", () => {
+    const bare = [result({ name: "Harrowgate", infoHash: "a".repeat(40) })];
+    const onMovies = visibleGroups(view({ group: "Movies", snapshot: snapshot(bare) }), () => true);
+    expect(onMovies[0]!.key).toBe("harrowgate||movie");
+  });
+});

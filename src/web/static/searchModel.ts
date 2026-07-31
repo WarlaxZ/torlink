@@ -18,6 +18,7 @@
 // in tsup.web.config.ts fails the build if that ever stops being true —
 // resultGroup reaches `parse-torrent-title` through util/release.ts, which the
 // bundle already carries for streamFlow.ts.
+import { hintForGroup } from "../../util/release";
 import { filterResults } from "../../util/resultFilter";
 import {
   groupResults,
@@ -177,7 +178,13 @@ export function visibleGroups(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
 ): ResultGroup<PublicSearchResult>[] {
-  return groupResults(visibleResults(view, reportsHealth));
+  // THE HINT IS NOT OPTIONAL for cross-surface agreement. The TUI groups with
+  // hintForSection(section); passing nothing here would let the same feed group
+  // differently in the two front ends, because the hint changes whether
+  // parseRelease reads a name as a film or a series — and that changes the shape
+  // of the key. hintForGroup is the "Movies"/"TV" → movie/series translation the
+  // browser's tab names need, and it already exists for the badges.
+  return groupResults(visibleResults(view, reportsHealth), hintForGroup(view.group));
 }
 
 /**
@@ -207,21 +214,15 @@ export function resultRowPlan(
       inGroup: false,
     }));
   }
-  return groupRowPlan(groupResults(shown), expanded);
+  // Same hint as visibleGroups, and for the same reason.
+  return groupRowPlan(groupResults(shown, hintForGroup(view.group)), expanded);
 }
 
-/**
- * Whether grouping is offered for this tab.
- *
- * True everywhere. On Games, Music and Books the release names are not film or
- * show names and the parser finds little to merge, which is the safe direction —
- * it groups exact repeats and leaves everything else alone. Named as a function
- * anyway so the rule has one home if that ever needs to change, the way
- * {@link previewApplies} does for the preview pane.
- */
-export function groupingApplies(_group: string): boolean {
-  return true;
-}
+// NOT GATED BY TAB, unlike previewApplies. Grouping is offered everywhere: on
+// Games, Music and Books the release names are not film or show names, so the
+// parser finds little to merge and the list is left almost as it was — which is
+// the safe direction. There is deliberately no `groupingApplies()` here: a
+// predicate that always returns true is a placeholder pretending to be a rule.
 
 /** "12/23 sources", the same fraction the TUI's spinner shows. */
 export function progressLabel(snapshot: PublicSearchSnapshot | null): string {
