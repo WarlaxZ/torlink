@@ -116,6 +116,12 @@ export function shouldSuggestFor(draft: string, submitted: string): boolean {
  * window both fire and nothing orders their replies.
  */
 export function applyReply(state: SuggestState, seq: number, items: TitleSuggestion[]): SuggestState {
+  // `<=`, not `<` — the equality case is not redundant, it's load-bearing.
+  // `suppressFor` sets `appliedSeq` to the seq of the request still in flight
+  // when the list is dismissed, so that request's own reply arrives with
+  // seq === appliedSeq. Equality IS the discard case for it. Tightening this
+  // to `<` would let that reply through and silently undo the dismissal fix
+  // (the list would reopen ~300ms after the user closed it).
   if (seq <= state.appliedSeq) return state;
   return { ...state, items, appliedSeq: seq };
 }

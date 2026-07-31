@@ -117,6 +117,13 @@ describe("applyReply", () => {
     expect(stale).toBe(fresh);
   });
 
+  // The abstract boundary: two applyReply calls, same seq, nothing else in play.
+  // `suppressFor`'s "discards the reply to a request that was in flight when it
+  // was called" test below exercises the SAME `<=` boundary but built the way
+  // the real code reaches it — via suppressFor's high-water mark, not a second
+  // applyReply — so it's the dismissal scenario, not a duplicate of this one.
+  // Keep both: this one pins the operator on applyReply in isolation; that one
+  // pins the actual bug the operator was fixing.
   it("discards a reply whose seq equals the one already applied", () => {
     const first = applyReply(emptySuggestState(), 3, [KEPLER]);
     expect(applyReply(first, 3, [KESTREL]).items).toEqual([KEPLER]);
@@ -213,6 +220,10 @@ describe("suppressFor", () => {
    * The previous version of this test asserted `appliedSeq` merely survived and
    * then probed with seq 3 — the one seq that was already discarded. It passed
    * against the bug.
+   *
+   * This exercises the same `<=` equality boundary as `applyReply`'s "discards
+   * a reply whose seq equals the one already applied" — see that test's
+   * comment for how the two differ.
    */
   it("discards the reply to a request that was in flight when it was called", () => {
     const some = applyReply(emptySuggestState(), 4, [KESTREL]);
