@@ -539,6 +539,14 @@ function proxyUpstream(
             const value = up.headers[name];
             if (value !== undefined) out[name] = value;
           }
+          // A redirect chain means more than one hop's response can arrive:
+          // a stale hop that already failed (or a hop whose response we
+          // already used) must not writeHead a second time on top of one
+          // that already answered.
+          if (settled || res.headersSent) {
+            up.resume();
+            return;
+          }
           // The upstream's status, never a hardcoded 200: a 206 answered as 200
           // tells the client its Range was ignored, and a player that asked for
           // the middle of a file will treat the bytes it gets as the start.
@@ -554,6 +562,11 @@ function proxyUpstream(
       current = upstream;
 
       upstream.on("error", () => {
+        // A redirect chain means more than one request can be in flight or
+        // dying at once: a socket this hop replaced (its own redirect already
+        // sent us on to the next hop) errors out from under it, and that
+        // stale error must not fail a request nobody is waiting on any more.
+        if (upstream !== current) return;
         // Nothing can be said to a client that is already gone or already
         // answered. This branch also covers the ordinary teardown case, where
         // the destroy below is *why* the request errored.

@@ -67,6 +67,35 @@ async function startUpstream(): Promise<Upstream> {
       return;
     }
 
+    // Same redirect, but the connection that carried it resets instead of
+    // closing cleanly — simulating a hop's socket dying right after the proxy
+    // has already moved on to the next hop's request. Redirects to a
+    // deliberately slow next hop so the reset is very likely to reach the
+    // client (and fire the stale request's `error`) before that next hop
+    // answers — the ordering the guard under test has to survive.
+    if (req.url?.startsWith("/redirect-die/")) {
+      res.writeHead(302, { Location: "/media-delay" });
+      res.flushHeaders();
+      // `resetAndDestroy`, not `destroy`: a plain close is a valid end-of-body
+      // for a response with no Content-Length, so the client just sees a
+      // completed (if bodyless) redirect. An RST is what actually surfaces as
+      // an `error` on the client request — the case the guard exists for.
+      setImmediate(() => res.socket?.resetAndDestroy());
+      return;
+    }
+
+    if (req.url?.startsWith("/media-delay")) {
+      setTimeout(() => {
+        res.writeHead(200, {
+          "Content-Type": "video/mp4",
+          "Content-Length": String(MEDIA.length),
+          "Accept-Ranges": "bytes",
+        });
+        res.end(MEDIA);
+      }, 30);
+      return;
+    }
+
     // Never-ending drip, for the teardown test: headers out immediately so the
     // client is reading, then a chunk forever.
     if (req.url?.startsWith("/slow")) {
@@ -401,6 +430,25 @@ describe("proxy redirects", () => {
     expect(logs.join("\n")).toContain("https:");
     // The scheme is loggable; the URL never is.
     expect(logs.join("\n")).not.toContain("cdn.example");
+  });
+
+  /**
+   * Regression test for a stale-hop race: hop 1's response handler drains its
+   * 302 and calls send() for hop 2 — reassigning `current` — before hop 1's own
+   * connection resets and its `error` handler fires. Without the `upstream !==
+   * current` guard, that stale error settles the promise with a 502 write, and
+   * hop 2's later, real answer then throws trying to writeHead a second time.
+   * With the guard, the stale error is ignored and hop 2's answer wins.
+   */
+  it("ignores a stale hop's socket error once a later hop has taken over", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect-die/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
   });
 });
 
