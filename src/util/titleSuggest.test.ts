@@ -138,13 +138,13 @@ describe("shouldQueryFor", () => {
   // change handler again — without this the list would immediately reopen on
   // the text the user just picked. Escape reuses the same latch.
   it("refuses the exact text that was suppressed", () => {
-    const s = suppressFor(emptySuggestState(), "Kestrel 2010");
+    const s = suppressFor(emptySuggestState(), "Kestrel 2010", 1);
     expect(shouldQueryFor(s, "Kestrel 2010")).toBe(false);
     expect(shouldQueryFor(s, "  Kestrel 2010  ")).toBe(false);
   });
 
   it("queries again as soon as the text changes", () => {
-    const s = suppressFor(emptySuggestState(), "Kestrel 2010");
+    const s = suppressFor(emptySuggestState(), "Kestrel 2010", 1);
     expect(shouldQueryFor(s, "Kestrel 2010 1080p")).toBe(true);
   });
 });

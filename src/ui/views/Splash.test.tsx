@@ -154,14 +154,17 @@ describe("Splash search suggestions", () => {
   it("still quits on escape with reccd configured and no list open", async () => {
     // Distinct from the plain "quits on escape" above: here the guard exists and
     // is asked about, but nothing has been typed so there is nothing to dismiss.
-    const { impl, urls } = suggestStub();
+    const { impl } = suggestStub();
     const quitAll = vi.fn();
     const { stdin } = renderSplash({ quitAll }, { reccConfig: SUGGEST_CFG, fetchImpl: impl });
     await flush();
     stdin.write(ESC);
     await flush();
     expect(quitAll).toHaveBeenCalledTimes(1);
-    expect(urls).toHaveLength(0);
+    // No assertion on `urls` here: nothing was typed, so an empty list of
+    // requests is not a property any change to this code could break. The
+    // request-side negatives live in the fake-timer describe below, where the
+    // clock can be run past the debounce to make them exact.
   });
 
   it("completes on tab with a suggestion available, instead of entering the app", async () => {
@@ -271,10 +274,14 @@ describe("Splash suggestion requests", () => {
       await tick(40); // seven keystrokes, all inside one debounce window
     }
     await tick(1000);
-    // Strictly fewer requests than keystrokes, and the one that fired asks about
-    // the text finally in the box — not an intermediate prefix.
-    expect(urls.length).toBeLessThan(7);
+    // Exactly one request for the text finally in the box, not an intermediate
+    // prefix. (A `toBeLessThan(7)` used to sit above this: it passed at zero
+    // calls and said nothing that toHaveLength(1) does not say exactly.)
     expect(urls).toHaveLength(1);
-    expect(urls[0]).toContain("q=kestrel");
+    // Anchored on the trailing separator: "q=kestrel" alone is also satisfied by
+    // "q=kestrelXYZ", and both stubs in this file ignore the URL and always
+    // answer [KESTREL] — so this assertion is the only thing pinning what was
+    // actually asked.
+    expect(urls[0]).toContain("q=kestrel&");
   });
 });

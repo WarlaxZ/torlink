@@ -3127,8 +3127,16 @@ describe("GET /api/title-search", () => {
    * the reccd token or URL — if it could, the TUI's proxy would be pointless
    * and a shared link would leak the user's server.
    *
-   * Asserted against the SERIALISED body, and with a token value that appears
-   * nowhere else in the fixture, so the negative cannot quietly go vacuous.
+   * Asserted against the SERIALISED body, with a token value that appears
+   * nowhere else in the fixture and is genuinely in play in the config this
+   * request is answered from.
+   *
+   * A FORWARD-LOOKING GUARD, not a live one, and worth being honest about: on
+   * the ok branch the body is `{status:"ok", items: result.items}` from an
+   * injected stub, so no config-derived value can reach it whatever the
+   * implementation does. This is the test that would turn red if that ever
+   * changed. Its error-branch twin below is the one that covers the branch a
+   * leak could plausibly be written into today.
    */
   it("leaks neither the reccd token nor its URL", async () => {
     const res = await look(

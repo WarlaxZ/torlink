@@ -545,13 +545,17 @@ describe("Results search suggestions", () => {
   });
 
   it("leaves the search box on tab when there is nothing to complete", async () => {
-    // reccd configured, but two characters never typed \u2014 so no list, and tab
-    // must behave exactly as it did before suggestions existed.
+    // reccd configured, and ONE character typed \u2014 below the two reccd will answer
+    // \u2014 so there is no list and tab must behave exactly as it did before
+    // suggestions existed. A character really is typed: with an empty box the
+    // emptiness of `urls` would follow from nothing having happened at all.
     const { impl, urls } = suggestStub();
     const u = await mountSuggest(impl);
 
     u.press("/");
     await vi.waitFor(() => expect(editing(u)).toBe(true));
+    u.press("k");
+    await vi.waitFor(() => expect(u.frame()).toContain("\u276f k"));
     u.press("\t");
     await vi.waitFor(() => expect(editing(u)).toBe(false));
     expect(urls).toHaveLength(0);
