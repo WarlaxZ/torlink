@@ -266,10 +266,18 @@ export function rankReleases<T extends PickableResult>(
 /**
  * The winner, or null. Exactly `rankReleases(...)[0] ?? null`.
  *
- * `rankReleases` is exported alongside it because spec C walks the ranking:
- * Real-Debrid has no cache-check endpoint, so neither "is it cached" nor "has
- * it been taken down" can be answered without trying a candidate. Returning
- * only a winner would force that loop to re-rank or reimplement the ordering.
+ * `rankReleases` is exported alongside it because spec C walks the ranking, and
+ * how far it has to walk depends on the provider. TorBox answers "is this
+ * cached?" up front (`checkCached`), so it can filter before trying anything;
+ * Real-Debrid withdrew that endpoint in 2024 and has no equivalent, so there
+ * the only way to learn whether a release is cached — or has been taken down —
+ * is to add it and see. Either way the caller needs the whole ordering, not
+ * just its head: a filter needs something to filter, and a retry loop needs
+ * somewhere to go next. Returning only a winner would force both to re-rank or
+ * reimplement the ordering.
+ *
+ * `DebridProvider.checkCached` being OPTIONAL is that capability difference,
+ * expressed in the type — see `src/integrations/debrid/types.ts`.
  */
 export function pickBestRelease<T extends PickableResult>(
   candidates: readonly T[],

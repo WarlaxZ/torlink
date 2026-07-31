@@ -97,7 +97,14 @@ that constraint and the four copy-then-drift bugs behind it.
 - Auto-download. This spec plays; it does not queue. The picker is reusable for a
   download action later, and its signature does not assume streaming.
 
-## What we learned about Real-Debrid (recorded so C does not relitigate it)
+## What we learned about the debrid providers (recorded so C does not relitigate it)
+
+> **Updated after the TorBox merge (`8e448b5`).** This section was written when Real-Debrid
+> was the only provider, and it read as though "you cannot ask whether a release is cached"
+> were a fact about debrid in general. It is not — it is a fact about Real-Debrid.
+> **TorBox answers the question directly.** The consequence for spec C is below, under
+> "What this means for C now that there are two providers".
+
 
 Real-Debrid **has no cache-check endpoint.** The official API documentation at
 `https://api.real-debrid.com/` lists exactly these under `/torrents/`:
@@ -117,24 +124,74 @@ filter over a list. It is a different feature with different failure modes (it m
 the user's RD account as a side effect of *asking a question*), which is why it is spec C.
 
 One cheap partial win already exists and belongs to C: `listTorrents` and `findExisting`
-(`src/integrations/realdebrid.ts:274`, `:291`) already locate a torrent by infohash in
+(now `src/integrations/debrid/realdebrid.ts`) already locate a torrent by infohash in
 the user's own account. Anything already there is instant. That covers re-watches for
 free; it says nothing about a title the user has never fetched.
+
+### TorBox *can* answer it, and the interface already says so
+
+`torBoxProvider.checkCached(token, hashes)` hits `/api/torrents/checkcached` and returns
+the subset of hashes TorBox already holds. So for TorBox the question spec C is built
+around is a cheap batched lookup, not a gamble.
+
+The provider interface encodes the difference rather than branching on a provider name
+(`src/integrations/debrid/types.ts`):
+
+```ts
+  /**
+   * Which of `hashes` the provider already has cached. Present ONLY where the
+   * provider supports it — its absence is the capability flag.
+   */
+  checkCached?(token: string, hashes: string[], opts?: RequestOptions): Promise<Set<string>>;
+```
+
+**`checkCached` being optional IS the capability flag.** C must branch on whether the
+active provider has the method, never on `provider === "torbox"` — a third provider with
+the endpoint would otherwise be silently excluded.
+
+Infrastructure that already exists and C should use rather than rebuild:
+`src/core/cachedHashes.ts` (`cachedHashesFor`, `batchHashes`, `CACHED_BATCH`),
+`POST /api/cached` (`CachedRequest`/`CachedResponse` in `wire.ts`), `Store.cachedHashes`
+and `Store.refreshCachedHashes`, and the `debridCachedCheck` capability flag on
+`GET /api/sources` so the browser can adapt without reading config.
+
+### What this means for C now that there are two providers
+
+C is no longer one design. It is one ranking with two consumers:
+
+- **Provider has `checkCached`** (TorBox): a *filter*. Batch the ranked candidates' hashes,
+  keep the cached ones, play the best of those. No side effects, one request, and the
+  answer is known before anything is added to the user's account.
+- **Provider lacks it** (Real-Debrid): a *retry loop*, exactly as originally specced —
+  walk the ranking, add, observe, fall back on `virus`/`dead`/`no_longer_available`.
+
+Both consume the same `rankReleases` output, which is why it returns the whole ordering
+rather than just a winner. The two paths differ in cost and in side effects, so C should
+say plainly which one is running — a user on Real-Debrid is having torrents added to their
+account to answer a question that a TorBox user gets answered for free.
 
 ### "Removed" and "taken down" are the same question, and detection already exists
 
 C also has to answer *has this been pulled?*, not just *is it cached?*. That needs no new
 detection work:
 
-- `ERROR_STATUSES` (`src/integrations/realdebrid.ts:12`) is
+- `ERROR_STATUSES` (now `src/integrations/debrid/realdebrid.ts`) is
   `{error, magnet_error, virus, dead}`. `virus` is Real-Debrid's flag for content it has
   removed; `messageForTorrentStatus` already renders it as "Real-Debrid flagged this
   torrent's contents", and `dead` as "No seeders".
 - The unrestrict step separately maps `file_unavailable` and `no_longer_available` to
   "No longer available on Real-Debrid (removed)."
 
-The constraint is identical to caching: all of it is knowable only *after* adding the
-magnet. What it changes is C's **value**. Today a `virus` or `dead` status fails the whole
+TorBox surfaces the same class of outcome in its own words — "TorBox isn't caching this
+torrent — it may have no seeders (removed or dead)" (`src/integrations/debrid/torbox.ts`).
+Read both through the provider's `isTransient` / `isTokenRejection`, and through the error
+message the resolve throws, rather than matching either provider's status strings directly:
+those strings are provider-private and the whole point of `DebridProvider` is that nothing
+above `src/integrations/debrid/` knows them.
+
+The constraint here is NOT lifted by TorBox's `checkCached`: that answers "is it cached",
+not "has it been pulled". A takedown is still only observable by trying to resolve —
+on both providers. What it changes is C's **value**. Today a `virus` or `dead` status fails the whole
 action and the user restarts by hand; with a fallback loop it simply advances to the next
 candidate. Recovering from a takedown is a better argument for building C than the
 caching speed-up was — and it is why C must be a loop over ranked candidates rather than
