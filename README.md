@@ -540,9 +540,9 @@ rejected` and the For You tab goes quiet. It's recoverable: sign in at reccd.str
 the reccd row in Accounts and paste the token it gives you back. If this happens, torlink isn't broken —
 it's holding a token reccd just replaced.
 
-**To stop torlink signing you up**, set `"reccAutoSignup": false` in `config.json` before first launch,
-or point `TORLINK_RECC_URL` at your own instance instead of the default host — either one heads off the
-auto-signup described above. (Neither undoes an account that already exists: `reccAutoSignup: false`
+**To stop torlink signing you up**, point `TORLINK_RECC_URL` at your own instance instead of the default
+host, or add `"reccAutoSignup": false` to `config.json` (create the file yourself if you haven't run
+torlink yet) — either one heads off the auto-signup described above. (Neither undoes an account that already exists: `reccAutoSignup: false`
 with a token still in `config.json` leaves that account working exactly as before, and pointing `reccUrl`
 elsewhere redirects recommendations rather than switching them off.) To disconnect an account entirely,
 clear it from the Accounts pane instead — **`x`**, or blank both fields in the prompt. Either one sets
@@ -597,9 +597,9 @@ Seed reccd with what you've already watched on Netflix, so its recommendations k
      give it the CSV path — you can drag the file onto the terminal to paste the path.
    - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
 
-torlink doesn't care what you watch — titles go only to your own reccd server to seed recommendations,
-and nothing else is done with them. Large exports upload in batches automatically, and re-importing the
-same file won't double-count anything.
+torlink doesn't care what you watch — titles go only to reccd (the hosted one by default, or your own
+if you've connected that instead) to seed recommendations, and nothing else is done with them. Large
+exports upload in batches automatically, and re-importing the same file won't double-count anything.
 
 #### From Trakt
 
@@ -618,7 +618,10 @@ This needs the reccd server to have a Trakt app configured (`RECCD_TRAKT_CLIENT_
 ## Privacy and staying safe
 
 Your files stay on your disk, and nothing routes through a central server; torlink only talks to the
-torrent network directly.
+torrent network directly. The one exception is [Recommendations](#recommendations): on first launch
+torlink makes a single outbound request to `reccd.stream` to create an account, and that's the only
+thing torlink contacts on its own, unconfigured — turn it off with `reccAutoSignup: false` if you'd
+rather it didn't.
 
 **What's exposed, and when.** A plain `d` download or a torrent stream is peer-to-peer, so your IP is
 visible to peers — torlink warns you once before the first one, and warns again on `d` if a debrid
