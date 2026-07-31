@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest something torlink should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        The situation you're in, rather than the feature you have in mind. It's often
+        the case that the underlying problem has a simpler answer than the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which front end?
+      description: >-
+        Most user-facing features ship in **both** the terminal and the browser in the
+        same change — see CLAUDE.md. Pick one only if it genuinely can't exist in the
+        other (the terminal has no posters; the browser has no keybindings).
+      options:
+        - Both
+        - Terminal UI only — and I've said why below
+        - Browser UI only — and I've said why below
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried already?
+      description: Existing keys, flags or config that get you part of the way.
+    validations:
+      required: false
