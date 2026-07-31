@@ -15,7 +15,13 @@ import { parseRelease, hintForSection } from "../../util/release";
 import { releaseBadges } from "../../util/releaseBadges";
 // The grouping engine, shared with the browser's results list. `groupCountLabel`
 // is deliberately NOT used here — see the "×5" comment on the count cell below.
-import { groupHeading, groupResults, groupRowPlan, resultAtRow } from "../../util/resultGroup";
+import {
+  defaultExpandedKeys,
+  groupHeading,
+  groupResults,
+  groupRowPlan,
+  resultAtRow,
+} from "../../util/resultGroup";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -274,6 +280,12 @@ export function Results() {
   // Which group headings are open, by group key. Cleared with the query for the
   // reason the cursor is: the keys of one search name nothing in the next.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // The highest-ranked season opens itself once per result set. SEEDED rather
+  // than applied every render, so collapsing it stays collapsed — the set means
+  // "what is open", and a running rule would fight the user. The effect itself
+  // lives BELOW the query-change effect that clears `expanded`: effects run in
+  // declaration order, and seeding above it just gets wiped on mount.
+  const seeded = useRef(false);
   // The row the user navigated to; null until they move. Keeps the cursor on
   // their row while streamed-in sources reshuffle the list.
   //
@@ -310,7 +322,22 @@ export function Results() {
     // since "kestrel|2010|movie" is the same key in every search that returns it,
     // which would silently expand a group the user never opened.
     setExpanded(new Set());
+    // Let the next result set seed its season open again.
+    seeded.current = false;
   }, [query, section]);
+
+  // Seeds the season the user most likely wants, once per result set. Declared
+  // after the clear above on purpose — see the note on `seeded`.
+  useEffect(() => {
+    if (results.length === 0) {
+      seeded.current = false;
+      return;
+    }
+    if (seeded.current) return;
+    seeded.current = true;
+    const keys = defaultExpandedKeys(groupResults(results, hintForSection(section)));
+    if (keys.length > 0) setExpanded(new Set(keys));
+  }, [results, section]);
 
 
   useEffect(() => {
@@ -330,7 +357,13 @@ export function Results() {
     () =>
       grouped
         ? groupRowPlan(groupResults(results, hintForSection(section)), expanded)
-        : results.map((result) => ({ kind: "release" as const, key: result.infoHash, result, inGroup: false })),
+        : results.map((result) => ({
+            kind: "release" as const,
+            key: result.infoHash,
+            result,
+            inGroup: false,
+            depth: 0,
+          })),
     [results, grouped, expanded, section],
   );
 
@@ -774,7 +807,7 @@ export function Results() {
                   // from the release the row would act on if you pressed `v`.
                   // Never null: groupRowPlan does not emit empty groups.
                   const r = resultAtRow(row)!;
-                  const isGroup = row.kind === "group";
+                  const isGroup = row.kind === "group" || row.kind === "season";
                   const ss = sourceStyle(r.source);
                   // The disclosure arrow and the member indent live INSIDE the
                   // name cell rather than in columns of their own. At 80 columns
@@ -782,10 +815,16 @@ export function Results() {
                   // two more fixed columns would come straight out of it.
                   // groupHeading, not a local format: the browser's headings go
                   // through the same call, and a show's season is the only thing
-                  // telling one heading from the next.
-                  const label = isGroup
-                    ? `${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}`
-                    : `${row.inGroup ? "  " : ""}${cleanText(r.name)}`;
+                  // telling one heading from the next. Children of a season take
+                  // the short form — the season row above them already states the
+                  // show, and repeating it at every level is noise.
+                  const indent = "  ".repeat(row.depth);
+                  const label =
+                    row.kind === "season"
+                      ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}`
+                      : row.kind === "group"
+                        ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row, { underSeason: row.depth > 0 })}`
+                        : `${indent}${cleanText(r.name)}`;
                   return (
                     <Box key={row.key}>
                       <Box width={GUTTER} flexShrink={0}>
