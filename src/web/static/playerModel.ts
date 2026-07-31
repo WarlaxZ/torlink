@@ -5,9 +5,13 @@
 // it lives here, where a plain unit test can reach it, and player.ts is left as
 // wiring that reads end to end.
 //
-// Bundled for the browser: no node:* imports, and nothing from outside this
-// directory except types. `URL` and `URLSearchParams` are globals in both
-// runtimes, so they are fair game and are what parses the intent target below.
+// Bundled for the browser: no node:* imports. What it may import from outside
+// this directory is `src/util/`, which is the front-end-agnostic layer both
+// front ends share — `npm run build` is what proves any such import is
+// browser-safe, following transitive imports where a grep cannot. `URL` and
+// `URLSearchParams` are globals in both runtimes, so they are fair game and are
+// what parses the intent target below.
+import { extensionOf } from "../../util/playability";
 
 /** Which session/file this page is showing, read off its own location. */
 export interface PlayerTarget {
@@ -78,11 +82,10 @@ export function absoluteUrl(origin: string, path: string): string {
   return `${origin.replace(/\/+$/, "")}${path}`;
 }
 
-/** Lowercase extension without the dot, or "" when there isn't a usable one. */
-export function extensionOf(filename: string): string {
-  const m = /\.([A-Za-z0-9]{1,5})$/.exec(filename);
-  return m ? m[1]!.toLowerCase() : "";
-}
+// extensionOf moved to ../../util/playability.ts when the server's .info route
+// became a second consumer of it. Re-exported here so this module stays the one
+// place the player page imports from.
+export { extensionOf };
 
 /**
  * Containers a browser has a real chance with. Everything else gets the
