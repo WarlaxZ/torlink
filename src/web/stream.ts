@@ -24,6 +24,7 @@ import { streamHandle } from "./routes";
 import { probeUrl } from "../core/probe";
 import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../util/playability";
 import type { ProbeCache } from "../core/probeCache";
+import type { HlsVerdictCache } from "../core/hlsVerdictCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
 import type { StreamInfoResponse } from "./wire";
 import {
@@ -68,6 +69,17 @@ export interface StreamDeps {
    * with a perfectly good manifest show a card claiming it cannot be played.
    */
   resolveHls?: (session: StreamSession, index: number) => Promise<string | null>;
+  /**
+   * Whether that manifest is one a browser can actually finish watching, rather
+   * than merely one that exists. Injected, and absent means "offer whatever
+   * `resolveHls` returned" — the behaviour before the provider was measured.
+   */
+  checkHls?: (manifestUrl: string) => Promise<boolean>;
+  /**
+   * Remembers the answer above, so a page reload does not pull a second probe
+   * segment through this machine. Optional for the same reason `probeCache` is.
+   */
+  hlsVerdictCache?: HlsVerdictCache;
   /**
    * Proxy debrid media through this server rather than redirecting to the
    * provider. Resolved per request by the caller — this module never loads
@@ -370,10 +382,34 @@ export async function handleStreamRequest(
     // most likely to be a big remux — around the relay the user asked for, and
     // show the provider the viewer's address. The ladder falls to a direct play
     // through this handle instead.
-    const hls =
+    const resolved =
       deps.resolveHls && deps.proxyDebrid !== true
         ? await deps.resolveHls(session, parsed.index)
         : null;
+    // A manifest existing is not the same as a manifest working. Measured
+    // against Real-Debrid: for 1080p HEVC its transcoder runs at 0.65x realtime
+    // and serves the segments it has not finished as complete 200s with a
+    // Content-Length matching a truncated body — so the browser cannot tell, and
+    // playback freezes a few seconds in with no error event to react to. See
+    // `hlsHealth.ts` for the measurements.
+    //
+    // So the rung is offered only when a segment past the transcoder's opening
+    // burst comes back whole. The check is skipped entirely when nothing injected
+    // one, which keeps a caller that has not wired it on the previous behaviour
+    // rather than silently dropping every manifest.
+    let hls = resolved;
+    if (resolved !== null && deps.checkHls) {
+      const remembered = deps.hlsVerdictCache?.get(parsed.sid, parsed.index);
+      const usable = remembered ?? (await deps.checkHls(resolved));
+      deps.hlsVerdictCache?.set(parsed.sid, parsed.index, usable);
+      if (!usable) {
+        // The verdict, never the URL: a transcode manifest is an unguessable URL
+        // minted for one file, i.e. a capability, and belongs in a log line no
+        // more than an unrestricted link does.
+        deps.log("stream: provider transcode is not keeping up; not offering HLS");
+        hls = null;
+      }
+    }
     const body: StreamInfoResponse = { facts, blockers: blockersFor(facts), hls };
     // Note what is NOT in that body: `file.url`. That is a debrid unrestricted
     // link, i.e. a credential against the user's account. The page plays through

@@ -1020,11 +1020,16 @@ describe("GET /stream/:sid/:idx.info", () => {
     expect(body.facts.audioCodec).toBe("dts");
   });
 
-  it("reports the provider's manifest in .info when one is offered", async () => {
+  it("reports the provider's manifest in .info when one is offered and usable", async () => {
     const { base, capability, id } = await infoSession({
       streamDeps: {
         probeImpl: async () => null,
         resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+        // Injected, because the real check fetches a probe segment: without this
+        // the suite would go to the network for a host that does not exist and
+        // the manifest would be withheld for that reason rather than the one
+        // under test.
+        checkHls: async () => true,
       },
     });
     const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
@@ -1052,6 +1057,64 @@ describe("GET /stream/:sid/:idx.info", () => {
     expect(JSON.parse(text).hls).toBeNull();
     // Not merely absent from the field — absent from the body.
     expect(text).not.toContain("real-debrid.example");
+  });
+
+  // A manifest existing is not a manifest working. Real-Debrid's transcoder
+  // measured 0.65x realtime on 1080p HEVC and serves the segments it has not
+  // finished as complete 200s with a Content-Length matching a truncated body —
+  // so the browser cannot tell, plays a few seconds and freezes. Offering such a
+  // manifest is worse than the card, which at least points at VLC.
+  it("withholds a manifest the provider cannot actually keep up with", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => null,
+        resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+        checkHls: async () => false,
+      },
+    });
+    const text = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).text();
+    expect(JSON.parse(text).hls).toBeNull();
+    // Not merely nulled in the field — the URL is a minted capability and must
+    // not appear anywhere in the body.
+    expect(text).not.toContain("real-debrid.example");
+  });
+
+  it("checks once and remembers, so a reload pulls no second probe segment", async () => {
+    let checks = 0;
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => null,
+        resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+        checkHls: async () => {
+          checks++;
+          return false;
+        },
+      },
+    });
+    for (let i = 0; i < 3; i++) {
+      const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+      expect(body.hls).toBeNull();
+    }
+    // A remembered "no" must not read as "never asked" — that is the whole point
+    // of the verdict cache holding a boolean rather than a truthy flag.
+    expect(checks).toBe(1);
+  });
+
+  it("does not ask the provider to be checked when it offered nothing", async () => {
+    let checks = 0;
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => null,
+        resolveHls: async () => null,
+        checkHls: async () => {
+          checks++;
+          return true;
+        },
+      },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.hls).toBeNull();
+    expect(checks).toBe(0);
   });
 
   it("still reports null hls when the resolver declines", async () => {

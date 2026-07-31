@@ -245,9 +245,17 @@ give up after twelve seconds:
 - **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because
   the server honours range requests.
 - **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox; no browser ships those
-  codecs. Where your **debrid provider will transcode it for you**, the player uses their stream and it
-  simply plays, with full seeking, and without a byte passing through the machine running torlnk.
+  codecs. Where your **debrid provider will transcode it for you**, the player uses their stream, with full
+  seeking, and without a byte passing through the machine running torlnk.
   Real-Debrid does this. TorBox publishes no equivalent, so a TorBox stream falls through to the next line.
+  **A provider offering a transcode is not the same as one that can keep up with it**, though: their
+  transcoder works on demand, from the start of the file, and for a big HEVC release it can fall behind
+  real time — at which point it serves the part of a segment it has finished as though it were the whole
+  thing, and the browser has no way to tell. That used to show up as a video that played for a few seconds
+  and then froze with nothing on screen to explain it. So the player now checks a segment before offering
+  the transcode at all, and a provider that is not keeping up falls through to the next line instead. If
+  one stalls anyway — the check can be fooled by a file whose opening the provider has already transcoded —
+  playback says so and points you at the `.m3u`, rather than freezing in silence.
   Turning on [relaying](#relaying-streams-through-this-machine) switches this off on purpose: their stream
   is played from *their* servers by your browser, which is the one thing relaying exists to prevent — so
   while it's on, these releases fall through to the next line too.

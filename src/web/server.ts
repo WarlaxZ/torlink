@@ -29,6 +29,8 @@ import {
   type StreamDeps,
 } from "./stream";
 import { ProbeCache } from "../core/probeCache";
+import { HlsVerdictCache } from "../core/hlsVerdictCache";
+import { makeCheckHls, probeFetch } from "./hlsHealth";
 import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
@@ -87,15 +89,19 @@ export interface WebServerOptions {
   webDeps?: Omit<Partial<WebDeps>, "runtime" | "token">;
   /**
    * Overrides for the stream handle's injectable seams — today the ffprobe call
-   * behind `.info`, the debrid transcode lookup, and the debrid-proxying branch
-   * a test drives without a real provider. `sessions`, `log`, `probeCache` and
-   * `trustProxy` are owned by this server and cannot be overridden.
+   * behind `.info`, the debrid transcode lookup and its health check, and the
+   * debrid-proxying branch a test drives without a real provider. `sessions`,
+   * `log`, `probeCache`, `hlsVerdictCache` and `trustProxy` are owned by this
+   * server and cannot be overridden.
    *
    * Same reasoning as `webDeps`: without it, a test of `.info` would spawn
    * ffprobe against a URL that does not exist, and the interesting cases (no
    * binary, a probe that disagrees with the filename) would be unreachable.
    */
-  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache" | "trustProxy">;
+  streamDeps?: Omit<
+    Partial<StreamDeps>,
+    "sessions" | "log" | "probeCache" | "hlsVerdictCache" | "trustProxy"
+  >;
 }
 
 export interface WebServerHandle {
@@ -253,6 +259,14 @@ export async function startWebServer(
   // transcoding or carrying a byte. Built once; it reads config per call, so a
   // token changed in the TUI is picked up without a restart.
   const resolveHls = makeResolveHls();
+
+  // ...and the check that it is worth offering. A manifest existing does not mean
+  // the provider's transcoder can keep up with it; measured against Real-Debrid,
+  // 1080p HEVC runs at 0.65x realtime and hands out truncated segments as
+  // complete responses, which freezes a browser a few seconds in. One verdict per
+  // (session, file), cached, so a reload costs nothing.
+  const checkHls = makeCheckHls({ fetchImpl: probeFetch });
+  const hlsVerdictCache = new HlsVerdictCache();
 
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
@@ -432,6 +446,7 @@ export async function startWebServer(
         // real debrid provider) still wins over the config read.
         const streamDeps: StreamDeps = {
           resolveHls,
+          checkHls,
           // Spread after the default so a test can override it, and before the
           // fields below so it cannot override those.
           ...options.streamDeps,
@@ -439,6 +454,7 @@ export async function startWebServer(
           log,
           trustProxy: options.trustProxy === true,
           probeCache,
+          hlsVerdictCache,
           proxyDebrid:
             options.streamDeps?.proxyDebrid ??
             (await (options.webDeps?.loadConfigImpl ?? loadConfig)()).proxyDebridStreams === true,

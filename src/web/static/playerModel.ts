@@ -266,3 +266,65 @@ export function fallbackMessage(reason: FallbackReason, filename: string): strin
   }
   return `${name} isn't playing here — the browser has taken it but produced nothing. Open it in a real player instead.`;
 }
+
+/** Where a failure should be reported: replace the player, or annotate it. */
+export type FailureRoute = "card" | "notice";
+
+/**
+ * Which of the two a failure goes to, given whether playback ever started.
+ *
+ * One line, and it lives here rather than in `player.ts` because it decides
+ * *what the user sees* — the rule in CLAUDE.md that keeps such conditionals out
+ * of the DOM-wiring files where no test can reach them. This one was a bug: the
+ * wiring latched a single `settled` flag on the first `playing` event and then
+ * dropped every later failure on the floor, so a stream that died mid-playback
+ * left a frozen `<video>` and no explanation anywhere.
+ *
+ * `card` destroys the element, which is right for a file that was never going to
+ * play and wrong for one that already did — the user would lose their position
+ * to be told something that is not true of what they just watched.
+ */
+export function routeFailure(started: boolean): FailureRoute {
+  return started ? "notice" : "card";
+}
+
+/**
+ * How long a starved player may sit without advancing before we say so.
+ *
+ * Distinct from `STALL_MS`, which covers *start-up* — an element that never
+ * produced a frame — and is disarmed as soon as one arrives. This one covers the
+ * opposite half: playback that ran and then stopped advancing.
+ *
+ * Thirty seconds, and the number is set by hls.js rather than by taste. Its
+ * default `fragLoadPolicy.errorRetry` is 6 attempts with a delay backing off to
+ * 8s, so a fragment it can eventually recover can legitimately take upwards of
+ * twenty seconds to arrive. Anything shorter would cry stall over a gap that was
+ * about to fill itself.
+ */
+export const PLAYBACK_STALL_MS = 30_000;
+
+/**
+ * What to say when playback that had ALREADY STARTED dies partway through.
+ *
+ * A separate message from `fallbackMessage` because the causes are disjoint and
+ * so is the honest wording. The startup card explains why a file was never going
+ * to play here ("browsers can't play this container"); by the time this fires the
+ * user has watched the thing run, so that explanation would be a plain lie. What
+ * actually happened is upstream: a provider transcode that stopped producing
+ * segments, or a stream that died mid-flight.
+ *
+ * Deliberately does NOT name the file. The card is a full replacement for the
+ * video and has room; this is a one-line notice sitting under a player the user
+ * is still looking at, and they know what they were watching.
+ *
+ * Both branches point at the `.m3u` and VLC, because those buttons are still on
+ * screen and — for the provider-transcode failure this exists for — they are the
+ * route that genuinely works: the playlist streams the original file rather than
+ * anything the provider had to transcode first.
+ */
+export function interruptedNotice(reason: FallbackReason): string {
+  if (reason === "stall") {
+    return "Playback stopped — no more of the stream arrived. Download the .m3u or open it in VLC to carry on watching.";
+  }
+  return "Playback stopped partway through — the stream failed upstream. Download the .m3u or open it in VLC to carry on watching.";
+}
