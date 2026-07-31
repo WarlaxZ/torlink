@@ -6,8 +6,10 @@ import {
   extensionOf,
   fallbackMessage,
   infoPath,
+  interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  routeFailure,
   streamPath,
   vlcLinks,
   type PlayerTarget,
@@ -285,5 +287,40 @@ describe("fallbackMessage", () => {
 
   it("tells a user with a capability-less link what to do", () => {
     expect(fallbackMessage("no-link", "")).toContain("reopen the player");
+  });
+});
+
+describe("routeFailure", () => {
+  it("replaces a player that never started", () => {
+    expect(routeFailure(false)).toBe("card");
+  });
+
+  // The regression this whole pair exists for: the wiring used to latch on the
+  // first `playing` event and then drop every later failure, so a stream that
+  // died partway through froze in silence.
+  it("annotates a player that had already started, rather than destroying it", () => {
+    expect(routeFailure(true)).toBe("notice");
+  });
+});
+
+// A failure that arrives AFTER playback started is a different message from the
+// startup card: the user has already seen the film run, so "browsers can't play
+// this container" would be a lie. It also has to point somewhere useful, because
+// the frozen <video> is staying on screen.
+describe("interruptedNotice", () => {
+  it("says playback stopped rather than blaming the container", () => {
+    const notice = interruptedNotice("error");
+    expect(notice).toContain("stopped");
+    expect(notice).not.toContain("container");
+  });
+
+  it("points at the hand-off that does work", () => {
+    for (const reason of ["error", "stall"] as const) {
+      expect(interruptedNotice(reason)).toMatch(/\.m3u|VLC/);
+    }
+  });
+
+  it("distinguishes a stall from an outright failure", () => {
+    expect(interruptedNotice("stall")).not.toBe(interruptedNotice("error"));
   });
 });

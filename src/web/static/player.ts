@@ -13,14 +13,17 @@
 // whoever made it — and there is no innerHTML, insertAdjacentHTML or
 // document.write in this file, and there must never be one.
 import {
+  PLAYBACK_STALL_MS,
   STALL_MS,
   absoluteUrl,
   chooseSource,
   detectPlatform,
   fallbackMessage,
   infoPath,
+  interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  routeFailure,
   streamPath,
   vlcLinks,
   type FallbackReason,
@@ -39,14 +42,30 @@ const NOTICE_MS = 4000;
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-function showNotice(message: string): void {
+/**
+ * `persist` for a notice the user must still be able to read after they look
+ * back at the screen. The copy-button notices are acknowledgements of something
+ * the user just did and self-clear; a stream that died mid-playback is not, and
+ * a four-second explanation of a video that is going to stay frozen is worse
+ * than none — they would be left with the silence this notice exists to break.
+ */
+function showNotice(message: string, opts: { persist?: boolean } = {}): void {
   notice.textContent = message;
   notice.hidden = false;
   if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = null;
+  if (opts.persist === true) return;
   noticeTimer = setTimeout(() => {
     noticeTimer = null;
     notice.hidden = true;
   }, NOTICE_MS);
+}
+
+function hideNotice(): void {
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = null;
+  notice.hidden = true;
+  notice.textContent = "";
 }
 
 function button(label: string, onClick: () => void): HTMLButtonElement {
@@ -115,12 +134,26 @@ function createVideo(): HTMLVideoElement {
  * `loadeddata`. So the timer is the primary detector and the event is the fast
  * path, and the first of them to fire wins.
  */
-function watch(video: HTMLVideoElement, target: PlayerTarget): { fail: (r: FallbackReason) => void } {
-  let settled = false;
+function watch(video: HTMLVideoElement, target: PlayerTarget): { report: (r: FallbackReason) => void } {
+  // THREE states, not one flag. Collapsing them into a single `settled` latch is
+  // the bug this shape replaces: the latch was set by the first `playing` event
+  // and then swallowed every subsequent failure, so a stream that died partway
+  // through left a frozen <video> and told the user nothing at all.
+  //
+  // - `started`: a frame arrived, so the start-up stall timer is wrong now.
+  // - `replaced`: a card has taken the element's place; there is nothing to
+  //   annotate and nothing to fail a second time.
+  // - `notified`: a mid-playback failure is already on screen, so a burst of
+  //   error events produces one notice rather than a flicker of them.
+  let started = false;
+  let replaced = false;
+  let notified = false;
+
   const fail = (reason: FallbackReason): void => {
-    if (settled) return;
-    settled = true;
+    if (replaced) return;
+    replaced = true;
     clearTimeout(timer);
+    clearTimeout(stallTimer);
     // Removing the src and calling load() is what actually stops an in-flight
     // fetch; dropping the element alone leaves the request running in some
     // browsers, and behind it a range request against a live torrent.
@@ -128,17 +161,70 @@ function watch(video: HTMLVideoElement, target: PlayerTarget): { fail: (r: Fallb
     video.load();
     showFallback(reason, target.filename);
   };
+
+  /**
+   * Report one failure, to whichever half of the player's life it belongs to.
+   *
+   * `routeFailure` makes the choice and is unit-tested; this is the wiring for
+   * its two answers. The notice branch deliberately leaves the element alone:
+   * the user has already watched some of this, and destroying it would throw
+   * away their position to tell them something untrue about what they saw.
+   */
+  const report = (reason: FallbackReason): void => {
+    if (routeFailure(started) === "card") {
+      fail(reason);
+      return;
+    }
+    if (replaced || notified) return;
+    notified = true;
+    showNotice(interruptedNotice(reason), { persist: true });
+  };
+
   const ok = (): void => {
-    if (settled) return;
-    settled = true;
+    if (replaced) return;
+    started = true;
     clearTimeout(timer);
   };
 
-  const timer = setTimeout(() => fail("stall"), STALL_MS);
-  video.addEventListener("error", () => fail("error"));
+  // The start-up watchdog: no frame at all, ever. Disarmed by `ok`.
+  const timer = setTimeout(() => report("stall"), STALL_MS);
+
+  // The other watchdog, and the one this file previously had no answer for: a
+  // player that ran and then stopped advancing. `waiting` is the browser saying
+  // it has run out of buffered media, which is exactly the shape of a provider
+  // transcode that stops producing segments — and on that path hls.js may report
+  // nothing fatal, so without this timer there is no event to react to at all.
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  const armStall = (): void => {
+    if (replaced || !started) return;
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => report("stall"), PLAYBACK_STALL_MS);
+  };
+  // Progress is the all-clear. If a gap filled itself after we spoke, the notice
+  // is now false, so it goes — and `notified` resets, because the next stall is
+  // news again.
+  const progressing = (): void => {
+    clearTimeout(stallTimer);
+    stallTimer = undefined;
+    if (notified) {
+      notified = false;
+      hideNotice();
+    }
+  };
+
+  video.addEventListener("error", () => report("error"));
   video.addEventListener("loadeddata", ok);
   video.addEventListener("playing", ok);
-  return { fail };
+  video.addEventListener("waiting", armStall);
+  video.addEventListener("stalled", armStall);
+  video.addEventListener("timeupdate", progressing);
+  video.addEventListener("playing", progressing);
+  // A file that reaches its end has not stalled, and must not be accused of it.
+  video.addEventListener("ended", () => {
+    clearTimeout(stallTimer);
+    stallTimer = undefined;
+  });
+  return { report };
 }
 
 // autoplay is blocked without a user gesture in every browser that matters; the
@@ -210,7 +296,7 @@ async function render(): Promise<void> {
     stage.replaceChildren(video);
     // The manifest is on the provider's own host, so no capability is appended:
     // it is already a capability, being an unguessable URL minted for this file.
-    await mountHls(video, info.hls, { onError: () => settle.fail("error") });
+    await mountHls(video, info.hls, { onError: () => settle.report("error") });
     tryPlay(video);
     return;
   }
