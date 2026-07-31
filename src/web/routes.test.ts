@@ -3142,6 +3142,36 @@ describe("GET /api/title-search", () => {
     expect(body).not.toContain("recc.internal");
   });
 
+  /**
+   * Same guarantee as above, but through the `!result.ok` branch, which the
+   * success-path test above cannot exercise: `{ok: true, items}` structurally
+   * cannot carry a URL or token, so that test passes with the risky branch
+   * never running. `titleSearch` forwards `result.error` into the response
+   * verbatim, so THIS is the branch a future edit could use to leak the
+   * server's address — e.g. appending `reccConfig.reccUrl` to the message for
+   * "helpful" debug context. The error text below names "the configured
+   * server", the kind of phrase such an edit would plausibly finish by
+   * interpolating the URL into — but, matching real `fetchTitleSuggestions`
+   * behaviour (a fixed sentence; see its own client tests), it does not
+   * already contain the sentinel URL or token. If it ever did get appended,
+   * this is the test that would turn red.
+   */
+  it("leaks neither the reccd token nor its URL through the error branch", async () => {
+    const res = await look(
+      suggestDeps({
+        loadConfigImpl: async () =>
+          searchConfig({ reccUrl: "http://recc.internal:4100", reccToken: "zzq-secret-9317" }),
+        fetchTitleSuggestionsImpl: async () => ({
+          ok: false,
+          error: "couldn't reach reccd's configured server",
+        }),
+      }),
+    );
+    const body = JSON.stringify(res.json);
+    expect(body).not.toContain("zzq-secret-9317");
+    expect(body).not.toContain("recc.internal");
+  });
+
   it("400s a missing q rather than asking reccd for everything", async () => {
     const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [HIT] }));
     const res = await look(suggestDeps({ fetchTitleSuggestionsImpl }), "");

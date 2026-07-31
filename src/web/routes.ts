@@ -1684,9 +1684,10 @@ export async function handleWebApi(
     return checkCached(deps, bodyText);
   }
 
-  // Both past the token gate above, and both need it: neither delegates to
-  // handleApi, so this is the only check between an anonymous caller and the
-  // user's taste profile — reading it out of reccd, or writing to it.
+  // All three past the token gate above, and all three need it: none delegates
+  // to handleApi, so this is the only check between an anonymous caller and the
+  // user's taste profile or reccd's catalog — reading it, searching it, or
+  // writing to it.
   if (method === "GET" && urlPath === "/api/recommendations") {
     return recommendations(deps, query);
   }
