@@ -103,6 +103,7 @@ import {
   pickSub,
   reasonLine,
   reasonTitle,
+  reccClaimHint,
   reccEventBody,
   reccItems,
   reccPosterHint,
@@ -238,6 +239,7 @@ const reccGenreInput = el<HTMLInputElement>("recc-genre");
 const reccExploreCheck = el<HTMLInputElement>("recc-explore");
 const reccRefreshButton = el<HTMLButtonElement>("recc-refresh");
 const reccStatusLine = el<HTMLParagraphElement>("recc-status");
+const reccClaimHintLine = el<HTMLParagraphElement>("recc-claim-hint");
 const reccHintLine = el<HTMLParagraphElement>("recc-hint");
 const reccList = el<HTMLUListElement>("recc-list");
 
@@ -1071,6 +1073,10 @@ async function loadSources(): Promise<void> {
   renderTabs();
   renderResults();
   renderPrefs();
+
+  const claimHint = reccClaimHint(sources?.reccAccount);
+  reccClaimHintLine.textContent = claimHint ?? "";
+  reccClaimHintLine.hidden = claimHint === null;
 }
 
 function stopSearch(): void {

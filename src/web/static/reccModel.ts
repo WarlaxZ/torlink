@@ -12,6 +12,7 @@
 import { NO_KEY_POSTER_NOTE, NO_POSTER_NOTE, OMDB_KEY_HINT } from "./previewModel";
 import { ALL_TAB, categoryTabs, type SourcesResponse } from "./searchModel";
 import type {
+  PublicReccAccount,
   PublicReccEventType,
   PublicRecommendation,
   PublicRecommendations,
@@ -19,6 +20,7 @@ import type {
 } from "../wire";
 
 export type {
+  PublicReccAccount,
   PublicReccEventType,
   PublicRecommendation,
   PublicRecommendations,
@@ -230,6 +232,26 @@ export function reccStatus(state: ReccState): ReccStatusLine {
           }
         : { text: "", tone: "info", show: false };
   }
+}
+
+/**
+ * The line telling the user their account has no password yet, or null for
+ * every other case.
+ *
+ * Deliberately NOT folded into `reccStatus` above, which returns `show: false`
+ * once there are cards to look at: this hint has to be visible precisely when
+ * the feed is working, which is the one case that function suppresses.
+ *
+ * `undefined` means /api/sources has not answered yet and returns null, so the
+ * sentence never flashes on a slow load.
+ *
+ * It points at the TUI because claiming IS terminal-only — credential entry
+ * lives there, the same as tokens. Naming where to go is the difference between
+ * a deliberate boundary and a missing feature.
+ */
+export function reccClaimHint(account: PublicReccAccount | null | undefined): string | null {
+  if (!account || account.claimed) return null;
+  return `Your picks are saved to ${account.name}, an account with no password yet. Claim it in the terminal UI to sign in on another machine.`;
 }
 
 /** The cards to render, or an empty list in every phase that has none. */
