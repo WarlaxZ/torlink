@@ -1072,14 +1072,33 @@ describe("the .info representation", () => {
   it("probes once for repeated requests", async () => {
     let probes = 0;
     const { origin } = await serve({
+      files: [{ url: "https://cdn.example/x", filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: 1 }],
       probeImpl: async () => {
         probes += 1;
-        return { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const };
+        return { container: "mkv", videoCodec: "h264", audioCodec: "aac", source: "probe" as const };
       },
     });
     await fetch(`${origin}/stream/${sid}/0.info?k=${capability}`);
     await fetch(`${origin}/stream/${sid}/0.info?k=${capability}`);
     expect(probes).toBe(1);
+  });
+
+  it("does not probe a file the name already says is playable", async () => {
+    // The common path. A probe is a spawn plus a network round trip bounded at
+    // 15s; paying it for an mp4 that was going to play anyway would make every
+    // player page load slower to catch a rare mislabelled file.
+    let probes = 0;
+    const { origin } = await serve({
+      files: [{ url: "https://cdn.example/x", filename: "Ashfall.1999.1080p.mp4", bytes: 1 }],
+      probeImpl: async () => {
+        probes += 1;
+        return null;
+      },
+    });
+    const body = await (await fetch(`${origin}/stream/${sid}/0.info?k=${capability}`)).json();
+    expect(probes).toBe(0);
+    expect(body.blockers).toEqual([]);
+    expect(body.facts.source).toBe("name");
   });
 
   it("never puts the upstream url in the response", async () => {
@@ -1174,11 +1193,29 @@ In `handleStreamRequest`, immediately after the existing bounds check that yield
     const container = extensionOf(file.filename);
     let facts = deps.probeCache.get(parsed.sid, parsed.index);
     if (!facts) {
-      const probe = deps.probeImpl ?? ((url: string, c: string) => probeUrl(url, c));
-      // A probe failure is not an error: classifyFromName is always available,
-      // and `session.name` is the release the file came from, which is a better
-      // codec signal than a debrid-renamed filename.
-      facts = (await probe(file.url, container)) ?? classifyFromName(file.filename, session.name);
+      // Only probe a file we would otherwise refuse.
+      //
+      // A probe is a spawn plus a network round trip against a CDN or a
+      // half-downloaded torrent, and it is bounded at 15s. Paying that on every
+      // player page load — including the mp4 that was going to play instantly —
+      // to catch the uncommon mp4-carrying-HEVC would make the common path
+      // markedly slower to serve the rare one. So the name decides first, and
+      // the probe only runs when the name says this needs a rung above direct
+      // play, where the accurate answer is what picks the rung.
+      //
+      // The cost of this order: an mp4 whose HEVC the name does not mention
+      // still gets optimism, a decode error and the card — the same as before
+      // this route existed, and one tap from working. That is the trade.
+      const fromName = classifyFromName(file.filename, session.name);
+      if (blockersFor(fromName).length === 0) {
+        facts = fromName;
+      } else {
+        const probe = deps.probeImpl ?? ((url: string, c: string) => probeUrl(url, c));
+        // A probe failure is not an error: classifyFromName is always available,
+        // and `session.name` is the release the file came from, which is a
+        // better codec signal than a debrid-renamed filename.
+        facts = (await probe(file.url, container)) ?? fromName;
+      }
       deps.probeCache.set(parsed.sid, parsed.index, facts);
     }
     const hls = deps.resolveHls ? await deps.resolveHls(session, parsed.index) : null;
@@ -1316,7 +1353,16 @@ Expected: FAIL — `chooseSource` and `infoPath` are not exported.
 
 - [ ] **Step 3: Implement**
 
-In `src/web/static/playerModel.ts`, add:
+In `src/web/static/playerModel.ts`, extend the import added in Task 1 — `chooseSource` needs the classifier too, for the case where `.info` could not be fetched:
+
+```ts
+import { blockersFor, classifyFromName, extensionOf, type Blocker } from "../../util/playability";
+import type { StreamInfoResponse } from "../wire";
+
+export { extensionOf };
+```
+
+then add:
 
 ```ts
 /** The `.info` path for a target. Same address, facts representation. */
@@ -1828,9 +1874,20 @@ export function makeResolveHls(
 }
 ```
 
-- [ ] **Step 4: Wire it in `server.ts`**
+- [ ] **Step 4: Do NOT wire it into `server.ts` yet**
 
-Where `StreamDeps` is built, pass `resolveHls: makeResolveHls({ tokenImpl })`, with `tokenImpl` doing `loadConfig()` → `resolveActiveDebrid(config)` → that provider's token, resolved **the same way `/api/sources` does it** so env-var overrides count. Read the config per call, not once at startup: `CLAUDE.md` is explicit that config is read-modify-write per request and a held snapshot silently serves a stale token.
+`resolveHls` stays unset in `StreamDeps` until Task 9. This is not tidiness — it is a correctness ordering. `chooseSource` returns `provider-hls` whenever `info.hls` is non-null, and until Task 9 exists the player page's `provider-hls` branch is the placeholder from Task 5 Step 4, which shows the fallback card. So wiring the resolver now would make a debrid MKV with a perfectly good manifest display a card *claiming the container is unplayable* while the manifest sits unused — a wrong message, not a stub.
+
+Write the wiring code as a comment in `server.ts` next to the `StreamDeps` construction, so Task 9 has one place to uncomment:
+
+```ts
+  // Task 9 enables rung 2 here, once the player page can mount an HLS manifest:
+  //   resolveHls: makeResolveHls({ tokenImpl }),
+  // tokenImpl does loadConfig() -> resolveActiveDebrid(config) -> that
+  // provider's token, resolved THE SAME WAY /api/sources does it so env-var
+  // overrides count, and reading config per call rather than holding a snapshot
+  // (CLAUDE.md: a held snapshot silently serves a stale token).
+```
 
 - [ ] **Step 5: Add the end-to-end route test**
 
@@ -2018,7 +2075,11 @@ Then:
   }
 ```
 
-- [ ] **Step 6: Run the tests and the build**
+- [ ] **Step 6: Turn rung 2 on**
+
+Now that the page can mount a manifest, uncomment the `resolveHls: makeResolveHls({ tokenImpl })` line left in `src/web/server.ts` by Task 8 Step 4, and implement `tokenImpl` as that comment describes. This is the step that makes rung 2 live; before it, `.info` always reported `hls: null` in production even though Task 8's tests covered the branch.
+
+- [ ] **Step 7: Run the tests and the build**
 
 Run: `npm test && npm run typecheck && npm run lint && npm run build`
 Expected: all pass. Check the emitted `dist/web/player.js` does **not** contain a bare `from"hls.js"`:
@@ -2029,7 +2090,7 @@ grep -c 'from"hls.js"' dist/web/*.js || echo "correctly bundled"
 
 hls.js should appear as its own dynamically-imported chunk in `dist/web/`.
 
-- [ ] **Step 7: Run it for real, on two devices**
+- [ ] **Step 8: Run it for real, on two devices**
 
 Run: `npm run dev -- serve --web` with a Real-Debrid token configured. Stream an MKV, open the player.
 
@@ -2038,10 +2099,10 @@ Run: `npm run dev -- serve --web` with a Real-Debrid token configured. Stream an
 
 If the manifest fetch fails with a CORS error in the console, Task 0's finding was wrong or has changed. Stop and report; do not paper over it with a proxy invented on the spot.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add package.json package-lock.json tsup.web.config.ts src/web/static/hlsMount.ts src/web/static/hlsMount.test.ts src/web/static/player.ts
+git add package.json package-lock.json tsup.web.config.ts src/web/server.ts src/web/static/hlsMount.ts src/web/static/hlsMount.test.ts src/web/static/player.ts
 git commit -m "feat: play a provider HLS manifest, natively on iOS and via hls.js elsewhere"
 ```
 
@@ -2101,5 +2162,7 @@ Also state what is *not* here: rung 3, the local ffmpeg path, so a WebTorrent-st
 
 - **Spec coverage.** Rung 1 → Tasks 1, 3, 4, 5. Rung 2 → Tasks 0, 6, 7, 8, 9. Rung 4 → unchanged, exercised by Task 5's tests. Classification from both sources → Tasks 1 and 3. ffmpeg detection and fail-soft → Task 2. iOS native HLS → Task 9. Docs and the front-end exemption → Tasks 10 and 11. **Rung 3 is not covered here** and is a separate plan, stated at the top.
 - **One deliberate deviation.** The spec's `debridTranscode` flag on `/api/sources` is not built; Task 8 records why (no consumer — `.info` resolves rung 2 server-side).
+- **One latency trade decided here, not in the spec.** `.info` probes only files the release name already says are unplayable. Paying a bounded-15s spawn plus network round trip on every player page load — including the mp4 that was going to play instantly — to catch the uncommon mp4-carrying-HEVC is the wrong way round. The cost is that such a file still gets optimism, a decode error and the card, which is exactly its behaviour before this route existed. Task 4 states this in the code comment and tests both directions.
+- **One ordering constraint that is a correctness matter, not tidiness.** Task 8 builds `makeResolveHls` but leaves it unwired; Task 9 turns it on. Wiring it earlier would make a debrid MKV with a working manifest show a card claiming its container is unplayable, because Task 5's `provider-hls` branch is still a placeholder until Task 9.
 - **One thing the spec did not settle, decided here.** How the player page learns the facts: the page has the capability and not the bearer token, so an `/api/` route is unreachable to it. Task 4 makes `.info` a representation of the stream handle, behind the same single guard chain as `.m3u`.
 - **Naming consistency.** `MediaFacts`, `Blocker`, `blockersFor`, `classifyFromName`, `extensionOf`, `probeUrl`, `ProbeCache`, `splitRepresentation`, `StreamInfoResponse`, `chooseSource`, `Rung`, `infoPath`, `makeResolveHls`, `transcodeManifest`, `hlsStrategy`, `mountHls` — each defined in exactly one task and referenced by that name everywhere after.
