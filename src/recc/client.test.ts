@@ -151,8 +151,29 @@ describe("fetchTitleSuggestions", () => {
     type: "movie",
     matchedAka: null,
   };
+  // A series, so a PASSING case carries both of reccd's two type values. Without
+  // one, `isSuggestionType`'s `|| v === "tv"` arm could be deleted with the whole
+  // suite still green — and the consequence is not "TV stops suggesting":
+  // `isTitleSuggestion` is all-or-nothing over `body.every`, so ONE series in the
+  // top 8 would reject the entire array and the user would get no suggestions at
+  // all, films included.
+  const SHOW = {
+    imdbId: "tt0000002",
+    title: "Kepler",
+    year: 2019,
+    type: "tv",
+    matchedAka: null,
+  };
   // reccd returns more than torlink models — this is what actually comes back.
   const WIRE_HIT = { ...HIT, genres: ["Drama"], rating: 7.4, votes: 90000 };
+  const WIRE_SHOW = { ...SHOW, genres: ["Mystery"], rating: 8.1, votes: 40000 };
+
+  it("accepts both of reccd's types in one reply", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT, WIRE_SHOW]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "ke" }, { fetchImpl });
+    // Asserted as the whole result: a series rejected here takes the film with it.
+    expect(res).toEqual({ ok: true, items: [HIT, SHOW] });
+  });
 
   it("gets {reccUrl}/search with q, limit and a bearer token", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT]));
@@ -173,6 +194,9 @@ describe("fetchTitleSuggestions", () => {
     const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+    // Length first: `not.toHaveProperty` on `items[0]` is satisfied by an empty
+    // array, so without this the three negatives below pass for no items at all.
+    expect(res.items).toHaveLength(1);
     expect(res.items[0]).not.toHaveProperty("votes");
     expect(res.items[0]).not.toHaveProperty("rating");
     expect(res.items[0]).not.toHaveProperty("genres");
@@ -208,10 +232,14 @@ describe("fetchTitleSuggestions", () => {
     expect(res).toEqual({ ok: false, error: "this reccd has no title search" });
   });
 
+  // The body is `[]` and the error is asserted exactly, so this can only be
+  // satisfied by the status check. `jsonRes(500)` defaults its body to `{}`,
+  // which is not an array — so the old version passed with the whole `!res.ok`
+  // branch deleted, failing on the array check instead and for the wrong reason.
   it("reports any other non-ok status", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(500));
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(500, []));
     const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
-    expect(res.ok).toBe(false);
+    expect(res).toEqual({ ok: false, error: "title search unavailable (HTTP 500)" });
   });
 
   it("rejects a body that is not an array", async () => {
