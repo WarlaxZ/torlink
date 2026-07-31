@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import { loadConfig, resolveReccConfig, saveConfig, type Config } from "../config/config";
 import { reccProvisionLockFile } from "../config/paths";
 import type { FetchImpl } from "../util/net";
@@ -82,6 +83,12 @@ const LOCK_STALE_MS = 60_000;
 
 /** True if the lock was taken. Never throws. */
 async function takeLock(lockFile: string): Promise<boolean> {
+  // configDir does not exist on a fresh install: nothing creates it until the
+  // first saveConfig, and provisioning runs BEFORE any config write. Without
+  // this, `wx` fails ENOENT, takeLock reports "someone holds the lock", and the
+  // one run this feature exists for is the one run it skips.
+  await fs.mkdir(path.dirname(lockFile), { recursive: true }).catch(() => {});
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const handle = await fs.open(lockFile, "wx");
@@ -98,6 +105,16 @@ async function takeLock(lockFile: string): Promise<boolean> {
       }
       if (ageMs < LOCK_STALE_MS) return false; // another process is mid-signup
       // Stale: a process died holding it. Clear it and try once more.
+      //
+      // Known bounded race: two processes can both observe the same >60s-old
+      // lock, both unlink and retry — A re-creates it, then B's unlink removes
+      // A's fresh lock, and B's `wx` succeeds too. Reaching this needs a
+      // laptop-sleep or a crash mid-signup. The read-modify-write bounds the
+      // cost to one extra orphan account on reccd: whichever of A/B finishes
+      // second re-reads config, sees the other's token, and discards its own.
+      // The same unconditional `unlink` in the outer `finally` can, after such
+      // a takeover, remove a lock that is not the caller's own — same family,
+      // same bounded cost.
       try {
         await fs.unlink(lockFile);
       } catch {
@@ -111,7 +128,7 @@ async function takeLock(lockFile: string): Promise<boolean> {
 function isAnonSignupBody(v: unknown): v is { name: string; token: string } {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
-  return typeof r.name === "string" && typeof r.token === "string" && r.token.length > 0;
+  return typeof r.name === "string" && typeof r.token === "string" && r.token.trim().length > 0;
 }
 
 /**
@@ -158,12 +175,15 @@ export async function ensureReccAccount(opts: EnsureReccAccountOptions = {}): Pr
       }
 
       // Read-modify-write, per CLAUDE.md: never a snapshot held across the
-      // network call. If a token appeared while we were waiting, the new
+      // network call. Re-check the WHOLE gate against fresh state, not just
+      // the token: the user may have pointed reccUrl at their own reccd while
+      // we were waiting, and clobbering that is precisely what shouldProvision
+      // exists to prevent. If anything in the gate no longer holds, the new
       // account is discarded — an orphan account on reccd is a far smaller
-      // problem than a lost token.
+      // problem than overwriting what the user configured.
       const fresh = await load();
-      if (resolveReccConfig(fresh).reccToken) {
-        log.debug("recc provision: a token appeared meanwhile, discarding the new account");
+      if (!shouldProvision(fresh)) {
+        log.debug("recc provision: config changed under us, discarding the new account");
         return;
       }
       const patch: ProvisionedPatch = {

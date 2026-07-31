@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -72,8 +72,11 @@ describe("shouldProvision", () => {
   );
 });
 
+const tmpDirs: string[] = [];
+
 async function tmpLock(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-provision-"));
+  tmpDirs.push(dir);
   return path.join(dir, "recc-provision.lock");
 }
 
@@ -99,6 +102,10 @@ describe("ensureReccAccount", () => {
   beforeEach(() => {
     vi.stubEnv("TORLINK_RECC_URL", "");
     vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  afterEach(async () => {
+    await Promise.all(tmpDirs.splice(0).map((d) => fs.rm(d, { recursive: true, force: true })));
   });
 
   it("signs up and writes url, token, name and claimed:false", async () => {
@@ -203,6 +210,21 @@ describe("ensureReccAccount", () => {
     expect(counter.n).toBe(1);
   });
 
+  it("leaves a live lock in place and makes no request when another process holds it", async () => {
+    const counter = { n: 0 };
+    const lockFile = await tmpLock();
+    await fs.writeFile(lockFile, ""); // a fresh lock: another process is mid-signup
+    const store = fakeStore(base());
+    await ensureReccAccount({
+      fetchImpl: signupFetch(counter), lockFile,
+      loadConfigImpl: store.load, saveConfigImpl: store.save,
+    });
+    expect(counter.n).toBe(0);
+    // The holder's lock must survive — deleting it here is what would quietly
+    // turn the lock into decoration while every other test still passed.
+    await expect(fs.stat(lockFile)).resolves.toBeTruthy();
+  });
+
   it("releases the lock, so the next launch is not blocked forever", async () => {
     const lockFile = await tmpLock();
     const store = fakeStore(base());
@@ -241,6 +263,24 @@ describe("ensureReccAccount", () => {
     expect(current.reccToken).toBe("someone-elses");
   });
 
+  it("does not clobber a self-hosted reccUrl set during the request", async () => {
+    const lockFile = await tmpLock();
+    let current = base();
+    const impl = (async () => {
+      // The user points reccUrl at their own reccd while we are in flight,
+      // leaving the token blank — so the token check alone would not catch it.
+      current = { ...current, reccUrl: "http://192.168.0.98:4100" };
+      return { ok: true, status: 201, json: async () => ({ id: 2, name: "n2", token: "mine" }) } as unknown as Response;
+    }) as unknown as FetchImpl;
+    await ensureReccAccount({
+      fetchImpl: impl, lockFile,
+      loadConfigImpl: async () => ({ ...current }),
+      saveConfigImpl: async (c) => { current = c; },
+    });
+    expect(current.reccUrl).toBe("http://192.168.0.98:4100");
+    expect(current.reccToken).toBeUndefined();
+  });
+
   // Spec §0: every one of these must RESOLVE, not reject.
   describe("fails soft — §0", () => {
     const cases: Array<[string, FetchImpl]> = [
@@ -250,6 +290,7 @@ describe("ensureReccAccount", () => {
       ["a body that is not JSON", (async () => ({ ok: true, status: 201, json: async () => { throw new Error("not json"); } }) as unknown as Response) as unknown as FetchImpl],
       ["a 201 with no token", (async () => ({ ok: true, status: 201, json: async () => ({ id: 1, name: "n" }) }) as unknown as Response) as unknown as FetchImpl],
       ["a 201 with a non-string token", (async () => ({ ok: true, status: 201, json: async () => ({ id: 1, name: "n", token: 42 }) }) as unknown as Response) as unknown as FetchImpl],
+      ["a 201 with a whitespace-only token", (async () => ({ ok: true, status: 201, json: async () => ({ id: 1, name: "n", token: "   " }) }) as unknown as Response) as unknown as FetchImpl],
     ];
 
     for (const [label, impl] of cases) {
@@ -273,15 +314,35 @@ describe("ensureReccAccount", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("resolves when the lock cannot be created because its directory is missing", async () => {
+    // The fresh-install path, and the regression guard for the bug this
+    // replaced: configDir does not exist until something writes config, and
+    // provisioning runs before anything does.
+    it("creates the lock's directory and provisions when configDir does not exist yet", async () => {
+      const counter = { n: 0 };
+      const parent = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fresh-"));
+      tmpDirs.push(parent);
+      const lockFile = path.join(parent, "config", "recc-provision.lock");
+      const store = fakeStore(base());
+      await ensureReccAccount({
+        fetchImpl: signupFetch(counter), lockFile,
+        loadConfigImpl: store.load, saveConfigImpl: store.save,
+      });
+      expect(counter.n).toBe(1);
+      expect(store.get().reccToken).toBe("tok123");
+    });
+
+    // §0 still needs a genuinely unwritable lock path. A path *under a file*
+    // cannot be mkdir'd on any platform (ENOTDIR), unlike a missing directory.
+    it("resolves and writes nothing when the lock path is genuinely unusable", async () => {
+      const store = fakeStore(base());
       await expect(
         ensureReccAccount({
           fetchImpl: signupFetch({ n: 0 }),
-          lockFile: "/nonexistent-dir-for-torlink-test/recc-provision.lock",
-          loadConfigImpl: async () => base(),
-          saveConfigImpl: async () => {},
+          lockFile: "/dev/null/config/recc-provision.lock",
+          loadConfigImpl: store.load, saveConfigImpl: store.save,
         }),
       ).resolves.toBeUndefined();
+      expect(store.get().reccToken).toBeUndefined();
     });
 
     it("resolves when loadConfig throws", async () => {
@@ -293,6 +354,23 @@ describe("ensureReccAccount", () => {
           saveConfigImpl: async () => {},
         }),
       ).resolves.toBeUndefined();
+    });
+
+    it("resolves when the config re-read after signup throws", async () => {
+      let calls = 0;
+      await expect(
+        ensureReccAccount({
+          fetchImpl: signupFetch({ n: 0 }),
+          lockFile: await tmpLock(),
+          loadConfigImpl: async () => {
+            calls++;
+            if (calls > 1) throw new Error("EACCES");
+            return base();
+          },
+          saveConfigImpl: async () => {},
+        }),
+      ).resolves.toBeUndefined();
+      expect(calls).toBe(2);
     });
 
     it("abandons a hung request via the timeout rather than hanging the caller", async () => {
