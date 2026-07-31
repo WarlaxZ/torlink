@@ -272,7 +272,17 @@ export async function claimReccAccount(
       body: JSON.stringify({ name, password }),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 10000),
     });
-    if (res.ok) return { ok: true, name };
+    if (res.ok) {
+      // reccd trims the name before storing it, so its response is the
+      // authoritative value — a later task writes this into config as the
+      // account name, and config disagreeing with the server would show the
+      // user a name that is not the one they log in with. Guarded like the 400
+      // path below: a 2xx with an unreadable body still claimed the account, so
+      // fall back to our own trimmed argument rather than failing the call.
+      const body: unknown = await res.json().catch(() => ({}));
+      const serverName = (body as { name?: unknown }).name;
+      return { ok: true, name: typeof serverName === "string" && serverName ? serverName : name.trim() };
+    }
     if (res.status === 409) {
       return { ok: false, reason: "nameTaken", message: "That username is taken — try another." };
     }
@@ -289,7 +299,12 @@ export async function claimReccAccount(
           message: "This account already has a username and password.",
         };
       }
-      return { ok: false, reason: "invalid", message: error || "reccd rejected that username or password." };
+      // Pass reccd's own wording through — it is better than anything this
+      // layer could synthesise. But never a string that contains the password:
+      // reccd should not phrase an error that way, and if it ever does, that
+      // string must not reach the screen or a log.
+      const safe = error && !error.includes(password) ? error : "";
+      return { ok: false, reason: "invalid", message: safe || "reccd rejected that username or password." };
     }
     return { ok: false, reason: "unreachable", message: `reccd couldn't claim the account (HTTP ${res.status}).` };
   } catch (err) {

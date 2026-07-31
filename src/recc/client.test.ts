@@ -390,6 +390,27 @@ describe("claimReccAccount", () => {
     expect(res).toEqual({ ok: true, name: "chosen" });
   });
 
+  it("reports the name reccd stored, not the one we sent", async () => {
+    // reccd trims server-side. Echoing our own argument would put a name in
+    // config that differs from the one the user must type to log in.
+    const res = await claimReccAccount(CFG, "  chosen  ", "correcthorsebattery", {
+      fetchImpl: reply(200, { name: "chosen" }),
+    });
+    expect(res).toEqual({ ok: true, name: "chosen" });
+  });
+
+  it("falls back to our trimmed name when a 2xx body is unreadable", async () => {
+    const impl = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("not json");
+      },
+    }) as unknown as Response) as unknown as FetchImpl;
+    const res = await claimReccAccount(CFG, "  chosen  ", "correcthorsebattery", { fetchImpl: impl });
+    expect(res).toEqual({ ok: true, name: "chosen" });
+  });
+
   it("POSTs name and password to /claim with the bearer token", async () => {
     let seenUrl = "";
     let seenInit: { headers?: Record<string, string>; body?: string; method?: string } = {};
@@ -416,8 +437,11 @@ describe("claimReccAccount", () => {
     const res = await claimReccAccount(CFG, "x", "correcthorsebattery", {
       fetchImpl: reply(400, { error: "account already claimed" }),
     });
-    expect(res.ok).toBe(false);
-    expect((res as { reason: string }).reason).toBe("alreadyClaimed");
+    expect(res).toEqual({
+      ok: false,
+      reason: "alreadyClaimed",
+      message: "This account already has a username and password.",
+    });
   });
 
   it("passes any other 400's own message through, so validation reads clearly", async () => {
@@ -434,7 +458,11 @@ describe("claimReccAccount", () => {
 
   it("maps 401 to unauthorized", async () => {
     const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(401, {}) });
-    expect((res as { reason: string }).reason).toBe("unauthorized");
+    expect(res).toEqual({
+      ok: false,
+      reason: "unauthorized",
+      message: "reccd rejected the token — check the connection.",
+    });
   });
 
   it("maps a 500 to unreachable", async () => {
@@ -456,8 +484,14 @@ describe("claimReccAccount", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("never puts the password in a log-shaped return value", async () => {
-    const res = await claimReccAccount(CFG, "x", "supersecretpassword", { fetchImpl: reply(500, {}) });
+  it("never lets a reccd error string carry the password into the result", async () => {
+    // The 400 passthrough is the ONLY branch that puts a server-controlled
+    // string into `message`, so it is the only one where a leak is possible.
+    // The 500 branch cannot leak by construction, which is why testing it
+    // proved nothing.
+    const res = await claimReccAccount(CFG, "chosen", "supersecretpassword", {
+      fetchImpl: reply(400, { error: 'password "supersecretpassword" is too short' }),
+    });
     expect(JSON.stringify(res)).not.toContain("supersecretpassword");
   });
 });
