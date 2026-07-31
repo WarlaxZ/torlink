@@ -290,10 +290,20 @@ Hit **play** on any row. torlnk resolves the torrent — through the active debr
 
 What happens next depends on the release, and it's worth knowing why:
 
-- **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because the server honours range requests.
-- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox. No browser ships those codecs. Rather than showing you a black rectangle, the page says so and offers a **Download .m3u** button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get a direct VLC link.
+Before creating a player at all, the page asks the server what the file actually
+*is* — container and codecs, read with `ffprobe` where you have it and from the
+release name where you don't. That check is why the answer below is immediate
+rather than a black rectangle that gives up after twelve seconds, and why an mp4
+that turns out to carry HEVC is caught rather than believed.
 
-There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it; the `.m3u` route is faster, lossless, and works on every platform.
+- **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because the server honours range requests.
+- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox; no browser ships those codecs. Where your debrid provider will transcode the file, the player uses **their** stream and it just plays, with full seeking, and without a byte passing through the machine running torlnk. Real-Debrid does this; TorBox publishes no equivalent endpoint, so a TorBox session falls through to the line below.
+- **Anything left over** — a file streamed from the swarm, or one the provider won't transcode — gets a card that says which part the browser can't handle, plus a **Download .m3u** button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get a direct VLC link.
+
+**torlnk still does no transcoding of its own.** It will not burn your CPU
+re-encoding a 4K remux so a browser can play it. Rung two above is the
+*provider's* transcode, done on their hardware and their bandwidth; where that
+isn't available the `.m3u` route is lossless and works on every platform.
 
 With a debrid provider connected the player redirects straight to their CDN, so the video never passes through the machine running torlnk — you get their bandwidth and native seeking. Without one, the bytes are proxied from the local torrent client, which is what makes a phone on your LAN able to play a swarm it can't reach itself.
 
