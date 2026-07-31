@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   absoluteUrl,
-  canDirectPlay,
+  chooseSource,
   detectPlatform,
   extensionOf,
   fallbackMessage,
+  infoPath,
   parsePlayerLocation,
   playlistPath,
   streamPath,
   vlcLinks,
   type PlayerTarget,
 } from "./playerModel";
+import type { StreamInfoResponse } from "../wire";
 
 const target = (over: Partial<PlayerTarget> = {}): PlayerTarget => ({
   sid: "sid-1",
@@ -103,20 +105,104 @@ describe("extensionOf", () => {
   });
 });
 
-describe("canDirectPlay", () => {
-  it.each(["movie.mp4", "movie.M4V", "clip.webm"])("attempts %s", (name) => {
-    expect(canDirectPlay(name)).toBe(true);
+describe("infoPath", () => {
+  it("is the stream handle plus .info, carrying the capability", () => {
+    expect(infoPath(target())).toBe("/stream/sid-1/0.info?k=cap-1");
   });
 
-  // The mutation guard for "direct-play attempted for every extension". mkv is
-  // the case that matters: it is most of what this app downloads and no
-  // shipping browser demuxes it.
+  it("encodes a session id with a slash in it", () => {
+    expect(infoPath(target({ sid: "a/b" }))).toBe("/stream/a%2Fb/0.info?k=cap-1");
+  });
+
+  it("omits the query entirely when there is no capability", () => {
+    expect(infoPath(target({ capability: "" }))).toBe("/stream/sid-1/0.info");
+  });
+});
+
+describe("chooseSource", () => {
+  const info = (over: Partial<StreamInfoResponse> = {}): StreamInfoResponse => ({
+    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" },
+    blockers: [],
+    hls: null,
+    ...over,
+  });
+
+  it("plays a clean file directly", () => {
+    expect(chooseSource(info(), "Ashfall.1999.1080p.mp4")).toEqual({
+      rung: "direct",
+      reason: null,
+    });
+  });
+
+  it("prefers the provider's HLS over the card when the container is wrong", () => {
+    const chosen = chooseSource(
+      info({ blockers: ["container"], hls: "https://rd.example/x.m3u8" }),
+      "Kestrel.2010.1080p.BluRay.x264.mkv",
+    );
+    expect(chosen).toEqual({ rung: "provider-hls", reason: null });
+  });
+
+  it("ignores an offered HLS when the file already plays directly", () => {
+    // The provider's transcode is a re-encode. Taking it for a file the browser
+    // can play losslessly would be a pointless quality loss.
+    const chosen = chooseSource(
+      info({ hls: "https://rd.example/x.m3u8" }),
+      "Ashfall.1999.1080p.mp4",
+    );
+    expect(chosen.rung).toBe("direct");
+  });
+
+  it("falls to the card with the video reason when nothing else is available", () => {
+    expect(
+      chooseSource(
+        info({
+          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" },
+          blockers: ["video"],
+        }),
+        "Tin.Rivers.2024.2160p.mp4",
+      ),
+    ).toEqual({ rung: "card", reason: "video-codec" });
+  });
+
+  it("names audio as the reason when audio is the only blocker", () => {
+    expect(chooseSource(info({ blockers: ["audio"] }), "Kestrel.2010.1080p.mp4").reason).toBe(
+      "audio-codec",
+    );
+  });
+
+  it("names the container when it is among the blockers, because it is the one a user recognises", () => {
+    expect(
+      chooseSource(info({ blockers: ["container", "video", "audio"] }), "Tin.Rivers.2024.2160p.mkv")
+        .reason,
+    ).toBe("container");
+  });
+
+  it("falls back to the filename when .info could not be fetched", () => {
+    // A phone that lost the network mid-load, or an older server. The page must
+    // still do something sensible rather than showing nothing.
+    expect(chooseSource(null, "Ashfall.1999.1080p.mp4")).toEqual({
+      rung: "direct",
+      reason: null,
+    });
+    expect(chooseSource(null, "Kestrel.2010.1080p.BluRay.x264.mkv")).toEqual({
+      rung: "card",
+      reason: "container",
+    });
+  });
+
+  // The mutation guard the retired canDirectPlay tests used to carry: mkv is
+  // most of what this app downloads and no shipping browser demuxes it, and an
+  // unnamed file must be pessimistic rather than show a black rectangle.
   it.each(["release.mkv", "movie.avi", "movie.ts", "movie.wmv", "movie.mov", "", "unnamed"])(
-    "falls back for %s",
+    "cards %s when there is nothing better",
     (name) => {
-      expect(canDirectPlay(name)).toBe(false);
+      expect(chooseSource(null, name).rung).toBe("card");
     },
   );
+
+  it.each(["movie.mp4", "movie.M4V", "clip.webm"])("plays %s directly", (name) => {
+    expect(chooseSource(null, name).rung).toBe("direct");
+  });
 });
 
 describe("detectPlatform", () => {

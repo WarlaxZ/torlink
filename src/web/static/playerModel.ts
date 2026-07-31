@@ -11,7 +11,13 @@
 // browser-safe, following transitive imports where a grep cannot. `URL` and
 // `URLSearchParams` are globals in both runtimes, so they are fair game and are
 // what parses the intent target below.
-import { extensionOf } from "../../util/playability";
+import {
+  blockersFor,
+  classifyFromName,
+  extensionOf,
+  type Blocker,
+} from "../../util/playability";
+import type { StreamInfoResponse } from "../wire";
 
 /** Which session/file this page is showing, read off its own location. */
 export interface PlayerTarget {
@@ -87,25 +93,50 @@ export function absoluteUrl(origin: string, path: string): string {
 // place the player page imports from.
 export { extensionOf };
 
-/**
- * Containers a browser has a real chance with. Everything else gets the
- * fallback card instead of a `<video>`.
- *
- * This list is short on purpose and is about the *container*, which is all a
- * filename can tell us. mp4/m4v/webm are the two containers every browser
- * demuxes; mkv is not one of them in any shipping browser, and mkv is what most
- * of the scene ships. Nor is a container a guarantee — an mp4 carrying HEVC or
- * DTS fails at the decoder — which is why the extension only picks the *initial*
- * optimism and the `error`/stall path still has to exist.
- *
- * An empty or unknown extension is pessimistic: showing the card is honest and
- * takes one tap to work around, where showing a black rectangle that never
- * plays looks like the app is broken.
- */
-const DIRECT_PLAY_CONTAINERS = new Set(["mp4", "m4v", "webm"]);
+/** The `.info` path for a target. Same address, facts representation. */
+export function infoPath(target: PlayerTarget): string {
+  const base = `/stream/${encodeURIComponent(target.sid)}/${target.index}.info`;
+  return target.capability ? `${base}?k=${encodeURIComponent(target.capability)}` : base;
+}
 
-export function canDirectPlay(filename: string): boolean {
-  return DIRECT_PLAY_CONTAINERS.has(extensionOf(filename));
+/**
+ * Where the bytes for this file should come from.
+ *
+ * `direct` is the existing `/stream/:sid/:idx` — lossless and free. `card` is
+ * the honest fallback. `provider-hls` is a manifest the debrid provider
+ * transcoded for us, which costs this machine nothing.
+ */
+export type Rung = "direct" | "provider-hls" | "card";
+
+/**
+ * Which rung of the source ladder to play this on.
+ *
+ * The order is deliberate: direct play first because it is lossless and costs
+ * nothing, then the provider's transcode, then the card. The provider's HLS is a
+ * re-encode, so taking it for a file the browser could already play would be a
+ * quality loss for no gain — hence it is consulted only once something is
+ * actually blocking.
+ *
+ * `info === null` means the `.info` fetch failed: an offline phone, or a page
+ * served by an older build. Falling back to the filename keeps the page working
+ * and reproduces exactly what it did before that route existed.
+ */
+export function chooseSource(
+  info: StreamInfoResponse | null,
+  filename: string,
+): { rung: Rung; reason: FallbackReason | null } {
+  const blockers = info ? info.blockers : blockersFor(classifyFromName(filename));
+  if (blockers.length === 0) return { rung: "direct", reason: null };
+  if (info?.hls) return { rung: "provider-hls", reason: null };
+  return { rung: "card", reason: reasonFor(blockers) };
+}
+
+// The container is named first when present because it is the blocker a user can
+// recognise and act on ("it's an mkv"); a codec name is not.
+function reasonFor(blockers: Blocker[]): FallbackReason {
+  if (blockers.includes("container")) return "container";
+  if (blockers.includes("video")) return "video-codec";
+  return "audio-codec";
 }
 
 /**
@@ -205,7 +236,13 @@ export function vlcLinks(absolute: string, platform: Platform): ExternalLink[] {
 }
 
 /** Why the fallback card is showing. Drives the wording, nothing else. */
-export type FallbackReason = "container" | "error" | "stall" | "no-link";
+export type FallbackReason =
+  | "container"
+  | "video-codec"
+  | "audio-codec"
+  | "error"
+  | "stall"
+  | "no-link";
 
 export function fallbackMessage(reason: FallbackReason, filename: string): string {
   const name = filename || "This file";
@@ -214,6 +251,15 @@ export function fallbackMessage(reason: FallbackReason, filename: string): strin
   }
   if (reason === "container") {
     return `${name} is in a container browsers can't play (most releases are MKV with HEVC or DTS audio). Open it in a real player — the stream itself is fine.`;
+  }
+  // The two below are only reachable now that the server reports real codecs:
+  // before that, a container browsers accept was assumed playable and these
+  // files failed at the decoder instead, twelve seconds later.
+  if (reason === "video-codec") {
+    return `${name} is in a container browsers accept, but its video (HEVC or AV1) is something they can't decode. Open it in a real player — the stream itself is fine.`;
+  }
+  if (reason === "audio-codec") {
+    return `${name} has audio browsers can't decode — usually DTS or TrueHD. Open it in a real player — the stream itself is fine.`;
   }
   if (reason === "error") {
     return `${name} started but this browser can't decode it. Open it in a real player instead.`;

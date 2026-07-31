@@ -13,9 +13,10 @@
 import {
   STALL_MS,
   absoluteUrl,
-  canDirectPlay,
+  chooseSource,
   detectPlatform,
   fallbackMessage,
+  infoPath,
   parsePlayerLocation,
   playlistPath,
   streamPath,
@@ -23,6 +24,7 @@ import {
   type FallbackReason,
   type PlayerTarget,
 } from "./playerModel";
+import type { StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -131,7 +133,7 @@ function mountVideo(target: PlayerTarget, src: string): void {
   void video.play().catch(() => {});
 }
 
-function render(): void {
+async function render(): Promise<void> {
   const target = parsePlayerLocation(location.pathname, location.search);
   if (!target || !target.capability) {
     nameLabel.textContent = "";
@@ -169,11 +171,44 @@ function render(): void {
   }
   actions.replaceChildren(...controls);
 
-  if (!canDirectPlay(target.filename)) {
+  // Ask the server what this file actually is before creating any element. This
+  // is what removes the twelve-second black rectangle: a container or codec the
+  // browser refuses is now known up front rather than discovered by a decode
+  // error that, for mkv in Chrome, never even fires.
+  const info = await fetchInfo(target);
+  const chosen = chooseSource(info, target.filename);
+  if (chosen.rung === "card") {
+    showFallback(chosen.reason ?? "container", target.filename);
+    return;
+  }
+  if (chosen.rung === "provider-hls") {
+    // Task 9 replaces this with mountHls. Until then `resolveHls` is left unset
+    // in the server's StreamDeps, so `info.hls` is always null in production and
+    // this branch is unreachable — see the note in server.ts. It is written out
+    // rather than left to fall through because a branch that silently renders
+    // nothing is the failure mode this file is built to avoid.
     showFallback("container", target.filename);
     return;
   }
   mountVideo(target, stream);
 }
 
-render();
+/**
+ * Fetch `.info`, or null.
+ *
+ * Null on any failure — offline, a 401, a server old enough not to have the
+ * route. `chooseSource` treats null as "decide from the filename", which is
+ * what this page did before the route existed, so a failure here degrades to
+ * the previous behaviour rather than to a blank page.
+ */
+async function fetchInfo(target: PlayerTarget): Promise<StreamInfoResponse | null> {
+  try {
+    const res = await fetch(absoluteUrl(location.origin, infoPath(target)));
+    if (!res.ok) return null;
+    return (await res.json()) as StreamInfoResponse;
+  } catch {
+    return null;
+  }
+}
+
+void render();

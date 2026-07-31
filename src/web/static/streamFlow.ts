@@ -90,11 +90,13 @@ export function isPlayable(row: DashRow): boolean {
  * - `k` is the capability. The player page authenticates its `<video>` and its
  *   `.m3u` with it, because neither can send an `Authorization` header. Without
  *   it the page renders the "this link is incomplete" card and nothing plays.
- * - `n` is the filename. It is the ONLY way the player page can learn it: a
- *   phone handed this link holds the capability but not the bearer token, so
- *   `GET /api/stream/:sid` is closed to it. Omit `n` and the page shows
- *   "Unnamed file" and — because `canDirectPlay("")` is pessimistic — the
- *   fallback card, even for an mp4 the browser would have played.
+ * - `n` is the filename, and it is what the page *displays*. A phone handed this
+ *   link holds the capability but not the bearer token, so `GET /api/stream/:sid`
+ *   is closed to it — but `GET /stream/:sid/:idx.info` is not, and that is where
+ *   the page gets the container and codecs it decides playability from. Omit `n`
+ *   and the page shows "Unnamed file" and still plays, because `.info` names the
+ *   file server-side; only if `.info` is unreachable too does an empty name fall
+ *   through to the pessimistic card.
  *
  * `file.index` is the session's own index, not a position in the filtered
  * candidate list: the two differ the moment a torrent contains a `.nfo`, and
