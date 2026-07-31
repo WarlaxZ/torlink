@@ -70,6 +70,14 @@ This is a torrent client. Fixtures that name real films read badly whatever the 
 user-facing copy. Reuse this cast rather than inventing more — a shared cast is greppable, and
 each of these is verified to parse the way the title it replaced did:
 
+**The one exception is README screenshots of the running app** (`preview/web-*.jpg|png`). Those show a
+live search, and the whole point of the browser UI is poster art — OMDb has no artwork for an invented
+cast, so a compliant screenshot is an empty grid, which sells nothing. Real titles there are a
+deliberate call by the repo owner. **Don't "fix" them to use the cast below**, and don't extend the
+exception to anything else: a screenshot is a photograph of real behaviour, whereas a fixture is text we
+choose to write. One further rule for screenshots — **never show the app playing something that isn't
+free to share.** The player shot uses a Blender open movie for exactly this reason.
+
 | Title | Shape | Use it for |
 | --- | --- | --- |
 | `Kestrel.2010.1080p.BluRay.x264` | one-word title + year | a plain film |
@@ -101,6 +109,28 @@ If you ever bulk-rename fixtures, the full suite is the only thing that will tel
   passes because *nothing* contains the old string any more. After any rename, grep
   `not.toContain` / `not.toBe` for the old names and confirm each still names something the test
   actually puts in play.
+
+## The fork-parent remote is called `forked-from` on purpose — don't rename it to `upstream`
+
+`WarlaxZ/torlink` is a fork of `baairon/torlink`. `gh` chooses a base repo by remote *name*,
+preferring `upstream`, then `github`, then `origin`. So while the parent remote was called `upstream`,
+a bare `gh pr create` opened the PR **against `baairon/torlink`** — a stranger's repository. That
+happened once, as `baairon/torlink#128`; closing such a PR does not delete it, and their watchers were
+notified.
+
+The parent remote is therefore named **`forked-from`**, which leaves `origin` as the preferred base:
+
+    origin       https://github.com/WarlaxZ/torlink.git
+    forked-from  https://github.com/baairon/torlink.git
+
+Pull the fork point in with `git fetch forked-from`. **Renaming it back to `upstream` reintroduces the
+bug**, so don't — nothing here depends on that name, and `@{upstream}` branch tracking is a different
+mechanism that works either way.
+
+`gh repo set-default WarlaxZ/torlink` is pinned too, as a second line of defence if someone re-adds an
+`upstream` remote. It lives in `.git/config`, so it covers this clone and its worktrees but does not
+travel to a fresh clone or to CI. In a fresh clone, check `git remote -v` before your first
+`gh pr create`, or pass `--repo WarlaxZ/torlink --base main` explicitly.
 
 ## Before you say it's done
 
