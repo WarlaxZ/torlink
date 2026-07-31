@@ -14,11 +14,28 @@ const ASHFALL_AKA: TitleSuggestion = {
 };
 
 describe("SearchBar suggestions", () => {
-  it("shows nothing extra when there are no suggestions", () => {
-    const { lastFrame } = render(
-      <SearchBar width={60} value="kes" editing onSubmit={() => {}} />,
+  // AN EMPTY LIST COSTS NO ROWS — the spec's promise that the layout does not
+  // move as replies arrive, and the reason the results view can budget for the
+  // bar plus exactly the rows it is showing. Asserted as a row COUNT against the
+  // one-suggestion case: the previous version asserted the frame did not contain
+  // "Kestrel" on a render that was passed no suggestions at all, so nothing could
+  // have put the string there and no bug could have failed it.
+  const rowCount = (frame: string | undefined): number => (frame ?? "").split("\n").length;
+
+  it("costs no extra rows when there are no suggestions", () => {
+    const empty = render(<SearchBar width={60} value="kes" editing suggestions={[]} onSubmit={() => {}} />);
+    const one = render(
+      <SearchBar
+        width={60}
+        value="kes"
+        editing
+        suggestions={[KESTREL]}
+        completion="Kestrel 2010"
+        onSubmit={() => {}}
+      />,
     );
-    expect(lastFrame()).not.toContain("Kestrel");
+    expect(rowCount(one.lastFrame())).toBe(rowCount(empty.lastFrame()) + 1);
+    expect(empty.lastFrame()).not.toContain("·");
   });
 
   it("lists each suggestion with its year and kind", () => {
@@ -123,6 +140,42 @@ describe("SearchBar suggestions", () => {
       />,
     );
     await new Promise((r) => setTimeout(r, 10));
+    stdin.write("\u001B[A");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lastFrame() ?? "").toContain("Tin Rivers 2024");
+  });
+  /**
+   * Completing mid-recall must end the recall. `recall()` deliberately leaves
+   * history-navigation state alone - that is what the arrows walk through with -
+   * so completing through it left `histIndex` pointing at an entry no longer in
+   * the field, and the next arrow press then moved relative to that stale index
+   * instead of starting again from the completed text.
+   *
+   * With a one-entry history the symptom is that the arrow does nothing at all,
+   * because the stale index is already the end of the list.
+   */
+  it("restarts history navigation after a tab completion", async () => {
+    const { stdin, lastFrame } = render(
+      <SearchBar
+        width={60}
+        value=""
+        editing
+        history={["Tin Rivers 2024"]}
+        suggestions={[KESTREL]}
+        completion="Kestrel 2010"
+        onSubmit={() => {}}
+      />,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    stdin.write("\u001B[A");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lastFrame() ?? "").toContain("Tin Rivers 2024");
+
+    stdin.write("\t");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lastFrame() ?? "").toContain("Kestrel 2010");
+
+    // The completion is a fresh draft, so up recalls the history entry again.
     stdin.write("\u001B[A");
     await new Promise((r) => setTimeout(r, 10));
     expect(lastFrame() ?? "").toContain("Tin Rivers 2024");

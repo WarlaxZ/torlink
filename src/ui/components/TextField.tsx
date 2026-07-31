@@ -156,6 +156,13 @@ export function TextField({
         // input handlers matters.
         if (completion !== null) {
           recall(completion);
+          // Completing is a new draft, not a step through history: without this,
+          // tab-completing partway through a recall left history navigation live
+          // against the index of the entry that is no longer in the field, so the
+          // next up/down jumped somewhere the user had not been. `recall` on its
+          // own deliberately preserves that state — it exists for the arrows.
+          setHistIndex(-1);
+          setDraft(completion);
           onComplete?.(completion);
           return;
         }
