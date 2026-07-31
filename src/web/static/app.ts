@@ -1664,9 +1664,12 @@ function renderGroupRow(row: Extract<GroupRow<PublicSearchResult>, { kind: "grou
   const best = row.members[0]!;
   const li = document.createElement("li");
   li.className = "row result-group";
-  // Selected when its own best release is — so a collapsed heading reads as
-  // selected rather than the selection appearing to vanish on collapse.
-  li.setAttribute("aria-selected", String(best.infoHash === selectedHash));
+  // ONLY WHILE COLLAPSED. A heading stands in for its best release, so it reads
+  // as selected when that release is — but an EXPANDED group also renders that
+  // same release as a member row, and both would claim the selection: two
+  // accent-bordered rows, from one selectedHash. Collapsed, the heading is the
+  // only row representing it; expanded, the member row is.
+  li.setAttribute("aria-selected", String(!row.expanded && best.infoHash === selectedHash));
 
   const facts = groupFactsFor(row);
   const toggle = groupToggleButton(facts);
@@ -1741,8 +1744,16 @@ function renderResults(): void {
   const rowKeys = currentRows.map((row) => row.key);
   // The selected ROW, not the selected hash: a heading's key is a group key, so
   // comparing selectedHash to it would never match.
+  //
+  // An EXPANDED heading is skipped, matching the aria-selected rule in
+  // renderGroupRow: it and its first member both resolve to the same release, and
+  // the member row is the one on screen representing it. Without the skip the tab
+  // stop lands on the heading while the highlight is on the member.
   const selectedRowKey =
-    currentRows.find((row) => resultAtRow(row)?.infoHash === selectedHash)?.key ?? null;
+    currentRows.find(
+      (row) =>
+        !(row.kind === "group" && row.expanded) && resultAtRow(row)?.infoHash === selectedHash,
+    )?.key ?? null;
 
   // Read BEFORE replaceChildren: afterwards the focused node is detached and
   // document.activeElement has already fallen back to <body>.
@@ -1860,8 +1871,9 @@ toTopButton.addEventListener("click", () => {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
   // Focus follows the scroll, so a keyboard user is not left at the bottom of the
-  // document tabbing through rows they can no longer see.
-  queryInput.focus({ preventScroll: true });
+  // document tabbing through rows they can no longer see. Only on the search pane
+  // though: elsewhere #pane-search is hidden and this would focus nothing.
+  if (view === "search") queryInput.focus({ preventScroll: true });
 });
 
 // Wrapping in the layout-affecting moments rather than trusting the observer:
@@ -1965,6 +1977,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   event.preventDefault();
+  // The search box lives in #pane-search, which is `hidden` on the other three
+  // panes — focusing a hidden input does nothing, so `/` would swallow the
+  // keystroke and appear broken. Switch to the pane that owns it first, which is
+  // what someone reaching for search wants anyway.
+  if (view !== "search") showView("search");
   queryInput.focus();
   queryInput.select();
 });

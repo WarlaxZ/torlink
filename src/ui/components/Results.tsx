@@ -274,9 +274,14 @@ export function Results() {
   // Which group headings are open, by group key. Cleared with the query for the
   // reason the cursor is: the keys of one search name nothing in the next.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  // The row the user navigated to, by infohash; null until they move. Keeps
-  // the cursor on their row while streamed-in sources reshuffle the list.
-  const selRef = useRef<string | null>(null);
+  // The row the user navigated to; null until they move. Keeps the cursor on
+  // their row while streamed-in sources reshuffle the list.
+  //
+  // BOTH the row key and the release hash. The key is the exact identity (an
+  // expanded group's heading and its first member share a hash but not a key);
+  // the hash is what still finds the row when grouping has since moved that
+  // release into a collapsed group under a different key.
+  const selRef = useRef<{ key: string; hash: string } | null>(null);
   const [detail, setDetail] = useState<TorrentResult | null>(null);
 
   // A new search jumps back to the top.
@@ -346,18 +351,30 @@ export function Results() {
   // frame that adds one release can turn a plain row into a heading and move
   // everything below it.
   //
-  // Matches on the release under the cursor, so a release that has since been
-  // folded into a collapsed group lands on that group's heading rather than
-  // resetting to the top.
+  // MATCHES ON THE ROW KEY FIRST, and that ordering is the whole fix. An
+  // infoHash is not a unique row identity: an expanded group's heading and its
+  // first member both resolve to members[0], and the heading has the lower index.
+  // Matching by hash alone therefore dragged the cursor off a member row back up
+  // to its heading on every streamed frame — reintroducing, through grouping, the
+  // exact wandering-cursor problem selRef exists to prevent.
+  //
+  // The hash is kept as the FALLBACK, for when the row key has genuinely gone:
+  // a release folded into a newly-collapsed group then lands on that group's
+  // heading rather than resetting to the top.
   useEffect(() => {
     const want = selRef.current;
     if (want === null) return;
-    const next = rows.findIndex(
+    const byKey = rows.findIndex((row) => row.key === want.key);
+    if (byKey >= 0) {
+      setCursor(byKey);
+      return;
+    }
+    const byHash = rows.findIndex(
       (row) =>
-        resultAtRow(row)?.infoHash === want ||
-        (row.kind === "group" && row.members.some((m) => m.infoHash === want)),
+        resultAtRow(row)?.infoHash === want.hash ||
+        (row.kind === "group" && row.members.some((m) => m.infoHash === want.hash)),
     );
-    if (next >= 0) setCursor(next);
+    if (byHash >= 0) setCursor(byHash);
   }, [rows]);
 
   const searchH = 3;
@@ -463,7 +480,9 @@ export function Results() {
 
   const moveTo = (n: number): void => {
     setCursor(n);
-    selRef.current = resultAt(n)?.infoHash ?? null;
+    const row = rows[n];
+    const hash = row ? resultAtRow(row)?.infoHash : undefined;
+    selRef.current = row && hash ? { key: row.key, hash } : null;
   };
 
   useInput(

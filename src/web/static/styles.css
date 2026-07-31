@@ -946,8 +946,11 @@ select:focus-visible {
   }
 
   /* Room for the bar at the end of the list, so the last row's buttons are not
-     underneath it. */
-  #results {
+     underneath it — but ONLY while the bar is up. Unconditional, this left 192px
+     of dead space you could scroll into at the end of every list with nothing
+     selected, which is the common case. Same `:has` gate the back-to-top offset
+     uses, and for the same reason. */
+  body:has(#preview:not([hidden])) #results {
     padding-bottom: 12rem;
   }
 

@@ -413,3 +413,31 @@ describe("Results grouping", () => {
     });
   });
 });
+
+describe("Results grouping keeps the cursor put", () => {
+  // THE REGRESSION THIS GUARDS. An infoHash is not a unique row identity: an
+  // expanded group's heading and its first member both resolve to members[0], and
+  // the heading has the lower index. While selRef matched on the hash alone,
+  // arrowing onto that first member and then receiving one more streamed result
+  // dragged the cursor back up to the heading — the exact wandering-cursor
+  // problem selRef exists to prevent, reintroduced through grouping.
+  it("stays on a group member when a later frame adds a result", async () => {
+    const u = await mountWide(GROUPABLE, 120);
+
+    // Open the group and step onto its first member.
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    u.press("j");
+    await vi.waitFor(() => expect(u.frame()).toMatch(/\u276f.*BluRay/));
+
+    // A later source answers. `p` only toggles the preview flag (which stays off
+    // at this width with no OMDb key) and is here purely to drive one more render
+    // now that the mocked search state has changed — the harness has no rerender.
+    searchState.current = settled([...GROUPABLE, t("n1", "Tin.Rivers.2024.2160p.WEB-DL")]);
+    u.press("p");
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (4)"));
+
+    // Still on the member, not yanked up to the heading above it.
+    expect(u.frame()).toMatch(/\u276f.*BluRay/);
+  });
+});
