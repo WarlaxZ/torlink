@@ -520,9 +520,9 @@ pause or resume any of them.
 On first launch, torlink creates an anonymous account on `https://reccd.stream` — [reccd](https://github.com/WarlaxZ/reccd),
 its recommendations engine — and turns on a **For You** tab. That's one request, sends nothing about
 you beyond the request itself, and fails silently: if reccd is unreachable, recommendations stay off and
-nothing else about torlink changes. It only happens when nothing is already configured — no token, and
-no `reccUrl` pointing anywhere but the default host. A `reccUrl` you've pointed at your own reccd is
-never signed up against.
+nothing else about torlink changes. It only happens when nothing is already configured and you haven't
+opted out — no token, no `reccUrl` pointing anywhere but the default host, and `reccAutoSignup` not set
+to `false`. A `reccUrl` you've pointed at your own reccd is never signed up against.
 
 The account it creates has a generated name like `quiet-heron-4f2a` and no password, so as it stands it
 lives in that one `config.json` and nowhere else. **Claiming** it — press **`c`** on the reccd row in the
@@ -542,9 +542,10 @@ it's holding a token reccd just replaced.
 
 **To stop torlink signing you up**, point `TORLINK_RECC_URL` at your own instance instead of the default
 host, or add `"reccAutoSignup": false` to `config.json` (create the file yourself if you haven't run
-torlink yet) — either one heads off the auto-signup described above. (Neither undoes an account that already exists: `reccAutoSignup: false`
-with a token still in `config.json` leaves that account working exactly as before, and pointing `reccUrl`
-elsewhere redirects recommendations rather than switching them off.) To disconnect an account entirely,
+torlink yet) — either one heads off the auto-signup described above. (Neither undoes an account that
+already exists: `reccAutoSignup: false` with a token still in `config.json` leaves that account working
+exactly as before, and pointing `reccUrl` elsewhere redirects recommendations rather than switching them
+off.) To disconnect an account entirely,
 clear it from the Accounts pane instead — **`x`**, or blank both fields in the prompt. Either one sets
 `reccAutoSignup: false` for you as part of clearing everything else, so a cleared connection stays
 cleared rather than being re-provisioned on the next launch. Both clear paths refuse if the connection
@@ -618,10 +619,12 @@ This needs the reccd server to have a Trakt app configured (`RECCD_TRAKT_CLIENT_
 ## Privacy and staying safe
 
 Your files stay on your disk, and nothing routes through a central server; torlink only talks to the
-torrent network directly. The one exception is [Recommendations](#recommendations): on first launch
-torlink makes a single outbound request to `reccd.stream` to create an account, and that's the only
-thing torlink contacts on its own, unconfigured — turn it off with `reccAutoSignup: false` if you'd
-rather it didn't.
+torrent network directly. Two things torlink contacts on its own, unconfigured: on launch it checks
+GitHub for a newer release, the same check behind the banner mentioned in [Get started](#get-started) —
+set `TORLINK_NO_UPDATE_CHECK` to skip it. And, on first launch only, [Recommendations](#recommendations)
+makes a single request to `reccd.stream` to create an account — `reccAutoSignup: false` stops that
+signup from happening (it won't touch an account that already exists; see
+[Recommendations](#recommendations) to disconnect one).
 
 **What's exposed, and when.** A plain `d` download or a torrent stream is peer-to-peer, so your IP is
 visible to peers — torlink warns you once before the first one, and warns again on `d` if a debrid
