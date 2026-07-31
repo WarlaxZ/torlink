@@ -5,3 +5,9 @@ sea-prep.blob
 .DS_Store
 package-lock.json
 !nix/package-lock.json
+
+# Claude Code keeps its git worktrees here — whole checkouts with their own
+# node_modules, hundreds of MB of them, and not project files. Scoped to
+# worktrees/ rather than all of .claude/ so shared config (settings.json, agents,
+# skills) can still be committed if we ever add any.
+.claude/worktrees/
