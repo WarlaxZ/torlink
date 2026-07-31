@@ -24,7 +24,7 @@ results, sorted, with a **play** button on every one. The files are yours, saved
 folder.
 
 <p align="center">
-  <img src="preview/web-demo.gif" alt="one search across every source filling a grid with film posters, then selecting one to see its plot and IMDb link" style="max-width: 1000px; width: 100%; height: auto;">
+  <img src="preview/web-demo.gif" alt="one search across every source filling a grid with film posters, one card standing in for 51 releases of the same film; opening it lists those releases with their quality badges, and selecting one shows its plot and IMDb link" style="max-width: 1000px; width: 100%; height: auto;">
 </p>
 
 Three reasons people stick with it:
@@ -152,7 +152,7 @@ The layout collapses to one column on a narrow screen, so the phone you already 
 usable remote for a machine in the cupboard:
 
 <p align="center">
-  <img src="preview/web-phone.jpg" alt="torlink's browser interface at phone width: a two-column grid of film posters, each with play, add, favourite and add via RD buttons" style="max-width: 380px; width: 100%; height: auto;">
+  <img src="preview/web-phone.jpg" alt="torlink's browser interface at phone width: a two-column grid of film posters, each card naming its title, how many releases it stands for and its quality badges, with play, add, favourite and add via RD buttons" style="max-width: 380px; width: 100%; height: auto;">
 </p>
 
 Results stream in as each source answers — you'll see `12/23 sources` climb rather than staring at a
