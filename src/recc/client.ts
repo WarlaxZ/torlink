@@ -1,5 +1,11 @@
 import type { FetchImpl } from "../util/net";
 import { log } from "../util/logger";
+import {
+  SUGGEST_LIMIT,
+  SUGGEST_TIMEOUT_MS,
+  type TitleSuggestion,
+  type TitleSuggestionType,
+} from "../util/titleSuggest";
 
 export type ReccEventType =
   | "started"
@@ -132,6 +138,83 @@ export async function fetchRecommendations(
   } catch (err) {
     log.debug(
       `recc fetchRecommendations: failed to reach ${config.reccUrl}/recommendations: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, error: "couldn't reach reccd" };
+  }
+}
+
+export type FetchTitleSuggestionsResult =
+  | { ok: true; items: TitleSuggestion[] }
+  | { ok: false; error: string };
+
+function isSuggestionType(v: unknown): v is TitleSuggestionType {
+  return v === "movie" || v === "tv";
+}
+
+// All-or-nothing, like isRecommendation above: a body we only half understand
+// is a contract change, and rendering the half we parsed would hide it.
+function isTitleSuggestion(v: unknown): v is TitleSuggestion & Record<string, unknown> {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.imdbId === "string" &&
+    typeof r.title === "string" &&
+    typeof r.year === "number" &&
+    isSuggestionType(r.type) &&
+    (r.matchedAka === null || typeof r.matchedAka === "string")
+  );
+}
+
+/**
+ * reccd's `GET /search` — partial input to a ranked list of catalog titles.
+ *
+ * A blocking read like `fetchRecommendations`, and a discriminated result for
+ * the same reason. But the CALLERS treat failure differently: this fires per
+ * keystroke, so every one of these errors is rendered as "no suggestions" and
+ * nothing else. An error banner per keystroke is worse than no suggestions.
+ *
+ * `q` is sent verbatim. reccd parses a trailing year out of it itself and has
+ * its own literal-interpretation fallback for titles that genuinely end in a
+ * year, so stripping one here would break both.
+ */
+export async function fetchTitleSuggestions(
+  config: ReccClientConfig,
+  query: { q: string; limit?: number },
+  opts: { fetchImpl?: FetchImpl; timeoutMs?: number } = {},
+): Promise<FetchTitleSuggestionsResult> {
+  if (!config.reccUrl) return { ok: false, error: "title search not configured" };
+  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
+  const params = new URLSearchParams();
+  params.set("q", query.q);
+  params.set("limit", String(query.limit ?? SUGGEST_LIMIT));
+  try {
+    const res = await fetchImpl(`${config.reccUrl}/search?${params.toString()}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${config.reccToken ?? ""}` },
+      signal: AbortSignal.timeout(opts.timeoutMs ?? SUGGEST_TIMEOUT_MS),
+    });
+    if (res.status === 401) return { ok: false, error: "reccd rejected the token — check reccToken" };
+    // A reccd older than the /search endpoint. Not a fault — the feature is
+    // simply unavailable, and the search box must behave as it did before.
+    if (res.status === 404) return { ok: false, error: "this reccd has no title search" };
+    if (!res.ok) return { ok: false, error: `title search unavailable (HTTP ${res.status})` };
+    const body: unknown = await res.json();
+    if (!Array.isArray(body) || !body.every(isTitleSuggestion)) {
+      return { ok: false, error: "unexpected response from reccd" };
+    }
+    // Narrowed deliberately: reccd also sends genres, rating and votes, and
+    // nothing here renders them.
+    const items: TitleSuggestion[] = body.map((r) => ({
+      imdbId: r.imdbId,
+      title: r.title,
+      year: r.year,
+      type: r.type,
+      matchedAka: r.matchedAka,
+    }));
+    return { ok: true, items };
+  } catch (err) {
+    log.debug(
+      `recc fetchTitleSuggestions: failed to reach ${config.reccUrl}/search: ${err instanceof Error ? err.message : String(err)}`,
     );
     return { ok: false, error: "couldn't reach reccd" };
   }
