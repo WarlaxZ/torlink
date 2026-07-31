@@ -57,7 +57,13 @@ import {
   type SearchView,
   type SourcesResponse,
 } from "./searchModel";
-import { focusTargetAfterRender, type FocusSnapshot } from "./resultFocus";
+import {
+  focusTargetAfterRender,
+  nextRowKey,
+  rovingRowKey,
+  type FocusSnapshot,
+  type RowStep,
+} from "./resultFocus";
 import {
   createPreviewController,
   posterPath,
@@ -1498,11 +1504,9 @@ function renderResults(): void {
   resultsList.replaceChildren(
     ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
   );
-  restoreRowFocus(
-    resultsList,
-    focusBefore,
-    shown.map((r) => r.infoHash),
-  );
+  const rowKeys = shown.map((r) => r.infoHash);
+  applyRovingTabIndex(rowKeys);
+  restoreRowFocus(resultsList, focusBefore, rowKeys);
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -1526,6 +1530,99 @@ function selectResult(result: PublicSearchResult): void {
   renderResults();
   preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
 }
+
+// ---- keyboard navigation of the results list ----
+
+// A roving tabindex: one row is reachable with Tab, the arrows move between rows
+// from there. Which row is rovingRowKey's decision; this only applies it.
+//
+// Only the row's PRIMARY control (its name, or a group heading) roves. The
+// action buttons stay at -1 and are reached by tabbing within the focused row,
+// which is what stops Tab from walking 210 rows × 5 buttons.
+function applyRovingTabIndex(rowKeys: readonly string[]): void {
+  const roving = rovingRowKey(rowKeys, selectedHash);
+  for (const control of resultsList.querySelectorAll<HTMLElement>("[data-control]")) {
+    const primary = control.dataset.control === "name" || control.dataset.control === "group";
+    control.tabIndex = primary && control.dataset.rowKey === roving ? 0 : -1;
+  }
+}
+
+// The row key a control belongs to, for the keydown handler.
+function rowKeyOf(node: EventTarget | null): string | null {
+  return node instanceof HTMLElement ? (node.closest<HTMLElement>("[data-row-key]")?.dataset.rowKey ?? null) : null;
+}
+
+const ROW_STEPS: Readonly<Record<string, RowStep>> = {
+  ArrowDown: "down",
+  ArrowUp: "up",
+  Home: "home",
+  End: "end",
+};
+
+// Arrow keys move the selection, which loads the preview — so the pane follows
+// the cursor the way the TUI's does. Moving selection re-renders the list, and
+// restoreRowFocus puts focus on the new node for the same row.
+resultsList.addEventListener("keydown", (event) => {
+  const step = ROW_STEPS[event.key];
+  if (!step) return;
+  // Let a text input inside a row (there are none today, but rows grow controls)
+  // keep its own Home/End behaviour.
+  if (event.target instanceof HTMLInputElement) return;
+  const shown = visibleResults(searchView, reportsHealthLookup(sources));
+  // Three fallbacks, and each one is load-bearing. `event.target` is the focused
+  // control in the normal case. Focus can also sit on the row or the list itself
+  // (a click on a row's padding), where the target carries no row key — without
+  // the activeElement and selection fallbacks the arrows would jump back to row
+  // one instead of moving from where the user is.
+  const from = rowKeyOf(event.target) ?? rowKeyOf(document.activeElement) ?? selectedHash;
+  const target = nextRowKey(
+    shown.map((r) => r.infoHash),
+    from,
+    step,
+  );
+  if (target === null) return;
+  const result = shown.find((r) => r.infoHash === target);
+  if (!result) return;
+  // Return AFTER deciding there is somewhere to go: at the end of the list the
+  // arrow should scroll the page as usual rather than dead-stop.
+  if (target === from) return;
+  event.preventDefault();
+  selectResult(result);
+  // Focus must be moved EXPLICITLY here. selectResult re-renders, and
+  // restoreRowFocus put focus back where it was captured — which is the row the
+  // user is arrowing away FROM, since nothing had moved focus yet. Without this
+  // the selection and the preview advance while focus stays behind, so the next
+  // arrow press starts from the old row.
+  //
+  // No preventScroll, unlike restoreRowFocus: that runs on every streamed frame
+  // and must not fight the user's scrolling, whereas this IS the user asking to
+  // move, so the row has to come into view.
+  const moved = resultsList.querySelector<HTMLElement>(
+    `[data-row-key="${CSS.escape(target)}"][data-control="name"]`,
+  );
+  moved?.focus();
+  moved?.scrollIntoView({ block: "nearest" });
+});
+
+// `/` focuses the search box from anywhere — what makes it acceptable for the
+// search form to scroll away while the toolbar stays pinned.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  // Never steal a slash the user is typing into a box. Without this, typing a
+  // path or a regex into the filter moves focus out from under them mid-word.
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  queryInput.focus();
+  queryInput.select();
+});
 
 // ---- add from a result ----
 
