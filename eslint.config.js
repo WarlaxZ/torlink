@@ -11,7 +11,10 @@ import globals from "globals";
 // bury the useful signal in noise.
 export default tseslint.config(
   {
-    ignores: ["dist/**", "**/*.cjs"],
+    // `.claude/**` holds git worktrees — whole second checkouts of this repo.
+    // Linting them lints the tree twice and fails on the parser's "multiple
+    // candidate TSConfigRootDirs" before it reports anything useful.
+    ignores: ["dist/**", ".claude/**", "**/*.cjs"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
