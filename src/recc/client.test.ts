@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { postEvent, fetchRecommendations } from "./client.js";
+import { postEvent, fetchRecommendations, fetchTitleSuggestions } from "./client.js";
 import type { FetchImpl } from "../util/net";
 
 function jsonRes(status: number, body: unknown = {}) {
@@ -140,5 +140,156 @@ describe("fetchRecommendations", () => {
   it("returns a not-configured error when reccUrl is missing", async () => {
     const res = await fetchRecommendations({ reccToken: "t" }, {});
     expect(res).toEqual({ ok: false, error: "recommendations not configured" });
+  });
+});
+
+describe("fetchTitleSuggestions", () => {
+  const HIT = {
+    imdbId: "tt0000001",
+    title: "Kestrel",
+    year: 2010,
+    type: "movie",
+    matchedAka: null,
+  };
+  // A series, so a PASSING case carries both of reccd's two type values. Without
+  // one, `isSuggestionType`'s `|| v === "tv"` arm could be deleted with the whole
+  // suite still green — and the consequence is not "TV stops suggesting":
+  // `isTitleSuggestion` is all-or-nothing over `body.every`, so ONE series in the
+  // top 8 would reject the entire array and the user would get no suggestions at
+  // all, films included.
+  const SHOW = {
+    imdbId: "tt0000002",
+    title: "Kepler",
+    year: 2019,
+    type: "tv",
+    matchedAka: null,
+  };
+  // reccd returns more than torlink models — this is what actually comes back.
+  const WIRE_HIT = { ...HIT, genres: ["Drama"], rating: 7.4, votes: 90000 };
+  const WIRE_SHOW = { ...SHOW, genres: ["Mystery"], rating: 8.1, votes: 40000 };
+
+  it("accepts both of reccd's types in one reply", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT, WIRE_SHOW]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "ke" }, { fetchImpl });
+    // Asserted as the whole result: a series rejected here takes the film with it.
+    expect(res).toEqual({ ok: true, items: [HIT, SHOW] });
+  });
+
+  it("gets {reccUrl}/search with q, limit and a bearer token", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT]));
+    const res = await fetchTitleSuggestions(
+      { reccUrl: "http://localhost:4100", reccToken: "dev-token" },
+      { q: "kes" },
+      { fetchImpl },
+    );
+    expect(res).toEqual({ ok: true, items: [HIT] });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, { method: string; headers: Record<string, string> }];
+    expect(url).toBe("http://localhost:4100/search?q=kes&limit=8");
+    expect(init.method).toBe("GET");
+    expect(init.headers.authorization).toBe("Bearer dev-token");
+  });
+
+  it("drops the fields torlink does not render", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Length first: `not.toHaveProperty` on `items[0]` is satisfied by an empty
+    // array, so without this the three negatives below pass for no items at all.
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]).not.toHaveProperty("votes");
+    expect(res.items[0]).not.toHaveProperty("rating");
+    expect(res.items[0]).not.toHaveProperty("genres");
+  });
+
+  // reccd parses a trailing year out of q itself, and its own fallback rescues
+  // titles that genuinely end in a year. Stripping it here would break both.
+  it("forwards a year in the query verbatim rather than parsing it out", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, []));
+    await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kestrel 2010" }, { fetchImpl });
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe("http://r/search?q=kestrel+2010&limit=8");
+  });
+
+  it("does not call fetch at all when reccUrl is not configured", async () => {
+    const fetchImpl = vi.fn();
+    const res = await fetchTitleSuggestions({}, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected token", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: "unauthorized" }));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "bad" }, { q: "kes" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "reccd rejected the token — check reccToken" });
+  });
+
+  // A reccd predating GET /search 404s. That is "this feature is unavailable",
+  // not a fault, and must leave the search box behaving exactly as it does now.
+  it("treats a 404 as an older reccd without the endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(404, { error: "not found" }));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "this reccd has no title search" });
+  });
+
+  // The body is `[]` and the error is asserted exactly, so this can only be
+  // satisfied by the status check. `jsonRes(500)` defaults its body to `{}`,
+  // which is not an array — so the old version passed with the whole `!res.ok`
+  // branch deleted, failing on the array check instead and for the wrong reason.
+  it("reports any other non-ok status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(500, []));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "title search unavailable (HTTP 500)" });
+  });
+
+  it("rejects a body that is not an array", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { items: [WIRE_HIT] }));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+  });
+
+  // All-or-nothing, matching isRecommendation: a body we only half understand
+  // is a contract change, and silently rendering the half we parsed would hide
+  // it until someone noticed rows missing.
+  it("rejects the whole array when one member is malformed", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [WIRE_HIT, { imdbId: "tt2" }]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects a hit whose type is neither movie nor tv", async () => {
+    const bad = { ...WIRE_HIT, type: "tvEpisode" };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [bad]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+  });
+
+  it("accepts a hit that matched on an AKA", async () => {
+    const aka = { ...WIRE_HIT, matchedAka: "Ashfall Rising" };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [aka]));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "ash" }, { fetchImpl });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.items[0]?.matchedAka).toBe("Ashfall Rising");
+  });
+
+  it("never throws on a network error", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    const res = await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+  });
+
+  it("honours an explicit limit", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, []));
+    await fetchTitleSuggestions({ reccUrl: "http://r", reccToken: "t" }, { q: "kes", limit: 3 }, { fetchImpl });
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe("http://r/search?q=kes&limit=3");
+  });
+
+  it("still fires with an empty bearer token when reccToken is omitted", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, []));
+    await fetchTitleSuggestions({ reccUrl: "http://r" }, { q: "kes" }, { fetchImpl });
+    const [, init] = fetchImpl.mock.calls[0] as [string, { headers: Record<string, string> }];
+    expect(init.headers.authorization).toBe("Bearer ");
   });
 });

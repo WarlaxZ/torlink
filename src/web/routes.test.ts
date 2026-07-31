@@ -3046,3 +3046,214 @@ describe("POST /api/cached", () => {
     expect(res.status).toBe(401);
   });
 });
+
+
+describe("GET /api/title-search", () => {
+  const HIT = {
+    imdbId: "tt0000001",
+    title: "Kestrel",
+    year: 2010,
+    type: "movie" as const,
+    matchedAka: null,
+  };
+
+  beforeEach(() => {
+    // Both override the config file inside resolveReccConfig, so a developer
+    // with a real reccd exported would never see the not-configured path — and
+    // the "configured" tests would talk to their actual service.
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  function suggestDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => searchConfig({ reccUrl: "http://recc.local", reccToken: "t" }),
+      fetchTitleSuggestionsImpl: async () => ({ ok: true, items: [HIT] }),
+      ...over,
+    });
+  }
+
+  function look(d: WebDeps, qs = "q=kes"): Promise<WebResponse> {
+    return handleWebApi(d, "GET", "/api/title-search", new URLSearchParams(qs), AUTH, "");
+  }
+
+  // The gate is the only thing between an anonymous caller and the user's
+  // reccd: this route does not delegate to handleApi, so nothing re-checks.
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [HIT] }));
+    const res = await handleWebApi(
+      suggestDeps({ token: "secret", fetchTitleSuggestionsImpl }),
+      "GET",
+      "/api/title-search",
+      new URLSearchParams("q=kes"),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+    expect(fetchTitleSuggestionsImpl).not.toHaveBeenCalled();
+  });
+
+  it("returns reccd's hits", async () => {
+    const res = await look(suggestDeps());
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "ok", items: [HIT] });
+  });
+
+  /**
+   * 200 with its own status, NOT a 500 — the same call `/api/recommendations`
+   * and `/api/title` make. Nothing is broken: the user has no reccd, and the
+   * browser needs to be able to tell that apart from the server falling over.
+   */
+  it("answers not-configured without asking reccd", async () => {
+    const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [HIT] }));
+    const res = await look(
+      suggestDeps({ loadConfigImpl: async () => searchConfig({}), fetchTitleSuggestionsImpl }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "not-configured" });
+    expect(fetchTitleSuggestionsImpl).not.toHaveBeenCalled();
+  });
+
+  it("reports a reccd failure as a status, not a 500", async () => {
+    const res = await look(
+      suggestDeps({ fetchTitleSuggestionsImpl: async () => ({ ok: false, error: "couldn't reach reccd" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "error", error: "couldn't reach reccd" });
+  });
+
+  /**
+   * THE WHOLE REASON THIS ROUTE EXISTS. The browser must never be able to read
+   * the reccd token or URL — if it could, the TUI's proxy would be pointless
+   * and a shared link would leak the user's server.
+   *
+   * Asserted against the SERIALISED body, with a token value that appears
+   * nowhere else in the fixture and is genuinely in play in the config this
+   * request is answered from.
+   *
+   * A FORWARD-LOOKING GUARD, not a live one, and worth being honest about: on
+   * the ok branch the body is `{status:"ok", items: result.items}` from an
+   * injected stub, so no config-derived value can reach it whatever the
+   * implementation does. This is the test that would turn red if that ever
+   * changed. Its error-branch twin below is the one that covers the branch a
+   * leak could plausibly be written into today.
+   */
+  it("leaks neither the reccd token nor its URL", async () => {
+    const res = await look(
+      suggestDeps({
+        loadConfigImpl: async () =>
+          searchConfig({ reccUrl: "http://recc.internal:4100", reccToken: "zzq-secret-9317" }),
+      }),
+    );
+    const body = JSON.stringify(res.json);
+    expect(body).not.toContain("zzq-secret-9317");
+    expect(body).not.toContain("recc.internal");
+  });
+
+  /**
+   * Same guarantee as above, but through the `!result.ok` branch, which the
+   * success-path test above cannot exercise: `{ok: true, items}` structurally
+   * cannot carry a URL or token, so that test passes with the risky branch
+   * never running. `titleSearch` forwards `result.error` into the response
+   * verbatim, so THIS is the branch a future edit could use to leak the
+   * server's address — e.g. appending `reccConfig.reccUrl` to the message for
+   * "helpful" debug context. The error text below names "the configured
+   * server", the kind of phrase such an edit would plausibly finish by
+   * interpolating the URL into — but, matching real `fetchTitleSuggestions`
+   * behaviour (a fixed sentence; see its own client tests), it does not
+   * already contain the sentinel URL or token. If it ever did get appended,
+   * this is the test that would turn red.
+   */
+  it("leaks neither the reccd token nor its URL through the error branch", async () => {
+    const res = await look(
+      suggestDeps({
+        loadConfigImpl: async () =>
+          searchConfig({ reccUrl: "http://recc.internal:4100", reccToken: "zzq-secret-9317" }),
+        fetchTitleSuggestionsImpl: async () => ({
+          ok: false,
+          error: "couldn't reach reccd's configured server",
+        }),
+      }),
+    );
+    const body = JSON.stringify(res.json);
+    expect(body).not.toContain("zzq-secret-9317");
+    expect(body).not.toContain("recc.internal");
+  });
+
+  it("400s a missing q rather than asking reccd for everything", async () => {
+    const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [HIT] }));
+    const res = await look(suggestDeps({ fetchTitleSuggestionsImpl }), "");
+    expect(res.status).toBe(400);
+    expect(fetchTitleSuggestionsImpl).not.toHaveBeenCalled();
+  });
+
+  // reccd answers a short q with [] and no DB round trip; not asking at all is
+  // the same answer for free.
+  it("answers a too-short q with an empty ok, without asking reccd", async () => {
+    const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [HIT] }));
+    const res = await look(suggestDeps({ fetchTitleSuggestionsImpl }), "q=k");
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "ok", items: [] });
+    expect(fetchTitleSuggestionsImpl).not.toHaveBeenCalled();
+  });
+
+  it("forwards the query verbatim, year and all", async () => {
+    const fetchTitleSuggestionsImpl = vi.fn(async () => ({ ok: true as const, items: [] }));
+    await look(suggestDeps({ fetchTitleSuggestionsImpl }), "q=kestrel+2010");
+    expect(fetchTitleSuggestionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ reccUrl: "http://recc.local" }),
+      { q: "kestrel 2010", limit: 8 },
+    );
+  });
+});
+
+describe("GET /api/sources reccConfigured", () => {
+  beforeEach(() => {
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  async function flag(config: Parameters<typeof searchConfig>[0]): Promise<boolean> {
+    const res = await handleWebApi(
+      deps({ loadConfigImpl: async () => searchConfig(config) }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      AUTH,
+      "",
+    );
+    return (res.json as { reccConfigured: boolean }).reccConfigured;
+  }
+
+  it("is false with no reccd", async () => {
+    expect(await flag({})).toBe(false);
+  });
+
+  it("is true with a configured reccUrl", async () => {
+    expect(await flag({ reccUrl: "http://recc.local", reccToken: "t" })).toBe(true);
+  });
+
+  // resolveReccConfig, not raw config.reccUrl — the browser must agree with the
+  // TUI about whether reccd is on, and the TUI resolves it this way.
+  it("counts TORLINK_RECC_URL", async () => {
+    vi.stubEnv("TORLINK_RECC_URL", "http://recc.env");
+    expect(await flag({})).toBe(true);
+  });
+
+  it("never carries the URL or token alongside the flag", async () => {
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () =>
+          searchConfig({ reccUrl: "http://recc.internal:4100", reccToken: "zzq-secret-9317" }),
+      }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      AUTH,
+      "",
+    );
+    const body = JSON.stringify(res.json);
+    expect(body).not.toContain("zzq-secret-9317");
+    expect(body).not.toContain("recc.internal");
+  });
+});

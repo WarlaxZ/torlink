@@ -2322,7 +2322,12 @@ export function App({
     return (
       <StoreContext.Provider value={store}>
         <TabTitle />
-        <Splash updateVersion={updateVersion} recovered={recovered} webStatus={webStatus} />
+        <Splash
+          updateVersion={updateVersion}
+          recovered={recovered}
+          webStatus={webStatus}
+          reccConfig={resolveReccConfig(store.config)}
+        />
       </StoreContext.Provider>
     );
   }
@@ -2813,7 +2818,7 @@ export function App({
               flexDirection="column"
               display={isCategory(section) ? "flex" : "none"}
             >
-              <Results />
+              <Results reccConfig={resolveReccConfig(store.config)} />
             </Box>
             <Box
               flexGrow={1}

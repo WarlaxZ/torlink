@@ -1297,3 +1297,65 @@ select:focus-visible {
   padding-top: 0.4rem;
   flex-wrap: wrap;
 }
+
+/* The search box's title suggestions.
+   .suggest-wrap takes over the flex growth #query used to have directly as a
+   child of .card (`flex: 1`), so the row lays out exactly as before;
+   min-width: 0 keeps a long suggestion from blowing out that row. .suggest
+   itself is positioned against this wrapper, not .card, and is an overlay
+   (position: absolute) rather than a flow row: opening it must never push
+   the Search / save-search buttons around while the user is still typing. */
+.suggest-wrap {
+  position: relative;
+  flex: 1;
+  /* Was min-width: 0, which was wrong. The bare #query used to sit in this
+     flex row carrying `input { flex: 1; min-width: 12rem }` (styles.css:237),
+     and that 12rem is what makes .card wrap instead of crushing the search
+     box. The wrapper now holds that place, so it inherits that job. */
+  min-width: 12rem;
+}
+
+.suggest-wrap #query {
+  width: 100%;
+  /* The generic `input` rule's min-width: 12rem would otherwise beat
+     width: 100% once the wrapper is narrower than 12rem, overflowing the
+     wrapper and leaving the overlay narrower than the input under it. The
+     wrapper enforces the 12rem floor now; the input just fills it. */
+  min-width: 0;
+}
+
+.suggest {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--raised);
+  max-height: 16rem;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+.suggest li {
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.suggest li + li {
+  border-top: 1px solid var(--line);
+}
+
+.suggest li[aria-selected="true"],
+.suggest li:hover {
+  background: var(--line);
+}
+
+.suggest .aka {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--dim);
+}

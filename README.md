@@ -222,7 +222,9 @@ anything other than loopback requires a token.
   automatically when a row names one — it just can't resume *where* you left off, because nothing here
   reads back from mpv, iina, vlc, or a browser tab; none of them report a position.
 - **No settings page, but there is a settings control.** Tokens, sources, limits and folders are still
-  TUI-only — the browser has no page for them. Playback preference is the exception: the header's
+  TUI-only — the browser has no page for them, and that includes reccd's own URL and bearer token; the
+  browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the
+  **For You** tab), never its address or token. Playback preference is the exception: the header's
   disclosure reads and writes it directly, over the same Origin-checked API as everything else here.
   Counting that, the browser writes four things: your saved searches, your library, your
   continue-watching list (the same searches, favourites and stream history the TUI's `w`, `b`, and
@@ -515,6 +517,23 @@ picked each one ("because you liked Harrowgate"). Rate a pick watched, liked or 
 search** to add it to your Saved searches — the same choice the terminal's `w` makes on a For You pick,
 so a pick you rate here and one you rate in the terminal land in the same place. Ratings feed back into
 reccd exactly as they do from the terminal.
+
+### Title autocomplete
+
+With reccd connected, both search boxes suggest titles as you type — the catalog's own
+spelling and year, so you don't have to remember either. In the terminal, press `⇥` to take the
+top suggestion; in the browser, arrow to one and press Enter, or click it. Picking one searches
+for the title *and* its year, which is what separates a remake from the original. A hit matched
+through an alternate title shows an "also known as" line, and picking it searches the *primary*
+title, not the alias you typed.
+
+Suggestions are **titles, not releases**: reccd's catalog holds films and shows, so you'll be
+offered `Harrowgate` and never `Harrowgate S03` — narrow to a season yourself once the results
+are in. There's no typo tolerance either; the match is on the start of any word, so `tin riv`
+finds `Tin Rivers` but `tin rivrs` finds nothing.
+
+Without reccd, both boxes behave exactly as they always have — nothing is requested and nothing
+changes on screen.
 
 ### Import your history
 

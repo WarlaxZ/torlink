@@ -72,7 +72,7 @@ describe("Results — rate-prompt input isolation", () => {
     const store = baseStore({ region: "content" });
     const { stdin } = render(
       <StoreContext.Provider value={store}>
-        <Results />
+        <Results reccConfig={{}} />
       </StoreContext.Provider>,
     );
     await flush();
@@ -88,7 +88,7 @@ describe("Results — rate-prompt input isolation", () => {
     const store = baseStore({ region: "help" });
     const { stdin } = render(
       <StoreContext.Provider value={store}>
-        <Results />
+        <Results reccConfig={{}} />
       </StoreContext.Provider>,
     );
     await flush();

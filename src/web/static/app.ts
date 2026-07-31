@@ -161,7 +161,19 @@ import {
   prefsFromWire,
   type PickState,
 } from "./pickModel";
-import type { PreferencesResponse, PublicQualityPrefs } from "../wire";
+import type { PreferencesResponse, PublicQualityPrefs, PublicTitleSuggestions } from "../wire";
+import {
+  emptyListState,
+  isOpen as suggestOpen,
+  withReply,
+  moveHighlight,
+  highlightAt,
+  closedFor,
+  acceptPlan,
+  rowPlan,
+  type ListState,
+} from "./suggestModel";
+import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -231,6 +243,7 @@ const toTopButton = el<HTMLButtonElement>("to-top");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
+const suggestList = el<HTMLUListElement>("suggest");
 const saveSearchButton = el<HTMLButtonElement>("save-search");
 const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
@@ -1247,8 +1260,171 @@ function renderPickPhase(state: PickState): void {
   else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
 }
 
+// ---- title suggestions -------------------------------------------------
+
+// Every decision here belongs to suggestModel.ts; this block is the timer, the
+// fetch, the DOM, and the key handling. If you find yourself writing an `if`
+// that decides what to show or what to send, it goes in the model.
+let suggestState: ListState = emptyListState();
+let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+// Monotonic, and the reason a slow reply cannot overwrite a fast one — see
+// applyReply. A 2-char query costs reccd ~311ms and an 8-char one ~71ms, so
+// out-of-order arrival is the normal case, not the edge case.
+let suggestSeq = 0;
+
+// Each row needs a stable id for `aria-activedescendant` to point at. By
+// position, because that is what the highlight is an index into.
+const suggestOptionId = (index: number): string => `suggest-option-${index}`;
+
+function renderSuggest(): void {
+  suggestList.replaceChildren();
+  const rows = rowPlan(suggestState);
+  for (const [index, row] of rows.entries()) {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.setAttribute("id", suggestOptionId(index));
+    li.setAttribute("aria-selected", row.highlighted ? "true" : "false");
+    // textContent, not innerHTML: a title is a string from a catalog we do not
+    // control, and src/web/static has no innerHTML path anywhere by rule.
+    const label = document.createElement("span");
+    label.textContent = row.label;
+    li.append(label);
+    if (row.aka !== null) {
+      const aka = document.createElement("span");
+      aka.className = "aka";
+      aka.textContent = row.aka;
+      li.append(aka);
+    }
+    // mousedown, not click: click lands after the input has already blurred,
+    // and a blur that closes the list would cancel the pick.
+    li.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      // Reuse the keyboard path rather than a second accept: highlight the
+      // clicked row, then accept, so a click and an Enter cannot drift apart.
+      suggestState = highlightAt(suggestState, index);
+      acceptSuggest();
+    });
+    suggestList.append(li);
+  }
+  // The two halves of "is the list on screen" — the visual one and the announced
+  // one — set side by side on purpose, so they cannot drift.
+  suggestList.hidden = rows.length === 0;
+  queryInput.setAttribute("aria-expanded", rows.length === 0 ? "false" : "true");
+  const active = rows.findIndex((row) => row.highlighted);
+  // Removed rather than set to "": an empty idref is a dangling pointer, and some
+  // screen readers announce it as a lost element instead of as nothing.
+  if (active === -1) queryInput.removeAttribute("aria-activedescendant");
+  else queryInput.setAttribute("aria-activedescendant", suggestOptionId(active));
+}
+
+// Closes the list for good: the pending timer is dropped so a debounced request
+// is never sent, and `suggestSeq` is handed to the model so a request ALREADY
+// sent has its reply discarded when it lands. Both halves are needed — clearing
+// the timer alone leaves the in-flight case, which reopens the list a few
+// hundred milliseconds later with nothing focused to close it again.
+function closeSuggest(): void {
+  if (suggestTimer !== null) clearTimeout(suggestTimer);
+  suggestTimer = null;
+  suggestState = closedFor(suggestState, queryInput.value, suggestSeq);
+  renderSuggest();
+}
+
+/** Run whatever the model says this keypress or click means. */
+function acceptSuggest(): void {
+  const plan = acceptPlan(suggestState, queryInput.value);
+  // Latch before searching: accepting writes text into the box, which fires the
+  // input handler again, and without the latch the list would reopen on the
+  // text just picked.
+  suggestState = closedFor(suggestState, plan.text, suggestSeq);
+  renderSuggest();
+  searchForTitle(plan.text);
+}
+
+async function loadSuggest(raw: string, seq: number): Promise<void> {
+  try {
+    const res = await fetch(`/api/title-search?q=${encodeURIComponent(raw)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as PublicTitleSuggestions;
+    // Every non-ok status renders as no suggestions. This fires per keystroke,
+    // so a banner per character would be worse than silence — and the Accounts
+    // pane is where a reccd problem belongs.
+    const items = body.status === "ok" ? body.items : [];
+    suggestState = withReply(suggestState, seq, items);
+    renderSuggest();
+  } catch {
+    // A suggestion we cannot fetch is a search box that behaves exactly as it
+    // did before this feature existed. Nothing to report.
+  }
+}
+
+queryInput.addEventListener("input", () => {
+  if (suggestTimer !== null) clearTimeout(suggestTimer);
+  // The capability flag from /api/sources, so a reccd-less server never spends
+  // a request per character discovering that again.
+  if (sources?.reccConfigured !== true) return;
+  const raw = queryInput.value;
+  if (!shouldQueryFor(suggestState.suggest, raw)) {
+    suggestState = withReply(suggestState, ++suggestSeq, []);
+    renderSuggest();
+    return;
+  }
+  const seq = ++suggestSeq;
+  suggestTimer = setTimeout(() => void loadSuggest(raw, seq), SUGGEST_DEBOUNCE_MS);
+});
+
+queryInput.addEventListener("keydown", (event) => {
+  if (!suggestOpen(suggestState)) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    suggestState = moveHighlight(suggestState, 1);
+    renderSuggest();
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    suggestState = moveHighlight(suggestState, -1);
+    renderSuggest();
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSuggest();
+    return;
+  }
+  if (event.key === "Enter") {
+    // Only intercept when a row is actually highlighted; otherwise let the form
+    // submit normally with what the user typed.
+    if (suggestState.highlight < 0) {
+      closeSuggest();
+      return;
+    }
+    event.preventDefault();
+    acceptSuggest();
+  }
+});
+
+// Leaving the box closes the list — an open dropdown over a pane the user has
+// moved on from is a stuck artefact, not a suggestion.
+queryInput.addEventListener("blur", () => closeSuggest());
+
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  // Submitting settles the text, so nothing more may be suggested about it. The
+  // keydown handler above cannot do this: it returns early when the list is not
+  // open, which is exactly the fast typist's case — Enter within the 250ms
+  // debounce, before any reply has landed. Without this the request fires (or
+  // finishes) after the search has run and a dropdown opens by itself over the
+  // fresh results, and since Enter does not blur the input nothing closes it.
+  //
+  // `closeSuggest()` rather than a `lastSubmitted` variable compared through
+  // `shouldSuggestFor`: that would be a new piece of mutable state in app.ts and
+  // a decision made in the file that is not allowed to decide things, whereas
+  // this reuses the one latch every other close path already goes through and
+  // covers both sub-cases at once — timer not yet fired (cleared, no request at
+  // all) and request in flight (its reply discarded by the seq high-water mark).
+  closeSuggest();
   // No guard on an empty value: submitting a blank box is how you browse the
   // top lists, the same as pressing Enter on an empty box in the TUI.
   startSearch(queryInput.value);

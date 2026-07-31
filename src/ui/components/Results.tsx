@@ -8,6 +8,8 @@ import { Panel } from "./Panel";
 import { Rule } from "./Rule";
 import { useConcurrentSearch } from "../hooks/useConcurrentSearch";
 import { useTitlePreview } from "../hooks/useTitlePreview";
+import { useTitleSuggest } from "../hooks/useTitleSuggest";
+import { shouldSuggestFor } from "../../util/titleSuggest";
 import { PreviewPane } from "./PreviewPane";
 import { parseRelease, hintForSection } from "../../util/release";
 // The same badges the browser's rows show, from the same table the quality
@@ -32,6 +34,8 @@ import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
 import { cleanText, formatBytes, formatCount, formatRelative, stripControl, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
+import type { FetchImpl } from "../../util/net";
+import type { ReccClientConfig } from "../../recc/client";
 
 type Mode = "list" | "search" | "detail" | "filter";
 
@@ -205,7 +209,18 @@ function Detail({
   );
 }
 
-export function Results() {
+interface ResultsProps {
+  /**
+   * reccd's address, for title suggestions in the search box. A prop rather than
+   * a `Store` field for the reason `ForYou`'s is: a `Store` field needs matching
+   * entries in `makeStore` and `makeTestStore`, and no other pane reads this.
+   */
+  reccConfig: ReccClientConfig;
+  /** Only ever set by tests, so they never dial out. Same as `ForYou`'s. */
+  fetchImpl?: FetchImpl;
+}
+
+export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   const {
     query,
     submitQuery,
@@ -271,6 +286,20 @@ export function Results() {
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
+  // The live draft in the search box, which is what suggestions are for —
+  // `query` is the last SUBMITTED search, and suggesting against that would lag
+  // a whole search behind.
+  const [draft, setDraft] = useState(query);
+  const suggest = useTitleSuggest({
+    reccConfig,
+    query: draft,
+    // Editing, AND the text has actually moved on from the last submitted search.
+    // The second half is what stops `/` popping a list over the search you are
+    // already looking at — see `shouldSuggestFor` for why it is derived here
+    // rather than latched when the box is entered.
+    enabled: mode === "search" && shouldSuggestFor(draft, query),
+    fetchImpl,
+  });
   const [cursor, setCursor] = useState(0);
   // Many releases of one title collapse to one row. ON by default, matching the
   // browser's checkbox: a browse routinely returns four uploads of every film.
@@ -350,6 +379,21 @@ export function Results() {
     if (!focused) setMode("list");
   }, [focused]);
 
+  // Entering search mode remounts the TextField with `query` in it, so the draft
+  // is resynced to match. Otherwise leaving the box with text in it and arrowing
+  // back up into it would suggest against the abandoned text while the box shows
+  // something else.
+  //
+  // This is about draft CORRECTNESS only. It is deliberately not what stops a
+  // list opening over text the user did not just type — that is
+  // `shouldSuggestFor` in the `enabled` argument above, which is re-derived every
+  // render and so cannot be defeated by a path into search mode that forgets to
+  // call this.
+  const enterSearch = (): void => {
+    setDraft(query);
+    setMode("search");
+  };
+
   // The rows on screen: group headings and releases, in order. The SAME
   // groupRowPlan the browser's list renders — "which rows are there" is one
   // decision with two renderers, which is why it lives in src/util.
@@ -410,7 +454,18 @@ export function Results() {
     if (byHash >= 0) setCursor(byHash);
   }, [rows]);
 
-  const searchH = 3;
+  // The SearchBar's own rows PLUS whatever suggestion rows it is currently
+  // emitting, because those sit above the results panel in the same column and
+  // the parent gives this view exactly `listRows` rows with overflow hidden. Left
+  // at a constant 3, an open list pushed the panel out by its own row count: Yoga
+  // shrank the panel or the clip took its bottom border, and it grew back when the
+  // list closed — jitter per keystroke.
+  //
+  // `resultsPanelOuter` floors the panel at 5 rows, so on a very short terminal a
+  // long list still cannot fit and the floor wins. That is the pre-existing
+  // minimum rather than something this adds, and shrinking a panel to nothing
+  // would be worse than clipping.
+  const searchH = 3 + suggest.items.length;
   const filterH = mode === "filter" || textFilter.trim() ? 1 : 0;
   const panelOuter = resultsPanelOuter(listRows, searchH + filterH);
   const listHeight = Math.max(3, panelOuter - 4);
@@ -521,12 +576,12 @@ export function Results() {
   useInput(
     (input, key) => {
       if (input === "/") {
-        setMode("search");
+        enterSearch();
         return;
       }
       if (key.upArrow || input === "k") {
         if (rows.length > 0 && clamped > 0) moveTo(clamped - 1);
-        else setMode("search");
+        else enterSearch();
         return;
       }
       if (input === "g") {
@@ -615,7 +670,15 @@ export function Results() {
 
   useInput(
     (_input, key) => {
-      if (key.escape) setMode("list");
+      if (!key.escape) return;
+      // Escape escalates: the first one puts the suggestion list away, the
+      // second leaves the box. Doing both at once would make dismissing a list
+      // cost you your place in the pane.
+      if (mode === "search" && suggest.open) {
+        suggest.dismiss();
+        return;
+      }
+      setMode("list");
     },
     { isActive: focused && (mode === "search" || mode === "filter") },
   );
@@ -744,6 +807,13 @@ export function Results() {
         editing={mode === "search"}
         placeholder={PLACEHOLDER}
         history={searchHistory}
+        suggestions={suggest.items}
+        completion={suggest.completion}
+        onChange={setDraft}
+        onComplete={(text) => {
+          setDraft(text);
+          suggest.accept(text);
+        }}
         onSubmit={onSubmit}
         onExitDown={() => setMode("list")}
         onExitLeft={() => setRegion("sidebar")}

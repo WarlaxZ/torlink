@@ -36,6 +36,7 @@
 import type { Blocker, MediaFacts } from "../util/playability";
 import type { EpisodeRef } from "../util/episode";
 import type { FeatureId, MaxResolution } from "../util/releasePick";
+import type { TitleSuggestion } from "../util/titleSuggest";
 
 /**
  * One in-flight (or paused / queued / failed) download.
@@ -388,6 +389,20 @@ export interface SourcesResponse {
    */
   omdbConfigured: boolean;
   /**
+   * Whether reccd is configured (file or `TORLINK_RECC_URL`), which is what
+   * makes title autocomplete available.
+   *
+   * A capability flag, never the URL or the token — the same contract as
+   * `debridConfigured` and `omdbConfigured`, and here for the same reason:
+   * this is the one payload the browser fetches before it can render anything.
+   *
+   * WHAT IT SAVES. Without it, a reccd-less server has every keystroke in the
+   * search box fire `/api/title-search` purely to be told
+   * `{status: "not-configured"}` — a request per character to learn a fact
+   * that is true for the whole session.
+   */
+  reccConfigured: boolean;
+  /**
    * The stored viewing preference — quality-picker state the TUI has always
    * had. It rides on this response rather than getting its own `GET` route for
    * the same reason `debridConfigured` and `omdbConfigured` do: this is the one
@@ -536,6 +551,26 @@ export interface PublicRecommendation {
  */
 export type PublicRecommendations =
   | { status: "ok"; items: PublicRecommendation[] }
+  | { status: "not-configured" }
+  | { status: "error"; error: string };
+
+/**
+ * The body of `GET /api/title-search?q=`.
+ *
+ * THE SAME THREE-WAY SHAPE AS `PublicRecommendations` AND `PublicTitleMeta`,
+ * deliberately: "the server has no reccd" is a thing the UI must be able to
+ * say, not a failure, and a fourth bespoke encoding of that idea would be
+ * drift.
+ *
+ * `"error"` carries reccd's own message so the browser and the TUI could show
+ * the same sentence — but the browser deliberately does not. This fires per
+ * keystroke, and an error banner per character is worse than no suggestions,
+ * so the browser renders every non-`"ok"` status as an empty list. The field
+ * is here because throwing the reason away at the wire would make a broken
+ * reccd indistinguishable from a working one with no matches.
+ */
+export type PublicTitleSuggestions =
+  | { status: "ok"; items: TitleSuggestion[] }
   | { status: "not-configured" }
   | { status: "error"; error: string };
 

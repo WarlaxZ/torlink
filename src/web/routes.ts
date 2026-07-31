@@ -26,8 +26,10 @@ import {
 } from "../config/config";
 import {
   fetchRecommendations,
+  fetchTitleSuggestions,
   postEvent,
   type FetchRecommendationsResult,
+  type FetchTitleSuggestionsResult,
   type ReccClientConfig,
   type ReccEvent,
   type ReccEventType,
@@ -56,6 +58,7 @@ import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
 import { hintForGroup, parseRelease } from "../util/release";
+import { shouldQuery, SUGGEST_LIMIT } from "../util/titleSuggest";
 import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
 import type {
@@ -77,6 +80,7 @@ import type {
   PublicRecommendations,
   PublicStreamSession,
   PublicTitleMeta,
+  PublicTitleSuggestions,
   SavedResponse,
   SourcesResponse,
   StartStreamResponse,
@@ -155,6 +159,11 @@ export interface WebDeps {
     config: ReccClientConfig,
     query: RecommendationQuery,
   ) => Promise<FetchRecommendationsResult>;
+  /** reccd's title search, for `/api/title-search`. Injected to keep tests off the network. */
+  fetchTitleSuggestionsImpl?: (
+    config: ReccClientConfig,
+    query: { q: string; limit?: number },
+  ) => Promise<FetchTitleSuggestionsResult>;
   /**
    * How `/api/recc-event` reaches reccd. Injected for the same reason, and
    * typed as returning void rather than a promise the route waits on — see the
@@ -732,6 +741,10 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // the browser must agree with the TUI about whether artwork is available,
     // and the TUI resolves it the same way.
     omdbConfigured: resolveOmdbApiKey(config) !== "",
+    // resolveReccConfig, not config.reccUrl, so TORLINK_RECC_URL counts — the
+    // browser must agree with the TUI about whether reccd is on, and the TUI
+    // resolves it the same way. A boolean, never the URL or the token.
+    reccConfigured: resolveReccConfig(config).reccUrl !== undefined,
     // Read only. `POST /api/preferences` is the write path; this is here so
     // fetching it costs no extra round trip on the page the browser loads first.
     preferences: toPublicQualityPrefs(config),
@@ -1426,6 +1439,56 @@ async function recommendations(deps: WebDeps, query: URLSearchParams): Promise<W
   return { status: 200, json: out };
 }
 
+/**
+ * `GET /api/title-search?q=` — reccd's catalog search, proxied.
+ *
+ * THIS ROUTE EXISTS SO THE BROWSER NEVER SEES `reccToken`. The TUI calls
+ * `fetchTitleSuggestions` directly; a page cannot, and handing it the token so
+ * it could would put the user's reccd credentials in a tab.
+ *
+ * `loadConfig()` per request, not a boot snapshot, for the same reason
+ * `recommendations` does it: a reccd URL can be pasted into the Accounts pane
+ * at any moment, and `serve --web` is a separate process from any running TUI.
+ */
+async function titleSearch(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
+  const raw = query.get("q");
+  // Absent, not empty: a client that forgot the param is a bug worth a 400,
+  // and it matches reccd's own behaviour for a missing q.
+  if (raw === null) return { status: 400, json: { error: "missing q" } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config);
+  if (!reccConfig.reccUrl) {
+    const out: PublicTitleSuggestions = { status: "not-configured" };
+    return { status: 200, json: out };
+  }
+
+  // reccd answers a shorter query with [] and no DB round trip. Not asking is
+  // the same answer without the round trip, and it keeps the min-length rule in
+  // exactly one place (util/titleSuggest.ts) for both front ends.
+  if (!shouldQuery(raw)) {
+    const out: PublicTitleSuggestions = { status: "ok", items: [] };
+    return { status: 200, json: out };
+  }
+
+  // `fetchTitleSuggestions` never throws and bounds itself with its own
+  // timeout, so a reccd that is down or hanging costs this request that timeout
+  // and nothing else.
+  const result = await (deps.fetchTitleSuggestionsImpl ?? fetchTitleSuggestions)(reccConfig, {
+    q: raw,
+    limit: SUGGEST_LIMIT,
+  });
+  if (!result.ok) {
+    const out: PublicTitleSuggestions = { status: "error", error: result.error };
+    return { status: 200, json: out };
+  }
+  // Assigned, not re-mapped: the client already narrowed reccd's row to the
+  // fields torlink renders, and this assignment is where the compiler checks
+  // that `TitleSuggestion` and the wire type still agree.
+  const out: PublicTitleSuggestions = { status: "ok", items: result.items };
+  return { status: 200, json: out };
+}
+
 /** The event types this route will forward, as a set for the body check. */
 const RECC_EVENTS: ReadonlySet<string> = new Set<PublicReccEventType>([
   "watched",
@@ -1621,11 +1684,16 @@ export async function handleWebApi(
     return checkCached(deps, bodyText);
   }
 
-  // Both past the token gate above, and both need it: neither delegates to
-  // handleApi, so this is the only check between an anonymous caller and the
-  // user's taste profile — reading it out of reccd, or writing to it.
+  // All three past the token gate above, and all three need it: none delegates
+  // to handleApi, so this is the only check between an anonymous caller and the
+  // user's taste profile or reccd's catalog — reading it, searching it, or
+  // writing to it.
   if (method === "GET" && urlPath === "/api/recommendations") {
     return recommendations(deps, query);
+  }
+
+  if (method === "GET" && urlPath === "/api/title-search") {
+    return titleSearch(deps, query);
   }
 
   if (method === "POST" && urlPath === "/api/recc-event") {
