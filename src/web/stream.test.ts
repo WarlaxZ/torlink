@@ -796,6 +796,28 @@ describe("GET /stream/:sid/:idx.info", () => {
     expect(body.facts.audioCodec).toBe("dts");
   });
 
+  it("reports the provider's manifest in .info when one is offered", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => null,
+        resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+      },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.hls).toBe(
+      "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+    );
+    expect(body.blockers).toContain("container");
+  });
+
+  it("still reports null hls when the resolver declines", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: { probeImpl: async () => null, resolveHls: async () => null },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.hls).toBeNull();
+  });
+
   it("never puts the upstream url in the response", async () => {
     // The debrid link is a credential against the user's account. The page has
     // no business seeing it and must keep using /stream/:sid/:idx.

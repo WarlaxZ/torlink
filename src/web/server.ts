@@ -245,6 +245,13 @@ export async function startWebServer(
   // spawn ffprobe twice. Bounded, so it needs no teardown of its own.
   const probeCache = new ProbeCache();
 
+  // Rung 2 of the player's source ladder — the debrid provider's own HLS
+  // transcode — is deliberately NOT wired in yet. `makeResolveHls` in
+  // ./hlsSource.ts is built and tested, but passing it into the stream deps
+  // before the player page can mount a manifest would make a file with a
+  // perfectly good manifest display a card claiming its container is unplayable.
+  // The next change adds the hls.js mount and enables it here.
+
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
   const streams = new Set<{ res: http.ServerResponse; stop: () => void }>();
