@@ -47,6 +47,11 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "/", label: "Edit search" },
       { keys: "↵", label: "Run search" },
       { keys: "↑", label: "Recall recent searches (while editing)" },
+      { keys: "⇥", label: "Complete to the top title suggestion (needs reccd)" },
+      {
+        keys: "esc",
+        label: "Dismiss title suggestions, then leave the box (one press, as always, when none are open)",
+      },
       { keys: "i", label: "Open on IMDb (exact match, or a title search)" },
       { keys: "f", label: "Filter list" },
       { keys: "p", label: "Toggle poster / plot preview (needs OMDb key)" },
