@@ -263,18 +263,56 @@ describe("pollDecision", () => {
     }
   });
 
-  it("shows the percent the session reports, so it doesn't look hung", () => {
-    const d = pollDecision(session({ state: "resolving", progress: 42 }), 0, "A Release");
+  it("names the provider and the percent for a debrid resolve", () => {
+    const d = pollDecision(
+      session({ state: "resolving", backend: "debrid", progress: 42 }),
+      12_000,
+      "Harrowgate.S03.1080p.WEB-DL",
+      "Real-Debrid",
+    );
     expect(d.kind).toBe("poll");
     if (d.kind !== "poll") return;
-    expect(d.label).toContain("42%");
-    expect(d.label).toContain("A Release");
+    expect(d.label).toBe("Caching on Real-Debrid… 42% · 12s");
     expect(d.delayMs).toBe(POLL_MS);
+  });
+
+  it("names the release, not a percent, while finding peers in a swarm", () => {
+    const d = pollDecision(
+      session({ state: "resolving", backend: "torrent", progress: 42 }),
+      3_000,
+      "Kestrel.2010.1080p.BluRay.x264",
+    );
+    expect(d.kind).toBe("poll");
+    if (d.kind !== "poll") return;
+    expect(d.label).toBe("Finding peers… Kestrel.2010.1080p.BluRay.x264 · 3s");
+  });
+
+  // The elapsed seconds are what tell a user that a resolve sitting at one
+  // percent for minutes is working rather than hung. Deleting them is the
+  // mutation this guards.
+  it("counts the seconds up, so a stalled percent still shows movement", () => {
+    const at = (ms: number): string => {
+      const d = pollDecision(
+        session({ state: "resolving", backend: "debrid", progress: 7 }),
+        ms,
+        "n",
+        "RD",
+      );
+      return d.kind === "poll" ? d.label : "";
+    };
+    expect(at(0)).toContain("· 0s");
+    expect(at(1_000)).toContain("· 1s");
+    expect(at(65_400)).toContain("· 65s");
   });
 
   it("clamps a nonsense percent rather than rendering it", () => {
     const at = (progress: number): string => {
-      const d = pollDecision(session({ state: "resolving", progress }), 0, "n");
+      const d = pollDecision(
+        session({ state: "resolving", backend: "debrid", progress }),
+        0,
+        "n",
+        "RD",
+      );
       return d.kind === "poll" ? d.label : "";
     };
     expect(at(140)).toContain("100%");
@@ -295,13 +333,17 @@ describe("pollDecision", () => {
     expect(d.message).toContain("A Release");
   });
 
-  it("clips a very long name for the notice", () => {
+  // Asserts the TRUNCATED name is present, not merely that some "…" is: every
+  // line prepareLine produces contains an ellipsis of its own ("Finding peers…"),
+  // so `toContain("…")` would pass while the name went unclipped. That is the
+  // vacuous-assertion trap CLAUDE.md records.
+  it("clips a very long name for the waiting line", () => {
     const long = "x".repeat(300);
-    const d = pollDecision(session({ state: "resolving" }), 0, long);
+    const d = pollDecision(session({ state: "resolving", backend: "torrent" }), 0, long);
     expect(d.kind).toBe("poll");
     if (d.kind !== "poll") return;
     expect(d.label).not.toContain(long);
-    expect(d.label).toContain("…");
+    expect(d.label).toContain(`${"x".repeat(79)}…`);
   });
 });
 
@@ -572,15 +614,19 @@ describe("runPlay", () => {
   // MUTATION GUARD #5. Real-Debrid caching reports a percent for minutes; a loop
   // that stopped at the first tick would strand a session that was about to be
   // ready and leave the user watching a frozen number.
+  // `backend: "debrid"` throughout, because a percent is only a thing a debrid
+  // resolve HAS: a swarm reports no cache progress, so its line names the release
+  // and counts seconds instead. Asserting "55%" against a torrent session would
+  // be asserting something the UI is right not to say.
   it("keeps polling while the session is resolving, and shows the percent", async () => {
     const states: PublicStreamSession[] = [
-      session({ state: "resolving", progress: 10 }),
-      session({ state: "resolving", progress: 55 }),
+      session({ state: "resolving", backend: "debrid", progress: 10 }),
+      session({ state: "resolving", backend: "debrid", progress: 55 }),
       session({ state: "ready", files: [file("movie.mp4", 0)] }),
     ];
     let i = 0;
     const { fx, calls } = harness({
-      start: async () => started({ state: "resolving", progress: 0 }),
+      start: async () => started({ state: "resolving", backend: "debrid", progress: 0 }),
       poll: async () => {
         calls.polls++;
         return states[i++] ?? null;

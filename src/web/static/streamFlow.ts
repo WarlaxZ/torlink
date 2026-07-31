@@ -42,6 +42,11 @@ import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
 // than being copied. `release.ts` was already in this bundle via nextEpisodeFile.
 import { historyKeyFor } from "../../util/streamHistoryKey";
 import { parseRelease } from "../../util/release";
+// The sixth value import out of this directory, and the same argument as the
+// other five: what a waiting user reads is a decision both front ends make, so
+// it is shared rather than written twice. It lived inline in src/ui/App.tsx's
+// render until this file needed it. See src/util/prepareLine.ts.
+import { prepareLine } from "../../util/prepareLine";
 import type { EpisodeRef } from "../../util/episode";
 import type { PublicStreamFile, PublicStreamHistoryItem, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
@@ -333,6 +338,7 @@ export function pollDecision(
   session: PublicStreamSession,
   elapsedMs: number,
   name: string,
+  providerLabel?: string | null,
 ): PollDecision {
   if (session.state !== "resolving") return { kind: "settled" };
   const label = shortName(name);
@@ -345,18 +351,24 @@ export function pollDecision(
   return {
     kind: "poll",
     delayMs: POLL_MS,
-    label: `Preparing “${label}” — ${resolvePercent(session)}%`,
+    // `phase: "caching"` unconditionally: the wire has one `resolving` state and
+    // no way to distinguish the provider's link-fetch step from its cache, so
+    // the browser never renders prepareLine's "Fetching link…" arm. The TUI
+    // does, from its own richer local state. Reporting a percent of 0 as
+    // "Caching… 0%" is honest for that moment; inventing a phase would not be.
+    //
+    // The clamp on `progress` lives in prepareLine, which is why there is no
+    // longer a `resolvePercent` here — one guard, shared with the terminal,
+    // rather than two that can disagree about what 99.7% rounds to.
+    label: prepareLine({
+      source: session.backend === "debrid" ? "rd" : "torrent",
+      phase: "caching",
+      providerLabel,
+      label,
+      pct: session.progress,
+      elapsedSec: elapsedMs / 1000,
+    }),
   };
-}
-
-// The session's own percent, defended against a backend that reports something
-// outside the documented 0–100 integer range. Same floor-don't-round rule as
-// dashboard.ts: rounding 99.6 up to 100 on something that is still working
-// reads as a stuck UI.
-function resolvePercent(session: PublicStreamSession): number {
-  const pct = session.progress;
-  if (!Number.isFinite(pct)) return 0;
-  return Math.max(0, Math.min(100, Math.floor(pct)));
 }
 
 /**
