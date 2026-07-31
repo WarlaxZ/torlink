@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_RECC_URL, shouldProvision, ensureReccAccount, type ProvisionedPatch } from "./provision";
@@ -388,4 +388,49 @@ describe("ensureReccAccount", () => {
       expect(store.get().reccToken).toBeUndefined();
     });
   });
+});
+
+// Deliberately OUTSIDE the `shouldProvision`/`ensureReccAccount` describes
+// above: both stub TORLINK_RECC_URL/TORLINK_RECC_TOKEN to "" in a beforeEach,
+// which would hide the ambient guard entirely. This test runs with whatever
+// the test environment sets by default — src/test-setup.ts points
+// TORLINK_RECC_URL at a bogus non-default host precisely so no test anywhere
+// in the suite can reach the real reccd, even one that forgets to mock
+// "../recc/provision" outright (the App.web.test.tsx incident this task's
+// brief describes). If that guard is ever removed, or shouldProvision's
+// self-hosted-host check is loosened, this fails loudly instead of the whole
+// suite silently starting to make real network calls.
+it("the ambient test environment refuses to provision", () => {
+  // Earlier describes in this file vi.stubEnv the recc env vars to "" and
+  // never unstub — restore the real ambient value test-setup.ts set before
+  // asserting on it, or this would just be checking the previous test's stub.
+  vi.unstubAllEnvs();
+  expect(shouldProvision(base())).toBe(false);
+});
+
+// §0's one requirement a unit test of this module cannot reach: the call sites
+// must not await, and must carry their own catch. An unhandled rejection from a
+// fire-and-forget reccd call is the exact hazard routes.ts documents, and an
+// await would put reccd on torlink's startup path. deps-pin.test.ts sets the
+// precedent for asserting on source shape.
+describe("call sites", () => {
+  const CALL_SITES = ["src/ui/App.tsx", "src/daemon/serve.ts"];
+
+  for (const rel of CALL_SITES) {
+    it(`${rel} calls ensureReccAccount fire-and-forget, with a catch`, () => {
+      const source = readFileSync(new URL(`../../${rel}`, import.meta.url), "utf8");
+      expect(source).toContain("ensureReccAccount");
+      // No `await ensureReccAccount` anywhere — that would put reccd on the
+      // startup path.
+      expect(source).not.toMatch(/await\s+ensureReccAccount/);
+      // ONE regex spanning the whole call, deliberately: an earlier draft
+      // sliced from `source.indexOf("ensureReccAccount(")` and asserted the
+      // remainder contained ".catch(", which matched the import line first and
+      // then found some unrelated `.catch(` hundreds of lines later. It passed
+      // whatever the call site did. A vacuous assertion is worse than none —
+      // the same trap CLAUDE.md records for `not.toContain` after a rename.
+      // {0,600} covers App.tsx's multi-line onProvisioned callback.
+      expect(source).toMatch(/void ensureReccAccount\([\s\S]{0,600}?\)\.catch\(/);
+    });
+  }
 });

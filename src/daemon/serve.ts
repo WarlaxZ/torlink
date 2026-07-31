@@ -19,6 +19,7 @@ import { startWebServer, type WebServerHandle } from "../web/server";
 import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 import { openUrl } from "../util/openUrl";
+import { ensureReccAccount } from "../recc/provision";
 
 export { isAuthorized } from "./auth";
 
@@ -351,6 +352,13 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   }
 
   const runtime = await startRuntime(options.downloadDir);
+
+  // A headless seedbox and `serve --web` get an account too. Fire-and-forget,
+  // never awaited: reccd is a value-add, never a dependency. No onProvisioned
+  // callback — unlike the TUI, this process holds no config snapshot (routes.ts
+  // calls loadConfig() per request), and the cross-process lock in provision.ts
+  // is what makes it safe for this and a running TUI to both call it.
+  void ensureReccAccount().catch(() => {});
 
   if (options.seedTimeMs && options.seedTimeMs > 0) {
     startSeedReaper(runtime.queue, options.seedTimeMs, { deleteFiles: options.deleteFiles, log });
