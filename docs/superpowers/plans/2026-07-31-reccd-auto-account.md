@@ -1042,6 +1042,19 @@ describe("shouldProvision", () => {
   it("is true when reccAutoSignup is explicitly true", () => {
     expect(shouldProvision(base({ reccAutoSignup: true }))).toBe(true);
   });
+
+  // config.json is hand-editable and this is the only field here whose absent
+  // state means ON, so a junk value must fail safe towards NOT signing up. A
+  // user who wrote "no" meant no. `as unknown as Config` because these are
+  // exactly the values TypeScript would stop a caller writing — the point is
+  // that a text editor does not typecheck.
+  it.each([["no"], ["false"], [0], [null], [""], [1], ["yes"]])(
+    "does not sign up when reccAutoSignup is the junk value %p",
+    (value) => {
+      const cfg = { ...base(), reccAutoSignup: value } as unknown as Config;
+      expect(shouldProvision(cfg)).toBe(false);
+    },
+  );
 });
 ```
 
@@ -1086,7 +1099,16 @@ function normaliseUrl(url: string): string {
  * 3. Not opted out. Absent means opted in: a fresh install has no config.json.
  */
 export function shouldProvision(config: Config): boolean {
-  if (config.reccAutoSignup === false) return false;
+  // `=== false` would be the obvious test and it is WRONG here. This is the
+  // only boolean in Config whose absent state means ON, so it is the only one
+  // where the usual `=== true` idiom inverts. config.json is hand-editable, and
+  // a user who opts out by writing "no", "false", or 0 has written a value that
+  // is not `=== false` — with the obvious test they would be signed up anyway,
+  // having explicitly asked not to be. So: absent or exactly `true` is on;
+  // anything else present is an opt-out. It fails safe in the direction of not
+  // contacting a third-party host, which is the only safe direction here.
+  const auto = config.reccAutoSignup;
+  if (auto !== undefined && auto !== true) return false;
   const { reccUrl, reccToken } = resolveReccConfig(config);
   if (reccToken) return false;
   if (reccUrl && normaliseUrl(reccUrl) !== DEFAULT_RECC_URL) return false;
