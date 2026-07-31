@@ -333,3 +333,83 @@ describe("Results quality badges", () => {
     expect(u.frame()).not.toContain("Dolby Vision");
   });
 });
+
+// Grouping. Two releases of Kestrel plus one Ashfall: the duplicate collapses to
+// a heading, the singleton stays a plain row.
+const GROUPABLE = [
+  t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+  t("k2", "Kestrel.2010.2160p.WEB-DL"),
+  t("a1", "Ashfall.1999.1080p"),
+];
+
+describe("Results grouping", () => {
+  // At a WIDE content width throughout. At 80 columns the list has ~61 and
+  // "Kestrel (2010)" renders as "Kestrel (…", so every assertion here would be
+  // testing the truncator rather than the grouping.
+  const mountGrouped = () => mountWide(GROUPABLE, 120);
+
+  it("collapses many releases of one title to a heading with a count", async () => {
+    const u = await mountGrouped();
+    // The parsed title and year, not a release name.
+    expect(u.frame()).toContain("Kestrel (2010)");
+    expect(u.frame()).toContain("\u00d72");
+    // Collapsed: neither release name is on screen.
+    expect(u.frame()).not.toContain("BluRay");
+    expect(u.frame()).not.toContain("WEB-DL");
+  });
+
+  it("leaves a lone release as a plain row", async () => {
+    const u = await mountGrouped();
+    // No heading, no count — the release name itself is the row.
+    expect(u.frame()).toContain("Ashfall.1999.1080p");
+    expect(u.frame()).not.toContain("Ashfall (1999)");
+  });
+
+  it("still reports the result count, not the row count", async () => {
+    // 3 results behind 2 rows. The panel counts results, matching the browser.
+    const u = await mountGrouped();
+    expect(u.frame()).toContain("Results (3)");
+  });
+
+  it("expands the group under the cursor on space, and collapses it again", async () => {
+    const u = await mountGrouped();
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    expect(u.frame()).toContain("WEB-DL");
+    // The heading stays, with its count.
+    expect(u.frame()).toContain("Kestrel (2010)");
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).not.toContain("BluRay"));
+  });
+
+  it("turns grouping off with g, showing every release", async () => {
+    const u = await mountGrouped();
+    u.press("g");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    // No headings at all now.
+    expect(u.frame()).not.toContain("Kestrel (2010)");
+    expect(u.frame()).not.toContain("\u00d72");
+  });
+
+  it("acts on the group's best release when the cursor is on a heading", async () => {
+    // `y` copies the magnet of whatever the cursor is on. On a collapsed heading
+    // that must be its first member — the reason every action key resolves
+    // through resultAt rather than indexing `results` directly, which after
+    // grouping would be a different row entirely.
+    const copyMagnet = vi.fn();
+    searchState.current = settled(GROUPABLE);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth: 120, cols: 139, copyMagnet })}>
+        <Results />
+      </StoreContext.Provider>,
+      { cols: 139 },
+    );
+    const u = ui;
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (3)"));
+    u.press("y");
+    await vi.waitFor(() => expect(copyMagnet).toHaveBeenCalled());
+    expect(copyMagnet.mock.calls[0]![0]).toMatchObject({
+      name: "Kestrel.2010.1080p.BluRay.x264",
+    });
+  });
+});

@@ -13,6 +13,9 @@ import { parseRelease, hintForSection } from "../../util/release";
 // The same badges the browser's rows show, from the same table the quality
 // preference under `P` reads — one vocabulary, two front ends.
 import { releaseBadges } from "../../util/releaseBadges";
+// The grouping engine, shared with the browser's results list. `groupCountLabel`
+// is deliberately NOT used here — see the "×5" comment on the count cell below.
+import { groupResults, groupRowPlan, resultAtRow } from "../../util/resultGroup";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -263,6 +266,14 @@ export function Results() {
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
   const [cursor, setCursor] = useState(0);
+  // Many releases of one title collapse to one row. ON by default, matching the
+  // browser's checkbox: a browse routinely returns four uploads of every film.
+  // Local state, like previewOn and aliveOnly — the browser stores its own in
+  // localStorage and neither surface has ever persisted the other's view options.
+  const [grouped, setGrouped] = useState(true);
+  // Which group headings are open, by group key. Cleared with the query for the
+  // reason the cursor is: the keys of one search name nothing in the next.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   // The row the user navigated to, by infohash; null until they move. Keeps
   // the cursor on their row while streamed-in sources reshuffle the list.
   const selRef = useRef<string | null>(null);
@@ -290,7 +301,12 @@ export function Results() {
     selRef.current = null;
     setCursor(0);
     setTextFilter("");
+    // The group keys of one search name nothing in the next — except by accident,
+    // since "kestrel|2010|movie" is the same key in every search that returns it,
+    // which would silently expand a group the user never opened.
+    setExpanded(new Set());
   }, [query, section]);
+
 
   useEffect(() => {
     if (!focused) return;
@@ -302,7 +318,47 @@ export function Results() {
     if (!focused) setMode("list");
   }, [focused]);
 
-  const clamped = Math.min(cursor, Math.max(0, results.length - 1));
+  // The rows on screen: group headings and releases, in order. The SAME
+  // groupRowPlan the browser's list renders — "which rows are there" is one
+  // decision with two renderers, which is why it lives in src/util.
+  const rows = useMemo(
+    () =>
+      grouped
+        ? groupRowPlan(groupResults(results, hintForSection(section)), expanded)
+        : results.map((result) => ({ kind: "release" as const, key: result.infoHash, result, inGroup: false })),
+    [results, grouped, expanded, section],
+  );
+
+  // THE CURSOR INDEXES `rows`, NOT `results`. With grouping on those two disagree
+  // — 210 results behind 121 rows — and every action key resolves through
+  // `resultAt` so a collapsed heading hands them its best member.
+  const clamped = Math.min(cursor, Math.max(0, rows.length - 1));
+
+  /** The release a row acts on: itself, or a collapsed group's best member. */
+  const resultAt = (index: number): TorrentResult | null => {
+    const row = rows[index];
+    return row ? resultAtRow(row) : null;
+  };
+
+  // MAKES selRef REAL. It was written in two places and read in none, so its
+  // comment — "keeps the cursor on their row while streamed-in sources reshuffle
+  // the list" — was a false promise. Grouping reshuffles rows for a living: a
+  // frame that adds one release can turn a plain row into a heading and move
+  // everything below it.
+  //
+  // Matches on the release under the cursor, so a release that has since been
+  // folded into a collapsed group lands on that group's heading rather than
+  // resetting to the top.
+  useEffect(() => {
+    const want = selRef.current;
+    if (want === null) return;
+    const next = rows.findIndex(
+      (row) =>
+        resultAtRow(row)?.infoHash === want ||
+        (row.kind === "group" && row.members.some((m) => m.infoHash === want)),
+    );
+    if (next >= 0) setCursor(next);
+  }, [rows]);
 
   const searchH = 3;
   const filterH = mode === "filter" || textFilter.trim() ? 1 : 0;
@@ -313,7 +369,7 @@ export function Results() {
   // Poster/plot preview for the highlighted result. Search results carry no
   // imdbId, so we parse a title+year out of the release name and look it up by
   // name — best-effort, gated to video sections and an OMDb key.
-  const selectedResult = results[clamped];
+  const selectedResult = resultAt(clamped) ?? undefined;
   const previewSection = useMemo(() => {
     const g = CATEGORIES.find((c) => c.key === section)?.group;
     return !g || g === "Movies" || g === "TV" || g === "Anime";
@@ -407,7 +463,7 @@ export function Results() {
 
   const moveTo = (n: number): void => {
     setCursor(n);
-    selRef.current = results[n]?.infoHash ?? null;
+    selRef.current = resultAt(n)?.infoHash ?? null;
   };
 
   useInput(
@@ -417,8 +473,14 @@ export function Results() {
         return;
       }
       if (key.upArrow || input === "k") {
-        if (results.length > 0 && clamped > 0) moveTo(clamped - 1);
+        if (rows.length > 0 && clamped > 0) moveTo(clamped - 1);
         else setMode("search");
+        return;
+      }
+      if (input === "g") {
+        // Grouping on/off wholesale — the browser's `group` checkbox, as a key.
+        setGrouped((v) => !v);
+        setExpanded(new Set());
         return;
       }
       if (input === "s") {
@@ -432,37 +494,51 @@ export function Results() {
         toggleSavedSearch(query.trim());
       } else if (input === "p") {
         setPreviewOn((v) => !v);
-      } else if (results.length === 0) {
+      } else if (rows.length === 0) {
         return;
+      } else if (input === " ") {
+        // Expand or collapse the group under the cursor. Space is the tree idiom
+        // and it is free here; the arrow keys are not — → and ← are pane
+        // navigation in App.tsx.
+        const row = rows[clamped];
+        if (row?.kind === "group") {
+          const key_ = row.key;
+          setExpanded((current) => {
+            const next = new Set(current);
+            if (next.has(key_)) next.delete(key_);
+            else next.add(key_);
+            return next;
+          });
+        }
       } else if (key.downArrow || input === "j") {
-        moveTo(wrapStep(clamped, 1, results.length));
+        moveTo(wrapStep(clamped, 1, rows.length));
       } else if (key.pageUp) {
         moveTo(Math.max(0, clamped - pageJump));
       } else if (key.pageDown) {
-        moveTo(Math.min(results.length - 1, clamped + pageJump));
+        moveTo(Math.min(rows.length - 1, clamped + pageJump));
       } else if (key.return) {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) {
           setDetail(r);
           setMode("detail");
         }
       } else if (input === "d") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) openDownload(r);
       } else if (input === "D") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) openDownloadTo(r);
       } else if (input === "r") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) openDebrid(r);
       } else if (input === "v") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) openStream(r);
       } else if (input === "y") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) copyResultMagnet(r);
       } else if (input === "i") {
-        const r = results[clamped];
+        const r = resultAt(clamped);
         if (r) openImdbFor(r.name, preview.imdbId);
       }
     },
@@ -515,7 +591,8 @@ export function Results() {
     () => results.some((r) => r.sizeBytes > 0 || r.seeders > 0),
     [results],
   );
-  const numW = Math.max(2, String(results.length).length);
+  // Numbers the ROWS, which with grouping on is fewer than the results.
+  const numW = Math.max(2, String(rows.length).length);
 
   const outageCodes = (sources: readonly Source[]): string => {
     const codes = [
@@ -603,8 +680,8 @@ export function Results() {
     );
   };
 
-  const start = windowStart(clamped, results.length, listHeight);
-  const visible = results.slice(start, start + listHeight);
+  const start = windowStart(clamped, rows.length, listHeight);
+  const visible = rows.slice(start, start + listHeight);
   const count = results.length > 0 ? `(${results.length})` : undefined;
 
   return (
@@ -670,12 +747,25 @@ export function Results() {
                     </Box>
                   </Box>
                 ) : null}
-                {visible.map((r, i) => {
+                {visible.map((row, i) => {
                   const index = start + i;
                   const here = index === clamped && focused && mode === "list";
+                  // A heading acts on its best member, so every column below —
+                  // the state mark, the badges, the stats, the source tag — reads
+                  // from the release the row would act on if you pressed `v`.
+                  // Never null: groupRowPlan does not emit empty groups.
+                  const r = resultAtRow(row)!;
+                  const isGroup = row.kind === "group";
                   const ss = sourceStyle(r.source);
+                  // The disclosure arrow and the member indent live INSIDE the
+                  // name cell rather than in columns of their own. At 80 columns
+                  // the list has ~61 to spend and the name is already truncated;
+                  // two more fixed columns would come straight out of it.
+                  const label = isGroup
+                    ? `${row.expanded ? ICON.caretDown : ICON.caretRight} ${row.year ? `${row.title} (${row.year})` : row.title}`
+                    : `${row.inGroup ? "  " : ""}${cleanText(r.name)}`;
                   return (
-                    <Box key={r.infoHash}>
+                    <Box key={row.key}>
                       <Box width={GUTTER} flexShrink={0}>
                         <Text color={COLOR.accent}>{here ? ICON.pointer : ""}</Text>
                       </Box>
@@ -692,12 +782,21 @@ export function Results() {
                         <Text
                           wrap="truncate-end"
                           color={here ? COLOR.accent : undefined}
-                          dimColor={!here}
-                          bold={here}
+                          dimColor={!here && !isGroup}
+                          bold={here || isGroup}
                         >
-                          {cleanText(r.name)}
+                          {label}
                         </Text>
                       </Box>
+                      {isGroup ? (
+                        <Box flexShrink={0} marginLeft={1}>
+                          {/* "x5", not the browser's "5 releases": this row has
+                              ~61 columns and that one does not. Same trade the
+                              stats columns already make, showing "40:6" where
+                              the browser writes "40 seeders / 6 leechers". */}
+                          <Text dimColor>{`${ICON.times}${row.members.length}`}</Text>
+                        </Box>
+                      ) : null}
                       {rowBadges(r.name).map((badge) => (
                         <Box key={badge} flexShrink={0} marginLeft={1}>
                           <Text dimColor>{badge}</Text>

@@ -22,6 +22,12 @@ export const ICON = {
   up: "↑",
   peer: "•",
   pause: "⏸",
+  // A results group's disclosure state, and the count that follows its title.
+  // Single-width glyphs on purpose: the row is a fixed-column layout and a
+  // double-width character would push every column after it out by one.
+  caretDown: "▾",
+  caretRight: "▸",
+  times: "×",
 } as const;
 
 export const RULE = "#6b6577";
