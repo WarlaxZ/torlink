@@ -1299,11 +1299,20 @@ select:focus-visible {
 .suggest-wrap {
   position: relative;
   flex: 1;
-  min-width: 0;
+  /* Was min-width: 0, which was wrong. The bare #query used to sit in this
+     flex row carrying `input { flex: 1; min-width: 12rem }` (styles.css:237),
+     and that 12rem is what makes .card wrap instead of crushing the search
+     box. The wrapper now holds that place, so it inherits that job. */
+  min-width: 12rem;
 }
 
 .suggest-wrap #query {
   width: 100%;
+  /* The generic `input` rule's min-width: 12rem would otherwise beat
+     width: 100% once the wrapper is narrower than 12rem, overflowing the
+     wrapper and leaving the overlay narrower than the input under it. The
+     wrapper enforces the 12rem floor now; the input just fills it. */
+  min-width: 0;
 }
 
 .suggest {
