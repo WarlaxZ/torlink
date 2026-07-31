@@ -33,6 +33,7 @@
 // a hand-written copy of the picker's shapes — `{ season, episode }` had
 // already drifted once — the exact drift this file was created to stop.
 // Anything with a runtime value in it still does not belong in this module.
+import type { Blocker, MediaFacts } from "../util/playability";
 import type { EpisodeRef } from "../util/episode";
 import type { FeatureId, MaxResolution } from "../util/releasePick";
 
@@ -107,6 +108,26 @@ export interface PublicStreamFile {
   index: number;
   /** Path of the form `/stream/:sid/:idx` — not a URL, and with no `?k=`. */
   handle: string;
+}
+
+/**
+ * `GET /stream/:sid/:idx.info?k=…` — what this file is, and how to play it.
+ *
+ * Capability-authenticated rather than bearer-authenticated, and that is the
+ * whole reason it is a representation of the stream handle rather than a route
+ * under `/api/`: the player page may be a phone that was handed a link, so it
+ * has the session capability and not the server's token.
+ *
+ * Deliberately does NOT carry the upstream URL. That is a debrid unrestricted
+ * link, i.e. a credential against the user's account; the page plays through
+ * `/stream/:sid/:idx` and never learns where the bytes come from.
+ */
+export interface StreamInfoResponse {
+  facts: MediaFacts;
+  /** Empty means the browser should be able to play this file as it is. */
+  blockers: Blocker[];
+  /** A provider HLS manifest the browser can play directly, or null. */
+  hls: string | null;
 }
 
 /**

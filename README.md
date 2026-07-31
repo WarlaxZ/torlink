@@ -237,21 +237,33 @@ the active stream; press **`x`** to stop.
 
 In the browser, torlnk resolves the torrent — through the active debrid provider if you have one
 connected, otherwise straight from the swarm — picks the video file (or asks, if there are several), and
-opens a player page. What happens next depends on the release:
+opens a player page. Before it builds a player at all it asks the server what the file actually *is* —
+container and codecs, read with `ffprobe` where you have it and from the release name where you don't. So
+what happens next is decided up front, and you find out immediately rather than watching a black rectangle
+give up after twelve seconds:
 
 - **mp4/H.264** plays inline. The video element streams it directly, and seeking works properly because
   the server honours range requests.
-- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox. No browser ships those
-  codecs. Rather than showing you a black rectangle, the page says so and offers a **Download .m3u**
-  button: your OS hands that tiny playlist to VLC (or whatever your default player is) and it plays
-  there. On iOS and Android you also get a direct VLC link.
+- **mkv, HEVC, DTS** — most of the scene — will not decode in Chrome or Firefox; no browser ships those
+  codecs. Where your **debrid provider will transcode it for you**, the player uses their stream and it
+  simply plays, with full seeking, and without a byte passing through the machine running torlnk.
+  Real-Debrid does this. TorBox publishes no equivalent, so a TorBox stream falls through to the next line.
+- **Anything left over** — a release streamed from the swarm, or one the provider won't transcode — gets a
+  card naming the part your browser can't handle, plus a **Download .m3u** button: your OS hands that tiny
+  playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get
+  a direct VLC link.
+
+That check is also why the card is honest about *which* part is the problem. An `.mp4` that turns out to be
+carrying HEVC used to look playable right up until it wasn't; now it's caught before anything loads.
 
 <p align="center">
   <img src="preview/web-player-fallback.png" alt="the player page telling you a release is in a container the browser can't play, with Download .m3u, Copy stream URL and Open in VLC buttons" style="max-width: 1024px; width: 100%; height: auto;">
 </p>
 
-There's no transcoding. torlnk will not burn your CPU re-encoding a 4K remux so a browser can play it;
-the `.m3u` route is faster, lossless, and works on every platform.
+**torlnk still does no transcoding of its own.** It will not burn your CPU re-encoding a 4K remux so a
+browser can play it — the transcode in that second case is the *provider's*, on their hardware and their
+bandwidth, which is why it costs you nothing. Where that isn't on offer, the `.m3u` route is lossless and
+works on every platform.
 
 **Without a debrid provider**, streaming runs **peer-to-peer** through a local server — the pieces you're
 watching download to a temporary folder as they play. Because that connects you straight to the swarm,

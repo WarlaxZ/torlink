@@ -274,7 +274,16 @@ describe("toPublicSession", () => {
       name: "Some Release",
       state: "ready",
       files: [
-        { url: RD_URL, filename: "big.mkv", bytes: 900 },
+        // providerFileId and providerStreamable are here so the generic leak
+        // test below covers them: they are server-side handles for the debrid
+        // transcode endpoint and the browser has no use for either.
+        {
+          url: RD_URL,
+          filename: "big.mkv",
+          bytes: 900,
+          providerFileId: "RDFILEID7QX",
+          providerStreamable: true,
+        },
         { url: LOCAL_URL, filename: "small.mkv", bytes: 100 },
       ],
       progress: 100,

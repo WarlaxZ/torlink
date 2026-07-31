@@ -20,7 +20,11 @@
 import http from "node:http";
 import { isAuthorized } from "../daemon/auth";
 import { streamHandle } from "./routes";
-import type { StreamSessionRegistry } from "../core/streamSession";
+import { probeUrl } from "../core/probe";
+import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../util/playability";
+import type { ProbeCache } from "../core/probeCache";
+import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
+import type { StreamInfoResponse } from "./wire";
 
 /** Diagnostics sink. Same contract as the server's: injected, never `console`. */
 export type StreamLog = (message: string) => void;
@@ -38,6 +42,24 @@ export interface StreamDeps {
    * learn the real external origin, which is why the option exists at all.
    */
   trustProxy?: boolean;
+  /**
+   * Remembers probe results so a page reload does not re-probe. Optional so a
+   * caller that never asks for `.info` need not construct one; absent simply
+   * means every `.info` request pays the probe.
+   */
+  probeCache?: ProbeCache;
+  /**
+   * Probe one upstream URL for its real container and codecs. Injected so the
+   * suite never spawns ffprobe, and so a host without the binary is the default
+   * rather than a special case. Returning null is normal.
+   */
+  probeImpl?: (url: string, container: string) => Promise<MediaFacts | null>;
+  /**
+   * The debrid provider's own HLS manifest for this file, or null. Left unset
+   * until the player page can mount one — wiring it earlier would make a file
+   * with a perfectly good manifest show a card claiming it cannot be played.
+   */
+  resolveHls?: (session: StreamSession, index: number) => Promise<string | null>;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -86,22 +108,34 @@ export function parseStreamPath(urlPath: string): { sid: string; index: number }
 }
 
 const PLAYLIST_SUFFIX = ".m3u";
+const INFO_SUFFIX = ".info";
+
+/** Which representation of the stream handle a path is asking for. */
+export type StreamRep = "media" | "playlist" | "info";
 
 /**
- * Split a trailing `.m3u` off a stream path.
+ * Split a trailing `.m3u` or `.info` off a stream path.
  *
- * The playlist is a *representation* of the handle, not a second resource, so
- * it is deliberately not a second route: stripping the suffix here means the
- * session lookup, the capability check, the readiness check and the bounds
- * check below are literally the same code for both. A `.m3u` that skipped the
- * capability would hand out a playable URL to anyone who guessed a session id,
- * and the only durable way to stop that is for there to be one guard, not two.
+ * Both are *representations* of the handle, not second resources, so neither is
+ * a second route: stripping the suffix here means the session lookup, the
+ * capability check, the readiness check and the bounds check below are literally
+ * the same code for all three. A `.m3u` that skipped the capability would hand
+ * out a playable URL to anyone who guessed a session id, and a `.info` that
+ * skipped it would hand out a filename and codec list; the only durable way to
+ * stop both is for there to be one guard, not three.
+ *
+ * Matched with `endsWith` on an exact lowercase suffix, so `.m3u8`, `.INFO` and
+ * `.information` are all just filenames — a near-miss must fall through to the
+ * media branch rather than be helpfully interpreted.
  */
-export function splitPlaylistSuffix(urlPath: string): { path: string; playlist: boolean } {
+export function splitRepresentation(urlPath: string): { path: string; rep: StreamRep } {
   if (urlPath.endsWith(PLAYLIST_SUFFIX)) {
-    return { path: urlPath.slice(0, -PLAYLIST_SUFFIX.length), playlist: true };
+    return { path: urlPath.slice(0, -PLAYLIST_SUFFIX.length), rep: "playlist" };
   }
-  return { path: urlPath, playlist: false };
+  if (urlPath.endsWith(INFO_SUFFIX)) {
+    return { path: urlPath.slice(0, -INFO_SUFFIX.length), rep: "info" };
+  }
+  return { path: urlPath, rep: "media" };
 }
 
 const PLAY_BASE = "/play";
@@ -236,7 +270,7 @@ export async function handleStreamRequest(
     return 405;
   }
 
-  const { path: handlePath, playlist } = splitPlaylistSuffix(urlPath);
+  const { path: handlePath, rep } = splitRepresentation(urlPath);
   const parsed = parseStreamPath(handlePath);
   if (!parsed) {
     writeJson(res, 404, { error: "not found" });
@@ -279,6 +313,50 @@ export async function handleStreamRequest(
     return 404;
   }
 
+  // The `.info`: what this file is, and how the player page should try to play
+  // it. Same position as the playlist below — after every guard, before the
+  // backend split — because the answer is about the media, not about which
+  // backend happens to be serving it.
+  if (rep === "info") {
+    const container = extensionOf(file.filename);
+    let facts = deps.probeCache?.get(parsed.sid, parsed.index);
+    if (!facts) {
+      // Only probe a file we would otherwise refuse.
+      //
+      // A probe is a spawn plus a network round trip against a CDN or a
+      // half-downloaded torrent, and it is bounded at 15s. Paying that on every
+      // player page load — including for the mp4 that was going to play
+      // instantly — to catch the uncommon mp4-carrying-HEVC would make the
+      // common path markedly slower in order to serve the rare one. So the name
+      // decides first, and the probe runs only when the name says this needs
+      // more than direct play, where the accurate answer is what picks the rung.
+      //
+      // The cost of this order: an mp4 whose HEVC the name does not mention
+      // still gets optimism, a decode error and the fallback card — the same as
+      // before this route existed, and one tap from working. That is the trade.
+      //
+      // `session.name` is the release the file came from. A debrid provider
+      // often renames the file itself ("1.mkv"), so the release name is the
+      // richer codec signal and the server is the only place that has both.
+      const fromName = classifyFromName(file.filename, session.name);
+      if (blockersFor(fromName).length === 0) {
+        facts = fromName;
+      } else {
+        const probe = deps.probeImpl ?? ((url: string, c: string) => probeUrl(url, c));
+        // A probe failure is not an error: classifyFromName is always available.
+        facts = (await probe(file.url, container)) ?? fromName;
+      }
+      deps.probeCache?.set(parsed.sid, parsed.index, facts);
+    }
+    const hls = deps.resolveHls ? await deps.resolveHls(session, parsed.index) : null;
+    const body: StreamInfoResponse = { facts, blockers: blockersFor(facts), hls };
+    // Note what is NOT in that body: `file.url`. That is a debrid unrestricted
+    // link, i.e. a credential against the user's account. The page plays through
+    // this handle and never learns where the bytes come from.
+    writeJson(res, 200, body);
+    return 200;
+  }
+
   // The `.m3u`, and note where it sits: after every guard above, and *before*
   // the backend split. A debrid-backed session's playlist points at this
   // handle, not at the unrestricted link — the redirect happens when the
@@ -289,7 +367,7 @@ export async function handleStreamRequest(
   // link to. A three-line file with the right content type is the only thing
   // that reliably opens the user's default media player on Windows, macOS and
   // Linux alike.
-  if (playlist) {
+  if (rep === "playlist") {
     const origin = requestOrigin(req.headers, deps.trustProxy === true);
     if (!origin) {
       // Not a 404: the request addressed a real file, we just cannot name it

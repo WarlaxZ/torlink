@@ -74,6 +74,7 @@
   },
   "dependencies": {
     "env-paths": "^4.0.0",
+    "hls.js": "^1.6.16",
     "ink": "^7.0.5",
     "jpeg-js": "^0.4.4",
     "parse-torrent": "^11.0.21",

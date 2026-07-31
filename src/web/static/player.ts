@@ -3,8 +3,10 @@
 // is kept boring on purpose so that reading it is enough to know what reaches
 // the page.
 //
-// Bundled for the browser: nothing from node:*, nothing from the repo outside
-// this directory.
+// Bundled for the browser: nothing from node:*. Types from `../wire.ts` are
+// fair game (they are erased at build time) and so is `src/util/`, the layer
+// both front ends share — `npm run build` is what proves any such import is
+// browser-safe, following transitive imports where a grep cannot.
 //
 // SAME HARD RULE AS app.ts: every node here is built with createElement and
 // filled with textContent. The filename comes out of a torrent — i.e. from
@@ -13,9 +15,10 @@
 import {
   STALL_MS,
   absoluteUrl,
-  canDirectPlay,
+  chooseSource,
   detectPlatform,
   fallbackMessage,
+  infoPath,
   parsePlayerLocation,
   playlistPath,
   streamPath,
@@ -23,6 +26,8 @@ import {
   type FallbackReason,
   type PlayerTarget,
 } from "./playerModel";
+import { mountHls } from "./hlsMount";
+import type { StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -85,7 +90,7 @@ function showFallback(reason: FallbackReason, filename: string): void {
   stage.replaceChildren(card);
 }
 
-function mountVideo(target: PlayerTarget, src: string): void {
+function createVideo(): HTMLVideoElement {
   const video = document.createElement("video");
   video.className = "player";
   video.controls = true;
@@ -95,12 +100,22 @@ function mountVideo(target: PlayerTarget, src: string): void {
   // first frame — which is exactly what tells us whether it can play this at
   // all — without pulling the whole file through the proxy behind it.
   video.preload = "metadata";
-  video.src = src;
+  return video;
+}
 
-  // The silent failure is the one that matters. A container the browser hates
-  // often produces no `error` event at all: the element simply never reaches
-  // `loadeddata`. So the timer is the primary detector and the event is the
-  // fast path, and the first of them to fire wins.
+/**
+ * Watch a `<video>` for the failure that produces no event.
+ *
+ * Shared by every rung that mounts an element, because an HLS mount needs
+ * exactly the same "no frame, no error, twelve seconds" detection as a direct
+ * `src` does — and two copies of it would drift.
+ *
+ * The silent failure is the one that matters. A container the browser hates
+ * often produces no `error` event at all: the element simply never reaches
+ * `loadeddata`. So the timer is the primary detector and the event is the fast
+ * path, and the first of them to fire wins.
+ */
+function watch(video: HTMLVideoElement, target: PlayerTarget): { fail: (r: FallbackReason) => void } {
   let settled = false;
   const fail = (reason: FallbackReason): void => {
     if (settled) return;
@@ -123,15 +138,25 @@ function mountVideo(target: PlayerTarget, src: string): void {
   video.addEventListener("error", () => fail("error"));
   video.addEventListener("loadeddata", ok);
   video.addEventListener("playing", ok);
+  return { fail };
+}
 
-  stage.replaceChildren(video);
-  // autoplay is blocked without a user gesture in every browser that matters;
-  // the rejection is expected and is not a playback failure, so it must not
-  // reach `fail`. The controls are right there.
+// autoplay is blocked without a user gesture in every browser that matters; the
+// rejection is expected and is not a playback failure, so it must never reach
+// `fail`. The controls are right there.
+function tryPlay(video: HTMLVideoElement): void {
   void video.play().catch(() => {});
 }
 
-function render(): void {
+function mountVideo(target: PlayerTarget, src: string): void {
+  const video = createVideo();
+  video.src = src;
+  watch(video, target);
+  stage.replaceChildren(video);
+  tryPlay(video);
+}
+
+async function render(): Promise<void> {
   const target = parsePlayerLocation(location.pathname, location.search);
   if (!target || !target.capability) {
     nameLabel.textContent = "";
@@ -169,11 +194,45 @@ function render(): void {
   }
   actions.replaceChildren(...controls);
 
-  if (!canDirectPlay(target.filename)) {
-    showFallback("container", target.filename);
+  // Ask the server what this file actually is before creating any element. This
+  // is what removes the twelve-second black rectangle: a container or codec the
+  // browser refuses is now known up front rather than discovered by a decode
+  // error that, for mkv in Chrome, never even fires.
+  const info = await fetchInfo(target);
+  const chosen = chooseSource(info, target.filename);
+  if (chosen.rung === "card") {
+    showFallback(chosen.reason ?? "container", target.filename);
+    return;
+  }
+  if (chosen.rung === "provider-hls" && info?.hls) {
+    const video = createVideo();
+    const settle = watch(video, target);
+    stage.replaceChildren(video);
+    // The manifest is on the provider's own host, so no capability is appended:
+    // it is already a capability, being an unguessable URL minted for this file.
+    await mountHls(video, info.hls, { onError: () => settle.fail("error") });
+    tryPlay(video);
     return;
   }
   mountVideo(target, stream);
 }
 
-render();
+/**
+ * Fetch `.info`, or null.
+ *
+ * Null on any failure — offline, a 401, a server old enough not to have the
+ * route. `chooseSource` treats null as "decide from the filename", which is
+ * what this page did before the route existed, so a failure here degrades to
+ * the previous behaviour rather than to a blank page.
+ */
+async function fetchInfo(target: PlayerTarget): Promise<StreamInfoResponse | null> {
+  try {
+    const res = await fetch(absoluteUrl(location.origin, infoPath(target)));
+    if (!res.ok) return null;
+    return (await res.json()) as StreamInfoResponse;
+  } catch {
+    return null;
+  }
+}
+
+void render();

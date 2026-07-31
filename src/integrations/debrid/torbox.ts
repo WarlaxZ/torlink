@@ -463,6 +463,19 @@ export const torBoxProvider: DebridProvider = {
   validateToken,
   resolveMagnet,
   checkCached,
+  // No transcodeManifest, and its absence IS the capability flag — the same
+  // pattern as Real-Debrid not having checkCached.
+  //
+  // Checked 2026-07-31 against https://api-docs.torbox.app and their published
+  // SDK's service list (torrents, usenet, web downloads, general, notifications,
+  // user, RSS feeds, integrations, queued): there is no documented public
+  // endpoint that returns an HLS manifest for a file. `requestdl` gives a direct
+  // download link, not a playlist. TorBox do describe server-side transcoding as
+  // shipped, and their Stremio addon hands out an `.m3u8` — but via that addon,
+  // not through the API this file speaks, so there is nothing here to call.
+  //
+  // Consequence: a TorBox-backed session skips rung 2 and lands on rung 3 (a
+  // local ffmpeg remux) or the fallback card. Revisit if they document one.
   isTransient,
   isTokenRejection,
 };

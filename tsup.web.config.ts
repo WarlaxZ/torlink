@@ -24,9 +24,8 @@ import { defineConfig } from "tsup";
 // unlike a source-text grep it follows transitive imports. That is why there is
 // no test asserting those files import nothing.
 export default defineConfig({
-  // One entry per page, each its own bundle: the dashboard and the player share
-  // only a stylesheet, and code-splitting them (which `splitting: false` below
-  // also rules out) would buy a shared chunk of nothing at this size.
+  // One entry per page: the dashboard and the player share only a stylesheet, so
+  // there is still no shared chunk worth extracting between the two.
   entry: { app: "src/web/static/app.ts", player: "src/web/static/player.ts" },
   outDir: "dist/web",
   format: ["esm"],
@@ -51,8 +50,19 @@ export default defineConfig({
   // anything pulled in here ever reaches a Node builtin. It arrives via
   // `src/util/nextEpisodeFile.ts` -> `src/util/release.ts`, the release parser
   // both front ends share.
-  noExternal: [/^parse-torrent-title$/],
+  //
+  // hls.js is here for the same reason. It is dynamically imported by
+  // hlsMount.ts so a direct-play mp4 never fetches it, which makes it a separate
+  // chunk rather than part of player.js — but left external it would emit a bare
+  // `import("hls.js")` that resolves to nothing in a browser, and the failure
+  // would appear only when someone opened an MKV.
+  noExternal: [/^parse-torrent-title$/, /^hls\.js$/],
   dts: false,
-  splitting: false,
+  // ON, and it has to be. hlsMount.ts imports hls.js dynamically so that a
+  // direct-play mp4 never downloads it — but with splitting off, esbuild inlines
+  // a dynamic import into its entry, and `player.js` went from 16 KB to 523 KB
+  // with every page load paying for it. Splitting is what turns that import back
+  // into a chunk fetched only when an HLS manifest is actually mounted.
+  splitting: true,
   minify: true,
 });

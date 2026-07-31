@@ -21,7 +21,15 @@ import {
   type WebResponse,
 } from "./routes";
 import { subscribeToQueue } from "./sse";
-import { handleStreamRequest, isPlayPath, isStreamPath, parsePlayPath } from "./stream";
+import {
+  handleStreamRequest,
+  isPlayPath,
+  isStreamPath,
+  parsePlayPath,
+  type StreamDeps,
+} from "./stream";
+import { ProbeCache } from "../core/probeCache";
+import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
@@ -76,6 +84,16 @@ export interface WebServerOptions {
    * nothing and gets every default.
    */
   webDeps?: Omit<Partial<WebDeps>, "runtime" | "token">;
+  /**
+   * Overrides for the stream handle's injectable seams — today the ffprobe call
+   * behind `.info` and the debrid transcode lookup. `sessions`, `log` and
+   * `probeCache` are owned by this server and cannot be overridden.
+   *
+   * Same reasoning as `webDeps`: without it, a test of `.info` would spawn
+   * ffprobe against a URL that does not exist, and the interesting cases (no
+   * binary, a probe that disagrees with the filename) would be unreachable.
+   */
+  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache">;
 }
 
 export interface WebServerHandle {
@@ -223,6 +241,16 @@ export async function startWebServer(
   // One deps object for every route, built once. `runtime` and `token` come
   // last so an override cannot swap the queue or weaken the gate.
   const routeDeps: WebDeps = { ...options.webDeps, runtime, token };
+
+  // One probe cache for this process, so opening a player page twice does not
+  // spawn ffprobe twice. Bounded, so it needs no teardown of its own.
+  const probeCache = new ProbeCache();
+
+  // Rung 2 of the player's source ladder: the debrid provider's own HLS
+  // transcode, which lets a browser play an MKV without this machine
+  // transcoding or carrying a byte. Built once; it reads config per call, so a
+  // token changed in the TUI is picked up without a restart.
+  const resolveHls = makeResolveHls();
 
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
@@ -396,7 +424,16 @@ export async function startWebServer(
       // carries that capability, and a Real-Debrid Location is a credential.
       if (isStreamPath(urlPath)) {
         const wrote = await handleStreamRequest(
-          { sessions: runtime.sessions, log, trustProxy: options.trustProxy === true },
+          {
+            resolveHls,
+            // Spread after the default so a test can override it, and before the
+            // fields below so it cannot override those.
+            ...options.streamDeps,
+            sessions: runtime.sessions,
+            log,
+            trustProxy: options.trustProxy === true,
+            probeCache,
+          },
           req,
           res,
           urlPath,

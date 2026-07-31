@@ -62,6 +62,16 @@ export interface DebridProvider {
    * removed its instant-availability endpoint in 2024 and so does not have it.
    */
   checkCached?(token: string, hashes: string[], opts?: RequestOptions): Promise<Set<string>>;
+  /**
+   * An HLS manifest URL for one already-resolved file, so a browser can play a
+   * container it could not otherwise touch — without this machine transcoding
+   * anything. `fileId` is `StreamFile.providerFileId`.
+   *
+   * Present ONLY where the provider supports it: its absence is the capability
+   * flag, exactly as for `checkCached` above. Resolves to null when the provider
+   * will not transcode this particular file.
+   */
+  transcodeManifest?(token: string, fileId: string, opts?: RequestOptions): Promise<string | null>;
   /** Worth requeuing (rate limit, transient server load) vs terminal. */
   isTransient(e: unknown): boolean;
   /** The token was rejected — the UI should re-prompt for THIS provider. */
