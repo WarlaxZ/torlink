@@ -46,7 +46,7 @@ function fetchStub(): { impl: FetchImpl; urls: string[] } {
   const urls: string[] = [];
   const impl = (async (url: string) => {
     urls.push(String(url));
-    return { ok: true, status: 200, json: async () => [REC] } as unknown as Response;
+    return { ok: true, status: 200, json: async () => ({ results: [REC] }) } as unknown as Response;
   }) as unknown as FetchImpl;
   return { impl, urls };
 }
@@ -58,7 +58,7 @@ function fetchStubWithPlot(plot: string): { impl: FetchImpl; urls: string[] } {
     urls.push(String(url));
     const body = String(url).includes("omdbapi.com")
       ? { Response: "True", Plot: plot }
-      : [REC];
+      : { results: [REC] };
     return { ok: true, status: 200, json: async () => body } as unknown as Response;
   }) as unknown as FetchImpl;
   return { impl, urls };
@@ -88,7 +88,7 @@ function fetchStubFull(plot: string): { impl: FetchImpl; urls: string[] } {
     }
     const body = u.includes("omdbapi.com")
       ? { Response: "True", Plot: plot, Poster: posterUrl }
-      : [REC];
+      : { results: [REC] };
     return { ok: true, status: 200, json: async () => body } as unknown as Response;
   }) as unknown as FetchImpl;
   return { impl, urls };
@@ -150,7 +150,7 @@ describe("ForYou", () => {
     let calls = 0;
     const impl = (async () => {
       calls++;
-      return { ok: true, status: 200, json: async () => [REC] } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({ results: [REC] }) } as unknown as Response;
     }) as unknown as FetchImpl;
     render(<ForYou reccConfig={CONFIG} visible active setSection={vi.fn()} submitQuery={vi.fn()} fetchImpl={impl} />);
     await flush();

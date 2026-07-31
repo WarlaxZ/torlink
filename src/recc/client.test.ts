@@ -89,13 +89,59 @@ const REC = { imdbId: "tt1", title: "Windmere", year: 2019, score: 33.4, reasons
 
 describe("fetchRecommendations", () => {
   it("returns ok with parsed items on 200", async () => {
-    const { impl } = fakeFetch(() => ({ status: 200, body: [REC] }));
+    const { impl } = fakeFetch(() => ({ status: 200, body: { results: [REC] } }));
     const res = await fetchRecommendations(CONFIG, { limit: 5 }, { fetchImpl: impl });
     expect(res).toEqual({ ok: true, items: [REC] });
   });
 
+  it("reads the items out of reccd's results envelope", async () => {
+    const { impl } = fakeFetch(() => ({ status: 200, body: { results: [REC] } }));
+    const res = await fetchRecommendations(CONFIG, { limit: 5 }, { fetchImpl: impl });
+    expect(res).toEqual({ ok: true, items: [REC] });
+  });
+
+  // The envelope exists so an attribution block can accompany plot text. torlink
+  // never asks for plots, but a parser that demanded EXACTLY `results` would
+  // break the day it did — so unknown siblings are ignored, not rejected.
+  it("ignores an attribution block sitting beside the results", async () => {
+    const { impl } = fakeFetch(() => ({
+      status: 200,
+      body: {
+        attribution: {
+          source: "reccd",
+          licence: "CC BY-SA 4.0",
+          licenceUrl: "https://example.invalid/licence",
+          modified: true,
+        },
+        results: [REC],
+      },
+    }));
+    const res = await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
+    expect(res).toEqual({ ok: true, items: [REC] });
+  });
+
+  // reccd's previous wire format. Accepting it would let torlink run against a
+  // reccd too old to send the envelope, which is deliberately not supported.
+  it("rejects a bare array, the wire format reccd used before the envelope", async () => {
+    const { impl } = fakeFetch(() => ({ status: 200, body: [REC] }));
+    const res = await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
+    expect(res).toEqual({ ok: false, error: "unexpected response from reccd" });
+  });
+
+  it("rejects an envelope whose results is not an array", async () => {
+    const { impl } = fakeFetch(() => ({ status: 200, body: { results: "nope" } }));
+    const res = await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
+    expect(res).toEqual({ ok: false, error: "unexpected response from reccd" });
+  });
+
+  it("rejects an object with no results key at all", async () => {
+    const { impl } = fakeFetch(() => ({ status: 200, body: {} }));
+    const res = await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
+    expect(res).toEqual({ ok: false, error: "unexpected response from reccd" });
+  });
+
   it("builds the query string from provided filters", async () => {
-    const { impl, urls } = fakeFetch(() => ({ status: 200, body: [] }));
+    const { impl, urls } = fakeFetch(() => ({ status: 200, body: { results: [] } }));
     await fetchRecommendations(CONFIG, { type: "movie", genre: "Western", explore: true, limit: 5 }, { fetchImpl: impl });
     expect(urls[0]).toContain("/recommendations?");
     expect(urls[0]).toContain("type=movie");
@@ -105,7 +151,7 @@ describe("fetchRecommendations", () => {
   });
 
   it("omits type/genre/explore when unset and defaults limit to 20", async () => {
-    const { impl, urls } = fakeFetch(() => ({ status: 200, body: [] }));
+    const { impl, urls } = fakeFetch(() => ({ status: 200, body: { results: [] } }));
     await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
     expect(urls[0]).not.toContain("type=");
     expect(urls[0]).not.toContain("genre=");
@@ -131,8 +177,10 @@ describe("fetchRecommendations", () => {
     expect(res).toEqual({ ok: false, error: "couldn't reach reccd" });
   });
 
-  it("rejects a malformed body", async () => {
-    const { impl } = fakeFetch(() => ({ status: 200, body: [{ imdbId: 1 }] }));
+  // Item-level validation, not envelope-level: the envelope here is valid, so
+  // the only thing that can reject this body is isRecommendation.
+  it("rejects an envelope whose items are malformed", async () => {
+    const { impl } = fakeFetch(() => ({ status: 200, body: { results: [{ imdbId: 1 }] } }));
     const res = await fetchRecommendations(CONFIG, {}, { fetchImpl: impl });
     expect(res).toEqual({ ok: false, error: "unexpected response from reccd" });
   });

@@ -106,6 +106,20 @@ function isRecommendation(v: unknown): v is Recommendation {
   );
 }
 
+// reccd wraps its list endpoints in an object so a response-level `attribution`
+// block can ride alongside plot text. Unknown siblings are ignored rather than
+// rejected: torlink does not send `plot=true` today, and a parser that demanded
+// exactly `results` would break the day it did.
+//
+// A bare array — reccd's format before the envelope — is deliberately NOT
+// accepted. This build requires a reccd new enough to send the envelope; the two
+// deploy together.
+function resultsOf(body: unknown): unknown[] | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+  const r = (body as Record<string, unknown>).results;
+  return Array.isArray(r) ? r : null;
+}
+
 // A blocking read, unlike the fire-and-forget postEvent: the user is waiting on
 // these results, so failures are surfaced as a discriminated result rather than
 // swallowed. reccd returns no magnet — the caller starts a torrent search from
@@ -131,10 +145,11 @@ export async function fetchRecommendations(
     if (res.status === 401) return { ok: false, error: "reccd rejected the token — check reccToken" };
     if (!res.ok) return { ok: false, error: `recommendations unavailable (HTTP ${res.status})` };
     const body: unknown = await res.json();
-    if (!Array.isArray(body) || !body.every(isRecommendation)) {
+    const results = resultsOf(body);
+    if (results === null || !results.every(isRecommendation)) {
       return { ok: false, error: "unexpected response from reccd" };
     }
-    return { ok: true, items: body };
+    return { ok: true, items: results };
   } catch (err) {
     log.debug(
       `recc fetchRecommendations: failed to reach ${config.reccUrl}/recommendations: ${err instanceof Error ? err.message : String(err)}`,
