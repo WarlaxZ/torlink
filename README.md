@@ -248,6 +248,9 @@ give up after twelve seconds:
   codecs. Where your **debrid provider will transcode it for you**, the player uses their stream and it
   simply plays, with full seeking, and without a byte passing through the machine running torlnk.
   Real-Debrid does this. TorBox publishes no equivalent, so a TorBox stream falls through to the next line.
+  Turning on [relaying](#relaying-streams-through-this-machine) switches this off on purpose: their stream
+  is played from *their* servers by your browser, which is the one thing relaying exists to prevent — so
+  while it's on, these releases fall through to the next line too.
 - **Anything left over** — a release streamed from the swarm, or one the provider won't transcode — gets a
   card naming the part your browser can't handle, plus a **Download .m3u** button: your OS hands that tiny
   playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get
@@ -417,6 +420,10 @@ the provider, but now it has to go back up from here to whoever's watching: roug
 1080p remux**, nearer **80 for 4K**. Three remote viewers of that 1080p remux want about **75 Mbps up**,
 which is more than most domestic lines have spare. A viewer on your own LAN costs no upload at all — those
 bytes never leave the network. Nothing is re-encoded, so your CPU barely notices.
+
+It costs one convenience too: an mkv your provider would have transcoded for the browser now gets the
+`.m3u` card instead, because that transcode is played from their servers and relaying is the decision not
+to do that. The file still plays — in VLC, losslessly — it just isn't in the tab any more.
 
 The browser has no switch for this, on purpose: it's a client of your config, not an editor of it, so it
 picks up the change on its own like everything else here. And one thing stated plainly, with no argument

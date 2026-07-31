@@ -1034,6 +1034,26 @@ describe("GET /stream/:sid/:idx.info", () => {
     expect(body.blockers).toContain("container");
   });
 
+  it("withholds the provider's manifest while relaying through this machine", async () => {
+    // The two features have to agree. Relaying exists so nothing the player
+    // holds points at the provider; a manifest URL in `.info` is exactly such a
+    // URL, and the browser fetches it directly — the provider would see the
+    // viewer's address and the relay would be bypassed for precisely the
+    // containers it matters most for. Rung 2 is therefore off while relaying,
+    // and the ladder falls to a direct play through this handle.
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        proxyDebrid: true,
+        probeImpl: async () => null,
+        resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+      },
+    });
+    const text = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).text();
+    expect(JSON.parse(text).hls).toBeNull();
+    // Not merely absent from the field — absent from the body.
+    expect(text).not.toContain("real-debrid.example");
+  });
+
   it("still reports null hls when the resolver declines", async () => {
     const { base, capability, id } = await infoSession({
       streamDeps: { probeImpl: async () => null, resolveHls: async () => null },

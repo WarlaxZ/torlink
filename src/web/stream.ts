@@ -362,7 +362,18 @@ export async function handleStreamRequest(
       }
       deps.probeCache?.set(parsed.sid, parsed.index, facts);
     }
-    const hls = deps.resolveHls ? await deps.resolveHls(session, parsed.index) : null;
+    // Rung 2 is the provider's own manifest, which the browser fetches from the
+    // provider directly. That is the whole point of it — and the exact thing
+    // relaying exists to stop, so the two features have to agree: while
+    // relaying, no URL handed to the player may point at the provider. Offering
+    // it anyway would route the containers a browser cannot demux — the ones
+    // most likely to be a big remux — around the relay the user asked for, and
+    // show the provider the viewer's address. The ladder falls to a direct play
+    // through this handle instead.
+    const hls =
+      deps.resolveHls && deps.proxyDebrid !== true
+        ? await deps.resolveHls(session, parsed.index)
+        : null;
     const body: StreamInfoResponse = { facts, blockers: blockersFor(facts), hls };
     // Note what is NOT in that body: `file.url`. That is a debrid unrestricted
     // link, i.e. a credential against the user's account. The page plays through
@@ -546,6 +557,12 @@ function proxyUpstream(
             // Drain rather than destroy: a redirect body is small and reading it
             // lets the socket close cleanly instead of resetting.
             up.resume();
+            // A hop we have already read the Location out of has nothing left to
+            // say, but its socket can still die while the next hop is in flight
+            // — and an unhandled `error` on a stream is a process exit, not a
+            // 502. The stale-hop guard below covers the request; this covers the
+            // response.
+            up.on("error", () => {});
             const next = resolveRedirect(location, url, opts.allowedProtocols, hopsRemaining - 1);
             if (!next.ok) {
               // Same reasoning as the initial refusal above: the scheme carries
