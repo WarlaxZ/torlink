@@ -1,0 +1,63 @@
+# torlnk's web UI in a container.
+#
+#   TORLINK_API_TOKEN=$(openssl rand -hex 24) docker compose up -d
+#
+# torlnk would boot without that: given `--web` it mints a token and prints the
+# link to its log rather than refusing. But a minted token is new on every
+# restart, and with `restart: unless-stopped` below that means the URL you
+# bookmarked breaks the first time the container bounces. So it is required here,
+# with no default — a compose file with a baked-in secret is a compose file whose
+# secret is in git.
+
+services:
+  torlnk:
+    build: .
+    image: torlnk:local
+    container_name: torlnk
+    restart: unless-stopped
+
+    ports:
+      # Host:container. Bound to 127.0.0.1 by default so bringing this up does
+      # not silently publish a media library to your whole LAN — change it to
+      # "9162:9162" once you have decided that is what you want.
+      - "127.0.0.1:9162:9162"
+
+    environment:
+      # No default. Compose refuses to start with "variable is not set", which is
+      # a better failure than a URL that silently changes on the next restart.
+      TORLINK_API_TOKEN: ${TORLINK_API_TOKEN:?set TORLINK_API_TOKEN, e.g. openssl rand -hex 24}
+      # Optional. Either can also be set once in /state/config/config.json.
+      REALDEBRID_API_TOKEN: ${REALDEBRID_API_TOKEN:-}
+      TORBOX_API_TOKEN: ${TORBOX_API_TOKEN:-}
+      TORLINK_OMDB_KEY: ${TORLINK_OMDB_KEY:-}
+
+    volumes:
+      # Everything torlnk persists: config (including tokens), the queue, watch
+      # history, seeds, the poster cache. One directory, because
+      # src/config/paths.ts puts all three of its trees under TORLINK_STATE_DIR.
+      - ./state:/state
+      # Downloads default to $HOME/Downloads/torlink and HOME is /state, so this
+      # is that path made explicit. Repoint it at a bigger disk and the files
+      # follow; no config change needed.
+      - ./state/Downloads/torlink:/state/Downloads/torlink
+
+    # Seeding wants inbound connections. Without a published BitTorrent port the
+    # swarm still works — outbound TCP/uTP and WebRTC peers connect fine — but
+    # nobody can dial in, so seeding ratios suffer. Publish the port torlnk is
+    # configured to listen on if that matters to you.
+
+    healthcheck:
+      # The web UI's own port, from inside the container, where loopback needs no
+      # token. Node rather than curl because the runtime image has no curl and
+      # adding one for a healthcheck is not worth a layer.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:9162/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

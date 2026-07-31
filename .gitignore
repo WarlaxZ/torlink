@@ -1,6 +1,9 @@
 node_modules/
 dist/
 build/
+# Where docker-compose.yml mounts the container's /state: config, tokens,
+# the queue, watch history and downloads. Host state, never committed.
+state/
 sea-prep.blob
 .DS_Store
 package-lock.json

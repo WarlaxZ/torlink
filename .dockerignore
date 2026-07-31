@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep host state out of it.
+#
+# node_modules is the big one: it is reinstalled in the image for the image's own
+# platform, and copying a macOS build of a native module into a Linux container
+# produces a failure that reads as a torlnk bug.
+node_modules
+dist
+
+# Whole second checkouts of this repo live here — see vitest.config.ts.
+.claude
+.git
+.github
+
+# Never let a developer's own state or secrets into an image layer.
+*.log
+.env
+.env.*
+config.json
+
+# Test and docs output that the runtime has no use for.
+coverage
+preview
+docs
