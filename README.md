@@ -179,6 +179,14 @@ episode one. Inside a season the show's name is stated once, by the season row, 
 `Season pack`, `S03E01`, `S03E02`. The **group** control still turns all of it off and gives you every
 release as its own row.
 
+**It remembers where you are.** Play an episode and the next time that show comes up, the
+season that opens is the one you are part-way through — not the newest — its heading says
+how far you got, and the episode you have not seen yet is the one already selected. The
+position moves only when a player actually starts, so a cancelled stream never counts, and
+it is read from the file you really opened, so watching one episode out of a season pack
+still advances it. Nothing is marked "watched": torlink keeps the furthest point you
+reached, which is an honest thing to say, rather than guessing at every episode below it.
+
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers
 the terminal's preview pane. Without one everything still works; you just get the release names.

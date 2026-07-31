@@ -8,6 +8,7 @@ import {
   defaultExpandedKeys,
   isSeasonNode,
   nextUpRowKey,
+  positionNote,
   showKeyOf,
   resultAtRow,
   seasonTree,
@@ -546,5 +547,19 @@ describe("showKeyOf", () => {
 
   it("leaves a film key alone", () => {
     expect(showKeyOf("kestrel|2010|movie")).toBe("kestrel|2010|movie");
+  });
+});
+
+describe("positionNote", () => {
+  it("says how far through a season you are", () => {
+    expect(positionNote(3, { season: 3, episode: 7 })).toBe("up to E07");
+  });
+
+  it("says nothing for a season you have not started", () => {
+    expect(positionNote(4, { season: 3, episode: 7 })).toBe("");
+  });
+
+  it("says nothing without a position", () => {
+    expect(positionNote(3, null)).toBe("");
   });
 });

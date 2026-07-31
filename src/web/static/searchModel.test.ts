@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PublicStreamHistoryItem } from "../wire";
 import {
   addBody,
   addPlan,
@@ -31,6 +32,7 @@ import {
   type PublicSearchSnapshot,
   type SearchView,
   type SourcesResponse,
+  positionLookup,
 } from "./searchModel";
 import { isPlayable } from "./streamFlow";
 
@@ -732,5 +734,38 @@ describe("grouping parity with the terminal", () => {
     const bare = [result({ name: "Harrowgate", infoHash: "a".repeat(40) })];
     const onMovies = visibleGroups(view({ group: "Movies", snapshot: snapshot(bare) }), () => true);
     expect(onMovies[0]!.key).toBe("harrowgate||movie");
+  });
+});
+
+describe("positionLookup", () => {
+  const row = (over: Partial<PublicStreamHistoryItem> = {}): PublicStreamHistoryItem => ({
+    key: "harrowgate|series",
+    title: "Harrowgate",
+    type: "series",
+    season: 3,
+    episode: 7,
+    next: { season: 3, episode: 8 },
+    rawName: "Harrowgate.S03E07.1080p.WEB-DL",
+    infoHash: "a1",
+    startedAt: 1,
+    ...over,
+  });
+
+  it("answers on the show key the group keys use", () => {
+    expect(positionLookup([row()])("harrowgate")).toEqual({ season: 3, episode: 7 });
+  });
+
+  it("is null for a show with no row", () => {
+    expect(positionLookup([row()])("kepler")).toBeNull();
+  });
+
+  it("ignores a film, which has no episode to be part-way through", () => {
+    const film = row({ key: "kestrel|2010|movie", type: "movie", season: undefined, episode: undefined });
+    expect(positionLookup([film])("kestrel|2010|movie")).toBeNull();
+  });
+
+  it("ignores a series row that names a season but no episode", () => {
+    // A season pack streamed before Piece B's fix, or one never advanced.
+    expect(positionLookup([row({ episode: undefined })])("harrowgate")).toBeNull();
   });
 });

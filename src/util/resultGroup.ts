@@ -513,6 +513,21 @@ export function resultAtRow<T>(row: GroupRow<T>): T | null {
   return row.kind === "release" ? row.result : (row.members[0] ?? null);
 }
 
+/**
+ * The note a season heading carries when you are part-way through it.
+ *
+ * "up to E07", NOT "watched" — the store holds a HIGH-WATER MARK, one entry per
+ * title, and `recordStream` deliberately keeps it that way so replaying an early
+ * episode does not rewind you. Claiming E01–E06 are watched is not something
+ * that data can support once someone jumps around.
+ *
+ * Empty string, never null, so a renderer can concatenate without a branch.
+ */
+export function positionNote(season: number, at: EpisodeRef | null): string {
+  if (!at || at.season !== season) return "";
+  return `up to E${pad(at.episode)}`;
+}
+
 /** "12 releases" for a group heading. */
 export function groupCountLabel(members: number): string {
   return `${members} release${members === 1 ? "" : "s"}`;

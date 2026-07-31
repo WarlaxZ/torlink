@@ -788,6 +788,16 @@ select:focus-visible {
   border-radius: 0.5rem;
 }
 
+/* "up to E07" on a season you are part-way through. Dim, and deliberately NOT
+   --accent: the rows already spend that on "this source reports health" and
+   "this is cached", both claims about the swarm. Where you are in a show is not
+   that kind of news. */
+.group-note {
+  color: var(--dim);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 /* Quality facts parsed out of the release name (releaseBadges). Dim and
    bordered, NOT accented: --accent is spoken for by "this source reports health"
    and "this is cached", both of which are claims about the swarm. A resolution is
