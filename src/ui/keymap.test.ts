@@ -137,6 +137,20 @@ describe("footerHints while a stream is active", () => {
   });
 });
 
+describe("debrid proxy toggle", () => {
+  it("documents N in the Navigate help group", () => {
+    const nav = HELP_GROUPS.find((g) => g.title === "Navigate")!;
+    expect(nav.hints.some((h) => h.keys === "N")).toBe(true);
+  });
+
+  it("does not bind N twice", () => {
+    // The uppercase settings keys are a crowded space; a duplicate is a key
+    // that silently does the wrong one of two things.
+    const all = HELP_GROUPS.flatMap((g) => g.hints.map((h) => h.keys));
+    expect(all.filter((k) => k === "N")).toHaveLength(1);
+  });
+});
+
 describe("play and search keys", () => {
   it("documents s in the For You help group", () => {
     const group = HELP_GROUPS.find((g) => g.title === "For You")!;

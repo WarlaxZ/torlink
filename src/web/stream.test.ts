@@ -48,6 +48,8 @@ async function startUpstream(): Promise<Upstream> {
   const seen: Upstream["seen"] = [];
   const open = new Set<net.Socket>();
   const timers = new Set<ReturnType<typeof setInterval>>();
+  // The hop whose socket is due to be reset once the next hop's request lands.
+  let dying: http.ServerResponse | null = null;
 
   const server = http.createServer((req, res) => {
     const range = req.headers.range;
@@ -56,6 +58,55 @@ async function startUpstream(): Promise<Upstream> {
     if (req.url?.startsWith("/missing")) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("nope");
+      return;
+    }
+
+    // Redirect chains: a provider's download URL can 302 to a specific CDN node.
+    if (req.url?.startsWith("/redirect/")) {
+      const hops = Number(req.url.slice("/redirect/".length));
+      res.writeHead(302, { Location: hops > 1 ? `/redirect/${hops - 1}` : "/media" });
+      res.end();
+      return;
+    }
+
+    // Same redirect, but the connection that carried it resets instead of
+    // closing cleanly — simulating a hop's socket dying after the proxy has
+    // already moved on to the next hop's request. The 302 goes out and the
+    // socket is *held*; the reset is fired by the `/media-delay` branch below,
+    // once the next hop's request has actually arrived.
+    //
+    // Firing it here on a timer instead is a race, and one platform loses it:
+    // Windows discards a socket's unread receive buffer when an RST lands, so a
+    // reset that beats the proxy's read of the 302 destroys the redirect itself.
+    // The proxy then sees a hop that died before answering — a genuine 502, and
+    // not the ordering this test exists to pin.
+    if (req.url?.startsWith("/redirect-die/")) {
+      dying = res;
+      res.writeHead(302, { Location: "/media-delay" });
+      res.flushHeaders();
+      return;
+    }
+
+    if (req.url?.startsWith("/media-delay")) {
+      // Hop 2 is here, so the proxy has read hop 1's 302 and reassigned
+      // `current`. Only now can hop 1's error be stale.
+      //
+      // `resetAndDestroy`, not `destroy`: a plain close is a valid end-of-body
+      // for a response with no Content-Length, so the client just sees a
+      // completed (if bodyless) redirect. An RST is what actually surfaces as
+      // an `error` on the client request — the case the guard exists for.
+      dying?.socket?.resetAndDestroy();
+      dying = null;
+      // Answer after the reset has had a turn to reach the client, so the stale
+      // error fires while this hop is still in flight rather than after it won.
+      setTimeout(() => {
+        res.writeHead(200, {
+          "Content-Type": "video/mp4",
+          "Content-Length": String(MEDIA.length),
+          "Accept-Ranges": "bytes",
+        });
+        res.end(MEDIA);
+      }, 30);
       return;
     }
 
@@ -342,6 +393,86 @@ describe("GET /stream/:sid/:idx — WebTorrent proxy", () => {
   });
 });
 
+describe("proxy redirects", () => {
+  it("follows a single redirect and serves the body", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+  });
+
+  it("re-sends the Range header on the redirected request", async () => {
+    // Dropping Range on a hop silently restarts a seek from byte zero, and the
+    // client gets bytes it will treat as the start of the file.
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`, {
+      headers: { Range: "bytes=100-199" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes 100-199/${MEDIA.length}`);
+    // Both hops saw it, not just the first.
+    expect(upstream.seen.filter((s) => s.range === "bytes=100-199").length).toBe(2);
+  });
+
+  it("502s rather than looping when a chain is too long", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect/9`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: 1 },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(502);
+    // Ties the bound to what MAX_PROXY_HOPS actually produces: 3 requests, so 2
+    // followed redirects — not just that some bound exists.
+    expect(upstream.seen.length).toBe(3);
+  });
+
+  it("still refuses an https upstream on the torrent path", async () => {
+    // The WebTorrent backend is loopback http and nothing else. This is the
+    // invariant the per-call allow-list exists to preserve.
+    const { reg, id, capability } = await torrentSession([
+      { url: "https://cdn.example/Kestrel.2010.1080p.BluRay.x264.mkv", filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: 1 },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(502);
+    expect(logs.join("\n")).toContain("https:");
+    // The scheme is loggable; the URL never is.
+    expect(logs.join("\n")).not.toContain("cdn.example");
+  });
+
+  /**
+   * Regression test for a stale-hop race: hop 1's response handler drains its
+   * 302 and calls send() for hop 2 — reassigning `current` — before hop 1's own
+   * connection resets and its `error` handler fires. Without the `upstream !==
+   * current` guard, that stale error settles the promise with a 502 write, and
+   * hop 2's later, real answer then throws trying to writeHead a second time.
+   * With the guard, the stale error is ignored and hop 2's answer wins.
+   */
+  it("ignores a stale hop's socket error once a later hop has taken over", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/redirect-die/1`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+    ]);
+    const base = await start(reg);
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+    // The stale hop was ignored, not merely absent: `fail("socket")` logs, so a
+    // silent log is what says the guard swallowed it rather than that no error
+    // ever arrived.
+    expect(logs.join("\n")).not.toContain("upstream failed (socket)");
+  });
+});
+
 describe("stream handle — capability auth", () => {
   async function ready(): Promise<{ base: string; capability: string; id: string }> {
     upstream = await startUpstream();
@@ -584,6 +715,99 @@ describe("stream handle — Real-Debrid", () => {
     expect(all).not.toContain(capability);
     expect(all).not.toContain("k=");
   });
+
+  it("302s by default — the flag off must change nothing", async () => {
+    const { base, capability, id } = await rdSession();
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(RD_URL);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("proxies instead of redirecting when the flag is on", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    const s = await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    expect(s.state).toBe("ready");
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+    // The client never learns where the bytes came from.
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("forwards a Range while proxying, so seeking still works", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, {
+      headers: { Range: "bytes=10-19" },
+      // Manual, not "follow": a regression to the 302 branch would have the
+      // upstream (which also honours Range) answer 206 on the client's behalf,
+      // and this test would pass for the wrong reason.
+      redirect: "manual",
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes 10-19/${MEDIA.length}`);
+  });
+
+  it("never logs the upstream url while proxying", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media?secret=SECRETTOKEN123`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+    // Manual, not "follow": a regression to the 302 branch would hand the
+    // secret-bearing URL to the fetch client as a Location header rather than
+    // logging it, and this test would pass despite the regression.
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    // Without this, the log assertion below is vacuous: a 502 (or any other
+    // failure to actually proxy) would also leave the upstream url out of the
+    // logs, and the test would pass while proving nothing about proxying.
+    expect(res.status).toBe(200);
+    expect(logs.join("\n")).not.toContain("SECRETTOKEN123");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -808,6 +1032,26 @@ describe("GET /stream/:sid/:idx.info", () => {
       "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
     );
     expect(body.blockers).toContain("container");
+  });
+
+  it("withholds the provider's manifest while relaying through this machine", async () => {
+    // The two features have to agree. Relaying exists so nothing the player
+    // holds points at the provider; a manifest URL in `.info` is exactly such a
+    // URL, and the browser fetches it directly — the provider would see the
+    // viewer's address and the relay would be bypassed for precisely the
+    // containers it matters most for. Rung 2 is therefore off while relaying,
+    // and the ladder falls to a direct play through this handle.
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        proxyDebrid: true,
+        probeImpl: async () => null,
+        resolveHls: async () => "https://4.stream.real-debrid.example/t/ID20/eng1/none/aac/full.m3u8",
+      },
+    });
+    const text = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).text();
+    expect(JSON.parse(text).hls).toBeNull();
+    // Not merely absent from the field — absent from the body.
+    expect(text).not.toContain("real-debrid.example");
   });
 
   it("still reports null hls when the resolver declines", async () => {

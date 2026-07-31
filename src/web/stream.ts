@@ -18,6 +18,7 @@
 //   served on is the whole point.
 
 import http from "node:http";
+import https from "node:https";
 import { isAuthorized } from "../daemon/auth";
 import { streamHandle } from "./routes";
 import { probeUrl } from "../core/probe";
@@ -25,6 +26,13 @@ import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../
 import type { ProbeCache } from "../core/probeCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
 import type { StreamInfoResponse } from "./wire";
+import {
+  HTTP_AND_HTTPS,
+  HTTP_ONLY,
+  resolveProxyTarget,
+  resolveRedirect,
+  type ProxyRefusal,
+} from "./proxyTarget";
 
 /** Diagnostics sink. Same contract as the server's: injected, never `console`. */
 export type StreamLog = (message: string) => void;
@@ -60,6 +68,12 @@ export interface StreamDeps {
    * with a perfectly good manifest show a card claiming it cannot be played.
    */
   resolveHls?: (session: StreamSession, index: number) => Promise<string | null>;
+  /**
+   * Proxy debrid media through this server rather than redirecting to the
+   * provider. Resolved per request by the caller — this module never loads
+   * config, it is handed what it needs.
+   */
+  proxyDebrid?: boolean;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -348,7 +362,18 @@ export async function handleStreamRequest(
       }
       deps.probeCache?.set(parsed.sid, parsed.index, facts);
     }
-    const hls = deps.resolveHls ? await deps.resolveHls(session, parsed.index) : null;
+    // Rung 2 is the provider's own manifest, which the browser fetches from the
+    // provider directly. That is the whole point of it — and the exact thing
+    // relaying exists to stop, so the two features have to agree: while
+    // relaying, no URL handed to the player may point at the provider. Offering
+    // it anyway would route the containers a browser cannot demux — the ones
+    // most likely to be a big remux — around the relay the user asked for, and
+    // show the provider the viewer's address. The ladder falls to a direct play
+    // through this handle instead.
+    const hls =
+      deps.resolveHls && deps.proxyDebrid !== true
+        ? await deps.resolveHls(session, parsed.index)
+        : null;
     const body: StreamInfoResponse = { facts, blockers: blockersFor(facts), hls };
     // Note what is NOT in that body: `file.url`. That is a debrid unrestricted
     // link, i.e. a credential against the user's account. The page plays through
@@ -405,6 +430,11 @@ export async function handleStreamRequest(
   }
 
   if (session.backend === "debrid") {
+    if (deps.proxyDebrid === true) {
+      // HTTP_AND_HTTPS: a provider CDN is https, and this is the only call site
+      // allowed to reach one.
+      return proxyUpstream(deps, req, res, file.url, { allowedProtocols: HTTP_AND_HTTPS });
+    }
     // 302, not 307: the method is GET/HEAD either way, and 302 is what every
     // player (and every home-router HTTP client) handles without argument.
     // `Cache-Control: no-store` because an unrestricted link is time-limited
@@ -414,35 +444,61 @@ export async function handleStreamRequest(
     return 302;
   }
 
-  return proxyUpstream(deps, req, res, file.url);
+  // HTTP_ONLY, deliberately: the WebTorrent backend serves plain http on
+  // loopback and nothing else, and widening it here would widen it for a
+  // backend whose URLs this process constructs rather than receives.
+  return proxyUpstream(deps, req, res, file.url, { allowedProtocols: HTTP_ONLY });
+}
+
+// How many requests this proxy may make for one client request — the original
+// plus MAX_PROXY_HOPS - 1 followed redirects, so 3 means 2 followed redirects.
+// That is enough for the "unrestrict → CDN region → node" shape seen in
+// practice, because the "unrestrict" step itself is an API call rather than an
+// HTTP hop this proxy follows — and small enough that a loop costs three
+// requests rather than a hang.
+const MAX_PROXY_HOPS = 3;
+
+export interface ProxyOptions {
+  /**
+   * Which URL schemes this call may reach. REQUIRED rather than defaulted, so a
+   * future caller cannot get the permissive set by forgetting the argument.
+   * `HTTP_ONLY` for the WebTorrent backend, `HTTP_AND_HTTPS` for a debrid CDN.
+   */
+  allowedProtocols: readonly string[];
 }
 
 /**
- * Reverse-proxy one request to the local WebTorrent server.
+ * Reverse-proxy one request to an upstream.
  *
- * Resolves once the response is on its way (headers written, body piping) or
- * has failed — not when the body finishes. The caller only needs the status.
+ * Resolves once the response is on its way (headers written, body piping) or has
+ * failed — not when the body finishes. The caller only needs the status.
+ *
+ * Two things this does beyond a single request: it refuses any scheme outside
+ * `opts.allowedProtocols`, and it follows up to MAX_PROXY_HOPS - 1 (2) redirects
+ * — MAX_PROXY_HOPS requests in total — because `http.request` does not and a
+ * debrid download URL can 302 to a CDN node.
  */
 function proxyUpstream(
   deps: StreamDeps,
   req: http.IncomingMessage,
   res: http.ServerResponse,
   target: string,
+  opts: ProxyOptions,
 ): Promise<number> {
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    deps.log("stream: upstream url is not parseable");
-    writeJson(res, 502, { error: "bad upstream" });
-    return Promise.resolve(502);
-  }
-  // The WebTorrent backend serves plain http on loopback and nothing else.
-  // Refusing anything else keeps `http.request` from being handed an https URL
-  // it would fail on in a much less legible way, and the log line says which
-  // scheme was refused — never the URL, which can be a credential.
-  if (url.protocol !== "http:") {
-    deps.log(`stream: refusing upstream scheme ${url.protocol}`);
+  const first = resolveProxyTarget(target, opts.allowedProtocols, MAX_PROXY_HOPS);
+  if (!first.ok) {
+    // The reason, never the URL: an unrestricted link is a credential. The
+    // refused scheme is named because it is the one part of a URL that
+    // carries no secret, and the only thing that makes this line actionable.
+    let scheme = "";
+    if (first.reason === "scheme") {
+      try {
+        scheme = ` ${new URL(target).protocol}`;
+      } catch {
+        // Unreachable: a "scheme" refusal means resolveProxyTarget parsed it.
+      }
+    }
+    deps.log(`stream: refusing upstream (${first.reason})${scheme}`);
     writeJson(res, 502, { error: "bad upstream" });
     return Promise.resolve(502);
   }
@@ -450,7 +506,8 @@ function proxyUpstream(
   const headers: http.OutgoingHttpHeaders = {};
   // The Range header is the entire reason this proxy is not a redirect: drop it
   // and every seek restarts the file from byte zero, and a browser that asked
-  // for `bytes=0-` gets a 200 it cannot scrub.
+  // for `bytes=0-` gets a 200 it cannot scrub. It is re-sent on every hop for
+  // the same reason.
   const range = req.headers.range;
   if (range !== undefined) headers.Range = range;
   // Passed through so a backend that answers 304 can; harmless otherwise.
@@ -463,65 +520,120 @@ function proxyUpstream(
       settled = true;
       resolve(status);
     };
+    // Which request the teardown below must destroy. Reassigned on each hop,
+    // because destroying the first one after a redirect would leak the second.
+    let current: http.ClientRequest | null = null;
 
-    const upstream = http.request(
-      {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port,
-        path: `${url.pathname}${url.search}`,
-        method: req.method === "HEAD" ? "HEAD" : "GET",
-        headers,
-        // No keep-alive: this proxy's client is a media element that abandons
-        // requests constantly, and a pooled socket outliving an aborted request
-        // is precisely the leak the teardown below exists to prevent. The
-        // upstream is on loopback, so a fresh connection costs nothing.
-        agent: false,
-      },
-      (up) => {
-        const out: http.OutgoingHttpHeaders = {};
-        for (const name of PASS_THROUGH) {
-          const value = up.headers[name];
-          if (value !== undefined) out[name] = value;
-        }
-        // The upstream's status, never a hardcoded 200: a 206 answered as 200
-        // tells the client its Range was ignored, and a player that asked for
-        // the middle of a file will treat the bytes it gets as the start of it.
-        res.writeHead(up.statusCode ?? 502, out);
-        done(up.statusCode ?? 502);
-        up.pipe(res);
-        // A mid-body upstream failure cannot become a status code; all that is
-        // left is to cut the client off so it sees a truncated body rather than
-        // a hang.
-        up.on("error", () => res.destroy());
-      },
-    );
-
-    // The teardown. A user scrubbing a timeline fires and abandons range
-    // requests by the dozen; without this each one leaves a socket to the
-    // WebTorrent server (and the piece requests behind it) alive with nobody
-    // reading. `close` fires for both a client disconnect and our own end, so
-    // `writableEnded` is what tells them apart: only the abandoned case needs
-    // the upstream destroyed.
-    res.on("close", () => {
-      if (!res.writableEnded) upstream.destroy();
-    });
-
-    upstream.on("error", (err) => {
-      // Nothing can be said to a client that is already gone or already
-      // answered; writing would only turn a dead connection into a second
-      // error. This branch also covers the ordinary teardown case, where the
-      // destroy above is *why* the request errored.
+    const fail = (reason: ProxyRefusal | "socket", scheme = ""): void => {
+      deps.log(`stream: upstream failed (${reason})${scheme}`);
       if (settled || res.headersSent || res.writableEnded || res.destroyed) {
         res.destroy();
         done(502);
         return;
       }
-      deps.log(`stream: upstream request failed: ${String(err)}`);
-      writeJson(res, 502, { error: "upstream unavailable" });
+      writeJson(res, 502, { error: "bad upstream" });
       done(502);
+    };
+
+    const send = (url: URL, hopsRemaining: number): void => {
+      const transport = url.protocol === "https:" ? https : http;
+      const upstream = transport.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port,
+          path: `${url.pathname}${url.search}`,
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers,
+          // No keep-alive: this proxy's client is a media element that abandons
+          // requests constantly, and a pooled socket outliving an aborted
+          // request is precisely the leak the teardown below exists to prevent.
+          agent: false,
+        },
+        (up) => {
+          const status = up.statusCode ?? 502;
+          const location = up.headers.location;
+          if (status >= 300 && status < 400 && typeof location === "string") {
+            // Drain rather than destroy: a redirect body is small and reading it
+            // lets the socket close cleanly instead of resetting.
+            up.resume();
+            // A hop we have already read the Location out of has nothing left to
+            // say, but its socket can still die while the next hop is in flight
+            // — and an unhandled `error` on a stream is a process exit, not a
+            // 502. The stale-hop guard below covers the request; this covers the
+            // response.
+            up.on("error", () => {});
+            const next = resolveRedirect(location, url, opts.allowedProtocols, hopsRemaining - 1);
+            if (!next.ok) {
+              // Same reasoning as the initial refusal above: the scheme carries
+              // no secret, and naming it here too is what makes a redirect
+              // refusal actionable instead of just a bare category.
+              let scheme = "";
+              if (next.reason === "scheme") {
+                try {
+                  scheme = ` ${new URL(location, url).protocol}`;
+                } catch {
+                  // Unreachable: a "scheme" refusal means resolveRedirect parsed it.
+                }
+              }
+              fail(next.reason, scheme);
+              return;
+            }
+            send(next.url, hopsRemaining - 1);
+            return;
+          }
+
+          const out: http.OutgoingHttpHeaders = {};
+          for (const name of PASS_THROUGH) {
+            const value = up.headers[name];
+            if (value !== undefined) out[name] = value;
+          }
+          // A redirect chain means more than one hop's response can arrive:
+          // a stale hop that already failed (or a hop whose response we
+          // already used) must not writeHead a second time on top of one
+          // that already answered.
+          if (settled || res.headersSent) {
+            up.resume();
+            return;
+          }
+          // The upstream's status, never a hardcoded 200: a 206 answered as 200
+          // tells the client its Range was ignored, and a player that asked for
+          // the middle of a file will treat the bytes it gets as the start.
+          res.writeHead(status, out);
+          done(status);
+          up.pipe(res);
+          // A mid-body upstream failure cannot become a status code; all that is
+          // left is to cut the client off so it sees a truncated body rather
+          // than a hang.
+          up.on("error", () => res.destroy());
+        },
+      );
+      current = upstream;
+
+      upstream.on("error", () => {
+        // A redirect chain means more than one request can be in flight or
+        // dying at once: a socket this hop replaced (its own redirect already
+        // sent us on to the next hop) errors out from under it, and that
+        // stale error must not fail a request nobody is waiting on any more.
+        if (upstream !== current) return;
+        // Nothing can be said to a client that is already gone or already
+        // answered. This branch also covers the ordinary teardown case, where
+        // the destroy below is *why* the request errored.
+        fail("socket");
+      });
+      upstream.end();
+    };
+
+    // The teardown. A user scrubbing a timeline fires and abandons range
+    // requests by the dozen; without this each one leaves a socket to the
+    // upstream (and the piece requests behind it) alive with nobody reading.
+    // `close` fires for both a client disconnect and our own end, so
+    // `writableEnded` is what tells them apart: only the abandoned case needs
+    // the upstream destroyed.
+    res.on("close", () => {
+      if (!res.writableEnded) current?.destroy();
     });
 
-    upstream.end();
+    send(first.url, MAX_PROXY_HOPS);
   });
 }

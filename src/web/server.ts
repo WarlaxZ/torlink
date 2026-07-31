@@ -33,6 +33,7 @@ import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
+import { loadConfig } from "../config/config";
 import type { Runtime } from "../daemon/runtime";
 
 export const DEFAULT_WEB_PORT = 9162;
@@ -86,14 +87,15 @@ export interface WebServerOptions {
   webDeps?: Omit<Partial<WebDeps>, "runtime" | "token">;
   /**
    * Overrides for the stream handle's injectable seams — today the ffprobe call
-   * behind `.info` and the debrid transcode lookup. `sessions`, `log` and
-   * `probeCache` are owned by this server and cannot be overridden.
+   * behind `.info`, the debrid transcode lookup, and the debrid-proxying branch
+   * a test drives without a real provider. `sessions`, `log`, `probeCache` and
+   * `trustProxy` are owned by this server and cannot be overridden.
    *
    * Same reasoning as `webDeps`: without it, a test of `.info` would spawn
    * ffprobe against a URL that does not exist, and the interesting cases (no
    * binary, a probe that disagrees with the filename) would be unreachable.
    */
-  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache">;
+  streamDeps?: Omit<Partial<StreamDeps>, "sessions" | "log" | "probeCache" | "trustProxy">;
 }
 
 export interface WebServerHandle {
@@ -423,17 +425,26 @@ export async function startWebServer(
       // send an Authorization header. Only the path is logged: the query string
       // carries that capability, and a Real-Debrid Location is a credential.
       if (isStreamPath(urlPath)) {
+        // Resolved fresh per request, not read once at boot: `serve --web` is a
+        // separate process from any TUI that might flip the flag, so a held
+        // snapshot here would silently serve a stale value. An explicit
+        // `options.streamDeps.proxyDebrid` (a test, driving the branch without a
+        // real debrid provider) still wins over the config read.
+        const streamDeps: StreamDeps = {
+          resolveHls,
+          // Spread after the default so a test can override it, and before the
+          // fields below so it cannot override those.
+          ...options.streamDeps,
+          sessions: runtime.sessions,
+          log,
+          trustProxy: options.trustProxy === true,
+          probeCache,
+          proxyDebrid:
+            options.streamDeps?.proxyDebrid ??
+            (await (options.webDeps?.loadConfigImpl ?? loadConfig)()).proxyDebridStreams === true,
+        };
         const wrote = await handleStreamRequest(
-          {
-            resolveHls,
-            // Spread after the default so a test can override it, and before the
-            // fields below so it cannot override those.
-            ...options.streamDeps,
-            sessions: runtime.sessions,
-            log,
-            trustProxy: options.trustProxy === true,
-            probeCache,
-          },
+          streamDeps,
           req,
           res,
           urlPath,

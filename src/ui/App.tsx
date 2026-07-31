@@ -2266,6 +2266,17 @@ export function App({
         setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
         return;
       }
+      if (input === "N") {
+        setShowHelp(false);
+        const enabled = config?.proxyDebridStreams !== true;
+        persistConfig({ proxyDebridStreams: enabled });
+        setNotice(
+          enabled
+            ? "Debrid streams now relay through this machine — uses your upload bandwidth."
+            : "Debrid streams go straight from the provider to the player.",
+        );
+        return;
+      }
       if (input === "m") {
         void pasteFromClipboard();
         return;

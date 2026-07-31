@@ -248,6 +248,9 @@ give up after twelve seconds:
   codecs. Where your **debrid provider will transcode it for you**, the player uses their stream and it
   simply plays, with full seeking, and without a byte passing through the machine running torlnk.
   Real-Debrid does this. TorBox publishes no equivalent, so a TorBox stream falls through to the next line.
+  Turning on [relaying](#relaying-streams-through-this-machine) switches this off on purpose: their stream
+  is played from *their* servers by your browser, which is the one thing relaying exists to prevent — so
+  while it's on, these releases fall through to the next line too.
 - **Anything left over** — a release streamed from the swarm, or one the provider won't transcode — gets a
   card naming the part your browser can't handle, plus a **Download .m3u** button: your OS hands that tiny
   playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get
@@ -276,9 +279,10 @@ itself.
 **With a debrid account connected**, `v` and **play** stream from that provider's servers instead:
 faster, no waiting on seeders, and your IP never touches the swarm. torlink takes that route
 automatically whenever an account is active, and only falls back to a torrent stream if you confirm it —
-so connecting a debrid provider never quietly drops you onto peer-to-peer. The browser's player
+so connecting a debrid provider never quietly drops you onto peer-to-peer. By default the browser's player
 redirects straight to their CDN, so the video never passes through the machine running torlnk — you get
-their bandwidth and native seeking.
+their bandwidth and native seeking. If you'd rather the link to your account never left the server, you
+can [relay it through this machine](#relaying-streams-through-this-machine) instead.
 
 ### One-click play and your quality bar
 
@@ -398,6 +402,34 @@ download or stream will be instant. Real-Debrid results never show that marker, 
 is cached, but because Real-Debrid withdrew its instant-availability check in 2024 and torlink won't
 guess: an absent marker means "can't tell," never "not cached."
 
+### Relaying streams through this machine
+
+By default the browser's player is sent straight to your provider's CDN, which is the fast, free thing to
+do — but that redirect hands the player the **unrestricted link**, and that link is a bearer URL good
+against your whole account, not just the one stream. Anyone who ends up with it can pull from your quota
+until it expires, no token needed.
+
+Press **`N`** in the terminal and torlink relays instead: it fetches from the provider and forwards the
+bytes on, so the credential-shaped URL stops at the server and never reaches a player, a browser history,
+or a chat message someone pasted a link into. **This is worth having with one user and no sharing at
+all** — it's the same file, minus a credential handed out. A side effect, if you do share: every viewer
+reaches the provider from this one machine rather than from their own address.
+
+It costs something, and it lands where you might not expect — **upload**. Every byte still comes down from
+the provider, but now it has to go back up from here to whoever's watching: roughly **25 Mbps up for a
+1080p remux**, nearer **80 for 4K**. Three remote viewers of that 1080p remux want about **75 Mbps up**,
+which is more than most domestic lines have spare. A viewer on your own LAN costs no upload at all — those
+bytes never leave the network. Nothing is re-encoded, so your CPU barely notices.
+
+It costs one convenience too: an mkv your provider would have transcoded for the browser now gets the
+`.m3u` card instead, because that transcode is played from their servers and relaying is the decision not
+to do that. The file still plays — in VLC, losslessly — it just isn't in the tab any more.
+
+The browser has no switch for this, on purpose: it's a client of your config, not an editor of it, so it
+picks up the change on its own like everything else here. And one thing stated plainly, with no argument
+either way — sharing a debrid account is against Real-Debrid's terms, and they enforce on concurrency and
+device count, not only on how many addresses a token is seen from.
+
 ## Downloads and seeding
 
 Active downloads sit up top with their progress, speed, and time left; when one finishes it drops into
@@ -481,7 +513,9 @@ torrent network directly.
 **What's exposed, and when.** A plain `d` download or a torrent stream is peer-to-peer, so your IP is
 visible to peers — torlink warns you once before the first one, and warns again on `d` if a debrid
 provider is connected. A [debrid](#debrid-real-debrid-or-torbox) download or stream never touches the
-swarm, so there's nothing to expose.
+swarm, so there's nothing to expose there. The one thing a debrid stream does hand out is the link to the
+file, which is a credential against your account — [relaying it](#relaying-streams-through-this-machine)
+keeps that on the server.
 
 **Seeding is on by default, and yours to switch off.** Once a download finishes it keeps seeding, sharing
 it back so the next person can find it just as easily. The network only works because people pass things
