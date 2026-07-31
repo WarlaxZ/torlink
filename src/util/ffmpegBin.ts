@@ -7,8 +7,8 @@
 // Deliberately the same shape as PLAYER_CANDIDATES in ./player.ts: a CLI name
 // on PATH, plus known Windows install paths, because on Windows a user who
 // installed ffmpeg from a zip very often has it nowhere near PATH.
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 export type WhichImpl = (cmd: string) => Promise<boolean>;
 
@@ -30,38 +30,45 @@ const WIN_PATHS = [
   "%ChocolateyInstall%\\bin\\{bin}.exe",
 ];
 
-// Whether a command resolves on PATH. Uses the platform's lookup tool; never
-// runs the binary itself, because running ffmpeg with no arguments prints a
-// banner and exits non-zero, which is not the question being asked.
-function commandExists(cmd: string, platform: NodeJS.Platform): Promise<boolean> {
-  const [probe, args] = platform === "win32" ? ["where", [cmd]] : ["command", ["-v", cmd]];
-  return new Promise((resolve) => {
-    try {
-      const proc = spawn(probe!, args as string[], {
-        windowsHide: true,
-        shell: platform !== "win32",
-      });
-      const timer = setTimeout(() => {
-        try {
-          proc.kill();
-        } catch {
-          /* already gone */
-        }
-        resolve(false);
-      }, 3000);
-      timer.unref?.();
-      proc.on("error", () => {
-        clearTimeout(timer);
-        resolve(false);
-      });
-      proc.on("close", (code) => {
-        clearTimeout(timer);
-        resolve(code === 0);
-      });
-    } catch {
-      resolve(false);
+/**
+ * Whether a command resolves on PATH, by walking PATH ourselves.
+ *
+ * `src/util/player.ts` answers the same question by spawning `command -v` under
+ * a shell. That is not copied here for two reasons: `spawn(cmd, args, { shell:
+ * true })` is deprecated as of Node 22 and prints a warning on every lookup —
+ * which for this module is once per player page load — and a PATH walk needs no
+ * subprocess, no timeout, and no shell to quote things into.
+ *
+ * Never runs the binary itself: `ffmpeg` with no arguments prints a banner and
+ * exits non-zero, which is not the question being asked.
+ */
+async function commandExists(
+  cmd: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  access: (p: string) => Promise<void>,
+): Promise<boolean> {
+  const win = platform === "win32";
+  // path.join follows the AMBIENT platform, but `platform` here is a parameter —
+  // so joining with the default would build "C:\bin/ffprobe.exe" whenever the
+  // two disagree. Picking the flavour explicitly is what makes the win32 branch
+  // both correct and testable from anywhere.
+  const join = win ? path.win32.join : path.posix.join;
+  const dirs = (env.PATH ?? "").split(win ? ";" : ":").filter(Boolean);
+  // On Windows a bare name is not executable; PATHEXT is the list of suffixes
+  // the shell would have tried. Elsewhere the name stands alone.
+  const suffixes = win ? (env.PATHEXT ?? ".EXE").split(";").filter(Boolean) : [""];
+  for (const dir of dirs) {
+    for (const suffix of suffixes) {
+      try {
+        await access(join(dir, `${cmd}${suffix}`));
+        return true;
+      } catch {
+        /* not here */
+      }
     }
-  });
+  }
+  return false;
 }
 
 function expandWinPath(
@@ -96,8 +103,11 @@ async function find(bin: string, deps: FfmpegBinDeps): Promise<string | null> {
 
   const platform = deps.platform ?? process.platform;
   const env = deps.env ?? process.env;
-  const which = deps.whichImpl ?? ((c: string) => commandExists(c, platform));
-  const access = deps.accessImpl ?? ((p: string) => fs.access(p));
+  // X_OK, not mere existence: a non-executable file of the right name on PATH
+  // is not a usable binary, and finding one would turn "no ffmpeg" into a spawn
+  // that fails later and less clearly.
+  const access = deps.accessImpl ?? ((p: string) => fs.access(p, fs.constants.X_OK));
+  const which = deps.whichImpl ?? ((c: string) => commandExists(c, platform, env, access));
 
   let found: string | null = null;
   if (await which(bin)) {

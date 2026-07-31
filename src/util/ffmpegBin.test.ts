@@ -73,6 +73,65 @@ describe("findFfprobe", () => {
   });
 });
 
+describe("the PATH walk itself", () => {
+  // These exercise the real lookup rather than a stubbed whichImpl: it replaces
+  // player.ts's `spawn("command -v")` under a shell, so it needs its own cover.
+
+  it("finds a binary in a PATH directory", async () => {
+    const found = await findFfprobe({
+      platform: "linux",
+      env: { PATH: "/usr/bin:/opt/homebrew/bin" },
+      accessImpl: async (p) => {
+        if (p !== "/opt/homebrew/bin/ffprobe") throw new Error("ENOENT");
+      },
+    });
+    expect(found).toBe("ffprobe");
+  });
+
+  it("returns null when no PATH directory has it", async () => {
+    expect(
+      await findFfprobe({
+        platform: "linux",
+        env: { PATH: "/usr/bin:/usr/local/bin" },
+        accessImpl: async () => {
+          throw new Error("ENOENT");
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("tolerates an unset PATH", async () => {
+    expect(await findFfprobe({ platform: "linux", env: {}, accessImpl: async () => {} })).toBeNull();
+  });
+
+  it("appends PATHEXT suffixes on Windows", async () => {
+    const tried: string[] = [];
+    const found = await findFfprobe({
+      platform: "win32",
+      env: { PATH: "C:\\bin", PATHEXT: ".COM;.EXE" },
+      accessImpl: async (p) => {
+        tried.push(p);
+        if (!p.endsWith(".EXE")) throw new Error("ENOENT");
+      },
+    });
+    expect(found).toBe("ffprobe");
+    expect(tried).toEqual(["C:\\bin\\ffprobe.COM", "C:\\bin\\ffprobe.EXE"]);
+  });
+
+  it("splits PATH on semicolons on Windows, not colons", async () => {
+    // A Windows PATH contains "C:\..." — splitting it on ":" would shred every
+    // entry into a drive letter and a fragment.
+    const found = await findFfprobe({
+      platform: "win32",
+      env: { PATH: "C:\\one;D:\\two", PATHEXT: ".EXE" },
+      accessImpl: async (p) => {
+        if (p !== "D:\\two\\ffprobe.EXE") throw new Error("ENOENT");
+      },
+    });
+    expect(found).toBe("ffprobe");
+  });
+});
+
 describe("findFfmpeg", () => {
   it("looks up its own name, not ffprobe's", async () => {
     const asked: string[] = [];
