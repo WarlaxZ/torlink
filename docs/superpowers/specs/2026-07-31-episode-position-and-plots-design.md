@@ -90,18 +90,37 @@ so `nextEpisode()` returns null and there is nothing to offer.
 This was a minor gap before. **Piece A made it the likely path**: a collapsed season row
 resolves to its best season pack, so `play` on a season is now the natural action.
 
-**Fix.** `historyItemFor` gains an optional third argument — the episode actually opened:
+**Fix — revised after tracing, which found a better seam than this spec first assumed.**
 
-    historyItemFor(input, now, opened?: EpisodeRef)
+The original plan here was a third argument on `historyItemFor`. Tracing killed it: the web
+records inside `recordStreamStart`, hung off the session *resolving*, and at that moment
+**the user has not picked a file yet** — the browser shows its picker afterwards. There is
+no episode to pass in.
 
-When present it wins over whatever the torrent name parsed to. `EpisodeRef` already exists
-in `src/util/episode.ts` and the picker already computes one (`PackTarget`).
+But both front ends already have a hook that fires when a player *actually launches*,
+carrying the chosen filename:
 
-**The plan must trace both call sites before writing code**, because what each knows at
-that moment differs: `App.tsx:1245` records from `DownloadInput` after the picker has
-resolved, and `routes.ts:452` records inside `recordStreamStart`, which currently receives
-only `infoHash` and `name`. If the web path does not know the chosen file at that point,
-the plan says so and threads it — it does not guess.
+| | Where |
+| --- | --- |
+| Terminal | `markPlayed(favId, filename)`, `src/ui/App.tsx:788` |
+| Browser | the `"watched"` action, posted from `src/web/static/app.ts:734` |
+
+That is the right seam: it is after the pick, it already exists on both surfaces, and its
+own comment says it is "called only once a player actually launches, so a failed/cancelled
+stream never earns a ✓" — precisely the bar a watch position wants.
+
+So `historyItemFor` is left alone, and `src/core/streamHistory.ts` gains:
+
+    recordPlayedFile(current, infoHash, filename): StreamHistoryItem[]
+
+which finds the entry by info hash, parses the **filename** for season/episode, and
+advances the mark only when the file names something later than what is stored — the same
+high-water rule `recordStream` already applies, for the same reason.
+
+It **returns the same array reference when nothing changed**, matching `markWatched`
+(`src/util/favouriteList.ts:31`), whose callers use exactly that as the write gate. This
+fires on every player launch, so churning the history file on every re-watch is the thing
+to avoid.
 
 ---
 
