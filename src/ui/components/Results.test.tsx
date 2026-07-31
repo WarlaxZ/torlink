@@ -717,4 +717,93 @@ describe("Results search suggestions on entering the box", () => {
     expect(urls).toHaveLength(1);
     expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
   });
+
+  /**
+   * ESCAPE MUST STICK EVEN WITH A REQUEST STILL OUT, and this is the test that
+   * pins the WIRING \u2014 `dismiss` handing the hook's live seq counter to
+   * `suppressFor`, not the seq of the last reply applied. The module's own unit
+   * tests pass either way; only a render distinguishes them.
+   *
+   * Dismissing does not change an effect dependency, so the pending request is
+   * neither cancelled nor cleared: it fires, answers, and (before the fix)
+   * applied, because its number was higher than anything yet applied. The list
+   * the user had just closed came back, and leaving the box then cost a THIRD
+   * escape \u2014 against help text promising one.
+   */
+  it("does not reopen a dismissed list when the request already in flight answers", async () => {
+    const { impl, urls } = suggestStub();
+    searchState.current = settled(LIST);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "" })}>
+        <Results reccConfig={SUGGEST_CFG} fetchImpl={impl} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await settleFrames();
+
+    u.press("/");
+    await settleFrames();
+    u.press("ke");
+    await tick(1000);
+    expect(u.frame()).toContain("Kestrel (2010) \u00b7 film");
+
+    // One more character, so a second request is queued for "ker", then escape
+    // WITHOUT moving the clock \u2014 the fast-typist case, where the reply is still
+    // owed when the list is dismissed.
+    u.press("r");
+    await settleFrames();
+    u.press(KEY.esc);
+    // 50ms, well inside the 250ms debounce, so the request for "ker" is still
+    // pending: enough for ink to settle an escape byte, not enough to send it.
+    await tick(50);
+    expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
+
+    // Now let the owed reply land. Two requests really were made, so the negative
+    // below is about a reply being DISCARDED and not about one never arriving.
+    await tick(2000);
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toEqual(expect.stringContaining("q=ker&limit="));
+    expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
+
+    // And leaving costs the promised second press, not a third.
+    expect(editing(u)).toBe(true);
+    u.press(KEY.esc);
+    await tick(100);
+    expect(editing(u)).toBe(false);
+  });
+
+  /**
+   * Backspacing out of a search must not leave stale rows behind. Five rows
+   * hanging under a one-character box is the symptom; the min-length branch in
+   * `useTitleSuggest` is what prevents it, and nothing covered it.
+   *
+   * Backspaces to exactly ONE character on purpose. Emptying the box entirely
+   * would make `shouldSuggestFor("", "")`... \u2014 well, here the submitted query is
+   * empty, so an empty draft turns `enabled` off and the rows would clear via the
+   * cap on `items` instead, with the branch under test never running.
+   */
+  it("clears the rows when backspacing below the minimum query length", async () => {
+    const { impl, urls } = suggestStub();
+    searchState.current = settled(LIST);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "" })}>
+        <Results reccConfig={SUGGEST_CFG} fetchImpl={impl} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await settleFrames();
+
+    u.press("/");
+    await settleFrames();
+    u.press("ke");
+    await tick(1000);
+    expect(u.frame()).toContain("Kestrel (2010) \u00b7 film");
+
+    // One backspace: "ke" -> "k", one character, below reccd's minimum.
+    u.press("\u007f");
+    await tick(1000);
+    expect(u.frame()).not.toContain("Kestrel (2010) \u00b7 film");
+    // And nothing was asked about a query reccd would answer with [] anyway.
+    expect(urls).toHaveLength(1);
+  });
 });

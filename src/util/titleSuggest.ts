@@ -126,11 +126,39 @@ export function applyReply(state: SuggestState, seq: number, items: TitleSuggest
  * text into the box, which fires the change handler again, and without this
  * the list would reopen on the text just picked.
  *
- * `appliedSeq` deliberately survives, so a request fired before this cannot
- * reopen the list when it answers.
+ * `throughSeq` IS THE WHOLE POINT, AND IT MUST BE THE CALLER'S CURRENT SEQ
+ * COUNTER, not `state.appliedSeq`. `suppressedText` alone does not close the
+ * list, because a request already in flight was numbered `++seq` — strictly
+ * GREATER than `appliedSeq` — so `applyReply`'s `seq <= state.appliedSeq` let
+ * its reply through and the dismissed list came back ~300ms later. Raising the
+ * high-water mark to the newest seq handed out makes every outstanding request
+ * stale by construction, so the reply is discarded whenever it lands.
+ *
+ * An earlier version of this function spread `appliedSeq` through unchanged and
+ * its doc comment claimed survival was itself the guard. It is not: survival is
+ * exactly what let the reply in.
  */
-export function suppressFor(state: SuggestState, raw: string): SuggestState {
-  return { ...state, items: [], suppressedText: raw.trim() };
+export function suppressFor(state: SuggestState, raw: string, throughSeq: number): SuggestState {
+  return {
+    ...state,
+    items: [],
+    suppressedText: raw.trim(),
+    // Math.max, not a bare assignment: the counter is monotonic so it should
+    // never go backwards, and if a caller ever passes a stale one this refuses
+    // to reopen a door rather than quietly reopening it.
+    appliedSeq: Math.max(state.appliedSeq, throughSeq),
+  };
+}
+
+/**
+ * Whether the list is on screen at all.
+ *
+ * Shared rather than `items.length > 0` in each front end: it is one expression
+ * today, but the day "open" means more than non-empty, two copies drift — and
+ * both surfaces gate keys and buttons on this answer.
+ */
+export function isSuggestOpen(state: SuggestState): boolean {
+  return state.items.length > 0;
 }
 
 export function topSuggestion(state: SuggestState): TitleSuggestion | null {

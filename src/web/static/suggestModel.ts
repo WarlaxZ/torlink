@@ -2,6 +2,7 @@ import {
   akaNote,
   applyReply,
   emptySuggestState,
+  isSuggestOpen,
   submitTextFor,
   suggestionLabel,
   suppressFor,
@@ -27,7 +28,7 @@ export function emptyListState(): ListState {
 }
 
 export function isOpen(s: ListState): boolean {
-  return s.suggest.items.length > 0;
+  return isSuggestOpen(s.suggest);
 }
 
 /**
@@ -65,9 +66,16 @@ export function highlightAt(s: ListState, index: number): ListState {
   return { ...s, highlight: index };
 }
 
-/** Close the list, and stop asking about `raw` so it cannot reopen itself. */
-export function closedFor(s: ListState, raw: string): ListState {
-  return { suggest: suppressFor(s.suggest, raw), highlight: -1 };
+/**
+ * Close the list, and stop asking about `raw` so it cannot reopen itself.
+ *
+ * `throughSeq` must be the caller's live seq counter, not anything read back out
+ * of the state: a request already in flight outranks every applied reply, and
+ * without this its answer reopens the list a few hundred milliseconds after
+ * Escape, a blur, or a submit. See `suppressFor`.
+ */
+export function closedFor(s: ListState, raw: string, throughSeq: number): ListState {
+  return { suggest: suppressFor(s.suggest, raw, throughSeq), highlight: -1 };
 }
 
 /**

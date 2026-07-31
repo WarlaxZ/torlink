@@ -4,6 +4,7 @@ import { fetchTitleSuggestions, type ReccClientConfig } from "../../recc/client"
 import {
   applyReply,
   emptySuggestState,
+  isSuggestOpen,
   shouldQueryFor,
   submitTextFor,
   suppressFor,
@@ -98,21 +99,30 @@ export function useTitleSuggest(args: Args): TitleSuggest {
     };
   }, [enabled, stableConfig, query, fetchImpl, debounceMs]);
 
+  // `seq.current` and not `prev.appliedSeq`: a request fired for the keystroke
+  // before this dismiss is still in flight with a HIGHER number than anything
+  // applied, and passing the applied one would let its reply reopen the list the
+  // user just closed. Escape changes no effect dependency, so the effect's
+  // `cancelled` flag never fires — this is the only guard on that path.
   const dismiss = useCallback(() => {
-    setState((prev) => suppressFor(prev, query));
+    setState((prev) => suppressFor(prev, query, seq.current));
   }, [query]);
 
   const accept = useCallback((text: string) => {
-    setState((prev) => suppressFor(prev, text));
+    setState((prev) => suppressFor(prev, text, seq.current));
   }, []);
 
   // Capped here rather than in the fetch: reccd is asked for SUGGEST_LIMIT so
   // both surfaces send it the same question, and the terminal renders fewer.
-  const items = enabled ? state.items.slice(0, SUGGEST_ROWS_TERMINAL) : [];
-  const top = topSuggestion({ ...state, items });
+  const capped: SuggestState = {
+    ...state,
+    items: enabled ? state.items.slice(0, SUGGEST_ROWS_TERMINAL) : [],
+  };
+  const items = capped.items;
+  const top = topSuggestion(capped);
   return {
     items,
-    open: items.length > 0,
+    open: isSuggestOpen(capped),
     completion: top ? submitTextFor(top) : null,
     dismiss,
     accept,

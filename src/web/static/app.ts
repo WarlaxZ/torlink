@@ -1297,10 +1297,15 @@ function renderSuggest(): void {
   suggestList.hidden = rows.length === 0;
 }
 
+// Closes the list for good: the pending timer is dropped so a debounced request
+// is never sent, and `suggestSeq` is handed to the model so a request ALREADY
+// sent has its reply discarded when it lands. Both halves are needed — clearing
+// the timer alone leaves the in-flight case, which reopens the list a few
+// hundred milliseconds later with nothing focused to close it again.
 function closeSuggest(): void {
   if (suggestTimer !== null) clearTimeout(suggestTimer);
   suggestTimer = null;
-  suggestState = closedFor(suggestState, queryInput.value);
+  suggestState = closedFor(suggestState, queryInput.value, suggestSeq);
   renderSuggest();
 }
 
@@ -1310,7 +1315,7 @@ function acceptSuggest(): void {
   // Latch before searching: accepting writes text into the box, which fires the
   // input handler again, and without the latch the list would reopen on the
   // text just picked.
-  suggestState = closedFor(suggestState, plan.text);
+  suggestState = closedFor(suggestState, plan.text, suggestSeq);
   renderSuggest();
   searchForTitle(plan.text);
 }
@@ -1386,6 +1391,20 @@ queryInput.addEventListener("blur", () => closeSuggest());
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  // Submitting settles the text, so nothing more may be suggested about it. The
+  // keydown handler above cannot do this: it returns early when the list is not
+  // open, which is exactly the fast typist's case — Enter within the 250ms
+  // debounce, before any reply has landed. Without this the request fires (or
+  // finishes) after the search has run and a dropdown opens by itself over the
+  // fresh results, and since Enter does not blur the input nothing closes it.
+  //
+  // `closeSuggest()` rather than a `lastSubmitted` variable compared through
+  // `shouldSuggestFor`: that would be a new piece of mutable state in app.ts and
+  // a decision made in the file that is not allowed to decide things, whereas
+  // this reuses the one latch every other close path already goes through and
+  // covers both sub-cases at once — timer not yet fired (cleared, no request at
+  // all) and request in flight (its reply discarded by the seq high-water mark).
+  closeSuggest();
   // No guard on an empty value: submitting a blank box is how you browse the
   // top lists, the same as pressing Enter on an empty box in the TUI.
   startSearch(queryInput.value);

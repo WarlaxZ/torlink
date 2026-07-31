@@ -5,6 +5,7 @@ import {
   shouldQueryFor,
   shouldSuggestFor,
   applyReply,
+  isSuggestOpen,
   suppressFor,
   topSuggestion,
   suggestionLabel,
@@ -195,16 +196,67 @@ describe("shouldSuggestFor", () => {
 describe("suppressFor", () => {
   it("clears the list so nothing is left on screen", () => {
     const some = applyReply(emptySuggestState(), 1, [KESTREL, KEPLER]);
-    expect(suppressFor(some, "ke").items).toEqual([]);
+    expect(suppressFor(some, "ke", 1).items).toEqual([]);
   });
 
-  // The seq must survive: a request fired before Escape is still in flight,
-  // and resetting the counter would let its reply reopen the dismissed list.
-  it("keeps the applied seq so an in-flight reply cannot reopen the list", () => {
+  /**
+   * THE DISMISS-THEN-REOPEN BUG, and the reason `throughSeq` exists.
+   *
+   * The shape on all three paths (terminal Escape, browser Escape, browser
+   * blur): a reply lands and rows appear (seq 4), the user types one more
+   * character so a request numbered 5 goes out, then dismisses. The request is
+   * still in flight and 5 > 4, so before this parameter existed its reply
+   * applied and the list the user had just closed came back — costing a THIRD
+   * keypress to leave the terminal's search box, against help text promising
+   * one.
+   *
+   * The previous version of this test asserted `appliedSeq` merely survived and
+   * then probed with seq 3 — the one seq that was already discarded. It passed
+   * against the bug.
+   */
+  it("discards the reply to a request that was in flight when it was called", () => {
     const some = applyReply(emptySuggestState(), 4, [KESTREL]);
-    const dismissed = suppressFor(some, "ke");
-    expect(dismissed.appliedSeq).toBe(4);
+    const inFlight = 5; // ++seq for the keystroke after the visible reply
+    const dismissed = suppressFor(some, "kestr", inFlight);
+    expect(dismissed.appliedSeq).toBe(5);
+    expect(applyReply(dismissed, inFlight, [KEPLER]).items).toEqual([]);
+  });
+
+  it("still discards a reply older than the one already applied", () => {
+    const some = applyReply(emptySuggestState(), 4, [KESTREL]);
+    const dismissed = suppressFor(some, "ke", 4);
     expect(applyReply(dismissed, 3, [KEPLER]).items).toEqual([]);
+  });
+
+  // A stale counter must not lower the bar and let an outstanding reply back in.
+  it("never lowers the high-water mark", () => {
+    const some = applyReply(emptySuggestState(), 7, [KESTREL]);
+    const dismissed = suppressFor(some, "ke", 2);
+    expect(dismissed.appliedSeq).toBe(7);
+  });
+
+  // The latch and the seq guard are separate jobs: text the user changes must be
+  // askable again, and the next request's seq is higher still.
+  it("leaves a later request free to open the list again", () => {
+    const some = applyReply(emptySuggestState(), 4, [KESTREL]);
+    const dismissed = suppressFor(some, "kestr", 5);
+    expect(shouldQueryFor(dismissed, "kestre")).toBe(true);
+    expect(applyReply(dismissed, 6, [KEPLER]).items).toEqual([KEPLER]);
+  });
+});
+
+describe("isSuggestOpen", () => {
+  it("is false with nothing to show", () => {
+    expect(isSuggestOpen(emptySuggestState())).toBe(false);
+  });
+
+  it("is true once a reply has landed", () => {
+    expect(isSuggestOpen(applyReply(emptySuggestState(), 1, [KESTREL]))).toBe(true);
+  });
+
+  it("is false again after a dismiss", () => {
+    const some = applyReply(emptySuggestState(), 1, [KESTREL]);
+    expect(isSuggestOpen(suppressFor(some, "ke", 1))).toBe(false);
   });
 });
 

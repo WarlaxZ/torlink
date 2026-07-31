@@ -130,7 +130,7 @@ describe("acceptPlan", () => {
 describe("closedFor", () => {
   it("closes the list and clears the highlight", () => {
     const s = moveHighlight(withReply(emptyListState(), 1, THREE), 1);
-    const shut = closedFor(s, "kes");
+    const shut = closedFor(s, "kes", 1);
     expect(isOpen(shut)).toBe(false);
     expect(shut.highlight).toBe(-1);
   });
@@ -138,9 +138,49 @@ describe("closedFor", () => {
   // Escape must stick. Without the suppression latch the next debounce tick
   // would re-fire the same query and reopen what the user just dismissed.
   it("stops the same text being queried again", () => {
-    const shut = closedFor(withReply(emptyListState(), 1, THREE), "kes");
+    const shut = closedFor(withReply(emptyListState(), 1, THREE), "kes", 1);
     expect(shouldQueryFor(shut.suggest, "kes")).toBe(false);
     expect(shouldQueryFor(shut.suggest, "kest")).toBe(true);
+  });
+
+  /**
+   * Escape and blur, with a request still out. Rows are up from reply 1, the
+   * user types one more character (request 2), then closes the list. Reply 2
+   * arrives afterwards — app.ts's `loadSuggest` folds it in with `withReply`
+   * whatever happened in between, because a fetch already sent cannot be
+   * recalled. It must not reopen the list.
+   *
+   * The blur case is the one that cannot heal: nothing is focused, so there is
+   * no key left to press at the dropdown.
+   */
+  it("discards the reply to a request that was out when the list closed", () => {
+    const open = withReply(emptyListState(), 1, THREE);
+    const shut = closedFor(open, "kest", 2);
+    expect(isOpen(withReply(shut, 2, THREE))).toBe(false);
+  });
+
+  /**
+   * The submit path, which is the same call with a different trigger: Enter
+   * inside the debounce window means app.ts's keydown handler never runs (the
+   * list is not open yet), so the form's submit listener is what has to close
+   * it. Request 1 is in flight against the text now being searched for.
+   *
+   * app.ts's own wiring — clearing `suggestTimer` and passing `suggestSeq` in
+   * `closeSuggest()`, and calling it from the submit listener — has no test
+   * environment by design (no jsdom; see CLAUDE.md). This pins the decision it
+   * delegates here; the listener itself is verified by running `serve --web`.
+   */
+  it("discards a reply for text that has already been submitted", () => {
+    const submitted = closedFor(emptyListState(), "kestrel", 1);
+    expect(isOpen(withReply(submitted, 1, THREE))).toBe(false);
+    expect(shouldQueryFor(submitted.suggest, "kestrel")).toBe(false);
+  });
+
+  // Closing does not deafen the box: the next thing typed is a new question with
+  // a higher number, and it opens the list as usual.
+  it("lets a request made after it open the list again", () => {
+    const shut = closedFor(withReply(emptyListState(), 1, THREE), "kest", 2);
+    expect(isOpen(withReply(shut, 3, THREE))).toBe(true);
   });
 });
 
