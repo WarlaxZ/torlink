@@ -300,11 +300,13 @@ export async function claimReccAccount(
         };
       }
       // Pass reccd's own wording through — it beats anything this layer could
-      // synthesise. But never a string containing the password. The length gate
-      // is load-bearing: "".includes() is always true, so without it a blank
-      // password — the most likely first mistake — loses the one message that
-      // would tell the user what to do.
-      const safe = error && (password.length < 8 || !error.includes(password)) ? error : "";
+      // synthesise. But never a string containing the password. The exemption
+      // is for the empty string specifically: "".includes() is always true, so
+      // without it a blank password — the most likely first mistake — loses
+      // the one message that would tell the user what to do. Any non-empty
+      // password, however short, still gets redacted if reccd ever echoes it
+      // back.
+      const safe = error && (!password || !error.includes(password)) ? error : "";
       return { ok: false, reason: "invalid", message: safe || "reccd rejected that username or password." };
     }
     return { ok: false, reason: "unreachable", message: `reccd couldn't claim the account (HTTP ${res.status}).` };

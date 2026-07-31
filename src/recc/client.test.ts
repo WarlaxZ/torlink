@@ -465,6 +465,16 @@ describe("claimReccAccount", () => {
     expect(res).toEqual({ ok: false, reason: "invalid", message: "password must be at least 8 characters" });
   });
 
+  it("redacts a short password too, not just a long one", async () => {
+    // The exemption is for the empty string only: "".includes("") is vacuously
+    // true and would swallow reccd's own message. A short-but-real password
+    // must still be redacted if reccd ever echoes it back.
+    const res = await claimReccAccount(CFG, "chosen", "abc", {
+      fetchImpl: reply(400, { error: 'password "abc" is too short' }),
+    });
+    expect(JSON.stringify(res)).not.toContain("abc");
+  });
+
   it("maps 401 to unauthorized", async () => {
     const res = await claimReccAccount(CFG, "x", "correcthorsebattery", { fetchImpl: reply(401, {}) });
     expect(res).toEqual({
