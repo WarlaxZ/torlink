@@ -190,6 +190,15 @@ there is one definition of "configured".
    per `CLAUDE.md`.
 4. **Release the lock in a `finally`** — unlink, ignoring `ENOENT`.
 
+**`ensureReccAccount` takes an `onProvisioned?: (patch) => void` callback, and the TUI must pass
+one.** This is not a nicety. `App.tsx`'s `persistConfig` (line 653) writes the **whole** config object
+from React state — `saveConfig({ ...prev, ...patch })`. Provisioning writes `config.json` behind that
+state's back, so without a callback the very next `persistConfig` call in that session (changing the
+sort, toggling a source, adding a favourite) serialises a snapshot with no `reccToken` and **silently
+deletes the account the user just got**. The callback applies the patch via `setConfigState` *without*
+re-saving, so React's copy and the file agree. `runServe` passes nothing — it holds no equivalent
+snapshot, and `routes.ts` already calls `loadConfig()` per request.
+
 ### 2.2 `claimReccAccount` in `src/recc/client.ts`
 
 Lives with the other reccd calls rather than in `provision.ts`: it is an authenticated API call the
@@ -206,7 +215,7 @@ Mapped from `200` / `409` / `400 account already claimed` / other `400` / `401` 
 
 ### 2.3 Config
 
-Two new fields on `Config`, both optional:
+Three new fields on `Config`, all optional:
 
 - `reccAccountName?: string` — the generated or claimed name. Written **once at signup**, and
   thereafter only by the TUI's Accounts pane, and only when `/profile`'s `account.name` actually
@@ -215,6 +224,11 @@ Two new fields on `Config`, both optional:
   must not turn a network read into a config write on every poll. That would be the same
   two-process write race §2.1 builds a lock to avoid, reintroduced on a timer. Display prefers the
   live `/profile` value; the stored one is a fallback so the pane can name the account while offline.
+- `reccAccountClaimed?: boolean` — written `false` at signup, `true` after a successful claim, and
+  corrected by the TUI status check under the same differs-only rule as the name. It exists because
+  the **web server cannot ask reccd**: `/api/sources` is the one payload the browser fetches before
+  it can render anything, and hanging a network round trip off it to learn a fact that changes once
+  per account lifetime is the wrong trade. Persisting it is the cheap side of that trade.
 - `reccAutoSignup?: boolean` — absent or `true` means auto-provision; `false` is the opt-out.
   Absent-means-on is deliberate: this must work on a fresh install with no `config.json` at all.
 
@@ -272,26 +286,41 @@ obvious way to make this feature feel broken.
 
 ### 3.2 Browser
 
-`/api/sources` gains **one** capability flag, alongside `debridConfigured` and `omdbConfigured` and
-for the same stated reason — a flag, never a credential:
+`/api/sources` gains **one** field, alongside `debridConfigured` and `omdbConfigured` and for the same
+stated reason — no credential ever leaves the server:
 
-- `reccClaimed: boolean`
+```ts
+reccAccount: { name: string; claimed: boolean } | null
+```
 
-Deliberately no companion `reccConfigured`: `/api/recommendations` already answers
+`null` means no reccd is configured. Nesting it rather than adding a flat `reccClaimed: boolean` is
+what makes it self-describing: a flat boolean is `false` both for "unclaimed account" and "no account
+at all", so every reader would have to cross-reference something else to tell them apart, and one
+reader eventually won't. The username is not a credential — it is the name the user will log in
+*with*, and reccd will show it publicly once claimed — so returning it is safe and lets the browser
+name the account instead of describing it abstractly.
+
+Deliberately no companion `reccConfigured` flag: `/api/recommendations` already answers
 `200 { status: "not-configured" }` when `reccUrl` is unset (`routes.ts:1400`), precisely so the
-browser can say "set up reccd", so the browser already knows. A second flag carrying the same fact is
-the copy-then-drift pattern `CLAUDE.md` records four bugs from. `reccClaimed` is the only genuinely
-new information, and it is read together with that existing `status`.
+browser can say "set up reccd". A second field carrying that same fact is the copy-then-drift pattern
+`CLAUDE.md` records four bugs from, and `reccAccount: null` already covers it for anyone who needs it
+before the feed loads.
 
 The For You pane shows one quiet line when configured but unclaimed:
 
 > Recommendations are saved to an unclaimed account — claim it in the terminal UI to sign in elsewhere.
 
-The decision of whether that line appears goes in `src/web/static/reccModel.ts` as a pure function
-taking the recommendations `status` and `reccClaimed` (with `null` for "`/api/sources` has not answered yet",
-following `resultPosters.ts`'s `omdbConfigured: boolean | null` precedent, so the sentence never
-flashes on a slow load). `app.ts` only mounts the text node. Per `CLAUDE.md`: no `innerHTML`,
-`createElement` + `textContent` only.
+The decision goes in `src/web/static/reccModel.ts` as a new pure function
+`reccClaimHint(reccAccount: PublicReccAccount | null | undefined): string | null`, returning the
+sentence only when the account exists and is unclaimed. `undefined` means "`/api/sources` has not
+answered yet" and returns `null`, following `resultPosters.ts`'s `omdbConfigured: boolean | null`
+precedent so the sentence never flashes on a slow load.
+
+It is deliberately **not** folded into the existing `reccStatus(state)`, which returns
+`show: false` once there are cards to look at — the claim hint has to be visible precisely when the
+feed is working, which is the one case that function suppresses. Separate line, separate function.
+`app.ts` only mounts the text node. Per `CLAUDE.md`: no `innerHTML`, `createElement` +
+`textContent` only.
 
 **Claim entry is terminal-only, deliberately.** It is credential entry, and `CLAUDE.md` already
 scopes tokens and account configuration to the TUI with the browser as a client of that config. The
@@ -343,8 +372,14 @@ and — the test that justifies the module existing — **two concurrent `ensure
 produce exactly one signup request and one token**. `client.test.ts` gains the `ClaimResult` mapping
 for every status code. `status.test.ts` covers the `account` field, including a `/profile` response
 without it (an older self-hosted reccd), which must degrade to no suffix rather than throwing.
-`reccModel.test.ts` covers the unclaimed hint including the `null` case. `routes.test.ts` covers the
-new `/api/sources` flag.
+`reccModel.test.ts` covers `reccClaimHint` for all four inputs — unclaimed, claimed, `null`,
+`undefined`. `routes.test.ts` covers `/api/sources`' `reccAccount`, including that it is `null` when
+no reccd is configured and that **no token appears anywhere in the response body**.
+
+One more torlink test earns its place, because the bug it guards is silent and destructive: after
+`ensureReccAccount` provisions with an `onProvisioned` callback, a subsequent whole-config write from
+the caller's snapshot must still contain `reccToken`. That is the §2.1 `persistConfig` hazard, and
+without a test the only symptom is a user's account vanishing the next time they change the sort.
 
 Two of the bail-out cases deserve named tests rather than a loop, because they are the ones a
 refactor would most plausibly get backwards: `reccUrl` set to a self-hosted host with no token makes
