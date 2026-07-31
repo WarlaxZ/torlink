@@ -25,6 +25,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "t", label: "Extra trackers" },
       { keys: "L", label: "Transfer and seeding limits" },
       { keys: "V", label: "VPN kill switch" },
+      { keys: "N", label: "Relay debrid streams through this machine" },
       { keys: "shift+w", label: "Open the web UI in a browser (needs --web)" },
       { keys: "shift+x", label: "Toggle adult content (Porn category)" },
       { keys: "q", label: "Quit" },
