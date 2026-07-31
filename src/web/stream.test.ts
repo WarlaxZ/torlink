@@ -48,6 +48,8 @@ async function startUpstream(): Promise<Upstream> {
   const seen: Upstream["seen"] = [];
   const open = new Set<net.Socket>();
   const timers = new Set<ReturnType<typeof setInterval>>();
+  // The hop whose socket is due to be reset once the next hop's request lands.
+  let dying: http.ServerResponse | null = null;
 
   const server = http.createServer((req, res) => {
     const range = req.headers.range;
@@ -68,23 +70,35 @@ async function startUpstream(): Promise<Upstream> {
     }
 
     // Same redirect, but the connection that carried it resets instead of
-    // closing cleanly — simulating a hop's socket dying right after the proxy
-    // has already moved on to the next hop's request. Redirects to a
-    // deliberately slow next hop so the reset is very likely to reach the
-    // client (and fire the stale request's `error`) before that next hop
-    // answers — the ordering the guard under test has to survive.
+    // closing cleanly — simulating a hop's socket dying after the proxy has
+    // already moved on to the next hop's request. The 302 goes out and the
+    // socket is *held*; the reset is fired by the `/media-delay` branch below,
+    // once the next hop's request has actually arrived.
+    //
+    // Firing it here on a timer instead is a race, and one platform loses it:
+    // Windows discards a socket's unread receive buffer when an RST lands, so a
+    // reset that beats the proxy's read of the 302 destroys the redirect itself.
+    // The proxy then sees a hop that died before answering — a genuine 502, and
+    // not the ordering this test exists to pin.
     if (req.url?.startsWith("/redirect-die/")) {
+      dying = res;
       res.writeHead(302, { Location: "/media-delay" });
       res.flushHeaders();
-      // `resetAndDestroy`, not `destroy`: a plain close is a valid end-of-body
-      // for a response with no Content-Length, so the client just sees a
-      // completed (if bodyless) redirect. An RST is what actually surfaces as
-      // an `error` on the client request — the case the guard exists for.
-      setImmediate(() => res.socket?.resetAndDestroy());
       return;
     }
 
     if (req.url?.startsWith("/media-delay")) {
+      // Hop 2 is here, so the proxy has read hop 1's 302 and reassigned
+      // `current`. Only now can hop 1's error be stale.
+      //
+      // `resetAndDestroy`, not `destroy`: a plain close is a valid end-of-body
+      // for a response with no Content-Length, so the client just sees a
+      // completed (if bodyless) redirect. An RST is what actually surfaces as
+      // an `error` on the client request — the case the guard exists for.
+      dying?.socket?.resetAndDestroy();
+      dying = null;
+      // Answer after the reset has had a turn to reach the client, so the stale
+      // error fires while this hop is still in flight rather than after it won.
       setTimeout(() => {
         res.writeHead(200, {
           "Content-Type": "video/mp4",
@@ -452,6 +466,10 @@ describe("proxy redirects", () => {
     const res = await fetch(`${base}/stream/${id}/0?k=${capability}`);
     expect(res.status).toBe(200);
     expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+    // The stale hop was ignored, not merely absent: `fail("socket")` logs, so a
+    // silent log is what says the guard swallowed it rather than that no error
+    // ever arrived.
+    expect(logs.join("\n")).not.toContain("upstream failed (socket)");
   });
 });
 
