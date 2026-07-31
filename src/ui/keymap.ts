@@ -52,6 +52,8 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "p", label: "Toggle poster / plot preview (needs OMDb key)" },
       { keys: "s", label: "Sort results" },
       { keys: "z", label: "Hide results with no seeders" },
+      { keys: "g", label: "Group many releases of one title (on by default)" },
+      { keys: "space", label: "Expand or collapse the group under the cursor" },
       { keys: "w", label: "Save or remove current search" },
       { keys: "d", label: "Download (P2P)" },
       { keys: "shift+d", label: "Download to a chosen folder" },
@@ -231,6 +233,13 @@ export function footerHints(
     // The footer advertises only the default download key; D (download to a
     // chosen folder) stays bound but lives in the `?` sheet alone.
     { keys: "d", label: "Download" },
+    // EARLY, and measured. This row is 115 columns bare and 131 with
+    // Real-Debrid configured, so Footer.tsx truncates it at 80 — anything past
+    // roughly "Alive" is already invisible there. Placed third it survives in
+    // both configurations, at the cost of the tail hint that was sitting on the
+    // boundary. `space` (expand the group under the cursor) is not advertised
+    // here for the same width reason; it lives in the `?` sheet.
+    { keys: "g", label: "Group" },
     ...(debridLabel ? [{ keys: "r", label: debridLabel }] : []),
     { keys: "v", label: "Stream" },
     { keys: "y", label: "Copy" },

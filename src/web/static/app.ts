@@ -40,12 +40,16 @@ import {
   debridAddedNotice,
   debridAddLabel,
   emptyView,
+  groupCountLabel,
   modeForQuery,
+  parseGrouping,
   parseLayout,
   parseSort,
   previewApplies,
   reportsHealthLookup,
+  resultAtRow,
   resultMeta,
+  resultRowPlan,
   rowForPlay,
   searchStatus,
   searchUrl,
@@ -54,12 +58,20 @@ import {
   tabClickPlan,
   visibleResults,
   type AddVia,
+  type GroupRow,
   type PublicSearchResult,
   type PublicSearchSnapshot,
   type ResultLayout,
   type SearchView,
   type SourcesResponse,
 } from "./searchModel";
+import {
+  focusTargetAfterRender,
+  nextRowKey,
+  rovingRowKey,
+  type FocusSnapshot,
+  type RowStep,
+} from "./resultFocus";
 import {
   createPreviewController,
   posterPath,
@@ -133,6 +145,11 @@ import {
   pickNoneLine,
   type FeatureState,
 } from "../../util/releasePick";
+// The quality badges, and the group-name → parser-hint seam. `hintForGroup`
+// already exists for exactly this: the web's tabs are "Movies"/"TV" while the
+// TUI's sections are lowercase keys, and that translation is written down once.
+import { releaseBadges } from "../../util/releaseBadges";
+import { hintForGroup } from "../../util/release";
 import type { ReccMedium } from "../../util/autoPlayableFilm";
 import {
   autoPlayableFilm,
@@ -203,6 +220,12 @@ const reccStatusLine = el<HTMLParagraphElement>("recc-status");
 const reccHintLine = el<HTMLParagraphElement>("recc-hint");
 const reccList = el<HTMLUListElement>("recc-list");
 
+// Both are `position: sticky` and both are measured into CSS custom properties;
+// see publishStickyHeights.
+const pageHeader = el<HTMLElement>("page-header");
+const searchToolbar = el<HTMLDivElement>("toolbar");
+const toTopButton = el<HTMLButtonElement>("to-top");
+
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
 const saveSearchButton = el<HTMLButtonElement>("save-search");
@@ -210,6 +233,7 @@ const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
+const groupCheck = el<HTMLInputElement>("group");
 const layoutControl = el<HTMLLabelElement>("layout-control");
 const layoutSelect = el<HTMLSelectElement>("layout");
 const searchProgress = el<HTMLSpanElement>("search-progress");
@@ -218,6 +242,7 @@ const searchHintLine = el<HTMLParagraphElement>("search-hint");
 const resultsList = el<HTMLUListElement>("results");
 
 const previewPane = el<HTMLElement>("preview");
+const previewCloseButton = el<HTMLButtonElement>("preview-close");
 const previewPoster = el<HTMLDivElement>("preview-poster");
 const previewTitle = el<HTMLParagraphElement>("preview-title");
 const previewSub = el<HTMLParagraphElement>("preview-sub");
@@ -330,6 +355,56 @@ function metaLine(row: DashRow): string {
 }
 
 // Every node below is built with createElement and filled with textContent.
+// ---- focus across a re-render ----
+//
+// Two lists here are rebuilt wholesale under the user: the results list on every
+// snapshot frame of a search (up to 23 of them), and the queue four times a
+// second whether or not anything was touched. `replaceChildren` discards the
+// focused node, so without this focus falls to <body> — measured, and it makes
+// both lists unusable from the keyboard.
+
+// Tags a row's focusable control with the row it belongs to and which control it
+// is. Two data attributes rather than a WeakMap because the nodes being matched
+// afterwards are the NEW ones; there is nothing to have kept a reference to.
+function tagControl(control: HTMLElement, rowKey: string, name: string): void {
+  control.dataset.rowKey = rowKey;
+  control.dataset.control = name;
+}
+
+// Where focus is right now, if it is inside `list`. Read before the list is
+// replaced; handed to focusTargetAfterRender once the new rows exist.
+function captureRowFocus(list: HTMLElement): FocusSnapshot | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return null;
+  if (!list.contains(active)) return null;
+  const rowKey = active.dataset.rowKey;
+  const control = active.dataset.control;
+  if (!rowKey || !control) return null;
+  return { rowKey, control };
+}
+
+function restoreRowFocus(
+  list: HTMLElement,
+  before: FocusSnapshot | null,
+  rowKeys: readonly string[],
+): void {
+  const target = focusTargetAfterRender(before, rowKeys);
+  if (!target) return;
+  const key = CSS.escape(target.rowKey);
+  const next =
+    list.querySelector<HTMLElement>(
+      `[data-row-key="${key}"][data-control="${CSS.escape(target.control)}"]`,
+    ) ??
+    // The row survived but that particular control did not — a group heading has
+    // a disclosure button where a release row has none, and a queue row's
+    // buttons change with its status. Any control on the right row beats <body>.
+    list.querySelector<HTMLElement>(`[data-row-key="${key}"]`);
+  // preventScroll is NOT optional: without it, restoring focus scrolls the row
+  // into view, and this runs on every streamed frame and four times a second in
+  // the queue — it would fight the user's own scrolling.
+  next?.focus({ preventScroll: true });
+}
+
 // A torrent's display name comes from a magnet link, i.e. from whoever wrote
 // the magnet — so an innerHTML path here is stored XSS. There is no innerHTML,
 // insertAdjacentHTML, or document.write anywhere in this file, and there must
@@ -370,6 +445,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.type = "button";
     playButton.className = "play";
     playButton.textContent = "play";
+    tagControl(playButton, row.id, "play");
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
@@ -378,6 +454,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action;
+    tagControl(button, row.id, action);
     button.addEventListener("click", () => {
       if (!confirmAction(action, row.name)) return;
       void control(row.id, action);
@@ -393,7 +470,16 @@ function render(): void {
   emptyNote.classList.remove("error");
   emptyNote.textContent = EMPTY_TEXT;
   emptyNote.hidden = rows.length > 0;
+  // Same treatment as the results list, and needed more urgently: this runs four
+  // times a second, so without it a queue button cannot be reached by keyboard
+  // at all — focus is destroyed within 250ms of arriving.
+  const focusBefore = captureRowFocus(rowsList);
   rowsList.replaceChildren(...rows.map(renderRow));
+  restoreRowFocus(
+    rowsList,
+    focusBefore,
+    rows.map((r) => r.id),
+  );
   // The queue tab carries its own count so a search that added something shows
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
@@ -861,6 +947,30 @@ function readStoredLayout(): ResultLayout {
 
 let layout: ResultLayout = readStoredLayout();
 
+// Remembered the same way, and read through parseGrouping for the same reason:
+// localStorage is user-writable and survives upgrades.
+const GROUPING_KEY = "torlnk.grouping";
+
+function readStoredGrouping(): boolean {
+  try {
+    return parseGrouping(localStorage.getItem(GROUPING_KEY));
+  } catch {
+    // Default ON even when storage throws — see emptyView().
+    return true;
+  }
+}
+
+// Which group headings are open, by group key. Not persisted: it is a per-search
+// gesture, and a remembered set of keys from an earlier query would expand
+// nothing recognisable on the next one.
+const expandedGroups = new Set<string>();
+
+// The rows currently on screen, as the plan produced them. The keydown handler
+// navigates THIS, not `visibleResults` — with grouping on those two disagree
+// (210 results, ~40 rows), and navigating the wrong one moves the selection to
+// rows that are not rendered.
+let currentRows: GroupRow<PublicSearchResult>[] = [];
+
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
@@ -909,6 +1019,10 @@ function renderTabs(): void {
       return button;
     }),
   );
+  // The strip just changed height — it may have gained a row of tabs, or wrapped.
+  // The preview's sticky offset is derived from it, so re-measure here rather
+  // than waiting on a ResizeObserver callback that a non-painting tab never gets.
+  publishStickyHeights();
 }
 
 async function loadSources(): Promise<void> {
@@ -984,6 +1098,10 @@ function startSearch(raw: string): void {
   // most sources answer with their own top/latest list; a couple opt out.
   const mode = modeForQuery(query);
   searchView = { ...searchView, query, mode, snapshot: null, running: true };
+  // A new set of rows means the old group keys name nothing. Left in place they
+  // would expand whichever groups of the new search happen to key the same —
+  // "Kestrel 2010" is the same key in every search that returns it.
+  expandedGroups.clear();
   // The box and the state must not disagree: without this, submitting "   "
   // leaves #query showing whitespace while searchView.query (and the URL sent
   // to the server) is already trimmed.
@@ -1170,6 +1288,20 @@ layoutSelect.addEventListener("change", () => {
   renderResults();
 });
 
+groupCheck.addEventListener("change", () => {
+  searchView = { ...searchView, grouped: groupCheck.checked };
+  try {
+    localStorage.setItem(GROUPING_KEY, groupCheck.checked ? "on" : "off");
+  } catch {
+    /* not remembering the preference is survivable; failing the click is not */
+  }
+  // Turning grouping off leaves no headings to be open, and leaving stale keys in
+  // the set would silently re-expand those groups when it is turned back on.
+  if (!groupCheck.checked) expandedGroups.clear();
+  // A view change, not a search change: the same rows, presented differently.
+  renderResults();
+});
+
 // One cache for the whole page. Cleared when a new search starts — the only
 // moment the set of rows changes wholesale — which revokes every blob it holds.
 const resultPosters = createPosterCache({
@@ -1316,7 +1448,7 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
 // The four buttons a result offers, built once and used by both layouts: a
 // grid card that offered fewer of them than the list row would be a downgrade
 // dressed as a view option.
-function resultActions(result: PublicSearchResult): HTMLDivElement {
+function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivElement {
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
@@ -1324,12 +1456,14 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  tagControl(playButton, rowKey, "play");
   playButton.addEventListener("click", () => void play(rowForPlay(result)));
   actions.append(playButton);
 
   const addButton = document.createElement("button");
   addButton.type = "button";
   addButton.textContent = "add";
+  tagControl(addButton, rowKey, "add");
   addButton.addEventListener("click", () => void addResult(result, "p2p"));
   actions.append(addButton);
 
@@ -1341,6 +1475,7 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
   favButton.type = "button";
   favButton.textContent = favouriteLabel(inLibrary);
   favButton.setAttribute("aria-pressed", String(inLibrary));
+  tagControl(favButton, rowKey, "favourite");
   favButton.addEventListener("click", () => {
     const input: LibraryInput = { infoHash: result.infoHash, name: result.name };
     if (result.sizeBytes > 0) input.sizeBytes = result.sizeBytes;
@@ -1357,11 +1492,29 @@ function resultActions(result: PublicSearchResult): HTMLDivElement {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
     debridButton.textContent = debridAddLabel(sources.debridProvider);
+    tagControl(debridButton, rowKey, "debrid");
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
 
   return actions;
+}
+
+// How many quality badges a row shows. A stacked 4K remux carries nine, which is
+// a spec sheet rather than the scan aid a list row needs — releaseBadges orders
+// them picture-facts-first precisely so that a slice keeps the useful ones.
+const BADGE_LIMIT = 4;
+
+// createElement + textContent, like everything else here: these strings come from
+// FEATURES and from the parser, but the row they sit in is built from a release
+// name and there is no innerHTML path in this file.
+function appendQualityBadges(meta: HTMLElement, name: string): void {
+  for (const badge of releaseBadges(name, hintForGroup(searchView.group)).slice(0, BADGE_LIMIT)) {
+    const span = document.createElement("span");
+    span.className = "tag-quality";
+    span.textContent = badge;
+    meta.append(span);
+  }
 }
 
 // createElement + textContent only — see the file-level rule. `cachedTag`
@@ -1375,11 +1528,85 @@ function appendCachedBadge(meta: HTMLElement, result: PublicSearchResult): void 
   meta.append(badge);
 }
 
+/** What a row needs to also present itself as a group heading. */
+interface GroupFacts {
+  key: string;
+  title: string;
+  year?: number;
+  count: number;
+  expanded: boolean;
+}
+
+/** The heading's display title: "Tin Rivers (2024)", or just the title. */
+function groupHeadingText(facts: GroupFacts): string {
+  return facts.year ? `${facts.title} (${facts.year})` : facts.title;
+}
+
+/**
+ * The expand/collapse control, shared by the list row and the grid card so the
+ * two cannot disagree about what the arrow means or which key it toggles.
+ */
+function groupToggleButton(facts: GroupFacts): HTMLButtonElement {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "group-toggle";
+  // A text glyph, like .conn's dot: it inherits colour and needs no second rule.
+  toggle.textContent = facts.expanded ? "▾" : "▸";
+  toggle.setAttribute("aria-expanded", String(facts.expanded));
+  toggle.setAttribute(
+    "aria-label",
+    `${facts.expanded ? "Collapse" : "Expand"} ${groupCountLabel(facts.count)} of ${facts.title}`,
+  );
+  tagControl(toggle, facts.key, "disclosure");
+  toggle.addEventListener("click", () => {
+    if (expandedGroups.has(facts.key)) expandedGroups.delete(facts.key);
+    else expandedGroups.add(facts.key);
+    renderResults();
+  });
+  return toggle;
+}
+
+/** The heading facts for a group row, so the row and the card agree. */
+function groupFactsFor(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): GroupFacts {
+  const facts: GroupFacts = {
+    key: row.key,
+    title: row.title,
+    count: row.members.length,
+    expanded: row.expanded,
+  };
+  if (row.year !== undefined) facts.year = row.year;
+  return facts;
+}
+
+/** "5 releases", as a chip. */
+function groupCountChip(count: number): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.className = "group-count";
+  chip.textContent = groupCountLabel(count);
+  return chip;
+}
+
 // Same createElement/textContent rule as every other list here: a release name
 // is written by whoever uploaded the torrent.
-function renderResultCard(result: PublicSearchResult): HTMLLIElement {
+//
+// `group` present means this card stands for a whole title rather than one
+// release: it shows the parsed title, a count and a disclosure control. Grid
+// layout exists to show artwork, so a collapsed group has to stay a CARD here —
+// rendering the list-shaped heading into the grid turned a poster wall into 69
+// full-width rows, which is the list with extra steps.
+function renderResultCard(
+  result: PublicSearchResult,
+  rowKey: string,
+  group?: GroupFacts,
+  inGroup = false,
+): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row result-card";
+  if (group) li.classList.add("result-group-card");
+  // A member card must say so as well. Without this an expanded group's cards
+  // were indistinguishable from top-level ones — the grid just grew four more
+  // posters with nothing to say they belonged to the card above.
+  if (inGroup) li.classList.add("result-member");
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   // The poster is the card's primary target and what it does is select the
@@ -1389,6 +1616,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   posterButton.type = "button";
   posterButton.className = "recc-poster";
   posterButton.title = result.name;
+  tagControl(posterButton, rowKey, "poster");
   const frame = document.createElement("div");
   frame.className = "poster";
   posterButton.append(frame);
@@ -1399,26 +1627,40 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
 
   const name = document.createElement("button");
   name.type = "button";
-  name.className = "result-name row-name";
-  name.textContent = result.name;
-  name.title = result.name;
+  name.className = group ? "result-name row-name group-title" : "result-name row-name";
+  // A group card names the TITLE; a release card names the release.
+  const label = group ? groupHeadingText(group) : result.name;
+  name.textContent = label;
+  name.title = label;
+  tagControl(name, rowKey, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const meta = document.createElement("span");
   meta.className = "row-meta";
   meta.textContent = resultMeta(result, sources);
+  appendQualityBadges(meta, result.name);
   appendCachedBadge(meta, result);
 
-  li.append(posterButton, name, meta, resultActions(result));
+  li.append(posterButton, name);
+  if (group) li.append(groupCountChip(group.count), groupToggleButton(group));
+  li.append(meta, resultActions(result, rowKey));
   return li;
 }
 
 // Every node below is createElement + textContent. A release name is written by
 // whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
 // stranger on a public tracker.
-function renderResult(result: PublicSearchResult): HTMLLIElement {
+function renderResult(
+  result: PublicSearchResult,
+  rowKey: string,
+  inGroup: boolean,
+): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row";
+  // Marks a release that belongs to the heading above it. Purely structural — the
+  // CSS indents it and draws a spine, rather than recolouring it: a member row
+  // must still read as the same kind of row it was before grouping existed.
+  if (inGroup) li.classList.add("result-member");
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   const head = document.createElement("div");
@@ -1429,6 +1671,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   name.className = "result-name";
   name.textContent = result.name;
   name.title = result.name;
+  tagControl(name, rowKey, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const badge = document.createElement("span");
@@ -1439,9 +1682,10 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   const meta = document.createElement("span");
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
+  appendQualityBadges(meta, result.name);
   appendCachedBadge(meta, result);
 
-  const actions = resultActions(result);
+  const actions = resultActions(result, rowKey);
 
   const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
   if (!withPoster) {
@@ -1459,6 +1703,73 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   body.append(head, meta, actions);
   li.append(frame, body);
   mountResultPoster(result.name, frame, true);
+  return li;
+}
+
+/**
+ * A group heading: one title standing in for every release of it.
+ *
+ * Differs from a release row by STRUCTURE, not by colour — a disclosure control,
+ * a clean title, and a count where a release row has a release name. A heading
+ * distinguishable only by a new accent would make a 40-row grouped list read as
+ * noisier than the 210-row one it replaced.
+ *
+ * Every action here acts on `resultAtRow(row)`, the group's first member, which
+ * under the current sort is its best one. No new picking logic.
+ */
+function renderGroupRow(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): HTMLLIElement {
+  const best = row.members[0]!;
+  const li = document.createElement("li");
+  li.className = "row result-group";
+  // ONLY WHILE COLLAPSED. A heading stands in for its best release, so it reads
+  // as selected when that release is — but an EXPANDED group also renders that
+  // same release as a member row, and both would claim the selection: two
+  // accent-bordered rows, from one selectedHash. Collapsed, the heading is the
+  // only row representing it; expanded, the member row is.
+  li.setAttribute("aria-selected", String(!row.expanded && best.infoHash === selectedHash));
+
+  const facts = groupFactsFor(row);
+  const toggle = groupToggleButton(facts);
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+
+  const title = document.createElement("button");
+  title.type = "button";
+  title.className = "result-name group-title";
+  // The parsed title and year, not a release name — this is the one row in the
+  // list that knows what the thing is actually called.
+  title.textContent = groupHeadingText(facts);
+  title.title = title.textContent;
+  tagControl(title, row.key, "name");
+  // Selecting the heading selects its best release, so the preview and every
+  // action have a real torrent to work with.
+  title.addEventListener("click", () => selectResult(best));
+
+  head.append(title, groupCountChip(row.members.length));
+
+  const meta = document.createElement("span");
+  meta.className = "result-meta";
+  meta.textContent = resultMeta(best, sources);
+  appendQualityBadges(meta, best.name);
+  appendCachedBadge(meta, best);
+
+  const body = document.createElement("div");
+  body.className = "group-body";
+  body.append(head, meta, resultActions(best, row.key));
+
+  if (!postersApply(searchView.group, sources?.omdbConfigured === true)) {
+    li.append(toggle, body);
+    return li;
+  }
+  const frame = document.createElement("div");
+  frame.className = "poster result-thumb";
+  li.classList.add("result-with-poster");
+  li.append(toggle, frame, body);
+  // The BEST MEMBER's name, not the group title: resultPosters caches by release
+  // name, so sharing the member's key means the heading and its expanded rows
+  // resolve to one lookup instead of two.
+  mountResultPoster(best.name, frame, true);
   return li;
 }
 
@@ -1480,9 +1791,46 @@ function renderResults(): void {
 
   resultsList.classList.toggle("recc-grid", effective === "grid");
   resultsList.classList.toggle("results-grid", effective === "grid");
+
+  // THE ROW PLAN IS THE ONLY SOURCE OF ROW KEYS. With grouping on, a row key is a
+  // group key — not an info hash — so anything that matches rows by key must read
+  // them from here. Deriving them from `shown` instead compiles fine and passes
+  // every unit test, and then silently pins the tab stop to row one, navigates
+  // 210 results across ~40 rendered rows, and drops focus after every re-render.
+  currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
+  const rowKeys = currentRows.map((row) => row.key);
+  // The selected ROW, not the selected hash: a heading's key is a group key, so
+  // comparing selectedHash to it would never match.
+  //
+  // An EXPANDED heading is skipped, matching the aria-selected rule in
+  // renderGroupRow: it and its first member both resolve to the same release, and
+  // the member row is the one on screen representing it. Without the skip the tab
+  // stop lands on the heading while the highlight is on the member.
+  const selectedRowKey =
+    currentRows.find(
+      (row) =>
+        !(row.kind === "group" && row.expanded) && resultAtRow(row)?.infoHash === selectedHash,
+    )?.key ?? null;
+
+  // Read BEFORE replaceChildren: afterwards the focused node is detached and
+  // document.activeElement has already fallen back to <body>.
+  const focusBefore = captureRowFocus(resultsList);
   resultsList.replaceChildren(
-    ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
+    ...currentRows.map((row) => {
+      if (row.kind === "group") {
+        // Grid layout keeps a group as a CARD — it exists to show artwork, and a
+        // list-shaped heading in there turns a poster wall back into a list.
+        return effective === "grid"
+          ? renderResultCard(row.members[0]!, row.key, groupFactsFor(row))
+          : renderGroupRow(row);
+      }
+      return effective === "grid"
+        ? renderResultCard(row.result, row.key, undefined, row.inGroup)
+        : renderResult(row.result, row.key, row.inGroup);
+    }),
   );
+  applyRovingTabIndex(rowKeys, selectedRowKey);
+  restoreRowFocus(resultsList, focusBefore, rowKeys);
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -1492,8 +1840,8 @@ function renderResults(): void {
     ? `${searchView.snapshot.done}/${searchView.snapshot.total} sources`
     : "";
 
-  // A selected row that the filters just removed keeps neither its highlight
-  // nor its preview.
+  // A selected row that the filters just removed keeps neither its highlight nor
+  // its preview. Not clearSelection(): that re-renders, and this IS the render.
   if (selectedHash !== null && !shown.some((r) => r.infoHash === selectedHash)) {
     selectedHash = null;
     preview.select(null, searchView.group);
@@ -1506,6 +1854,194 @@ function selectResult(result: PublicSearchResult): void {
   renderResults();
   preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
 }
+
+// Drops the selection, which hides the preview. One path for "nothing is
+// selected any more", shared with the filtered-away branch in renderResults —
+// two would drift, and the visible symptom would be a pane showing a row that is
+// no longer highlighted.
+function clearSelection(): void {
+  selectedHash = null;
+  renderResults();
+  preview.select(null, searchView.group);
+}
+
+// Only reachable in the narrow bottom-bar skin (CSS hides it at wide widths),
+// where the pane overlays the list.
+previewCloseButton.addEventListener("click", () => clearSelection());
+
+// ---- sticky offsets ----
+//
+// The header and the toolbar are `position: sticky`, and the preview pane sits
+// below them at a `top` derived from their heights. Those heights are MEASURED
+// rather than written into the stylesheet: both strips are flex-wrap, so a
+// narrow window (or a debrid button, or the adult category adding a tab) changes
+// them. A hardcoded value leaves a gap at one width and overlaps at another.
+//
+// A measurement, not a decision — which is why it lives here rather than in a
+// pure module.
+//
+// A ZERO HEIGHT IS NEVER PUBLISHED. Both strips live inside `main#app`, which is
+// `hidden` until the page unlocks, and `[hidden]` is `display: none !important` —
+// an unrendered element measures 0. Publishing that puts the preview's sticky
+// `top` underneath the toolbar instead of below it, which is the bug this
+// function exists to prevent. Keeping the stylesheet's fallback until there is
+// something real to measure is strictly better than a confident wrong number.
+function publishStickyHeights(): void {
+  const root = document.documentElement;
+  const headerH = Math.ceil(pageHeader.getBoundingClientRect().height);
+  const toolbarH = Math.ceil(searchToolbar.getBoundingClientRect().height);
+  if (headerH > 0) root.style.setProperty("--header-h", `${headerH}px`);
+  if (headerH > 0 && toolbarH > 0) root.style.setProperty("--toolbar-h", `${headerH + toolbarH}px`);
+}
+
+// MODULE SCOPE, not a local inside an `if`: an observer with no live reference is
+// collectable.
+//
+// And it is a BEST-EFFORT refinement, not the mechanism. ResizeObserver
+// callbacks ride the rendering pipeline, so a tab that is not painting never
+// receives them — verified in an automated browser, where even the guaranteed
+// initial callback never arrived. Everything below therefore also measures at the
+// moments a height can actually change, so the offsets are right whether or not
+// the observer ever fires.
+const stickyObserver: ResizeObserver | null =
+  typeof ResizeObserver === "function" ? new ResizeObserver(() => publishStickyHeights()) : null;
+stickyObserver?.observe(pageHeader);
+stickyObserver?.observe(searchToolbar);
+
+// ---- back to top ----
+//
+// Two viewports of scroll before it appears: any less and it is in the way on a
+// page that never needed it. `passive` because the handler only reads.
+const TO_TOP_AFTER_VIEWPORTS = 2;
+
+function updateToTop(): void {
+  toTopButton.hidden = window.scrollY < window.innerHeight * TO_TOP_AFTER_VIEWPORTS;
+}
+
+window.addEventListener("scroll", () => updateToTop(), { passive: true });
+updateToTop();
+
+toTopButton.addEventListener("click", () => {
+  // Honour the OS setting rather than always animating: a 25,000px smooth scroll
+  // is a long ride, and for someone who asked for less motion it is worse than
+  // long.
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+  // Focus follows the scroll, so a keyboard user is not left at the bottom of the
+  // document tabbing through rows they can no longer see. Only on the search pane
+  // though: elsewhere #pane-search is hidden and this would focus nothing.
+  if (view === "search") queryInput.focus({ preventScroll: true });
+});
+
+// Wrapping in the layout-affecting moments rather than trusting the observer:
+// unlocking the page (which reveals #app), the tab bar being built from
+// /api/sources, and any window resize that could re-wrap either strip.
+window.addEventListener("resize", () => publishStickyHeights());
+publishStickyHeights();
+
+// ---- keyboard navigation of the results list ----
+
+// A roving tabindex: one row is reachable with Tab, the arrows move between rows
+// from there. Which row is rovingRowKey's decision; this only applies it.
+//
+// Only the row's PRIMARY control (its name, or a group heading) roves. The
+// action buttons stay at -1 and are reached by tabbing within the focused row,
+// which is what stops Tab from walking 210 rows × 5 buttons.
+function applyRovingTabIndex(rowKeys: readonly string[], selectedRowKey: string | null): void {
+  const roving = rovingRowKey(rowKeys, selectedRowKey);
+  for (const control of resultsList.querySelectorAll<HTMLElement>("[data-control]")) {
+    // Only the row's name (a release name, or a group's title) roves. Action
+    // buttons stay at -1 and are reached by tabbing within the focused row —
+    // that is what stops Tab from walking 210 rows × 5 buttons.
+    const primary = control.dataset.control === "name";
+    control.tabIndex = primary && control.dataset.rowKey === roving ? 0 : -1;
+  }
+}
+
+// The row key a control belongs to, for the keydown handler.
+function rowKeyOf(node: EventTarget | null): string | null {
+  return node instanceof HTMLElement ? (node.closest<HTMLElement>("[data-row-key]")?.dataset.rowKey ?? null) : null;
+}
+
+const ROW_STEPS: Readonly<Record<string, RowStep>> = {
+  ArrowDown: "down",
+  ArrowUp: "up",
+  Home: "home",
+  End: "end",
+};
+
+// Arrow keys move the selection, which loads the preview — so the pane follows
+// the cursor the way the TUI's does. Moving selection re-renders the list, and
+// restoreRowFocus puts focus on the new node for the same row.
+resultsList.addEventListener("keydown", (event) => {
+  const step = ROW_STEPS[event.key];
+  if (!step) return;
+  // Let a text input inside a row (there are none today, but rows grow controls)
+  // keep its own Home/End behaviour.
+  if (event.target instanceof HTMLInputElement) return;
+  // currentRows, NOT visibleResults: with grouping on those two disagree — 210
+  // results behind ~40 rendered rows — and navigating the results would move the
+  // selection to rows that are not on the page.
+  const rowKeys = currentRows.map((row) => row.key);
+  // Three fallbacks, and each is load-bearing. `event.target` is the focused
+  // control in the normal case. Focus can also sit on the row or the list itself
+  // (a click on a row's padding), where the target carries no row key — without
+  // the activeElement and selection fallbacks the arrows jump back to row one
+  // instead of moving from where the user is.
+  const from =
+    rowKeyOf(event.target) ??
+    rowKeyOf(document.activeElement) ??
+    currentRows.find((row) => resultAtRow(row)?.infoHash === selectedHash)?.key ??
+    null;
+  const target = nextRowKey(rowKeys, from, step);
+  if (target === null) return;
+  const result = resultAtRow(currentRows.find((row) => row.key === target)!);
+  if (!result) return;
+  // Return AFTER deciding there is somewhere to go: at the end of the list the
+  // arrow should scroll the page as usual rather than dead-stop.
+  if (target === from) return;
+  event.preventDefault();
+  selectResult(result);
+  // Focus must be moved EXPLICITLY here. selectResult re-renders, and
+  // restoreRowFocus put focus back where it was captured — which is the row the
+  // user is arrowing away FROM, since nothing had moved focus yet. Without this
+  // the selection and the preview advance while focus stays behind, so the next
+  // arrow press starts from the old row.
+  //
+  // No preventScroll, unlike restoreRowFocus: that runs on every streamed frame
+  // and must not fight the user's scrolling, whereas this IS the user asking to
+  // move, so the row has to come into view.
+  const moved = resultsList.querySelector<HTMLElement>(
+    `[data-row-key="${CSS.escape(target)}"][data-control="name"]`,
+  );
+  moved?.focus();
+  moved?.scrollIntoView({ block: "nearest" });
+});
+
+// `/` focuses the search box from anywhere — what makes it acceptable for the
+// search form to scroll away while the toolbar stays pinned.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  // Never steal a slash the user is typing into a box. Without this, typing a
+  // path or a regex into the filter moves focus out from under them mid-word.
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  ) {
+    return;
+  }
+  event.preventDefault();
+  // The search box lives in #pane-search, which is `hidden` on the other three
+  // panes — focusing a hidden input does nothing, so `/` would swallow the
+  // keystroke and appear broken. Switch to the pane that owns it first, which is
+  // what someone reaching for search wants anyway.
+  if (view !== "search") showView("search");
+  queryInput.focus();
+  queryInput.select();
+});
 
 // ---- add from a result ----
 
@@ -2402,7 +2938,17 @@ function openApp(payload: StatusPayload): void {
   showView(view);
   renderTabs();
   layoutSelect.value = layout;
+  // The remembered grouping preference, into both the control and the view state
+  // — the checkbox is `checked` in the markup to match emptyView()'s default, so
+  // without this an opted-out user sees a ticked box over a grouped list.
+  const grouped = readStoredGrouping();
+  groupCheck.checked = grouped;
+  searchView = { ...searchView, grouped };
   renderResults();
+  // #app was `hidden` until three lines ago, so every measurement taken before
+  // now was of an unrendered element. This is the first point at which the header
+  // and toolbar have real heights for the preview's sticky offset to build on.
+  publishStickyHeights();
   renderSaved();
   renderPrefs();
   rows = mergeRows(rows, rowsFromStatus(payload));

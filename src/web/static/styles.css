@@ -28,18 +28,42 @@
   display: none !important;
 }
 
+/* 78rem, up from 60rem. At 1440px the old cap left roughly a third of the screen
+   empty, and grouping made that harder to justify — a heading carries more per
+   row than a release does, and the grid fits four posters across instead of
+   three.
+
+   NOT a full-width layout: the cards, the prose and the search form all read
+   worse stretched, so the extra room goes to the results column and the preview
+   (see .split) and the measure stays civilised. */
 body {
   margin: 0;
   margin-inline: auto;
   padding: 1.5rem;
-  max-width: 60rem;
+  max-width: 78rem;
   background: var(--bg);
   color: var(--fg);
   font-size: 0.9rem;
   line-height: 1.45;
 }
 
+/* PINNED. A browse is 25,000px of document and the nav was scrolling away with
+   it, so switching pane meant scrolling to the top first.
+
+   The background is opaque, not translucent: release names scrolling under a
+   see-through bar is unreadable, and this palette has no colour to spare for a
+   scrim. The negative inline margins with matching padding let the bar's
+   background reach the window edges while its content stays on the body's
+   measure — without them a scrolled row shows through the 1.5rem gutter.
+
+   --header-h and --toolbar-h are measured by app.ts (a ResizeObserver), never
+   hardcoded: both strips wrap at narrow widths, and the preview pane's sticky
+   offset is derived from them. A constant leaves a gap at one width and an
+   overlap at another. */
 header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -47,6 +71,56 @@ header {
   border-bottom: 1px solid var(--line);
   padding-bottom: 0.75rem;
   margin-bottom: 1.5rem;
+  margin-inline: -1.5rem;
+  padding-inline: 1.5rem;
+  padding-top: 1rem;
+  margin-top: -1.5rem;
+  background: var(--bg);
+}
+
+/* Tabs and controls, pinned directly under the header. Below it in z-order so a
+   wrapped control strip slides under the header rather than over it. */
+.toolbar {
+  position: sticky;
+  top: var(--header-h, 3.5rem);
+  z-index: 2;
+  margin-inline: -1.5rem;
+  padding-inline: 1.5rem;
+  padding-top: 0.5rem;
+  background: var(--bg);
+  /* A hairline so the pinned strip has an edge. Without it a row scrolling
+     underneath simply stops mid-height with nothing to say why, which reads as a
+     clipping bug rather than as a fixed bar. */
+  border-bottom: 1px solid var(--line);
+}
+
+/* The toolbar owns the gap below itself, so the strips inside it don't also
+   carry one — two margins here read as a hole between the controls and the
+   first result. */
+.toolbar .controls {
+  margin-bottom: 0.5rem;
+}
+
+/* The header's row does not fit a phone: wordmark + four nav buttons + the
+   connection state need ~447px, so at 400 the state indicator sat off-screen and
+   the document carried a horizontal scrollbar. Longstanding, but it matters more
+   now the bar is pinned — an indicator you can never see is not an indicator.
+   Wrapping is the fix that holds whatever the labels say. */
+@media (max-width: 34rem) {
+  header {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+
+  /* Two rows, not three. Left to wrap on its own the three children take a line
+     each; giving the nav the full width puts the wordmark and the connection
+     state together on the first row, where space-between already pushes them to
+     opposite ends. Saves ~35px of a pinned bar on a phone. */
+  .views {
+    order: 1;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
 }
 
 h1 {
@@ -491,7 +565,12 @@ select:focus-visible {
 
 /* Results beside the preview. The preview is dropped below the list — not
    hidden — under the width where a two-column split would squeeze the release
-   names to nothing, which is the same trade the TUI makes at 74 columns. */
+   names to nothing, which is the same trade the TUI makes at 74 columns.
+
+   NOTHING IN THIS SUBTREE MAY GET `overflow` OTHER THAN `visible`. The preview
+   is `position: sticky` and an ancestor with any other overflow silently kills
+   that — no error, no visual clue, it simply scrolls away again. If a wide badge
+   strip needs containing, contain it on the strip itself. */
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 16rem;
@@ -499,9 +578,12 @@ select:focus-visible {
   align-items: start;
 }
 
-@media (max-width: 46rem) {
+/* Above the old 60rem cap there is room to spend, and the preview is where it
+   buys the most: a poster and a plot in 16rem is a narrow column of short lines.
+   The results column keeps the rest. */
+@media (min-width: 76rem) {
   .split {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 20rem;
   }
 }
 
@@ -557,6 +639,163 @@ select:focus-visible {
    styling here because that state does not exist on screen. --accent, not
    --dim: this is the one positive fact in the meta line and should read as
    one, the same way .result-source already does. */
+/* Back to top. A browse is 25,000px of document; the pinned toolbar removes most
+   of the need to go back up, but not the wish to. */
+.to-top {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--raised);
+}
+
+.to-top:hover {
+  color: var(--accent);
+}
+
+/* Above the narrow preview bar rather than on top of it — but only while that bar
+   is actually up. `:has` on the pane's own `hidden` attribute is what keeps this
+   honest: raising the button whenever the window is narrow would leave it
+   floating mid-screen for the common case of nothing selected. Where `:has` is
+   unsupported the button keeps its corner and the two can overlap, which is a
+   mild degradation rather than a broken control. */
+@media (max-width: 46rem) {
+  body:has(#preview:not([hidden])) .to-top {
+    bottom: calc(45vh + 1.5rem);
+  }
+}
+
+/* ---- grouped results ---------------------------------------------------- */
+
+/* A heading stands in for every release of one title. It differs from a release
+   row by STRUCTURE — a disclosure control and a count where a release row has a
+   release name — and NOT by colour. A heading distinguishable only by a new
+   accent would make a 40-row grouped list read as busier than the 210-row one it
+   replaced, which is the opposite of the point. */
+.result-group {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  gap: 0 0.5rem;
+  align-items: start;
+}
+
+/* With artwork, the thumbnail sits between the arrow and the text — the same
+   column order a release row uses, so the two line up down the page. */
+.result-group.result-with-poster {
+  grid-template-columns: 1.25rem 3rem minmax(0, 1fr);
+}
+
+.group-toggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--dim);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.group-toggle:hover {
+  color: var(--accent);
+  border-color: transparent;
+}
+
+/* The title, not a release name: bolder than a member row's, because it is the
+   answer to "what is this" where the rows below answer "which copy". */
+.group-title {
+  font-weight: 600;
+  white-space: normal;
+}
+
+.group-count {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A group in GRID layout: still a poster card, with the count and the disclosure
+   under the title. `.result-card` already lays the card out as a stack, so this
+   only has to place the two extra controls on one line. */
+.result-group-card {
+  position: relative;
+}
+
+.result-group-card .group-count {
+  margin-top: 0.15rem;
+}
+
+/* Top-right of the card rather than in the stack: it is a control on the card,
+   not another line of its metadata.
+
+   It sits ON the poster, so unlike the list row's toggle it needs its own
+   surface — a 9x20px dim glyph over film artwork is invisible and untappable.
+   The backdrop is what makes it a control; the 1.75rem box is what makes it a
+   target. */
+.result-group-card .group-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: rgb(0 0 0 / 70%);
+  color: var(--fg);
+  font-size: 0.9rem;
+}
+
+.result-group-card .group-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* A release inside an open group. Indented with a spine so the belonging is
+   visible without a second colour — and the name keeps the weight it always had,
+   so an expanded group looks like the list it is. */
+.result-member {
+  margin-left: 1.25rem;
+  border-left: 2px solid var(--line);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* The indent and spine are a LIST idiom. In the grid every card is the same size
+   by definition, so an indented one just breaks the columns — belonging is shown
+   there by the member cards following their group card instead. */
+.results-grid .result-member {
+  margin-left: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+/* Quality facts parsed out of the release name (releaseBadges). Dim and
+   bordered, NOT accented: --accent is spoken for by "this source reports health"
+   and "this is cached", both of which are claims about the swarm. A resolution is
+   not that kind of news, and four accented chips per row would drown the two
+   markers that are. */
+.tag-quality {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
 .tag-cached {
   display: inline-block;
   margin-left: 0.5rem;
@@ -630,6 +869,139 @@ select:focus-visible {
   display: block;
   font-size: 0.75rem;
   padding: 0.3rem 0.6rem;
+}
+
+/* PINNED under the toolbar. Before this the pane loaded correctly and then sat
+   above the top of the window — measured at -1402px with a row selected barely
+   two screens down, which is to say the feature was unreachable in normal use.
+
+   DECLARED AFTER the base .preview/.poster rules above, not before them: these
+   overrides and those base rules have the same specificity, so the later block
+   wins. Moved up here once already and the narrow skin's `display: grid` lost to
+   the base `display: block`, which left a full-width poster covering the text.
+
+   --toolbar-h is measured by app.ts (see publishStickyHeights); the fallback only
+   applies before the first measurement, or in a browser with no ResizeObserver.
+
+   Its own overflow-y is safe: no lazily-loaded row posters live in here, so the
+   IntersectionObserver that fills them (app.ts) is unaffected — it observes
+   frames in #results, which stays in the document scroll. */
+.preview {
+  position: sticky;
+  top: calc(var(--toolbar-h, 7rem) + 0.75rem);
+  max-height: calc(100vh - var(--toolbar-h, 7rem) - 2rem);
+  overflow-y: auto;
+}
+
+/* Only ever shown in the narrow bottom-bar skin, where the pane overlays the
+   list and there has to be a way out of it. At wide widths it sits in its own
+   column and closing it would leave a hole.
+
+   DECLARED BEFORE the media query that shows it: same specificity, so whichever
+   comes last wins. With this block below, the button was `display: none` at every
+   width and the bar could not be dismissed. */
+.preview-close {
+  display: none;
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* NOT PINNED on a phone. The tabs and controls wrap to five rows there, so the
+   header plus toolbar measured 297px of an 850px viewport — 35% of the screen
+   held permanently by controls you touch occasionally. The header stays pinned
+   because it carries the pane nav, which you do touch; the toolbar scrolls away,
+   and the thing that genuinely needed pinning at this width is the preview bar
+   at the bottom, which already is. */
+@media (max-width: 46rem) {
+  .toolbar {
+    position: static;
+    margin-inline: 0;
+    padding-inline: 0;
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 46rem) {
+  /* One column, and the preview OVERLAYS the list rather than following it.
+
+     Both children share grid cell 1/1 so the preview's containing block is the
+     full height of the list, which is what lets it travel: a sticky item can
+     only move within its own grid area, so a preview in its own row above a
+     25,000px list is still 25,000px away from a selection at the bottom. That
+     was the actual phone bug, and it is why this is an overlay and not a
+     reorder.
+
+     Pinned to the BOTTOM, like a now-playing bar: the selection is what you just
+     tapped, so it belongs where your thumb is. */
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split > #results,
+  .split > .preview {
+    grid-area: 1 / 1;
+  }
+
+  /* Poster beside the text rather than above it: a 2:3 frame at phone width is a
+     600x900 poster you would scroll past to reach the plot, and this bar has
+     only 45vh to spend. */
+  .preview {
+    position: sticky;
+    top: auto;
+    bottom: 0.5rem;
+    align-self: end;
+    max-height: 45vh;
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    /* OPAQUE, and this is not cosmetic. `.card` styles a border and no
+       background, which is fine for a pane in its own column — as an overlay it
+       let the rows underneath show straight through, and the plot text sat on top
+       of a release name completely unreadably.
+
+       --raised rather than --bg so it reads as a surface lifted off the list
+       rather than a hole punched in it, which is what it is. */
+    background: var(--raised);
+    /* Lifted off the list it covers. A shadow as well as the border: the bar
+       overlaps live content, and the border alone left rows visually tangled
+       with it. */
+    box-shadow:
+      0 0 0 1px var(--line),
+      0 -0.75rem 1.5rem rgb(0 0 0 / 55%);
+  }
+
+  .preview .poster {
+    max-width: none;
+    margin: 0;
+    grid-row: 1 / span 5;
+  }
+
+  /* Two lines of plot in the bar. The full text is one tap away on the row
+     itself; a bar tall enough for a whole synopsis is a bar covering the list. */
+  .preview-body {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Room for the bar at the end of the list, so the last row's buttons are not
+     underneath it — but ONLY while the bar is up. Unconditional, this left 192px
+     of dead space you could scroll into at the end of every list with nothing
+     selected, which is the common case. Same `:has` gate the back-to-top offset
+     uses, and for the same reason. */
+  body:has(#preview:not([hidden])) #results {
+    padding-bottom: 12rem;
+  }
+
+  .preview-close {
+    display: inline-flex;
+  }
 }
 
 /* ---------------------------------------------------------------------------

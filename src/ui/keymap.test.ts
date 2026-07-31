@@ -168,3 +168,28 @@ describe("play and search keys", () => {
     expect(footerHints("content", "continueWatching").map((h) => h.keys)).toContain("s");
   });
 });
+
+describe("grouping keys", () => {
+  it("documents both grouping keys in the help sheet", () => {
+    const search = HELP_GROUPS.find((g) => g.title === "Search");
+    expect(search?.hints.some((h) => h.keys === "g")).toBe(true);
+    expect(search?.hints.some((h) => h.keys === "space")).toBe(true);
+  });
+
+  it("keeps the grouping hint inside the truncated footer width", () => {
+    // The results row is 115 columns bare and 131 with a debrid provider, so
+    // Footer.tsx truncates it at 80. A hint the user cannot see is not a hint —
+    // this asserts `g` lands within the visible span in BOTH configurations.
+    for (const debrid of [undefined, "Real-Debrid"]) {
+      const row = footerHints("content", "all", null, null, debrid);
+      let acc = 0;
+      let end = -1;
+      row.forEach((h, i) => {
+        acc += (i ? 3 : 0) + h.keys.length + 1 + h.label.length;
+        if (h.keys === "g") end = acc;
+      });
+      expect(end).toBeGreaterThan(0);
+      expect(end).toBeLessThanOrEqual(78);
+    }
+  });
+});

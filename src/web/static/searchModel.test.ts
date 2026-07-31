@@ -12,17 +12,20 @@ import {
   emptyView,
   erroredSources,
   modeForQuery,
+  parseGrouping,
   parseLayout,
   previewApplies,
   progressLabel,
   reportsHealthLookup,
   resultMeta,
+  resultRowPlan,
   rowForPlay,
   searchStatus,
   searchUrl,
   sourceLabel,
   statusLineHidden,
   tabClickPlan,
+  visibleGroups,
   visibleResults,
   type PublicSearchResult,
   type PublicSearchSnapshot,
@@ -629,5 +632,104 @@ describe("cachedTag", () => {
 
   it("matches case-insensitively", () => {
     expect(cachedTag("AABB", new Set(["aabb"]), true)).toBe("cached");
+  });
+});
+
+describe("resultRowPlan", () => {
+  const health = () => true;
+  const grouped = () =>
+    view({
+      snapshot: snapshot([
+        result({ name: "Kestrel.2010.1080p.BluRay.x264", infoHash: "a".repeat(40) }),
+        result({ name: "Kestrel.2010.2160p.WEB-DL", infoHash: "b".repeat(40) }),
+        result({ name: "Ashfall.1999.1080p", infoHash: "c".repeat(40) }),
+      ]),
+    });
+
+  it("collapses the duplicate title and leaves the singleton as a plain row", () => {
+    const rows = resultRowPlan(grouped(), health, new Set());
+    expect(rows.map((r) => r.kind)).toEqual(["group", "release"]);
+  });
+
+  it("returns one plain release row per result when grouping is off", () => {
+    const rows = resultRowPlan(view({ ...grouped(), grouped: false }), health, new Set());
+    expect(rows.map((r) => r.kind)).toEqual(["release", "release", "release"]);
+  });
+
+  it("keys an ungrouped row on the info hash, so focus and selection can find it", () => {
+    const rows = resultRowPlan(view({ ...grouped(), grouped: false }), health, new Set());
+    expect(rows[0]!.key).toBe("a".repeat(40));
+  });
+
+  it("expands the named group", () => {
+    const key = resultRowPlan(grouped(), health, new Set())[0]!.key;
+    const rows = resultRowPlan(grouped(), health, new Set([key]));
+    expect(rows.map((r) => r.kind)).toEqual(["group", "release", "release", "release"]);
+  });
+
+  it("groups only what the filters left, so a filter still narrows the list", () => {
+    const rows = resultRowPlan(view({ ...grouped(), textFilter: "ashfall" }), health, new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("release");
+  });
+
+  it("defaults to grouped, because a duplicate-heavy browse is the common case", () => {
+    expect(emptyView().grouped).toBe(true);
+  });
+});
+
+describe("visibleGroups", () => {
+  it("groups the filtered, sorted results", () => {
+    const groups = visibleGroups(
+      view({
+        snapshot: snapshot([
+          result({ name: "Kestrel.2010.1080p.BluRay.x264", infoHash: "a".repeat(40) }),
+          result({ name: "Kestrel.2010.2160p.WEB-DL", infoHash: "b".repeat(40) }),
+        ]),
+      }),
+      () => true,
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.members).toHaveLength(2);
+    expect(groups[0]!.title).toBe("Kestrel");
+  });
+});
+
+describe("parseGrouping", () => {
+  it("defaults on for a missing or junk stored value", () => {
+    expect(parseGrouping(null)).toBe(true);
+    expect(parseGrouping("nonsense")).toBe(true);
+  });
+
+  it("honours an explicit opt-out", () => {
+    expect(parseGrouping("off")).toBe(false);
+  });
+});
+
+describe("grouping parity with the terminal", () => {
+  // The TUI groups with hintForSection(section); the browser must group with the
+  // equivalent hint for its tab names, or the same feed groups differently in the
+  // two front ends.
+  //
+  // NON-VACUOUS BY CONSTRUCTION. parseRelease only consults the hint when the
+  // name has no episode markers of its own (`type = isSeries ? "series" : hint ??
+  // …`), so a fixture like "Kepler 01x04" keys as a series with or without it —
+  // the first version of this test asserted exactly that and proved nothing. A
+  // bare title with no year and no markers is the case where the hint decides,
+  // and the assertion is that the tab changes the key.
+  it("passes the tab's parser hint through to the grouping key", () => {
+    const bare = [result({ name: "Harrowgate", infoHash: "a".repeat(40) })];
+    const onTv = visibleGroups(view({ group: "TV", snapshot: snapshot(bare) }), () => true);
+    const onAll = visibleGroups(view({ group: ALL_TAB, snapshot: snapshot(bare) }), () => true);
+    expect(onTv[0]!.key).toContain("|series|");
+    // The All tab has no medium to assume, so the same name keys differently.
+    expect(onAll[0]!.key).not.toContain("|series|");
+    expect(onTv[0]!.key).not.toBe(onAll[0]!.key);
+  });
+
+  it("groups a Movies tab with the film-shaped key", () => {
+    const bare = [result({ name: "Harrowgate", infoHash: "a".repeat(40) })];
+    const onMovies = visibleGroups(view({ group: "Movies", snapshot: snapshot(bare) }), () => true);
+    expect(onMovies[0]!.key).toBe("harrowgate||movie");
   });
 });

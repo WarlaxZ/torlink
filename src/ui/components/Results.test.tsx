@@ -272,3 +272,172 @@ describe("Results preview pane", () => {
     );
   });
 });
+
+// Quality badges. The invented cast from CLAUDE.md: Tin Rivers is the 4K entry
+// that carries features, Kestrel the plain 1080p film.
+const BADGED = [
+  t("t1", "Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP"),
+  t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+];
+
+async function mountWide(results: TorrentResult[], contentWidth: number): Promise<RenderedUI> {
+  searchState.current = settled(results);
+  ui = renderUI(
+    <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth, cols: contentWidth + 19 })}>
+      <Results />
+    </StoreContext.Provider>,
+    { cols: contentWidth + 19 },
+  );
+  const u = ui;
+  await vi.waitFor(() => expect(u.frame()).toContain(`Results (${results.length})`));
+  return u;
+}
+
+describe("Results quality badges", () => {
+  // ASSERTED VIA LABELS THE RELEASE NAME CANNOT PROVIDE. The name already
+  // contains "2160p" and "HDR", so `toContain` on those matches whether or not a
+  // badge rendered at all — the first version of this test passed vacuously.
+  // "Dolby Vision" is FEATURES' label for the name's "DV" and appears nowhere
+  // else, and a resolution badge shows up as a SECOND occurrence of "1080p".
+  it("shows the resolution as a badge beside the name", async () => {
+    const u = await mount([t("k1", "Kestrel.2010.1080p.BluRay.x264")]);
+    // SPACE-DELIMITED, which is what proves it is the badge column: in the
+    // release name "1080p" is surrounded by dots. Not a count of occurrences —
+    // the badge costs the name six columns, so at 80 columns the name truncates
+    // to "Kestrel.2010.1…" and the only "1080p" on the row is the badge.
+    expect(u.frame()).toContain(" 1080p ");
+  });
+
+  // The row is a fixed-column layout and the name is what you read before
+  // pressing `v`. At 80 columns there is no room for a spec sheet, so the
+  // resolution wins and the features are dropped rather than eating the name.
+  it("shows only the resolution at 80 columns", async () => {
+    const u = await mount(BADGED);
+    expect(u.frame()).not.toContain("Dolby Vision");
+    expect(u.frame()).not.toContain("Atmos");
+  });
+
+  it("never pushes a row past the content width", async () => {
+    const u = await mount(BADGED);
+    for (const l of lines(u)) expect(l.length).toBeLessThanOrEqual(TEST_CONTENT_WIDTH);
+  });
+
+  it("adds features when the terminal is wide enough to carry them", async () => {
+    const u = await mountWide(BADGED, 120);
+    expect(u.frame()).toContain("Dolby Vision");
+  });
+
+  it("shows nothing where the release name carries no quality facts", async () => {
+    const u = await mount([t("z9", "gentoo stage3 tarball")]);
+    expect(u.frame()).not.toContain("1080p");
+    expect(u.frame()).not.toContain("Dolby Vision");
+  });
+});
+
+// Grouping. Two releases of Kestrel plus one Ashfall: the duplicate collapses to
+// a heading, the singleton stays a plain row.
+const GROUPABLE = [
+  t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+  t("k2", "Kestrel.2010.2160p.WEB-DL"),
+  t("a1", "Ashfall.1999.1080p"),
+];
+
+describe("Results grouping", () => {
+  // At a WIDE content width throughout. At 80 columns the list has ~61 and
+  // "Kestrel (2010)" renders as "Kestrel (…", so every assertion here would be
+  // testing the truncator rather than the grouping.
+  const mountGrouped = () => mountWide(GROUPABLE, 120);
+
+  it("collapses many releases of one title to a heading with a count", async () => {
+    const u = await mountGrouped();
+    // The parsed title and year, not a release name.
+    expect(u.frame()).toContain("Kestrel (2010)");
+    expect(u.frame()).toContain("\u00d72");
+    // Collapsed: neither release name is on screen.
+    expect(u.frame()).not.toContain("BluRay");
+    expect(u.frame()).not.toContain("WEB-DL");
+  });
+
+  it("leaves a lone release as a plain row", async () => {
+    const u = await mountGrouped();
+    // No heading, no count — the release name itself is the row.
+    expect(u.frame()).toContain("Ashfall.1999.1080p");
+    expect(u.frame()).not.toContain("Ashfall (1999)");
+  });
+
+  it("still reports the result count, not the row count", async () => {
+    // 3 results behind 2 rows. The panel counts results, matching the browser.
+    const u = await mountGrouped();
+    expect(u.frame()).toContain("Results (3)");
+  });
+
+  it("expands the group under the cursor on space, and collapses it again", async () => {
+    const u = await mountGrouped();
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    expect(u.frame()).toContain("WEB-DL");
+    // The heading stays, with its count.
+    expect(u.frame()).toContain("Kestrel (2010)");
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).not.toContain("BluRay"));
+  });
+
+  it("turns grouping off with g, showing every release", async () => {
+    const u = await mountGrouped();
+    u.press("g");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    // No headings at all now.
+    expect(u.frame()).not.toContain("Kestrel (2010)");
+    expect(u.frame()).not.toContain("\u00d72");
+  });
+
+  it("acts on the group's best release when the cursor is on a heading", async () => {
+    // `y` copies the magnet of whatever the cursor is on. On a collapsed heading
+    // that must be its first member — the reason every action key resolves
+    // through resultAt rather than indexing `results` directly, which after
+    // grouping would be a different row entirely.
+    const copyMagnet = vi.fn();
+    searchState.current = settled(GROUPABLE);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "linux iso", contentWidth: 120, cols: 139, copyMagnet })}>
+        <Results />
+      </StoreContext.Provider>,
+      { cols: 139 },
+    );
+    const u = ui;
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (3)"));
+    u.press("y");
+    await vi.waitFor(() => expect(copyMagnet).toHaveBeenCalled());
+    expect(copyMagnet.mock.calls[0]![0]).toMatchObject({
+      name: "Kestrel.2010.1080p.BluRay.x264",
+    });
+  });
+});
+
+describe("Results grouping keeps the cursor put", () => {
+  // THE REGRESSION THIS GUARDS. An infoHash is not a unique row identity: an
+  // expanded group's heading and its first member both resolve to members[0], and
+  // the heading has the lower index. While selRef matched on the hash alone,
+  // arrowing onto that first member and then receiving one more streamed result
+  // dragged the cursor back up to the heading — the exact wandering-cursor
+  // problem selRef exists to prevent, reintroduced through grouping.
+  it("stays on a group member when a later frame adds a result", async () => {
+    const u = await mountWide(GROUPABLE, 120);
+
+    // Open the group and step onto its first member.
+    u.press(" ");
+    await vi.waitFor(() => expect(u.frame()).toContain("BluRay"));
+    u.press("j");
+    await vi.waitFor(() => expect(u.frame()).toMatch(/\u276f.*BluRay/));
+
+    // A later source answers. `p` only toggles the preview flag (which stays off
+    // at this width with no OMDb key) and is here purely to drive one more render
+    // now that the mocked search state has changed — the harness has no rerender.
+    searchState.current = settled([...GROUPABLE, t("n1", "Tin.Rivers.2024.2160p.WEB-DL")]);
+    u.press("p");
+    await vi.waitFor(() => expect(u.frame()).toContain("Results (4)"));
+
+    // Still on the member, not yanked up to the heading above it.
+    expect(u.frame()).toMatch(/\u276f.*BluRay/);
+  });
+});

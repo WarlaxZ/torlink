@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header>
+    <header id="page-header">
       <h1>torlnk</h1>
       <!-- Search / For You / Saved / Queue. Buttons rather than links or a
            router: it is one page with four panes, and a URL that could be
@@ -87,49 +87,72 @@
           <button id="save-search" type="button">save search</button>
         </form>
 
-        <!-- Category tabs, built by app.js from GET /api/sources. Empty in the
-             markup on purpose: the group list depends on config (the adult
-             category is absent from the response when it is off), so a
-             hardcoded tab here could show a category the server will not
-             search. -->
-        <div id="tabs" class="tabs" role="tablist"></div>
+        <!-- Tabs and controls in one PINNED strip. A browse is 25,000px of
+             document, and both of these were scrolling away with it: changing
+             category or sort meant scrolling back to the top first.
 
-        <div class="controls">
-          <label class="control" for="sort">
-            <span>sort</span>
-            <select id="sort">
-              <!-- "default" is the server's own order (seeders, then recency).
-                   It is the initial selection and must stay that way: the TUI
-                   shows that order for the same query. -->
-              <option value="none" selected>default</option>
-              <option value="seeders:desc">seeders ▾</option>
-              <option value="seeders:asc">seeders ▴</option>
-              <option value="size:desc">size ▾</option>
-              <option value="size:asc">size ▴</option>
-              <option value="added:desc">added ▾</option>
-              <option value="added:asc">added ▴</option>
-              <option value="source:asc">source ▴</option>
-              <option value="source:desc">source ▾</option>
-            </select>
-          </label>
-          <label class="control" for="filter">
-            <span>filter</span>
-            <input id="filter" type="text" placeholder="narrow these results" autocomplete="off" />
-          </label>
-          <label class="control control-check" for="alive">
-            <input id="alive" type="checkbox" />
-            <span>alive only</span>
-          </label>
-          <!-- Shown only on the tabs that have artwork to show, by app.ts:
-               a grid of empty frames is worse than the list it replaced. -->
-          <label class="control" id="layout-control" for="layout" hidden>
-            <span>layout</span>
-            <select id="layout">
-              <option value="list" selected>list</option>
-              <option value="grid">grid</option>
-            </select>
-          </label>
-          <span id="search-progress" class="progress"></span>
+             The search form above is deliberately NOT in here — it is 100px on
+             its own, which is too much of a phone viewport to spend
+             permanently. `/` focuses it from anywhere instead (app.ts).
+
+             Its height is measured into --toolbar-h rather than hardcoded,
+             because both of these strips wrap: the preview pane's sticky offset
+             reads that variable, and a constant would leave a gap at one width
+             and an overlap at another. -->
+        <div id="toolbar" class="toolbar">
+          <!-- Category tabs, built by app.js from GET /api/sources. Empty in the
+               markup on purpose: the group list depends on config (the adult
+               category is absent from the response when it is off), so a
+               hardcoded tab here could show a category the server will not
+               search. -->
+          <div id="tabs" class="tabs" role="tablist"></div>
+
+          <div class="controls">
+            <label class="control" for="sort">
+              <span>sort</span>
+              <select id="sort">
+                <!-- "default" is the server's own order (seeders, then recency).
+                     It is the initial selection and must stay that way: the TUI
+                     shows that order for the same query. -->
+                <option value="none" selected>default</option>
+                <option value="seeders:desc">seeders ▾</option>
+                <option value="seeders:asc">seeders ▴</option>
+                <option value="size:desc">size ▾</option>
+                <option value="size:asc">size ▴</option>
+                <option value="added:desc">added ▾</option>
+                <option value="added:asc">added ▴</option>
+                <option value="source:asc">source ▴</option>
+                <option value="source:desc">source ▾</option>
+              </select>
+            </label>
+            <label class="control" for="filter">
+              <span>filter</span>
+              <input id="filter" type="text" placeholder="narrow these results" autocomplete="off" />
+            </label>
+            <label class="control control-check" for="alive">
+              <input id="alive" type="checkbox" />
+              <span>alive only</span>
+            </label>
+            <!-- Many uploads of one film collapse to one row. CHECKED by default,
+                 matching emptyView(): a browse routinely returns four of
+                 everything, and one measured search returned 129 results that
+                 were 21 actual things. Remembered in localStorage, read back
+                 through parseGrouping. -->
+            <label class="control control-check" for="group">
+              <input id="group" type="checkbox" checked />
+              <span>group</span>
+            </label>
+            <!-- Shown only on the tabs that have artwork to show, by app.ts:
+                 a grid of empty frames is worse than the list it replaced. -->
+            <label class="control" id="layout-control" for="layout" hidden>
+              <span>layout</span>
+              <select id="layout">
+                <option value="list" selected>list</option>
+                <option value="grid">grid</option>
+              </select>
+            </label>
+            <span id="search-progress" class="progress"></span>
+          </div>
         </div>
 
         <p id="search-status" class="empty">Search across every enabled source — or submit a blank box to browse.</p>
@@ -146,6 +169,13 @@
                the plot comes from OMDb and the heading from a torrent's release
                name, both of them strangers' strings. -->
           <aside id="preview" class="preview card" hidden>
+            <!-- Only visible in the narrow bottom-bar skin, where the pane
+                 overlays the list and there has to be a way out of it. At wide
+                 widths it sits in its own column and closing it would leave a
+                 hole, so CSS hides it there. -->
+            <button id="preview-close" class="preview-close" type="button" aria-label="Close preview">
+              ✕
+            </button>
             <div id="preview-poster" class="poster"></div>
             <p id="preview-title" class="preview-title"></p>
             <p id="preview-sub" class="preview-sub"></p>
@@ -232,6 +262,11 @@
         <p id="empty" class="empty">Nothing in the queue.</p>
       </section>
     </main>
+
+    <!-- Shown by app.ts after roughly two viewports of scroll. Outside <main> so
+         it is not hidden with a pane, and fixed rather than sticky so it does not
+         need a positioned ancestor to travel in. -->
+    <button id="to-top" class="to-top" type="button" hidden>↑ top</button>
 
     <script type="module" src="/app.js"></script>
   </body>

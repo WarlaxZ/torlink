@@ -6,15 +6,26 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 //
-// THREE IMPORTS LEAVE THIS DIRECTORY, all deliberate. `../wire` is types-only
+// FOUR IMPORTS LEAVE THIS DIRECTORY, all deliberate. `../wire` is types-only
 // and erased at build time. `../../util/resultSort` and
 // `../../util/resultFilter` are *value* imports of the TUI's own sort and
 // filter — they were `src/ui/sort.ts` and `src/ui/filter.ts` until this file
 // needed them, and reimplementing either here is the copy-then-drift bug this
 // codebase has hit four times (uploadSpeed, the byte formatter, the progress
-// unit, the API path table). Both are dependency-free and `platform: "browser"`
-// in tsup.web.config.ts fails the build if that ever stops being true.
+// unit, the API path table). `../../util/resultGroup` is the same arrangement
+// for title grouping, and the TUI's results list renders the same rows from the
+// same `groupRowPlan`. All three are dependency-light and `platform: "browser"`
+// in tsup.web.config.ts fails the build if that ever stops being true —
+// resultGroup reaches `parse-torrent-title` through util/release.ts, which the
+// bundle already carries for streamFlow.ts.
+import { hintForGroup } from "../../util/release";
 import { filterResults } from "../../util/resultFilter";
+import {
+  groupResults,
+  groupRowPlan,
+  type GroupRow,
+  type ResultGroup,
+} from "../../util/resultGroup";
 import { sortResults, type Sort } from "../../util/resultSort";
 import { formatBytes, type DashRow } from "./dashboard";
 import type { PublicSearchResult, PublicSearchSnapshot, SourcesResponse } from "../wire";
@@ -42,6 +53,12 @@ export {
   type SortDir,
   type SortField,
 } from "../../util/resultSort";
+export {
+  groupCountLabel,
+  resultAtRow,
+  type GroupRow,
+  type ResultGroup,
+} from "../../util/resultGroup";
 
 /** The pseudo-tab that searches every enabled source, as `parseSearchParams` names it. */
 export const ALL_TAB = "All";
@@ -101,6 +118,13 @@ export interface SearchView {
   sort: Sort;
   hideDead: boolean;
   textFilter: string;
+  /**
+   * Whether many releases of one title collapse to one row.
+   *
+   * A view preference, not a search parameter: it changes how the rows already
+   * fetched are presented, so toggling it never re-runs a 23-source fan-out.
+   */
+  grouped: boolean;
 }
 
 export function emptyView(): SearchView {
@@ -117,6 +141,10 @@ export function emptyView(): SearchView {
     sort: "none",
     hideDead: false,
     textFilter: "",
+    // ON. A browse of one category routinely returns four uploads of every film,
+    // and one measured search returned 129 results that were 21 actual things.
+    // The list is the product; showing it duplicated by default is the bug.
+    grouped: true,
   };
 }
 
@@ -137,6 +165,64 @@ export function visibleResults(
   const all = view.snapshot?.results ?? [];
   return sortResults(filterResults(all, view.hideDead, view.textFilter, reportsHealth), view.sort);
 }
+
+/**
+ * The groups to render: {@link visibleResults}, grouped.
+ *
+ * Grouping runs AFTER filter and sort, for two reasons. A filter must narrow the
+ * list rather than narrow within groups — typing "ashfall" should leave one row,
+ * not one group per title with the misses hidden inside. And group order then
+ * follows whatever sort is selected, so "seeders ▾" still means seeders ▾.
+ */
+export function visibleGroups(
+  view: SearchView,
+  reportsHealth: (source: string) => boolean,
+): ResultGroup<PublicSearchResult>[] {
+  // THE HINT IS NOT OPTIONAL for cross-surface agreement. The TUI groups with
+  // hintForSection(section); passing nothing here would let the same feed group
+  // differently in the two front ends, because the hint changes whether
+  // parseRelease reads a name as a film or a series — and that changes the shape
+  // of the key. hintForGroup is the "Movies"/"TV" → movie/series translation the
+  // browser's tab names need, and it already exists for the badges.
+  return groupResults(visibleResults(view, reportsHealth), hintForGroup(view.group));
+}
+
+/**
+ * The flat row list `app.ts` renders — group headings and release rows in order.
+ *
+ * The same `groupRowPlan` the TUI's results list renders, which is the point of
+ * it living in `src/util`: "which rows are there" is one decision with two
+ * renderers, not two implementations.
+ *
+ * Grouping off yields one release row per result, so the toggle is genuinely a
+ * view option rather than a second code path — and the row shape `app.ts` binds
+ * to is identical either way.
+ */
+export function resultRowPlan(
+  view: SearchView,
+  reportsHealth: (source: string) => boolean,
+  expanded: ReadonlySet<string>,
+): GroupRow<PublicSearchResult>[] {
+  const shown = visibleResults(view, reportsHealth);
+  if (!view.grouped) {
+    // Keyed on the info hash rather than a group key: this is the identity
+    // selection, focus restoration and the cached-marker lookup already use.
+    return shown.map((result) => ({
+      kind: "release" as const,
+      key: result.infoHash,
+      result,
+      inGroup: false,
+    }));
+  }
+  // Same hint as visibleGroups, and for the same reason.
+  return groupRowPlan(groupResults(shown, hintForGroup(view.group)), expanded);
+}
+
+// NOT GATED BY TAB, unlike previewApplies. Grouping is offered everywhere: on
+// Games, Music and Books the release names are not film or show names, so the
+// parser finds little to merge and the list is left almost as it was — which is
+// the safe direction. There is deliberately no `groupingApplies()` here: a
+// predicate that always returns true is a placeholder pretending to be a rule.
 
 /** "12/23 sources", the same fraction the TUI's spinner shows. */
 export function progressLabel(snapshot: PublicSearchSnapshot | null): string {
@@ -471,4 +557,18 @@ export type ResultLayout = "list" | "grid";
  */
 export function parseLayout(raw: string | null): ResultLayout {
   return raw === "grid" ? "grid" : "list";
+}
+
+/**
+ * A remembered grouping preference, or the default.
+ *
+ * Parsed rather than cast for the reason {@link parseLayout} is: the value comes
+ * from `localStorage`, which is user-writable and survives upgrades, so a stale
+ * or hand-edited entry must fall back rather than render nothing.
+ *
+ * Anything that is not the explicit opt-out means ON — see {@link emptyView} for
+ * why that is the default rather than the cautious one.
+ */
+export function parseGrouping(raw: string | null): boolean {
+  return raw !== "off";
 }
