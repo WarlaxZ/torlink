@@ -592,6 +592,132 @@ select:focus-visible {
    styling here because that state does not exist on screen. --accent, not
    --dim: this is the one positive fact in the meta line and should read as
    one, the same way .result-source already does. */
+/* ---- grouped results ---------------------------------------------------- */
+
+/* A heading stands in for every release of one title. It differs from a release
+   row by STRUCTURE — a disclosure control and a count where a release row has a
+   release name — and NOT by colour. A heading distinguishable only by a new
+   accent would make a 40-row grouped list read as busier than the 210-row one it
+   replaced, which is the opposite of the point. */
+.result-group {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  gap: 0 0.5rem;
+  align-items: start;
+}
+
+/* With artwork, the thumbnail sits between the arrow and the text — the same
+   column order a release row uses, so the two line up down the page. */
+.result-group.result-with-poster {
+  grid-template-columns: 1.25rem 3rem minmax(0, 1fr);
+}
+
+.group-toggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--dim);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.group-toggle:hover {
+  color: var(--accent);
+  border-color: transparent;
+}
+
+/* The title, not a release name: bolder than a member row's, because it is the
+   answer to "what is this" where the rows below answer "which copy". */
+.group-title {
+  font-weight: 600;
+  white-space: normal;
+}
+
+.group-count {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A group in GRID layout: still a poster card, with the count and the disclosure
+   under the title. `.result-card` already lays the card out as a stack, so this
+   only has to place the two extra controls on one line. */
+.result-group-card {
+  position: relative;
+}
+
+.result-group-card .group-count {
+  margin-top: 0.15rem;
+}
+
+/* Top-right of the card rather than in the stack: it is a control on the card,
+   not another line of its metadata.
+
+   It sits ON the poster, so unlike the list row's toggle it needs its own
+   surface — a 9x20px dim glyph over film artwork is invisible and untappable.
+   The backdrop is what makes it a control; the 1.75rem box is what makes it a
+   target. */
+.result-group-card .group-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: rgb(0 0 0 / 70%);
+  color: var(--fg);
+  font-size: 0.9rem;
+}
+
+.result-group-card .group-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* A release inside an open group. Indented with a spine so the belonging is
+   visible without a second colour — and the name keeps the weight it always had,
+   so an expanded group looks like the list it is. */
+.result-member {
+  margin-left: 1.25rem;
+  border-left: 2px solid var(--line);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* The indent and spine are a LIST idiom. In the grid every card is the same size
+   by definition, so an indented one just breaks the columns — belonging is shown
+   there by the member cards following their group card instead. */
+.results-grid .result-member {
+  margin-left: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+/* Quality facts parsed out of the release name (releaseBadges). Dim and
+   bordered, NOT accented: --accent is spoken for by "this source reports health"
+   and "this is cached", both of which are claims about the swarm. A resolution is
+   not that kind of news, and four accented chips per row would drown the two
+   markers that are. */
+.tag-quality {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
 .tag-cached {
   display: inline-block;
   margin-left: 0.5rem;

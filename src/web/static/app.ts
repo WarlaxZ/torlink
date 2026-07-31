@@ -37,12 +37,16 @@ import {
   debridAddedNotice,
   debridAddLabel,
   emptyView,
+  groupCountLabel,
   modeForQuery,
+  parseGrouping,
   parseLayout,
   parseSort,
   previewApplies,
   reportsHealthLookup,
+  resultAtRow,
   resultMeta,
+  resultRowPlan,
   rowForPlay,
   searchStatus,
   searchUrl,
@@ -51,6 +55,7 @@ import {
   tabClickPlan,
   visibleResults,
   type AddVia,
+  type GroupRow,
   type PublicSearchResult,
   type PublicSearchSnapshot,
   type ResultLayout,
@@ -137,6 +142,11 @@ import {
   pickNoneLine,
   type FeatureState,
 } from "../../util/releasePick";
+// The quality badges, and the group-name → parser-hint seam. `hintForGroup`
+// already exists for exactly this: the web's tabs are "Movies"/"TV" while the
+// TUI's sections are lowercase keys, and that translation is written down once.
+import { releaseBadges } from "../../util/releaseBadges";
+import { hintForGroup } from "../../util/release";
 import type { ReccMedium } from "../../util/autoPlayableFilm";
 import {
   autoPlayableFilm,
@@ -218,6 +228,7 @@ const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
+const groupCheck = el<HTMLInputElement>("group");
 const layoutControl = el<HTMLLabelElement>("layout-control");
 const layoutSelect = el<HTMLSelectElement>("layout");
 const searchProgress = el<HTMLSpanElement>("search-progress");
@@ -878,6 +889,30 @@ function readStoredLayout(): ResultLayout {
 
 let layout: ResultLayout = readStoredLayout();
 
+// Remembered the same way, and read through parseGrouping for the same reason:
+// localStorage is user-writable and survives upgrades.
+const GROUPING_KEY = "torlnk.grouping";
+
+function readStoredGrouping(): boolean {
+  try {
+    return parseGrouping(localStorage.getItem(GROUPING_KEY));
+  } catch {
+    // Default ON even when storage throws — see emptyView().
+    return true;
+  }
+}
+
+// Which group headings are open, by group key. Not persisted: it is a per-search
+// gesture, and a remembered set of keys from an earlier query would expand
+// nothing recognisable on the next one.
+const expandedGroups = new Set<string>();
+
+// The rows currently on screen, as the plan produced them. The keydown handler
+// navigates THIS, not `visibleResults` — with grouping on those two disagree
+// (210 results, ~40 rows), and navigating the wrong one moves the selection to
+// rows that are not rendered.
+let currentRows: GroupRow<PublicSearchResult>[] = [];
+
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
@@ -1005,6 +1040,10 @@ function startSearch(raw: string): void {
   // most sources answer with their own top/latest list; a couple opt out.
   const mode = modeForQuery(query);
   searchView = { ...searchView, query, mode, snapshot: null, running: true };
+  // A new set of rows means the old group keys name nothing. Left in place they
+  // would expand whichever groups of the new search happen to key the same —
+  // "Kestrel 2010" is the same key in every search that returns it.
+  expandedGroups.clear();
   // The box and the state must not disagree: without this, submitting "   "
   // leaves #query showing whitespace while searchView.query (and the URL sent
   // to the server) is already trimmed.
@@ -1188,6 +1227,20 @@ layoutSelect.addEventListener("change", () => {
   }
   // No refetch: both layouts render from the same visibleResults output and the
   // same poster cache, so a toggle costs nothing.
+  renderResults();
+});
+
+groupCheck.addEventListener("change", () => {
+  searchView = { ...searchView, grouped: groupCheck.checked };
+  try {
+    localStorage.setItem(GROUPING_KEY, groupCheck.checked ? "on" : "off");
+  } catch {
+    /* not remembering the preference is survivable; failing the click is not */
+  }
+  // Turning grouping off leaves no headings to be open, and leaving stale keys in
+  // the set would silently re-expand those groups when it is turned back on.
+  if (!groupCheck.checked) expandedGroups.clear();
+  // A view change, not a search change: the same rows, presented differently.
   renderResults();
 });
 
@@ -1389,6 +1442,23 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   return actions;
 }
 
+// How many quality badges a row shows. A stacked 4K remux carries nine, which is
+// a spec sheet rather than the scan aid a list row needs — releaseBadges orders
+// them picture-facts-first precisely so that a slice keeps the useful ones.
+const BADGE_LIMIT = 4;
+
+// createElement + textContent, like everything else here: these strings come from
+// FEATURES and from the parser, but the row they sit in is built from a release
+// name and there is no innerHTML path in this file.
+function appendQualityBadges(meta: HTMLElement, name: string): void {
+  for (const badge of releaseBadges(name, hintForGroup(searchView.group)).slice(0, BADGE_LIMIT)) {
+    const span = document.createElement("span");
+    span.className = "tag-quality";
+    span.textContent = badge;
+    meta.append(span);
+  }
+}
+
 // createElement + textContent only — see the file-level rule. `cachedTag`
 // already folds in `debridCachedCheck`, so this is a straight append-or-not.
 function appendCachedBadge(meta: HTMLElement, result: PublicSearchResult): void {
@@ -1400,11 +1470,85 @@ function appendCachedBadge(meta: HTMLElement, result: PublicSearchResult): void 
   meta.append(badge);
 }
 
+/** What a row needs to also present itself as a group heading. */
+interface GroupFacts {
+  key: string;
+  title: string;
+  year?: number;
+  count: number;
+  expanded: boolean;
+}
+
+/** The heading's display title: "Tin Rivers (2024)", or just the title. */
+function groupHeadingText(facts: GroupFacts): string {
+  return facts.year ? `${facts.title} (${facts.year})` : facts.title;
+}
+
+/**
+ * The expand/collapse control, shared by the list row and the grid card so the
+ * two cannot disagree about what the arrow means or which key it toggles.
+ */
+function groupToggleButton(facts: GroupFacts): HTMLButtonElement {
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "group-toggle";
+  // A text glyph, like .conn's dot: it inherits colour and needs no second rule.
+  toggle.textContent = facts.expanded ? "▾" : "▸";
+  toggle.setAttribute("aria-expanded", String(facts.expanded));
+  toggle.setAttribute(
+    "aria-label",
+    `${facts.expanded ? "Collapse" : "Expand"} ${groupCountLabel(facts.count)} of ${facts.title}`,
+  );
+  tagControl(toggle, facts.key, "disclosure");
+  toggle.addEventListener("click", () => {
+    if (expandedGroups.has(facts.key)) expandedGroups.delete(facts.key);
+    else expandedGroups.add(facts.key);
+    renderResults();
+  });
+  return toggle;
+}
+
+/** The heading facts for a group row, so the row and the card agree. */
+function groupFactsFor(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): GroupFacts {
+  const facts: GroupFacts = {
+    key: row.key,
+    title: row.title,
+    count: row.members.length,
+    expanded: row.expanded,
+  };
+  if (row.year !== undefined) facts.year = row.year;
+  return facts;
+}
+
+/** "5 releases", as a chip. */
+function groupCountChip(count: number): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.className = "group-count";
+  chip.textContent = groupCountLabel(count);
+  return chip;
+}
+
 // Same createElement/textContent rule as every other list here: a release name
 // is written by whoever uploaded the torrent.
-function renderResultCard(result: PublicSearchResult): HTMLLIElement {
+//
+// `group` present means this card stands for a whole title rather than one
+// release: it shows the parsed title, a count and a disclosure control. Grid
+// layout exists to show artwork, so a collapsed group has to stay a CARD here —
+// rendering the list-shaped heading into the grid turned a poster wall into 69
+// full-width rows, which is the list with extra steps.
+function renderResultCard(
+  result: PublicSearchResult,
+  rowKey: string,
+  group?: GroupFacts,
+  inGroup = false,
+): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row result-card";
+  if (group) li.classList.add("result-group-card");
+  // A member card must say so as well. Without this an expanded group's cards
+  // were indistinguishable from top-level ones — the grid just grew four more
+  // posters with nothing to say they belonged to the card above.
+  if (inGroup) li.classList.add("result-member");
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   // The poster is the card's primary target and what it does is select the
@@ -1414,7 +1558,7 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
   posterButton.type = "button";
   posterButton.className = "recc-poster";
   posterButton.title = result.name;
-  tagControl(posterButton, result.infoHash, "poster");
+  tagControl(posterButton, rowKey, "poster");
   const frame = document.createElement("div");
   frame.className = "poster";
   posterButton.append(frame);
@@ -1425,27 +1569,40 @@ function renderResultCard(result: PublicSearchResult): HTMLLIElement {
 
   const name = document.createElement("button");
   name.type = "button";
-  name.className = "result-name row-name";
-  name.textContent = result.name;
-  name.title = result.name;
-  tagControl(name, result.infoHash, "name");
+  name.className = group ? "result-name row-name group-title" : "result-name row-name";
+  // A group card names the TITLE; a release card names the release.
+  const label = group ? groupHeadingText(group) : result.name;
+  name.textContent = label;
+  name.title = label;
+  tagControl(name, rowKey, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const meta = document.createElement("span");
   meta.className = "row-meta";
   meta.textContent = resultMeta(result, sources);
+  appendQualityBadges(meta, result.name);
   appendCachedBadge(meta, result);
 
-  li.append(posterButton, name, meta, resultActions(result, result.infoHash));
+  li.append(posterButton, name);
+  if (group) li.append(groupCountChip(group.count), groupToggleButton(group));
+  li.append(meta, resultActions(result, rowKey));
   return li;
 }
 
 // Every node below is createElement + textContent. A release name is written by
 // whoever uploaded the torrent, so an innerHTML path here is stored XSS from a
 // stranger on a public tracker.
-function renderResult(result: PublicSearchResult): HTMLLIElement {
+function renderResult(
+  result: PublicSearchResult,
+  rowKey: string,
+  inGroup: boolean,
+): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row";
+  // Marks a release that belongs to the heading above it. Purely structural — the
+  // CSS indents it and draws a spine, rather than recolouring it: a member row
+  // must still read as the same kind of row it was before grouping existed.
+  if (inGroup) li.classList.add("result-member");
   li.setAttribute("aria-selected", String(result.infoHash === selectedHash));
 
   const head = document.createElement("div");
@@ -1456,7 +1613,7 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   name.className = "result-name";
   name.textContent = result.name;
   name.title = result.name;
-  tagControl(name, result.infoHash, "name");
+  tagControl(name, rowKey, "name");
   name.addEventListener("click", () => selectResult(result));
 
   const badge = document.createElement("span");
@@ -1467,9 +1624,10 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   const meta = document.createElement("span");
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
+  appendQualityBadges(meta, result.name);
   appendCachedBadge(meta, result);
 
-  const actions = resultActions(result, result.infoHash);
+  const actions = resultActions(result, rowKey);
 
   const withPoster = postersApply(searchView.group, sources?.omdbConfigured === true);
   if (!withPoster) {
@@ -1487,6 +1645,70 @@ function renderResult(result: PublicSearchResult): HTMLLIElement {
   body.append(head, meta, actions);
   li.append(frame, body);
   mountResultPoster(result.name, frame, true);
+  return li;
+}
+
+/**
+ * A group heading: one title standing in for every release of it.
+ *
+ * Differs from a release row by STRUCTURE, not by colour — a disclosure control,
+ * a clean title, and a count where a release row has a release name. A heading
+ * distinguishable only by a new accent would make a 40-row grouped list read as
+ * noisier than the 210-row one it replaced.
+ *
+ * Every action here acts on `resultAtRow(row)`, the group's first member, which
+ * under the current sort is its best one. No new picking logic.
+ */
+function renderGroupRow(row: Extract<GroupRow<PublicSearchResult>, { kind: "group" }>): HTMLLIElement {
+  const best = row.members[0]!;
+  const li = document.createElement("li");
+  li.className = "row result-group";
+  // Selected when its own best release is — so a collapsed heading reads as
+  // selected rather than the selection appearing to vanish on collapse.
+  li.setAttribute("aria-selected", String(best.infoHash === selectedHash));
+
+  const facts = groupFactsFor(row);
+  const toggle = groupToggleButton(facts);
+
+  const head = document.createElement("div");
+  head.className = "result-head";
+
+  const title = document.createElement("button");
+  title.type = "button";
+  title.className = "result-name group-title";
+  // The parsed title and year, not a release name — this is the one row in the
+  // list that knows what the thing is actually called.
+  title.textContent = groupHeadingText(facts);
+  title.title = title.textContent;
+  tagControl(title, row.key, "name");
+  // Selecting the heading selects its best release, so the preview and every
+  // action have a real torrent to work with.
+  title.addEventListener("click", () => selectResult(best));
+
+  head.append(title, groupCountChip(row.members.length));
+
+  const meta = document.createElement("span");
+  meta.className = "result-meta";
+  meta.textContent = resultMeta(best, sources);
+  appendQualityBadges(meta, best.name);
+  appendCachedBadge(meta, best);
+
+  const body = document.createElement("div");
+  body.className = "group-body";
+  body.append(head, meta, resultActions(best, row.key));
+
+  if (!postersApply(searchView.group, sources?.omdbConfigured === true)) {
+    li.append(toggle, body);
+    return li;
+  }
+  const frame = document.createElement("div");
+  frame.className = "poster result-thumb";
+  li.classList.add("result-with-poster");
+  li.append(toggle, frame, body);
+  // The BEST MEMBER's name, not the group title: resultPosters caches by release
+  // name, so sharing the member's key means the heading and its expanded rows
+  // resolve to one lookup instead of two.
+  mountResultPoster(best.name, frame, true);
   return li;
 }
 
@@ -1508,14 +1730,37 @@ function renderResults(): void {
 
   resultsList.classList.toggle("recc-grid", effective === "grid");
   resultsList.classList.toggle("results-grid", effective === "grid");
+
+  // THE ROW PLAN IS THE ONLY SOURCE OF ROW KEYS. With grouping on, a row key is a
+  // group key — not an info hash — so anything that matches rows by key must read
+  // them from here. Deriving them from `shown` instead compiles fine and passes
+  // every unit test, and then silently pins the tab stop to row one, navigates
+  // 210 results across ~40 rendered rows, and drops focus after every re-render.
+  currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
+  const rowKeys = currentRows.map((row) => row.key);
+  // The selected ROW, not the selected hash: a heading's key is a group key, so
+  // comparing selectedHash to it would never match.
+  const selectedRowKey =
+    currentRows.find((row) => resultAtRow(row)?.infoHash === selectedHash)?.key ?? null;
+
   // Read BEFORE replaceChildren: afterwards the focused node is detached and
   // document.activeElement has already fallen back to <body>.
   const focusBefore = captureRowFocus(resultsList);
   resultsList.replaceChildren(
-    ...shown.map((r) => (effective === "grid" ? renderResultCard(r) : renderResult(r))),
+    ...currentRows.map((row) => {
+      if (row.kind === "group") {
+        // Grid layout keeps a group as a CARD — it exists to show artwork, and a
+        // list-shaped heading in there turns a poster wall back into a list.
+        return effective === "grid"
+          ? renderResultCard(row.members[0]!, row.key, groupFactsFor(row))
+          : renderGroupRow(row);
+      }
+      return effective === "grid"
+        ? renderResultCard(row.result, row.key, undefined, row.inGroup)
+        : renderResult(row.result, row.key, row.inGroup);
+    }),
   );
-  const rowKeys = shown.map((r) => r.infoHash);
-  applyRovingTabIndex(rowKeys);
+  applyRovingTabIndex(rowKeys, selectedRowKey);
   restoreRowFocus(resultsList, focusBefore, rowKeys);
 
   const status = searchStatus(searchView, shown.length);
@@ -1608,10 +1853,13 @@ publishStickyHeights();
 // Only the row's PRIMARY control (its name, or a group heading) roves. The
 // action buttons stay at -1 and are reached by tabbing within the focused row,
 // which is what stops Tab from walking 210 rows × 5 buttons.
-function applyRovingTabIndex(rowKeys: readonly string[]): void {
-  const roving = rovingRowKey(rowKeys, selectedHash);
+function applyRovingTabIndex(rowKeys: readonly string[], selectedRowKey: string | null): void {
+  const roving = rovingRowKey(rowKeys, selectedRowKey);
   for (const control of resultsList.querySelectorAll<HTMLElement>("[data-control]")) {
-    const primary = control.dataset.control === "name" || control.dataset.control === "group";
+    // Only the row's name (a release name, or a group's title) roves. Action
+    // buttons stay at -1 and are reached by tabbing within the focused row —
+    // that is what stops Tab from walking 210 rows × 5 buttons.
+    const primary = control.dataset.control === "name";
     control.tabIndex = primary && control.dataset.rowKey === roving ? 0 : -1;
   }
 }
@@ -1637,20 +1885,23 @@ resultsList.addEventListener("keydown", (event) => {
   // Let a text input inside a row (there are none today, but rows grow controls)
   // keep its own Home/End behaviour.
   if (event.target instanceof HTMLInputElement) return;
-  const shown = visibleResults(searchView, reportsHealthLookup(sources));
-  // Three fallbacks, and each one is load-bearing. `event.target` is the focused
+  // currentRows, NOT visibleResults: with grouping on those two disagree — 210
+  // results behind ~40 rendered rows — and navigating the results would move the
+  // selection to rows that are not on the page.
+  const rowKeys = currentRows.map((row) => row.key);
+  // Three fallbacks, and each is load-bearing. `event.target` is the focused
   // control in the normal case. Focus can also sit on the row or the list itself
   // (a click on a row's padding), where the target carries no row key — without
-  // the activeElement and selection fallbacks the arrows would jump back to row
-  // one instead of moving from where the user is.
-  const from = rowKeyOf(event.target) ?? rowKeyOf(document.activeElement) ?? selectedHash;
-  const target = nextRowKey(
-    shown.map((r) => r.infoHash),
-    from,
-    step,
-  );
+  // the activeElement and selection fallbacks the arrows jump back to row one
+  // instead of moving from where the user is.
+  const from =
+    rowKeyOf(event.target) ??
+    rowKeyOf(document.activeElement) ??
+    currentRows.find((row) => resultAtRow(row)?.infoHash === selectedHash)?.key ??
+    null;
+  const target = nextRowKey(rowKeys, from, step);
   if (target === null) return;
-  const result = shown.find((r) => r.infoHash === target);
+  const result = resultAtRow(currentRows.find((row) => row.key === target)!);
   if (!result) return;
   // Return AFTER deciding there is somewhere to go: at the end of the list the
   // arrow should scroll the page as usual rather than dead-stop.
@@ -2588,6 +2839,12 @@ function openApp(payload: StatusPayload): void {
   showView(view);
   renderTabs();
   layoutSelect.value = layout;
+  // The remembered grouping preference, into both the control and the view state
+  // — the checkbox is `checked` in the markup to match emptyView()'s default, so
+  // without this an opted-out user sees a ticked box over a grouped list.
+  const grouped = readStoredGrouping();
+  groupCheck.checked = grouped;
+  searchView = { ...searchView, grouped };
   renderResults();
   // #app was `hidden` until three lines ago, so every measurement taken before
   // now was of an unrendered element. This is the first point at which the header
