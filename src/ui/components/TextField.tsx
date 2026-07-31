@@ -12,6 +12,14 @@ export interface TextFieldProps {
   // Previously-run values (most-recent first). When present, the up arrow
   // recalls them and the down arrow walks back toward the live draft.
   history?: string[];
+  /**
+   * What tab should complete the field to, or null for "nothing to complete".
+   * When set, tab completes instead of calling `onExitDown` — see the tab arm
+   * in `useInput` for why that swap is safe.
+   */
+  completion?: string | null;
+  /** Called after tab completed the field, with the text written into it. */
+  onComplete?: (text: string) => void;
   width?: number;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
@@ -84,6 +92,8 @@ export function TextField({
   placeholder = "",
   mask = false,
   history,
+  completion = null,
+  onComplete,
   width,
   onChange,
   onSubmit,
@@ -139,6 +149,16 @@ export function TextField({
         return;
       }
       if (key.tab) {
+        // Completion wins over leaving the field, but ONLY when there is
+        // something to complete: the rest of the time tab still exits, which is
+        // what the results pane and the splash both rely on. Both callers read
+        // the same `completion` value this does, so no ordering between Ink's
+        // input handlers matters.
+        if (completion !== null) {
+          recall(completion);
+          onComplete?.(completion);
+          return;
+        }
         onExitDown?.();
         return;
       }
