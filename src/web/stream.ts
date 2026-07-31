@@ -26,7 +26,13 @@ import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../
 import type { ProbeCache } from "../core/probeCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
 import type { StreamInfoResponse } from "./wire";
-import { HTTP_ONLY, resolveProxyTarget, resolveRedirect, type ProxyRefusal } from "./proxyTarget";
+import {
+  HTTP_AND_HTTPS,
+  HTTP_ONLY,
+  resolveProxyTarget,
+  resolveRedirect,
+  type ProxyRefusal,
+} from "./proxyTarget";
 
 /** Diagnostics sink. Same contract as the server's: injected, never `console`. */
 export type StreamLog = (message: string) => void;
@@ -62,6 +68,12 @@ export interface StreamDeps {
    * with a perfectly good manifest show a card claiming it cannot be played.
    */
   resolveHls?: (session: StreamSession, index: number) => Promise<string | null>;
+  /**
+   * Proxy debrid media through this server rather than redirecting to the
+   * provider. Resolved per request by the caller — this module never loads
+   * config, it is handed what it needs.
+   */
+  proxyDebrid?: boolean;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -407,6 +419,11 @@ export async function handleStreamRequest(
   }
 
   if (session.backend === "debrid") {
+    if (deps.proxyDebrid === true) {
+      // HTTP_AND_HTTPS: a provider CDN is https, and this is the only call site
+      // allowed to reach one.
+      return proxyUpstream(deps, req, res, file.url, { allowedProtocols: HTTP_AND_HTTPS });
+    }
     // 302, not 307: the method is GET/HEAD either way, and 302 is what every
     // player (and every home-router HTTP client) handles without argument.
     // `Cache-Control: no-store` because an unrestricted link is time-limited

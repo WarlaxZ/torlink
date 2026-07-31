@@ -694,6 +694,95 @@ describe("stream handle — Real-Debrid", () => {
     expect(all).not.toContain(capability);
     expect(all).not.toContain("k=");
   });
+
+  it("302s by default — the flag off must change nothing", async () => {
+    const { base, capability, id } = await rdSession();
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(RD_URL);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("proxies instead of redirecting when the flag is on", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    const s = await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    expect(s.state).toBe("ready");
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    expect(res.status).toBe(200);
+    expect((await res.arrayBuffer()).byteLength).toBe(MEDIA.length);
+    // The client never learns where the bytes came from.
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("forwards a Range while proxying, so seeking still works", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+    const res = await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, {
+      headers: { Range: "bytes=10-19" },
+      // Manual, not "follow": a regression to the 302 branch would have the
+      // upstream (which also honours Range) answer 206 on the client's behalf,
+      // and this test would pass for the wrong reason.
+      redirect: "manual",
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes 10-19/${MEDIA.length}`);
+  });
+
+  it("never logs the upstream url while proxying", async () => {
+    upstream = await startUpstream();
+    const upstreamBase = upstream.base;
+    const reg = registry({
+      idFactory: () => "sid-rd",
+      capabilityFactory: () => "cap-rd",
+      resolveDebridImpl: async () => [
+        { url: `${upstreamBase}/media?secret=SECRETTOKEN123`, filename: "Kestrel.2010.1080p.BluRay.x264.mkv", bytes: MEDIA.length },
+      ],
+    });
+    await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    const base = await start(reg, { streamDeps: { proxyDebrid: true } });
+    // Manual, not "follow": a regression to the 302 branch would hand the
+    // secret-bearing URL to the fetch client as a Location header rather than
+    // logging it, and this test would pass despite the regression.
+    await fetch(`${base}/stream/sid-rd/0?k=cap-rd`, { redirect: "manual" });
+    expect(logs.join("\n")).not.toContain("SECRETTOKEN123");
+  });
 });
 
 // ---------------------------------------------------------------------------

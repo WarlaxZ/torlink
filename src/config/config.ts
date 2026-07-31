@@ -51,6 +51,19 @@ export interface Config {
   // Set once the user has acknowledged that streaming via torrent exposes their
   // IP to the swarm (the no-Real-Debrid path). Absent/false = not yet warned.
   torrentStreamAck?: boolean;
+  // Send debrid media through this server instead of redirecting the client to
+  // the provider's CDN. Absent/false = redirect, which is the cheap default.
+  //
+  // Two reasons to turn it on, and the first applies even to a single user: the
+  // unrestricted link is a bearer credential against the account, and a redirect
+  // hands it to the client, where proxying keeps it server-side. The second is
+  // that every viewer then reaches the provider from this machine's address
+  // rather than their own.
+  //
+  // It is NOT free: every byte is pulled down from the provider and pushed back
+  // up to the viewer, so the cost lands on this machine's upstream — three
+  // remote viewers of a 1080p remux need roughly 75 Mbps of upload.
+  proxyDebridStreams?: boolean;
   // Opt-in adult ("Porn") category. Absent/false = OFF: the Porn tab and its
   // sources are hidden and never searched. A TORLINK_ADULT env var overrides it.
   adultContent?: boolean;
