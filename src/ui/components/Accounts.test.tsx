@@ -9,6 +9,22 @@ function storeStub(): Store {
   return { region: "content", section: "accounts" } as unknown as Store;
 }
 
+/**
+ * A store with the width and height the real pane actually gets. The plain
+ * stub leaves both undefined, so the Panel is unconstrained and never has to
+ * fit its rows — which is why it can't catch a squashed row.
+ */
+function sizedStoreStub(listRows: number): Store {
+  return {
+    region: "content",
+    section: "accounts",
+    contentWidth: 76,
+    listRows,
+  } as unknown as Store;
+}
+
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
 const noop = () => {};
 
 const RD_STATUS: DebridStatus = {
@@ -88,6 +104,69 @@ describe("Accounts", () => {
     expect(frame).toContain("Real-Debrid");
     expect(frame).toContain("TorBox");
     expect(frame).toContain("active");
+  });
+
+  it("keeps each row's name line separate from its status line when the pane is short", () => {
+    // Every provider signed in — five two-line rows, more than a short pane fits.
+    const { lastFrame } = render(
+      <StoreContext.Provider value={sizedStoreStub(14)}>
+        <Accounts
+          {...props({
+            rutrackerUser: "alice",
+            reccConfigured: true,
+            reccStatus: { state: "connected", host: "reccd.local:4100" } as ReccStatus,
+            omdbConfigured: true,
+          })}
+        />
+      </StoreContext.Provider>,
+    );
+    const lines = (lastFrame() ?? "").split("\n");
+
+    // A row's homepage must never share a line with that row's status. When Ink
+    // squashes the two-line cell onto one row the status overprints the name,
+    // producing run-together text like "60d lefte  · real-debrid.com".
+    const homepageLine = lines.find((l) => l.includes("real-debrid.com"));
+    expect(homepageLine).toBeDefined();
+    expect(homepageLine).not.toContain("premium");
+
+    const torboxLine = lines.find((l) => l.includes("torbox.app"));
+    expect(torboxLine).toBeDefined();
+    expect(torboxLine).not.toContain("pro ");
+
+    // The tails of the overprinted domains, which only appear when a row collapses.
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("lefte");
+    expect(frame).not.toContain("youcker.org");
+    expect(frame).not.toContain("setmdbapi.com");
+  });
+
+  it("truncates a long provider name rather than spilling it over the key hints", () => {
+    // reccd has the longest homepage, and the widest hint set (it adds "i import").
+    const { lastFrame } = render(
+      <StoreContext.Provider value={sizedStoreStub(20)}>
+        <Accounts
+          {...props({
+            reccConfigured: true,
+            reccStatus: { state: "connected", host: "reccd.local:4100" } as ReccStatus,
+          })}
+        />
+      </StoreContext.Provider>,
+    );
+    expect(lastFrame() ?? "").toContain("i import");
+  });
+
+  it("scrolls to keep the cursored provider on screen in a pane too short for all of them", async () => {
+    const { lastFrame, stdin } = render(
+      <StoreContext.Provider value={sizedStoreStub(11)}>
+        <Accounts {...props({ omdbConfigured: true })} />
+      </StoreContext.Provider>,
+    );
+    // Not every row fits, so the last one starts off screen.
+    expect(lastFrame() ?? "").not.toContain("omdbapi.com");
+    // Up from the first row wraps to the last, which must scroll into view.
+    stdin.write("[A");
+    await flush();
+    expect(lastFrame() ?? "").toContain("omdbapi.com");
   });
 
   it("offers the make-active key only on a signed-in provider that is not already active", () => {

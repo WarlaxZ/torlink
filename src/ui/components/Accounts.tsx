@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store";
 import { Panel } from "./Panel";
-import { wrapStep } from "../move";
+import { windowStart, wrapStep } from "../move";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { truncate } from "../../util/format";
 import { formatAccountStatus } from "../../integrations/debrid/status";
@@ -176,16 +176,32 @@ export function Accounts({
 
   const panelH = Math.max(5, listRows - 1);
 
+  // Each row is two lines with a blank between, so n rows cost 3n - 1 lines. The
+  // blurb and its margin take the first two, and the panel border the last. Show
+  // as many whole rows as fit and scroll the rest, rather than letting a short
+  // pane clip a provider the cursor can still reach.
+  // An unmeasured pane (no listRows yet) shows everything rather than nothing.
+  const listH = Math.max(2, panelH - 3);
+  const visibleCount = Number.isFinite(listH)
+    ? Math.max(1, Math.floor((listH + 1) / 3))
+    : rows.length;
+  const start = windowStart(clamped, rows.length, visibleCount);
+  const visible = rows.slice(start, start + visibleCount);
+
   return (
     <Panel title="accounts" width={contentWidth} focused={focused} height={panelH}>
       <Box>
         <Text dimColor>Sign in to services that need an account to search or stream.</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
-        {rows.map((r, i) => {
+        {visible.map((r, vi) => {
+          const i = start + vi;
           const here = i === clamped && focused;
           return (
-            <Box key={r.label} marginTop={i > 0 ? 1 : 0}>
+            // Each row is two lines tall (name, then status). Without flexShrink={0}
+            // a pane too short for every row makes Yoga compress the rows instead of
+            // overflowing, and the status ends up overprinting the name on one line.
+            <Box key={r.label} marginTop={vi > 0 ? 1 : 0} flexShrink={0} height={2}>
               <Box width={GUTTER} flexShrink={0}>
                 <Text color={COLOR.accent} bold>{here ? ICON.pointer : ""}</Text>
               </Box>
@@ -193,17 +209,19 @@ export function Accounts({
                 <Text color={r.color} bold={here}>{r.tag}</Text>
               </Box>
               <Box flexGrow={1} minWidth={0} marginLeft={1} flexDirection="column">
-                <Text bold={here} color={here ? COLOR.accent : undefined} dimColor={!here}>
+                {/* truncate, not wrap: a long name would otherwise spill over the
+                    key hints to its right and clip them mid-word. */}
+                <Text bold={here} color={here ? COLOR.accent : undefined} dimColor={!here} wrap="truncate">
                   {r.label}
                   <Text dimColor>{`  ${ICON.dot} ${r.homepage}`}</Text>
                 </Text>
                 {r.signedIn ? (
-                  <Text>
+                  <Text wrap="truncate">
                     <Text color={r.ok ? COLOR.good : COLOR.warn}>{`${r.ok ? ICON.done : ICON.warn} `}</Text>
                     <Text dimColor>{r.status}</Text>
                   </Text>
                 ) : (
-                  <Text dimColor>{`${ICON.dot} ${r.emptyStatus}`}</Text>
+                  <Text dimColor wrap="truncate">{`${ICON.dot} ${r.emptyStatus}`}</Text>
                 )}
               </Box>
               <Box flexShrink={0} marginLeft={1}>
