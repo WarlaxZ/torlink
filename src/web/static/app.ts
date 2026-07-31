@@ -15,7 +15,7 @@ import {
   type StatusPayload,
 } from "./dashboard";
 import { abortableSleep } from "./abortableSleep";
-import { isBusy, type FlowState } from "./streamBusy";
+import { controlState, isBusy, type FlowState } from "./streamBusy";
 import {
   fileLabel,
   isPlayable,
@@ -366,10 +366,50 @@ function showPrepare(line: string | null): void {
   prepareBox.hidden = false;
 }
 
-// Repaints every Play control from `flow`. Filled in by the next commit, which
-// tags the six Play buttons it reads; a no-op here keeps this one green rather
-// than half-wiring the paint and the tags together.
-function paintPlayBusy(): void {}
+// Stamps a Play control with the identity `flow` will match it against, and the
+// word it says when idle.
+//
+// A SEPARATE ATTRIBUTE FROM tagControl's `data-row-key`, and that is not
+// duplication. `data-row-key` is resultFocus's identity — for a search result it
+// is the GROUP key (one row per title, several releases nested inside), not the
+// info hash `play()` is handed. Matching busy state on it would mark the wrong
+// control the moment a title has more than one release.
+//
+// `data-idle-label` is stamped because the paint overwrites `textContent`: once a
+// button reads "preparing…", the word it should return to is no longer anywhere
+// in the DOM to read back.
+function tagPlayKey(button: HTMLButtonElement, key: string, idleLabel: string): void {
+  button.dataset.playKey = key;
+  button.dataset.idleLabel = idleLabel;
+}
+
+// Repaints every Play control on the page from `flow`.
+//
+// DERIVED ON EVERY RENDER, never set once on click: the queue's rows are rebuilt
+// four times a second by the SSE tick, so a `disabled` set in a click handler is
+// gone by the next frame. That is the bug this pass exists to close — the button
+// that was pressed looked untouched, so it got pressed again.
+//
+// Which control looks how is controlState's decision (streamBusy.ts), not one
+// made here: all this does is assign the three values it hands back.
+function paintPlayBusy(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-play-key]")) {
+    const state = controlState(
+      flow,
+      button.dataset.playKey ?? "",
+      // The stamped label, falling back to whatever the button currently says —
+      // which is only wrong for a control that was somehow never tagged, and is
+      // still better than blanking it.
+      button.dataset.idleLabel ?? button.textContent ?? "play",
+    );
+    button.disabled = state.disabled;
+    button.textContent = state.label;
+    // A boolean attribute, so it is removed rather than set to "false" — the same
+    // thing this file already does with aria-current on the picker's next row.
+    if (state.busy) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  }
+}
 
 prepareCancel.addEventListener("click", () => {
   // Feedback on the press itself. Aborting kills an in-flight fetch, but there
@@ -507,6 +547,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.className = "play";
     playButton.textContent = "play";
     tagControl(playButton, row.id, "play");
+    tagPlayKey(playButton, row.id, "play");
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
@@ -541,6 +582,10 @@ function render(): void {
     focusBefore,
     rows.map((r) => r.id),
   );
+  // The buttons that were just rebuilt know nothing about a play in flight. This
+  // list is replaced four times a second, so this is the call that makes a busy
+  // state survive longer than 250ms.
+  paintPlayBusy();
   // The queue tab carries its own count so a search that added something shows
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
@@ -1363,6 +1408,12 @@ const pickController = createPickController<PublicSearchResult>({
 // the controller.
 function renderPickPhase(state: PickState): void {
   const phase = state.phase;
+  // The one-click Play's search is a flow too, and while it runs no other Play
+  // button should look pressable — the same rule as a prepare. Only "searching"
+  // counts: by "playing" the controller has handed off to play(), which owns
+  // `flow.prepare` from that point on.
+  flow.picking = phase.kind === "searching" ? phase.title : null;
+  paintPlayBusy();
   if (phase.kind === "searching") showNotice(pickSearchingLine(phase.title));
   else if (phase.kind === "playing") showNotice(phase.note);
   else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
@@ -1748,6 +1799,10 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   playButton.className = "play";
   playButton.textContent = "play";
   tagControl(playButton, rowKey, "play");
+  // `result.infoHash`, NOT `rowKey`: rowKey is the group key (this row may nest
+  // several releases of one title), while play() is handed rowForPlay(result),
+  // whose id is the hash. See tagPlayKey for why the two identities are separate.
+  tagPlayKey(playButton, result.infoHash, "play");
   playButton.addEventListener("click", () => void play(rowForPlay(result)));
   actions.append(playButton);
 
@@ -2202,6 +2257,8 @@ function renderResults(): void {
   );
   applyRovingTabIndex(rowKeys, selectedRowKey);
   restoreRowFocus(resultsList, focusBefore, rowKeys);
+  // Freshly built rows, so freshly built Play buttons: re-apply the flow.
+  paintPlayBusy();
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -2776,8 +2833,19 @@ function paintReccPlay(
   playButton.type = "button";
   playButton.className = "play recc-play";
   playButton.textContent = "Play";
-  playButton.addEventListener("click", () => pickController.start(item.title, { kind: "film" }));
+  // The TITLE, not a hash: this button goes through pickController, which is off
+  // to find a release for a film that has no torrent picked yet.
+  tagPlayKey(playButton, item.title, "Play");
+  playButton.addEventListener("click", () => {
+    // One flow at a time, exactly as play() does. This button had NO guard of any
+    // kind before — pickController is not covered by play()'s.
+    if (isBusy(flow)) return;
+    pickController.start(item.title, { kind: "film" });
+  });
   actions.prepend(playButton);
+  // A recc card repaints on its own (paintReccPlay is called per render), so the
+  // freshly built button needs the current flow applied to it.
+  paintPlayBusy();
 }
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
@@ -2921,6 +2989,7 @@ function renderPick(item: PublicRecommendation, filter: ReccType): HTMLLIElement
 function renderRecc(state: ReccState): void {
   const items = reccItems(state);
   reccList.replaceChildren(...items.map((item) => renderPick(item, state.filters.type)));
+  paintPlayBusy();
 
   const status = reccStatus(state);
   reccStatusLine.textContent = status.text;
@@ -3135,6 +3204,9 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  // `f.id` is the info hash dashRowForPlay builds the row's id from, so this is
+  // the same key `flow.prepare` will hold.
+  tagPlayKey(playButton, f.id, "play");
   playButton.addEventListener("click", () => void play(dashRowForPlay(f.id, f.name)));
   actions.append(playButton);
 
@@ -3176,6 +3248,11 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  // The INFO HASH, not the title: playContinueWatching resumes the remembered
+  // torrent via dashRowForPlay(item.infoHash, …), so that is the key flow holds.
+  // The "Play next" button below is the one keyed by title — it goes looking for
+  // a fresh release instead.
+  tagPlayKey(playButton, item.infoHash, "play");
   playButton.addEventListener("click", () => void playContinueWatching(item));
   actions.append(playButton);
 
@@ -3201,12 +3278,18 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
     playNext.type = "button";
     playNext.className = "play";
     playNext.textContent = "Play next";
+    // Keyed by TITLE, unlike the resume button above: this one goes through
+    // pickController to find a fresh release for the next episode.
+    tagPlayKey(playNext, item.title, "Play next");
     // onNone falls back to the same "remembered torrent" resume the plain
     // play button above uses — a fresh pick found nothing, not a reason to
     // strand the row with no action at all.
-    playNext.addEventListener("click", () =>
-      pickController.start(item.title, intent, () => void playContinueWatching(item)),
-    );
+    playNext.addEventListener("click", () => {
+      // As with the For You card: pickController is not covered by play()'s
+      // guard, so this button had none at all before.
+      if (isBusy(flow)) return;
+      pickController.start(item.title, intent, () => void playContinueWatching(item));
+    });
     actions.prepend(playNext);
   }
 
@@ -3224,6 +3307,8 @@ function renderSaved(): void {
   continueRows.replaceChildren(...savedState.continueWatching.map(renderContinueRow));
   savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
   libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+  // Continue-watching and library rows both carry Play buttons.
+  paintPlayBusy();
 
   const cw = continueWatchingStatus(savedState);
   continueStatusLine.textContent = cw.text;
