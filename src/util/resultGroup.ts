@@ -248,6 +248,114 @@ export function groupResults<T extends GroupableResult>(
 }
 
 /**
+ * A season of one show, holding its packs and its episode groups.
+ *
+ * `members` is every child's members concatenated in child order, which is what
+ * lets `resultAtRow` keep working untouched: packs sort first, so the first
+ * member of a collapsed season row is the best season pack.
+ */
+export interface SeasonNode<T> {
+  kind: "season";
+  key: string;
+  title: string;
+  season: number;
+  /** Packs first, then episodes ascending. Never empty. */
+  children: ResultGroup<T>[];
+  /** Never empty. */
+  members: T[];
+}
+
+/** A top-level node: a season of a show, or a group with no season to sit under. */
+export type TreeNode<T> = SeasonNode<T> | ResultGroup<T>;
+
+/** True for a `SeasonNode`. `ResultGroup` has no `kind`, which is the discriminator. */
+export function isSeasonNode<T>(node: TreeNode<T>): node is SeasonNode<T> {
+  return "kind" in node;
+}
+
+/**
+ * Which groups fold under a season.
+ *
+ * A group naming ONE season. A span pack ("S01-S03") names three and filing it
+ * under season 1 would claim it is a season-1 release; a "complete series" pack
+ * names none. Both stay top-level. Only the series branch of `factsFor` ever
+ * sets `season`, so this needs no separate "is a series" flag.
+ */
+function foldsUnderSeason<T>(group: ResultGroup<T>): boolean {
+  return group.season !== undefined && group.seasonEnd === undefined;
+}
+
+/** "harrowgate" out of "harrowgate|series|s3|e1" — the show's identity. */
+function showOf(key: string): string {
+  const at = key.indexOf("|series|");
+  return at === -1 ? key : key.slice(0, at);
+}
+
+/** Packs before episodes; episodes ascending. */
+function compareSeasonChild<T>(a: ResultGroup<T>, b: ResultGroup<T>): number {
+  if (a.episode === undefined && b.episode === undefined) return 0;
+  if (a.episode === undefined) return -1;
+  if (b.episode === undefined) return 1;
+  return a.episode - b.episode;
+}
+
+/**
+ * Fold a show's single-season groups under season nodes.
+ *
+ * ORDER IS PRESERVED at the top level: a show's whole season block is emitted at
+ * the position of its FIRST group, so `groupResults`' promise that groups sit
+ * where their best member sits — which every sort depends on — still holds.
+ * Within a show, seasons are newest first.
+ *
+ * The sort control therefore orders releases INSIDE a group, and orders
+ * unrelated results against each other. A series' internal structure is
+ * structural and not re-sortable: "order these episodes by seeders" is not a
+ * thing anyone wants.
+ */
+export function seasonTree<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+): TreeNode<T>[] {
+  const byShow = new Map<string, Map<number, ResultGroup<T>[]>>();
+  for (const group of groups) {
+    if (!foldsUnderSeason(group)) continue;
+    const show = showOf(group.key);
+    let seasons = byShow.get(show);
+    if (!seasons) {
+      seasons = new Map();
+      byShow.set(show, seasons);
+    }
+    const bucket = seasons.get(group.season!) ?? [];
+    bucket.push(group);
+    seasons.set(group.season!, bucket);
+  }
+
+  const out: TreeNode<T>[] = [];
+  const done = new Set<string>();
+  for (const group of groups) {
+    if (!foldsUnderSeason(group)) {
+      out.push(group);
+      continue;
+    }
+    const show = showOf(group.key);
+    if (done.has(show)) continue;
+    done.add(show);
+    const seasons = byShow.get(show)!;
+    for (const season of [...seasons.keys()].sort((a, b) => b - a)) {
+      const children = [...seasons.get(season)!].sort(compareSeasonChild);
+      out.push({
+        kind: "season",
+        key: `${show}|series|s${season}`,
+        title: children[0]!.title,
+        season,
+        children,
+        members: children.flatMap((child) => child.members),
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Flatten groups into the rows to render, honouring what is expanded.
  *
  * A group of one is emitted as a plain release row: a disclosure arrow over

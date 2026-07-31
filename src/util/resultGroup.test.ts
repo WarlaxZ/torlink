@@ -5,7 +5,9 @@ import {
   groupKeyFor,
   groupResults,
   groupRowPlan,
+  isSeasonNode,
   resultAtRow,
+  seasonTree,
 } from "./resultGroup";
 
 const r = (name: string) => ({ name });
@@ -214,5 +216,117 @@ describe("groupCountLabel", () => {
   it("says releases, and gets the singular right", () => {
     expect(groupCountLabel(2)).toBe("2 releases");
     expect(groupCountLabel(1)).toBe("1 release");
+  });
+});
+
+describe("seasonTree", () => {
+  it("folds a show's packs and episodes under one season node", () => {
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S03.1080p.WEB-DL"),
+          r("Harrowgate.S03.2160p.WEB-DL"),
+          r("Harrowgate.S03E02.1080p.WEB-DL"),
+          r("Harrowgate.S03E02.2160p.WEB-DL"),
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E01.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    expect(tree).toHaveLength(1);
+    const node = tree[0]!;
+    expect(isSeasonNode(node)).toBe(true);
+    if (!isSeasonNode(node)) return;
+    expect(node.key).toBe("harrowgate|series|s3");
+    expect(node.season).toBe(3);
+    expect(node.title).toBe("Harrowgate");
+  });
+
+  it("puts the pack before the episodes, and episodes ascending", () => {
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S03E02.1080p.WEB-DL"),
+          r("Harrowgate.S03E02.2160p.WEB-DL"),
+          r("Harrowgate.S03.1080p.WEB-DL"),
+          r("Harrowgate.S03.2160p.WEB-DL"),
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E01.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    const node = tree[0]!;
+    if (!isSeasonNode(node)) throw new Error("expected a season node");
+    expect(node.children.map((c) => c.episode)).toEqual([undefined, 1, 2]);
+  });
+
+  it("orders seasons newest first", () => {
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S01E01.1080p.WEB-DL"),
+          r("Harrowgate.S01E01.2160p.WEB-DL"),
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E01.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    expect(tree.map((n) => (isSeasonNode(n) ? n.season : null))).toEqual([3, 1]);
+  });
+
+  it("emits a show's whole season block where its first group sat", () => {
+    // Kestrel comes between the two Harrowgate groups in input order. The show's
+    // seasons must stay contiguous, at the position of its FIRST group, so every
+    // existing sort still means what it means.
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S01E01.1080p.WEB-DL"),
+          r("Harrowgate.S01E01.2160p.WEB-DL"),
+          r("Kestrel.2010.1080p.BluRay.x264"),
+          r("Kestrel.2010.2160p.WEB-DL"),
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E01.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    expect(tree.map((n) => (isSeasonNode(n) ? `s${n.season}` : "film"))).toEqual([
+      "s3",
+      "s1",
+      "film",
+    ]);
+  });
+
+  it("leaves a film alone", () => {
+    const tree = seasonTree(groupResults([r("Kestrel.2010.1080p"), r("Kestrel.2010.2160p")]));
+    expect(tree).toHaveLength(1);
+    expect(isSeasonNode(tree[0]!)).toBe(false);
+  });
+
+  it("leaves a multi-season span pack top-level, not filed under its first season", () => {
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S01-S03.COMPLETE.1080p.WEB-DL"),
+          r("Harrowgate.S01-S03.COMPLETE.2160p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    expect(isSeasonNode(tree[0]!)).toBe(false);
+  });
+
+  it("leaves a seasonless complete-series pack top-level", () => {
+    const tree = seasonTree(
+      groupResults(
+        [r("Harrowgate.COMPLETE.SERIES.1080p.WEB-DL"), r("Harrowgate.COMPLETE.SERIES.2160p")],
+        "series",
+      ),
+    );
+    expect(isSeasonNode(tree[0]!)).toBe(false);
   });
 });
