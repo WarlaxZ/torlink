@@ -1288,3 +1288,35 @@ select:focus-visible {
   padding-top: 0.4rem;
   flex-wrap: wrap;
 }
+
+/* The search box's title suggestions. `flex: 1 0 100%` breaks it onto its own
+   row inside .card, which lays its children out as a strip of controls. */
+.suggest {
+  flex: 1 0 100%;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.suggest li {
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.suggest li + li {
+  border-top: 1px solid var(--line);
+}
+
+.suggest li[aria-selected="true"],
+.suggest li:hover {
+  background: var(--line);
+}
+
+.suggest .aka {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--dim);
+}

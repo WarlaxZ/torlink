@@ -159,6 +159,19 @@ import {
   type PickState,
 } from "./pickModel";
 import type { PreferencesResponse, PublicQualityPrefs } from "../wire";
+import {
+  emptyListState,
+  isOpen as suggestOpen,
+  withReply,
+  moveHighlight,
+  highlightAt,
+  closedFor,
+  acceptPlan,
+  rowPlan,
+  type ListState,
+} from "./suggestModel";
+import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
+import type { PublicTitleSuggestions } from "../wire";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -228,6 +241,7 @@ const toTopButton = el<HTMLButtonElement>("to-top");
 
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
+const suggestList = el<HTMLUListElement>("suggest");
 const saveSearchButton = el<HTMLButtonElement>("save-search");
 const tabsBar = el<HTMLDivElement>("tabs");
 const sortSelect = el<HTMLSelectElement>("sort");
@@ -1239,6 +1253,137 @@ function renderPickPhase(state: PickState): void {
   else if (phase.kind === "playing") showNotice(phase.note);
   else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
 }
+
+// ---- title suggestions -------------------------------------------------
+
+// Every decision here belongs to suggestModel.ts; this block is the timer, the
+// fetch, the DOM, and the key handling. If you find yourself writing an `if`
+// that decides what to show or what to send, it goes in the model.
+let suggestState: ListState = emptyListState();
+let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+// Monotonic, and the reason a slow reply cannot overwrite a fast one — see
+// applyReply. A 2-char query costs reccd ~311ms and an 8-char one ~71ms, so
+// out-of-order arrival is the normal case, not the edge case.
+let suggestSeq = 0;
+
+function renderSuggest(): void {
+  suggestList.replaceChildren();
+  const rows = rowPlan(suggestState);
+  for (const [index, row] of rows.entries()) {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", row.highlighted ? "true" : "false");
+    // textContent, not innerHTML: a title is a string from a catalog we do not
+    // control, and src/web/static has no innerHTML path anywhere by rule.
+    const label = document.createElement("span");
+    label.textContent = row.label;
+    li.append(label);
+    if (row.aka !== null) {
+      const aka = document.createElement("span");
+      aka.className = "aka";
+      aka.textContent = row.aka;
+      li.append(aka);
+    }
+    // mousedown, not click: click lands after the input has already blurred,
+    // and a blur that closes the list would cancel the pick.
+    li.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      // Reuse the keyboard path rather than a second accept: highlight the
+      // clicked row, then accept, so a click and an Enter cannot drift apart.
+      suggestState = highlightAt(suggestState, index);
+      acceptSuggest();
+    });
+    suggestList.append(li);
+  }
+  suggestList.hidden = rows.length === 0;
+}
+
+function closeSuggest(): void {
+  if (suggestTimer !== null) clearTimeout(suggestTimer);
+  suggestTimer = null;
+  suggestState = closedFor(suggestState, queryInput.value);
+  renderSuggest();
+}
+
+/** Run whatever the model says this keypress or click means. */
+function acceptSuggest(): void {
+  const plan = acceptPlan(suggestState, queryInput.value);
+  // Latch before searching: accepting writes text into the box, which fires the
+  // input handler again, and without the latch the list would reopen on the
+  // text just picked.
+  suggestState = closedFor(suggestState, plan.text);
+  renderSuggest();
+  searchForTitle(plan.text);
+}
+
+async function loadSuggest(raw: string, seq: number): Promise<void> {
+  try {
+    const res = await fetch(`/api/title-search?q=${encodeURIComponent(raw)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as PublicTitleSuggestions;
+    // Every non-ok status renders as no suggestions. This fires per keystroke,
+    // so a banner per character would be worse than silence — and the Accounts
+    // pane is where a reccd problem belongs.
+    const items = body.status === "ok" ? body.items : [];
+    suggestState = withReply(suggestState, seq, items);
+    renderSuggest();
+  } catch {
+    // A suggestion we cannot fetch is a search box that behaves exactly as it
+    // did before this feature existed. Nothing to report.
+  }
+}
+
+queryInput.addEventListener("input", () => {
+  if (suggestTimer !== null) clearTimeout(suggestTimer);
+  // The capability flag from /api/sources, so a reccd-less server never spends
+  // a request per character discovering that again.
+  if (sources?.reccConfigured !== true) return;
+  const raw = queryInput.value;
+  if (!shouldQueryFor(suggestState.suggest, raw)) {
+    suggestState = withReply(suggestState, ++suggestSeq, []);
+    renderSuggest();
+    return;
+  }
+  const seq = ++suggestSeq;
+  suggestTimer = setTimeout(() => void loadSuggest(raw, seq), SUGGEST_DEBOUNCE_MS);
+});
+
+queryInput.addEventListener("keydown", (event) => {
+  if (!suggestOpen(suggestState)) return;
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    suggestState = moveHighlight(suggestState, 1);
+    renderSuggest();
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    suggestState = moveHighlight(suggestState, -1);
+    renderSuggest();
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSuggest();
+    return;
+  }
+  if (event.key === "Enter") {
+    // Only intercept when a row is actually highlighted; otherwise let the form
+    // submit normally with what the user typed.
+    if (suggestState.highlight < 0) {
+      closeSuggest();
+      return;
+    }
+    event.preventDefault();
+    acceptSuggest();
+  }
+});
+
+// Leaving the box closes the list — an open dropdown over a pane the user has
+// moved on from is a stuck artefact, not a suggestion.
+queryInput.addEventListener("blur", () => closeSuggest());
 
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();

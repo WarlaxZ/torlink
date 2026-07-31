@@ -83,6 +83,12 @@
         <form id="search" class="card">
           <label for="query">Search every source</label>
           <input id="query" type="search" placeholder="a film or show — or leave blank to browse" autocomplete="off" />
+          <!-- Title suggestions from reccd, when it is configured. A full-width
+               row inside the card's flex layout so it sits under the input
+               rather than beside it. Empty and `hidden` until there is
+               something to show; app.ts fills it with createElement +
+               textContent, never innerHTML. -->
+          <ul id="suggest" class="suggest" role="listbox" aria-label="Title suggestions" hidden></ul>
           <button type="submit">Search</button>
           <button id="save-search" type="button">save search</button>
         </form>
