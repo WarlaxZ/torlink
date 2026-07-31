@@ -251,7 +251,7 @@ Create `src/api/anonName.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { generateAnonName } from "./anonName.js";
+import { generateAnonName, ADJECTIVES, NOUNS } from "./anonName.js";
 
 describe("generateAnonName", () => {
   it("returns adjective-noun-hex4, lowercase", () => {
@@ -264,9 +264,23 @@ describe("generateAnonName", () => {
 
   it("does not repeat itself in a small sample", () => {
     const seen = new Set(Array.from({ length: 200 }, () => generateAnonName()));
-    // 200 draws from a space of tens of millions. Any repeat means the suffix
-    // is not actually random -- e.g. a seeded or cached RNG.
-    expect(seen.size).toBe(200);
+    // Not `toBe(200)`: 200 draws from ~37.7M names carry a ~1-in-1,900 chance of
+    // a genuine collision, which would fail this test on a correct
+    // implementation. A floor well above the 576 word-pairs still catches the
+    // failure this guards -- a seeded, cached, or memoised RNG.
+    expect(seen.size).toBeGreaterThan(190);
+  });
+
+  // The cross-list rule is documented in anonName.ts and enforced nowhere else,
+  // so it is enforced here. Requires ADJECTIVES and NOUNS to be exported.
+  it("shares no word between the two lists, so no name pairs with itself", () => {
+    const overlap = ADJECTIVES.filter((w) => NOUNS.includes(w));
+    expect(overlap).toEqual([]);
+  });
+
+  it("has no duplicates within either list", () => {
+    expect(new Set(ADJECTIVES).size).toBe(ADJECTIVES.length);
+    expect(new Set(NOUNS).size).toBe(NOUNS.length);
   });
 });
 ```
@@ -283,16 +297,21 @@ Create `src/api/anonName.ts`:
 ```ts
 import crypto from "node:crypto";
 
-// Deliberately dull words. These become a username a stranger may see, so:
-// no real people, no place names that read as people, no film or show titles,
-// and nothing that could read as an insult when paired with the other list.
-const ADJECTIVES = [
+// Deliberately dull words. These become a username a stranger may see, and the
+// name is ASSIGNED rather than chosen, so the bar is higher than "we wouldn't
+// mind it": no real people, no place names that read as people, no film or show
+// titles, nothing that reads as an insult alone or in combination, and no word
+// describing a body or a character. A word must also not appear in both lists —
+// a self-paired `hazel-hazel-4f2a` reads as a bug to whoever is handed it, and
+// nothing in the code enforces this, so the tests below do.
+// Exported so the tests can enforce the two rules above that the code cannot.
+export const ADJECTIVES = [
   "quiet", "amber", "hollow", "drifting", "copper", "steady", "distant", "gentle",
-  "narrow", "silver", "patient", "hazel", "shallow", "russet", "brisk", "muted",
-  "slender", "faded", "wandering", "modest", "glassy", "sable", "tranquil", "dusky",
+  "narrow", "silver", "patient", "ochre", "pebbled", "russet", "brisk", "muted",
+  "woven", "faded", "wandering", "modest", "glassy", "sable", "tranquil", "misty",
 ];
 
-const NOUNS = [
+export const NOUNS = [
   "heron", "alder", "willow", "plover", "cedar", "linnet", "birch", "swift",
   "hawthorn", "sparrow", "rowan", "curlew", "juniper", "wren", "maple", "godwit",
   "hazel", "finch", "aspen", "dipper", "larch", "avocet", "elder", "pipit",
