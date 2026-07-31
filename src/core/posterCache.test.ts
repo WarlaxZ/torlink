@@ -253,18 +253,31 @@ describe("getPoster redirects", () => {
 describe("getPoster housekeeping", () => {
   it("prunes to the cap from the write path", async () => {
     const fetchImpl = vi.fn(async () => okResponse(JPEG));
+    // Pin the directory for the whole loop. `dir` is module state that beforeEach
+    // reassigns, and an async test body keeps running after vitest abandons it on
+    // timeout — so reading `dir` per iteration lets a slow runner spray this
+    // loop's writes into a *later* test's directory. That fails as a stray
+    // sha1 .jpg/.tmp in the prunePosters assertions, and as ENOTEMPTY from
+    // afterEach racing a write, which reads as a bug anywhere but here.
+    const own = dir;
     // writesSincePrune is module state shared with the tests above, so make no
     // assumption about its value: PRUNE_EVERY_N_WRITES successful writes cross
     // the threshold from anywhere in its range.
     for (let i = 0; i < 50; i++) {
-      await getPoster(`https://m.media-amazon.com/p${i}.jpg`, { dir, fetchImpl, maxBytes: 100 });
+      await getPoster(`https://m.media-amazon.com/p${i}.jpg`, {
+        dir: own,
+        fetchImpl,
+        maxBytes: 100,
+      });
     }
 
     // prunePosters is fire-and-forget from getPoster, so wait for it to land.
     await vi.waitFor(async () => {
-      expect((await fs.readdir(dir)).length).toBeLessThan(50);
+      expect((await fs.readdir(own)).length).toBeLessThan(50);
     });
-  });
+    // 50 sequential write-then-rename round trips are ~10ms locally but have
+    // exceeded the 5s default on a loaded Windows runner.
+  }, 30_000);
 
   it("touches mtime on a cache hit so eviction is LRU, not FIFO", async () => {
     const fetchImpl = vi.fn(async () => okResponse(JPEG));
