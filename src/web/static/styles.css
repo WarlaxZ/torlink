@@ -39,7 +39,23 @@ body {
   line-height: 1.45;
 }
 
+/* PINNED. A browse is 25,000px of document and the nav was scrolling away with
+   it, so switching pane meant scrolling to the top first.
+
+   The background is opaque, not translucent: release names scrolling under a
+   see-through bar is unreadable, and this palette has no colour to spare for a
+   scrim. The negative inline margins with matching padding let the bar's
+   background reach the window edges while its content stays on the body's
+   measure — without them a scrolled row shows through the 1.5rem gutter.
+
+   --header-h and --toolbar-h are measured by app.ts (a ResizeObserver), never
+   hardcoded: both strips wrap at narrow widths, and the preview pane's sticky
+   offset is derived from them. A constant leaves a gap at one width and an
+   overlap at another. */
 header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -47,6 +63,34 @@ header {
   border-bottom: 1px solid var(--line);
   padding-bottom: 0.75rem;
   margin-bottom: 1.5rem;
+  margin-inline: -1.5rem;
+  padding-inline: 1.5rem;
+  padding-top: 1rem;
+  margin-top: -1.5rem;
+  background: var(--bg);
+}
+
+/* Tabs and controls, pinned directly under the header. Below it in z-order so a
+   wrapped control strip slides under the header rather than over it. */
+.toolbar {
+  position: sticky;
+  top: var(--header-h, 3.5rem);
+  z-index: 2;
+  margin-inline: -1.5rem;
+  padding-inline: 1.5rem;
+  padding-top: 0.5rem;
+  background: var(--bg);
+  /* A hairline so the pinned strip has an edge. Without it a row scrolling
+     underneath simply stops mid-height with nothing to say why, which reads as a
+     clipping bug rather than as a fixed bar. */
+  border-bottom: 1px solid var(--line);
+}
+
+/* The toolbar owns the gap below itself, so the strips inside it don't also
+   carry one — two margins here read as a hole between the controls and the
+   first result. */
+.toolbar .controls {
+  margin-bottom: 0.5rem;
 }
 
 h1 {
@@ -483,18 +527,17 @@ select:focus-visible {
 
 /* Results beside the preview. The preview is dropped below the list — not
    hidden — under the width where a two-column split would squeeze the release
-   names to nothing, which is the same trade the TUI makes at 74 columns. */
+   names to nothing, which is the same trade the TUI makes at 74 columns.
+
+   NOTHING IN THIS SUBTREE MAY GET `overflow` OTHER THAN `visible`. The preview
+   is `position: sticky` and an ancestor with any other overflow silently kills
+   that — no error, no visual clue, it simply scrolls away again. If a wide badge
+   strip needs containing, contain it on the strip itself. */
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 16rem;
   gap: 1rem;
   align-items: start;
-}
-
-@media (max-width: 46rem) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .result-head {
@@ -622,6 +665,121 @@ select:focus-visible {
   display: block;
   font-size: 0.75rem;
   padding: 0.3rem 0.6rem;
+}
+
+/* PINNED under the toolbar. Before this the pane loaded correctly and then sat
+   above the top of the window — measured at -1402px with a row selected barely
+   two screens down, which is to say the feature was unreachable in normal use.
+
+   DECLARED AFTER the base .preview/.poster rules above, not before them: these
+   overrides and those base rules have the same specificity, so the later block
+   wins. Moved up here once already and the narrow skin's `display: grid` lost to
+   the base `display: block`, which left a full-width poster covering the text.
+
+   --toolbar-h is measured by app.ts (see publishStickyHeights); the fallback only
+   applies before the first measurement, or in a browser with no ResizeObserver.
+
+   Its own overflow-y is safe: no lazily-loaded row posters live in here, so the
+   IntersectionObserver that fills them (app.ts) is unaffected — it observes
+   frames in #results, which stays in the document scroll. */
+.preview {
+  position: sticky;
+  top: calc(var(--toolbar-h, 7rem) + 0.75rem);
+  max-height: calc(100vh - var(--toolbar-h, 7rem) - 2rem);
+  overflow-y: auto;
+}
+
+/* Only ever shown in the narrow bottom-bar skin, where the pane overlays the
+   list and there has to be a way out of it. At wide widths it sits in its own
+   column and closing it would leave a hole.
+
+   DECLARED BEFORE the media query that shows it: same specificity, so whichever
+   comes last wins. With this block below, the button was `display: none` at every
+   width and the bar could not be dismissed. */
+.preview-close {
+  display: none;
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+@media (max-width: 46rem) {
+  /* One column, and the preview OVERLAYS the list rather than following it.
+
+     Both children share grid cell 1/1 so the preview's containing block is the
+     full height of the list, which is what lets it travel: a sticky item can
+     only move within its own grid area, so a preview in its own row above a
+     25,000px list is still 25,000px away from a selection at the bottom. That
+     was the actual phone bug, and it is why this is an overlay and not a
+     reorder.
+
+     Pinned to the BOTTOM, like a now-playing bar: the selection is what you just
+     tapped, so it belongs where your thumb is. */
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split > #results,
+  .split > .preview {
+    grid-area: 1 / 1;
+  }
+
+  /* Poster beside the text rather than above it: a 2:3 frame at phone width is a
+     600x900 poster you would scroll past to reach the plot, and this bar has
+     only 45vh to spend. */
+  .preview {
+    position: sticky;
+    top: auto;
+    bottom: 0.5rem;
+    align-self: end;
+    max-height: 45vh;
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    /* OPAQUE, and this is not cosmetic. `.card` styles a border and no
+       background, which is fine for a pane in its own column — as an overlay it
+       let the rows underneath show straight through, and the plot text sat on top
+       of a release name completely unreadably.
+
+       --raised rather than --bg so it reads as a surface lifted off the list
+       rather than a hole punched in it, which is what it is. */
+    background: var(--raised);
+    /* Lifted off the list it covers. A shadow as well as the border: the bar
+       overlaps live content, and the border alone left rows visually tangled
+       with it. */
+    box-shadow:
+      0 0 0 1px var(--line),
+      0 -0.75rem 1.5rem rgb(0 0 0 / 55%);
+  }
+
+  .preview .poster {
+    max-width: none;
+    margin: 0;
+    grid-row: 1 / span 5;
+  }
+
+  /* Two lines of plot in the bar. The full text is one tap away on the row
+     itself; a bar tall enough for a whole synopsis is a bar covering the list. */
+  .preview-body {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Room for the bar at the end of the list, so the last row's buttons are not
+     underneath it. */
+  #results {
+    padding-bottom: 12rem;
+  }
+
+  .preview-close {
+    display: inline-flex;
+  }
 }
 
 /* ---------------------------------------------------------------------------

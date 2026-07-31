@@ -206,6 +206,11 @@ const reccStatusLine = el<HTMLParagraphElement>("recc-status");
 const reccHintLine = el<HTMLParagraphElement>("recc-hint");
 const reccList = el<HTMLUListElement>("recc-list");
 
+// Both are `position: sticky` and both are measured into CSS custom properties;
+// see publishStickyHeights.
+const pageHeader = el<HTMLElement>("page-header");
+const searchToolbar = el<HTMLDivElement>("toolbar");
+
 const searchForm = el<HTMLFormElement>("search");
 const queryInput = el<HTMLInputElement>("query");
 const saveSearchButton = el<HTMLButtonElement>("save-search");
@@ -221,6 +226,7 @@ const searchHintLine = el<HTMLParagraphElement>("search-hint");
 const resultsList = el<HTMLUListElement>("results");
 
 const previewPane = el<HTMLElement>("preview");
+const previewCloseButton = el<HTMLButtonElement>("preview-close");
 const previewPoster = el<HTMLDivElement>("preview-poster");
 const previewTitle = el<HTMLParagraphElement>("preview-title");
 const previewSub = el<HTMLParagraphElement>("preview-sub");
@@ -920,6 +926,10 @@ function renderTabs(): void {
       return button;
     }),
   );
+  // The strip just changed height — it may have gained a row of tabs, or wrapped.
+  // The preview's sticky offset is derived from it, so re-measure here rather
+  // than waiting on a ResizeObserver callback that a non-painting tab never gets.
+  publishStickyHeights();
 }
 
 async function loadSources(): Promise<void> {
@@ -1516,8 +1526,8 @@ function renderResults(): void {
     ? `${searchView.snapshot.done}/${searchView.snapshot.total} sources`
     : "";
 
-  // A selected row that the filters just removed keeps neither its highlight
-  // nor its preview.
+  // A selected row that the filters just removed keeps neither its highlight nor
+  // its preview. Not clearSelection(): that re-renders, and this IS the render.
   if (selectedHash !== null && !shown.some((r) => r.infoHash === selectedHash)) {
     selectedHash = null;
     preview.select(null, searchView.group);
@@ -1530,6 +1540,65 @@ function selectResult(result: PublicSearchResult): void {
   renderResults();
   preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
 }
+
+// Drops the selection, which hides the preview. One path for "nothing is
+// selected any more", shared with the filtered-away branch in renderResults —
+// two would drift, and the visible symptom would be a pane showing a row that is
+// no longer highlighted.
+function clearSelection(): void {
+  selectedHash = null;
+  renderResults();
+  preview.select(null, searchView.group);
+}
+
+// Only reachable in the narrow bottom-bar skin (CSS hides it at wide widths),
+// where the pane overlays the list.
+previewCloseButton.addEventListener("click", () => clearSelection());
+
+// ---- sticky offsets ----
+//
+// The header and the toolbar are `position: sticky`, and the preview pane sits
+// below them at a `top` derived from their heights. Those heights are MEASURED
+// rather than written into the stylesheet: both strips are flex-wrap, so a
+// narrow window (or a debrid button, or the adult category adding a tab) changes
+// them. A hardcoded value leaves a gap at one width and overlaps at another.
+//
+// A measurement, not a decision — which is why it lives here rather than in a
+// pure module.
+//
+// A ZERO HEIGHT IS NEVER PUBLISHED. Both strips live inside `main#app`, which is
+// `hidden` until the page unlocks, and `[hidden]` is `display: none !important` —
+// an unrendered element measures 0. Publishing that puts the preview's sticky
+// `top` underneath the toolbar instead of below it, which is the bug this
+// function exists to prevent. Keeping the stylesheet's fallback until there is
+// something real to measure is strictly better than a confident wrong number.
+function publishStickyHeights(): void {
+  const root = document.documentElement;
+  const headerH = Math.ceil(pageHeader.getBoundingClientRect().height);
+  const toolbarH = Math.ceil(searchToolbar.getBoundingClientRect().height);
+  if (headerH > 0) root.style.setProperty("--header-h", `${headerH}px`);
+  if (headerH > 0 && toolbarH > 0) root.style.setProperty("--toolbar-h", `${headerH + toolbarH}px`);
+}
+
+// MODULE SCOPE, not a local inside an `if`: an observer with no live reference is
+// collectable.
+//
+// And it is a BEST-EFFORT refinement, not the mechanism. ResizeObserver
+// callbacks ride the rendering pipeline, so a tab that is not painting never
+// receives them — verified in an automated browser, where even the guaranteed
+// initial callback never arrived. Everything below therefore also measures at the
+// moments a height can actually change, so the offsets are right whether or not
+// the observer ever fires.
+const stickyObserver: ResizeObserver | null =
+  typeof ResizeObserver === "function" ? new ResizeObserver(() => publishStickyHeights()) : null;
+stickyObserver?.observe(pageHeader);
+stickyObserver?.observe(searchToolbar);
+
+// Wrapping in the layout-affecting moments rather than trusting the observer:
+// unlocking the page (which reveals #app), the tab bar being built from
+// /api/sources, and any window resize that could re-wrap either strip.
+window.addEventListener("resize", () => publishStickyHeights());
+publishStickyHeights();
 
 // ---- keyboard navigation of the results list ----
 
@@ -2520,6 +2589,10 @@ function openApp(payload: StatusPayload): void {
   renderTabs();
   layoutSelect.value = layout;
   renderResults();
+  // #app was `hidden` until three lines ago, so every measurement taken before
+  // now was of an unrendered element. This is the first point at which the header
+  // and toolbar have real heights for the preview's sticky offset to build on.
+  publishStickyHeights();
   renderSaved();
   renderPrefs();
   rows = mergeRows(rows, rowsFromStatus(payload));
