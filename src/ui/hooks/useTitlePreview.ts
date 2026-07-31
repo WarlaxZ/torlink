@@ -7,7 +7,18 @@ import { cachedPosterRows } from "../../core/posterCache";
 // name parsed from a release string (search results).
 export type MetaQuery =
   | { by: "id"; imdbId: string }
-  | { by: "name"; title: string; year?: number; type?: OmdbType };
+  | {
+      by: "name";
+      title: string;
+      year?: number;
+      type?: OmdbType;
+      /**
+       * One episode of a series. OMDb answers with THAT episode's plot, which is
+       * the point of stepping down a season in the preview pane.
+       */
+      season?: number;
+      episode?: number;
+    };
 
 interface Meta {
   imdbId: string | null;
@@ -79,7 +90,13 @@ export function useTitlePreview(args: Args): TitlePreview {
       const p =
         q.by === "id"
           ? fetchTitleMeta(q.imdbId, omdbApiKey, { fetchImpl })
-          : fetchTitleMetaByName(q.title, omdbApiKey, { year: q.year, type: q.type, fetchImpl });
+          : fetchTitleMetaByName(q.title, omdbApiKey, {
+              year: q.year,
+              type: q.type,
+              season: q.season,
+              episode: q.episode,
+              fetchImpl,
+            });
       void p.then((res) => {
         if (cancelled) return;
         metas.current.set(

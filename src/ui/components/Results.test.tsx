@@ -12,6 +12,7 @@ import { Results } from "./Results";
 import type { ConcurrentSearchState } from "../hooks/useConcurrentSearch";
 import type { TorrentResult } from "../../sources/types";
 import type { FetchImpl } from "../../util/net";
+import type { StreamHistoryItem } from "../../core/streamHistory";
 
 // Captured BEFORE the fake timers installed by one describe near the bottom of
 // this file: `setImmediate` is faked too, and ink's React scheduler drains its
@@ -299,6 +300,83 @@ async function mountWide(results: TorrentResult[], contentWidth: number): Promis
   await vi.waitFor(() => expect(u.frame()).toContain(`Results (${results.length})`));
   return u;
 }
+
+// A mount that also seeds the watch position, so the landing behaviour can be
+// asserted. `Store.streamHistory` already exists and `makeTestStore` already
+// seeds it empty, so this is an override, not a new field.
+async function mountWideWithHistory(
+  results: TorrentResult[],
+  streamHistory: StreamHistoryItem[],
+  contentWidth: number,
+): Promise<RenderedUI> {
+  searchState.current = settled(results);
+  ui = renderUI(
+    <StoreContext.Provider
+      value={makeTestStore({
+        query: "linux iso",
+        contentWidth,
+        cols: contentWidth + 19,
+        streamHistory,
+      })}
+    >
+      <Results reccConfig={{}} />
+    </StoreContext.Provider>,
+    { cols: contentWidth + 19 },
+  );
+  const u = ui;
+  await vi.waitFor(() => expect(u.frame()).toContain(`Results (${results.length})`));
+  return u;
+}
+
+describe("Results watch position", () => {
+  const HISTORY: StreamHistoryItem[] = [
+    {
+      key: "harrowgate|series",
+      title: "Harrowgate",
+      type: "series",
+      season: 3,
+      episode: 1,
+      rawName: "Harrowgate.S03E01.1080p.WEB-DL",
+      infoHash: "a1",
+      magnet: "magnet:?xt=urn:btih:a1",
+      startedAt: 1,
+    },
+  ];
+
+  const SHOW = [
+    t("a1", "Harrowgate.S03E01.1080p.WEB-DL"),
+    t("a2", "Harrowgate.S03E01.2160p.WEB-DL"),
+    t("b1", "Harrowgate.S03E02.1080p.WEB-DL"),
+    t("b2", "Harrowgate.S03E02.2160p.WEB-DL"),
+    t("c1", "Harrowgate.S04E01.1080p.WEB-DL"),
+    t("c2", "Harrowgate.S04E01.2160p.WEB-DL"),
+  ];
+
+  it("opens the season you are part-way through, not the newest one", async () => {
+    const u = await mountWideWithHistory(SHOW, HISTORY, 120);
+    // Seasons sort newest first, so S04 is the highest-ranked node and would be
+    // the one to open without a position. This only passes if the position won.
+    await vi.waitFor(() => expect(u.frame()).toContain("S03E02"));
+    expect(u.frame()).toContain("Harrowgate S03");
+  });
+
+  it("says how far through the season you are", async () => {
+    const u = await mountWideWithHistory(SHOW, HISTORY, 120);
+    await vi.waitFor(() => expect(u.frame()).toContain("up to E01"));
+  });
+
+  it("puts the cursor on the next episode, not the season row", async () => {
+    const u = await mountWideWithHistory(SHOW, HISTORY, 120);
+    await vi.waitFor(() => expect(lines(u).find((l) => l.includes("S03E02"))).toContain("❯"));
+    expect(lines(u).find((l) => l.includes("Harrowgate S03 "))).not.toContain("❯");
+  });
+
+  it("marks nothing and opens the newest season when the show is unwatched", async () => {
+    const u = await mountWideWithHistory(SHOW, [], 120);
+    await vi.waitFor(() => expect(u.frame()).toContain("Harrowgate S04"));
+    expect(u.frame()).not.toContain("up to");
+  });
+});
 
 describe("Results quality badges", () => {
   // ASSERTED VIA LABELS THE RELEASE NAME CANNOT PROVIDE. The name already

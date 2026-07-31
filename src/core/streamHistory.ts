@@ -106,6 +106,46 @@ export function recordStream(
 }
 
 /**
+ * Advance a title's position from the file a player ACTUALLY opened.
+ *
+ * `historyItemFor` parses the TORRENT's name, so streaming E03 out of
+ * "Harrowgate.S03.COMPLETE" stored a season and no episode — and `nextEpisode`
+ * returns null without one, so there was nothing to offer. The season tree made
+ * that the likely path rather than a corner case: a collapsed season row
+ * resolves to its best season pack.
+ *
+ * Called from the hook both front ends already fire when a player launches
+ * (`markPlayed` in the TUI, the `"watched"` action in the browser), so a failed
+ * or cancelled stream never moves the mark.
+ *
+ * SAME HIGH-WATER RULE as `recordStream`, for the same reason: replaying an
+ * early episode must not rewind your progress.
+ *
+ * Returns the SAME ARRAY REFERENCE when nothing changed. Callers use that as
+ * their write gate, exactly as `markWatched` (src/util/favouriteList.ts) does —
+ * this fires on every player launch, and churning the file on every re-watch is
+ * what that avoids.
+ */
+export function recordPlayedFile(
+  current: readonly StreamHistoryItem[],
+  infoHash: string,
+  filename: string,
+): StreamHistoryItem[] {
+  const item = current.find((e) => e.infoHash === infoHash);
+  if (!item) return current as StreamHistoryItem[];
+  const parsed = parseRelease(filename);
+  if (parsed?.season === undefined || parsed.episode === undefined) {
+    return current as StreamHistoryItem[];
+  }
+  const season = parsed.season;
+  const episode = parsed.episode;
+  const later =
+    season !== (item.season ?? 0) ? season > (item.season ?? 0) : episode > (item.episode ?? 0);
+  if (!later) return current as StreamHistoryItem[];
+  return current.map((e) => (e.infoHash === infoHash ? { ...e, season, episode } : e));
+}
+
+/**
  * The episode to offer next, or null when there is nothing honest to offer.
  *
  * A SUGGESTION, never a claim the episode exists — nothing here has asked a

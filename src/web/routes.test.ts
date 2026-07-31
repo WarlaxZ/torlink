@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_TITLE_CACHE,
@@ -1695,6 +1698,41 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     });
   });
 
+  it("asks OMDb for one episode when season and episode are sent", async () => {
+    const byName = vi.fn(async () => ({ ok: true as const, imdbId: "tt9", plot: "P", posterUrl: null, type: null }));
+    const d = deps({ fetchTitleMetaByNameImpl: byName, loadConfigImpl: async () => ({ ...defaultConfig, omdbApiKey: "key" }) });
+    await handleWebApi(
+      d,
+      "GET",
+      "/api/title",
+      new URLSearchParams({ release: "Harrowgate.S03E02.1080p.WEB-DL", group: "TV", season: "3", episode: "2" }),
+      undefined,
+      "",
+    );
+    expect(byName).toHaveBeenCalledWith("Harrowgate", "key", expect.objectContaining({ season: 3, episode: 2 }));
+  });
+
+  it("does NOT ask for an episode when the params are absent", async () => {
+    // Number("") is 0 and Number.isInteger(0) is true, so a bare digit check
+    // sends every poster lookup down the episode path — and an episode's own
+    // artwork is missing often enough to blank grid cards at random.
+    const byName = vi.fn(async () => ({ ok: true as const, imdbId: "tt9", plot: "P", posterUrl: null, type: null }));
+    const d = deps({ fetchTitleMetaByNameImpl: byName, loadConfigImpl: async () => ({ ...defaultConfig, omdbApiKey: "key" }) });
+    await handleWebApi(
+      d,
+      "GET",
+      "/api/title",
+      new URLSearchParams({ release: "Harrowgate.S03E02.1080p.WEB-DL", group: "TV" }),
+      undefined,
+      "",
+    );
+    const opts = (byName.mock.calls as unknown as unknown[][])[0]?.[2] as
+      | Record<string, unknown>
+      | undefined;
+    expect(opts?.season).toBeUndefined();
+    expect(opts?.episode).toBeUndefined();
+  });
+
   it("lets a parsed season override the tab's hint", async () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     await title(
@@ -2726,6 +2764,67 @@ describe("handleWebApi — POST /api/library", () => {
     expect(res.status).toBe(200);
     expect((res.json as LibraryResponse).library[0]?.watched).toBe(2);
     expect(saved[0]?.favourites?.[0]?.watched).toEqual(["ep1.mkv", "ep2.mkv"]);
+  });
+
+  // The watched action is also where the WATCH POSITION advances: it is the
+  // first moment the server knows which episode was really opened. At stream
+  // start `historyItemFor` parsed the torrent's name, which for a season pack
+  // names no episode at all.
+  //
+  // Isolated state dir + a fresh module instance, the seam
+  // src/core/streamHistory.test.ts uses: loadStreamHistory resolves its path at
+  // module load, so without this the test would read (and could write) the
+  // developer's real stream-history file.
+  it("advances the watch position from the file that was played", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-routes-history-"));
+    vi.stubEnv("TORLINK_STATE_DIR", dir);
+    vi.resetModules();
+    const paths = await import("../config/paths");
+    // The state dir is fresh, so the data subdirectory does not exist yet.
+    await fs.mkdir(path.dirname(paths.streamHistoryFile), { recursive: true });
+    await fs.writeFile(
+      paths.streamHistoryFile,
+      JSON.stringify([
+        {
+          key: "harrowgate|series",
+          title: "Harrowgate",
+          type: "series",
+          season: 3,
+          rawName: "Harrowgate.S03.COMPLETE.1080p.WEB-DL",
+          infoHash: HASH,
+          magnet: `magnet:?xt=urn:btih:${HASH}`,
+          startedAt: 1,
+        },
+      ]),
+      "utf8",
+    );
+    const fresh = await import("./routes");
+
+    await fresh.handleWebApi(
+      capture().deps,
+      "POST",
+      "/api/library",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({
+        infoHash: HASH,
+        name: "Harrowgate.S03.COMPLETE.1080p.WEB-DL",
+        action: "watched",
+        filename: "Harrowgate.S03E03.1080p.WEB-DL.mkv",
+      }),
+    );
+
+    const after = JSON.parse(await fs.readFile(paths.streamHistoryFile, "utf8")) as {
+      season?: number;
+      episode?: number;
+    }[];
+    // Season 3 was already stored; the EPISODE is what the pack's name could not
+    // give, and without it nextEpisode() has nothing to offer.
+    expect(after[0]?.season).toBe(3);
+    expect(after[0]?.episode).toBe(3);
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it("skips the disk write when nothing changed", async () => {

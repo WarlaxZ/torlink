@@ -43,6 +43,10 @@ import {
   defaultExpandedKeys,
   groupCountLabel,
   groupHeading,
+  nextUpRowKey,
+  positionLookup,
+  positionNote,
+  showKeyOf,
   modeForQuery,
   parseGrouping,
   parseLayout,
@@ -81,6 +85,8 @@ import {
   previewCopy,
   type PreviewState,
   type PublicTitleMeta,
+
+  previewEpisodeFor,
 } from "./previewModel";
 import {
   createPosterCache,
@@ -1723,6 +1729,8 @@ interface GroupFacts {
   expanded: boolean;
   /** 0 top level, 1 inside an open season. Chooses the heading's form. */
   depth: number;
+  /** "up to E07" on a season you are part-way through, else absent. */
+  note?: string;
 }
 
 /**
@@ -1776,6 +1784,10 @@ function groupFactsFor(
   };
   if (row.kind === "season") {
     facts.season = row.season;
+    // How far through this season you are — "up to E07", never "watched": the
+    // store is a high-water mark and cannot honestly claim the episodes below it
+    // were all seen.
+    facts.note = positionNote(row.season, positionLookup(savedState.continueWatching)(showKeyOf(row.key)));
     return facts;
   }
   if (row.year !== undefined) facts.year = row.year;
@@ -1783,6 +1795,21 @@ function groupFactsFor(
   if (row.seasonEnd !== undefined) facts.seasonEnd = row.seasonEnd;
   if (row.episode !== undefined) facts.episode = row.episode;
   return facts;
+}
+
+/**
+ * "up to E07" beside a season heading, or null when there is nothing to say.
+ *
+ * createElement + textContent like every other node here — and its own element
+ * rather than glued into the heading string, so it can be styled dim without
+ * dimming the title.
+ */
+function groupNoteSpan(note: string | undefined): HTMLSpanElement | null {
+  if (!note) return null;
+  const span = document.createElement("span");
+  span.className = "group-note";
+  span.textContent = note;
+  return span;
 }
 
 /** "5 releases", as a chip. */
@@ -1859,7 +1886,11 @@ function renderResultCard(
   appendCachedBadge(meta, result);
 
   li.append(posterButton, name);
-  if (group) li.append(groupCountChip(group.count), groupToggleButton(group));
+  if (group) {
+    const note = groupNoteSpan(group.note);
+    if (note) li.append(note);
+    li.append(groupCountChip(group.count), groupToggleButton(group));
+  }
   li.append(meta, resultActions(result, rowKey));
   return li;
 }
@@ -1963,7 +1994,8 @@ function renderGroupRow(
   // action have a real torrent to work with.
   title.addEventListener("click", () => selectResult(best));
 
-  head.append(title, groupCountChip(row.members.length));
+  const note = groupNoteSpan(facts.note);
+  head.append(title, ...(note ? [note] : []), groupCountChip(row.members.length));
 
   const meta = document.createElement("span");
   meta.className = "result-meta";
@@ -2022,7 +2054,15 @@ function renderResults(): void {
     const groups = visibleGroups(searchView, reportsHealthLookup(sources));
     if (groups.length > 0) {
       seededExpansion = true;
-      for (const key of defaultExpandedKeys(groups)) expandedGroups.add(key);
+      const positionFor = positionLookup(savedState.continueWatching);
+      for (const key of defaultExpandedKeys(groups, positionFor)) expandedGroups.add(key);
+      // Select the episode you are up to, so it is the one already in the
+      // preview. Resolved from the GROUPS rather than the rows: the rows do not
+      // exist yet, and a group hands back its best member directly. Null when
+      // the results do not have that episode — nothing phantom gets selected.
+      const nextKey = nextUpRowKey(groups, positionFor);
+      const landing = nextKey ? groups.find((g) => g.key === nextKey) : undefined;
+      if (landing?.members[0]) selectedHash = landing.members[0].infoHash;
     }
   }
   currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
@@ -2426,6 +2466,13 @@ const preview = createPreviewController({
     // The group, not a parsed hint: the server maps it (hintForGroup) so the
     // browser never has to know that "TV" means OMDb's "series".
     if (group && group !== ALL_TAB) params.set("group", group);
+    // Ask for THIS episode's plot. Only the preview sends these — the poster
+    // cache asks the same route and must keep getting the series artwork.
+    const ep = previewEpisodeFor(release, group && group !== ALL_TAB ? group : null);
+    if (ep) {
+      params.set("season", String(ep.season));
+      params.set("episode", String(ep.episode));
+    }
     try {
       const res = await fetch(`/api/title?${params.toString()}`, { headers: authHeaders() });
       if (!res.ok) return null;

@@ -27,6 +27,9 @@ import {
   type ResultGroup,
 } from "../../util/resultGroup";
 import { sortResults, type Sort } from "../../util/resultSort";
+import type { PositionLookup } from "../../util/resultGroup";
+import type { EpisodeRef } from "../../util/episode";
+import type { PublicStreamHistoryItem } from "../wire";
 import { formatBytes, type DashRow } from "./dashboard";
 import type { PublicSearchResult, PublicSearchSnapshot, SourcesResponse } from "../wire";
 
@@ -57,10 +60,36 @@ export {
   defaultExpandedKeys,
   groupCountLabel,
   groupHeading,
+  nextUpRowKey,
+  positionNote,
   resultAtRow,
+  showKeyOf,
   type GroupRow,
+  type PositionLookup,
   type ResultGroup,
 } from "../../util/resultGroup";
+
+/**
+ * The watch position by normalised show key, from `GET /api/saved`.
+ *
+ * A FUNCTION, matching `reportsHealthLookup`: the row-plan helpers take a lookup
+ * so `src/util/resultGroup.ts` stays front-end-agnostic. Here rather than in
+ * app.ts because app.ts is DOM wiring — this decides what the list is told.
+ *
+ * The key on the wire is `<show>|series` and a group key's show segment is
+ * `<show>`; one normaliser produces both since titleKey.ts unified them.
+ */
+export function positionLookup(
+  continueWatching: readonly PublicStreamHistoryItem[],
+): PositionLookup {
+  const byShow = new Map<string, EpisodeRef>();
+  for (const item of continueWatching) {
+    if (item.type !== "series") continue;
+    if (item.season === undefined || item.episode === undefined) continue;
+    byShow.set(item.key.replace(/\|series$/, ""), { season: item.season, episode: item.episode });
+  }
+  return (showKey) => byShow.get(showKey) ?? null;
+}
 
 /** The pseudo-tab that searches every enabled source, as `parseSearchParams` names it. */
 export const ALL_TAB = "All";

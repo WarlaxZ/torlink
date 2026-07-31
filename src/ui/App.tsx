@@ -44,6 +44,7 @@ import {
   historyItemFor,
   loadStreamHistory,
   nextEpisode,
+  recordPlayedFile,
   recordStream,
   removeStreamHistory,
   saveStreamHistory,
@@ -783,17 +784,43 @@ export function App({
     });
   }, []);
 
+  // Advance the watch position from the file a player really opened.
+  //
+  // RE-READS before writing. `serve --web` is a SEPARATE PROCESS writing this
+  // same file, so a writer that trusted its own React snapshot would silently
+  // drop every row the browser recorded since this TUI started — the rule
+  // `forgetStreamHistory` already states.
+  //
+  // Totally swallowed: this is a convenience list, and an unhandled rejection in
+  // a TUI's Node process can take the terminal down with it.
+  const advancePosition = useCallback(async (infoHash: string, filename: string) => {
+    try {
+      const current = await loadStreamHistory();
+      const next = recordPlayedFile(current, infoHash, filename);
+      if (next === current) return; // nothing moved — do not churn the file
+      await saveStreamHistory(next);
+      setStreamHistory(next);
+    } catch {
+      // ignored, deliberately
+    }
+  }, []);
+
   // Mark a file streamed this session and, when its torrent is favourited,
   // persist watched progress. Called only once a player actually launches, so a
   // failed/cancelled stream never earns a ✓.
+  //
+  // ALSO the watch position: `historyItemFor` ran at stream start and parsed the
+  // TORRENT's name, which for a season pack names no episode. This is the first
+  // moment we know which episode was really opened.
   const markPlayed = useCallback(
     (favId: string, filename: string) => {
       setStreamedFiles((prev) => new Set(prev).add(filename));
       if (isFavouritedIn(config?.favourites ?? [], favId)) {
         markWatchedInFavourite(favId, filename);
       }
+      void advancePosition(favId, filename);
     },
-    [config, markWatchedInFavourite],
+    [config, markWatchedInFavourite, advancePosition],
   );
 
   const isFavourited = useCallback(

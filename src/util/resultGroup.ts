@@ -11,7 +11,11 @@
 // resultFilter.ts already follow: TorrentResult and PublicSearchResult both fit
 // without either front end's types leaking in here.
 import { parseRelease } from "./release";
+// One definition of "the same show" — the history key uses the same one.
+import { normaliseTitle, tidyTitle } from "./titleKey";
 import type { OmdbType } from "../recc/omdb";
+// episode.ts imports nothing, so this costs the browser bundle nothing.
+import type { EpisodeRef } from "./episode";
 
 export interface GroupableResult {
   name: string;
@@ -68,60 +72,6 @@ export type GroupRow<T> =
       depth: number;
     }
   | { kind: "release"; key: string; result: T; inGroup: boolean; depth: number };
-
-/**
- * Normalise a parsed title before it becomes a key.
- *
- * THE ORDER IS LOAD-BEARING. Punctuation becomes spaces BEFORE the leading
- * article is dropped: a title wrapped in another script — "супер … (the …
- * movie)" appears in live data — keeps its "the" if the article is stripped
- * first, and splits off into a group of its own.
- */
-function normaliseTitle(raw: string): string {
-  const base = raw
-    // "www.uindex.org    -    Kestrel 2010": a tracker stamps its own domain on
-    // the front of the release name. Five of 129 live results for one film were
-    // stranded in a group of their own by this alone.
-    .replace(/^\s*(?:www\.)?[a-z0-9-]+\.[a-z]{2,12}\s*[-–—]\s*/i, "")
-    // "[Judas] Harrowgate S03": see BRACKET_PREFIX.
-    .replace(BRACKET_PREFIX, "")
-    .replace(/\.(?:mkv|mp4|m4v|avi|7z|zip|iso)$/i, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/^(?:the|a|an)\s+/, "")
-    .trim();
-  // "Harrowgate Complete Series" is the same show as "Harrowgate": the parser
-  // leaves pack words in the title when no season number follows them to anchor
-  // on. Stripped only from the END and never down to nothing, so a title that is
-  // genuinely one of these words survives.
-  const trimmed = base.replace(PACK_FILLER, "").trim();
-  return trimmed || base;
-}
-
-const PACK_FILLER = /(?:[\s._-]+(?:complete|full|series|seasons?|packs?))+$/i;
-
-/**
- * A release group in brackets on the front, the convention for fansubbed shows.
- *
- * The lookahead demands a LETTER in what is left, not merely a non-space: a film
- * actually titled "(Ashfall) 1999" would otherwise reduce to "1999", and a title
- * eaten down to a bare number groups with every other numeric residue. Bracketed
- * junk in front of nothing is not a prefix, it IS the name.
- */
-const BRACKET_PREFIX = /^\s*[[({][^\])}]*[\])}]\s*(?=[^a-z]*[a-z])/i;
-
-/**
- * The same two strips, on the DISPLAY title, which keeps its own case.
- *
- * A heading reading "Harrowgate COMPLETE SERIES" while the group beside it reads
- * "Harrowgate" is the duplicate-looking-rows complaint again, one layer up: the
- * key already treats them as one thing, so the label has to as well.
- */
-function tidyTitle(raw: string): string {
-  const base = raw.replace(BRACKET_PREFIX, "").trim();
-  return base.replace(PACK_FILLER, "").trim() || base;
-}
 
 /**
  * The season the NAME ITSELF states, which beats the parser when they disagree.
@@ -313,10 +263,44 @@ function foldsUnderSeason<T>(group: ResultGroup<T>): boolean {
   return group.season !== undefined && group.seasonEnd === undefined;
 }
 
-/** "harrowgate" out of "harrowgate|series|s3|e1" — the show's identity. */
-function showOf(key: string): string {
-  const at = key.indexOf("|series|");
-  return at === -1 ? key : key.slice(0, at);
+/**
+ * "harrowgate" out of any group key — the show's identity, and what a watch
+ * position is keyed on. Exported so the front ends build their lookup with the
+ * same rule rather than each slicing the key their own way.
+ */
+export function showKeyOf(groupKey: string): string {
+  const at = groupKey.indexOf("|series|");
+  return at === -1 ? groupKey : groupKey.slice(0, at);
+}
+
+/** Where the user is in a show, by normalised show key. Null when unknown. */
+export type PositionLookup = (showKey: string) => EpisodeRef | null;
+
+/** The episode after a position. `nextEpisode` in src/core owns the public one. */
+function nextOf(at: EpisodeRef): EpisodeRef {
+  return { season: at.season, episode: at.episode + 1 };
+}
+
+/**
+ * The group key of the episode to land on, or null.
+ *
+ * NULL WHEN THE RESULTS DO NOT HAVE IT. A position is a suggestion — nothing has
+ * asked a tracker whether the next episode exists — so a season aired up to E07
+ * that returns no E08 must not grow a phantom row. The results are the authority
+ * on what can be selected.
+ */
+export function nextUpRowKey<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  positionFor: PositionLookup,
+): string | null {
+  for (const group of groups) {
+    if (group.season === undefined || group.episode === undefined) continue;
+    const at = positionFor(showKeyOf(group.key));
+    if (!at) continue;
+    const want = nextOf(at);
+    if (group.season === want.season && group.episode === want.episode) return group.key;
+  }
+  return null;
 }
 
 /** Packs before episodes; episodes ascending. */
@@ -346,7 +330,7 @@ export function seasonTree<T extends GroupableResult>(
   const byShow = new Map<string, Map<number, ResultGroup<T>[]>>();
   for (const group of groups) {
     if (!foldsUnderSeason(group)) continue;
-    const show = showOf(group.key);
+    const show = showKeyOf(group.key);
     let seasons = byShow.get(show);
     if (!seasons) {
       seasons = new Map();
@@ -364,7 +348,7 @@ export function seasonTree<T extends GroupableResult>(
       out.push(group);
       continue;
     }
-    const show = showOf(group.key);
+    const show = showKeyOf(group.key);
     if (done.has(show)) continue;
     done.add(show);
     const seasons = byShow.get(show)!;
@@ -433,7 +417,9 @@ export function groupRowPlan<T extends GroupableResult>(
 /**
  * The keys a fresh result set should start with open.
  *
- * The highest-ranked season node, and only that one. Without it a search for one
+ * WITH a position: the season holding the next episode.
+ *
+ * WITHOUT one: the highest-ranked season node, and only that one. Without it a search for one
  * season collapses to a single line, which reads as the list having failed.
  *
  * "Highest-ranked" rather than "the only one": a real search for one season of
@@ -449,8 +435,19 @@ export function groupRowPlan<T extends GroupableResult>(
  */
 export function defaultExpandedKeys<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
+  positionFor?: PositionLookup,
 ): string[] {
-  for (const node of seasonTree(groups)) {
+  const nodes = seasonTree(groups);
+  // WITH a position: the season holding the next episode, which is the whole
+  // point — you searched a show to carry on watching it.
+  if (positionFor) {
+    for (const node of nodes) {
+      if (!isSeasonNode(node) || node.children.length <= 1) continue;
+      const at = positionFor(showKeyOf(node.key));
+      if (at && nextOf(at).season === node.season) return [node.key];
+    }
+  }
+  for (const node of nodes) {
     if (isSeasonNode(node) && node.children.length > 1) return [node.key];
   }
   return [];
@@ -514,6 +511,21 @@ function pushGroupRows<T extends GroupableResult>(
  */
 export function resultAtRow<T>(row: GroupRow<T>): T | null {
   return row.kind === "release" ? row.result : (row.members[0] ?? null);
+}
+
+/**
+ * The note a season heading carries when you are part-way through it.
+ *
+ * "up to E07", NOT "watched" — the store holds a HIGH-WATER MARK, one entry per
+ * title, and `recordStream` deliberately keeps it that way so replaying an early
+ * episode does not rewind you. Claiming E01–E06 are watched is not something
+ * that data can support once someone jumps around.
+ *
+ * Empty string, never null, so a renderer can concatenate without a branch.
+ */
+export function positionNote(season: number, at: EpisodeRef | null): string {
+  if (!at || at.season !== season) return "";
+  return `up to E${pad(at.episode)}`;
 }
 
 /** "12 releases" for a group heading. */

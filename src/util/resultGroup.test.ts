@@ -7,6 +7,9 @@ import {
   groupRowPlan,
   defaultExpandedKeys,
   isSeasonNode,
+  nextUpRowKey,
+  positionNote,
+  showKeyOf,
   resultAtRow,
   seasonTree,
 } from "./resultGroup";
@@ -465,5 +468,98 @@ describe("defaultExpandedKeys", () => {
       "series",
     );
     expect(defaultExpandedKeys(groups)).toEqual([]);
+  });
+});
+
+describe("defaultExpandedKeys with a watch position", () => {
+  const SHOW = [
+    r("Harrowgate.S03.1080p.WEB-DL"),
+    r("Harrowgate.S03.2160p.WEB-DL"),
+    r("Harrowgate.S03E01.1080p.WEB-DL"),
+    r("Harrowgate.S03E01.2160p.WEB-DL"),
+    r("Harrowgate.S04E02.1080p.WEB-DL"),
+    r("Harrowgate.S04E02.2160p.WEB-DL"),
+    r("Harrowgate.S04E03.1080p.WEB-DL"),
+    r("Harrowgate.S04E03.2160p.WEB-DL"),
+  ];
+
+  it("opens the season holding the next episode, not the highest-ranked one", () => {
+    const groups = groupResults(SHOW, "series");
+    // Seasons sort newest first, so S04 is the highest-ranked node. This only
+    // passes if the POSITION is what chose S03.
+    expect(defaultExpandedKeys(groups, () => ({ season: 3, episode: 0 }))).toEqual([
+      "harrowgate|series|s3",
+    ]);
+  });
+
+  it("falls back to the highest-ranked season when the show has no position", () => {
+    const groups = groupResults(SHOW, "series");
+    expect(defaultExpandedKeys(groups, () => null)).toEqual(defaultExpandedKeys(groups));
+  });
+
+  it("is unchanged when no lookup is given, so Piece A's behaviour is intact", () => {
+    const groups = groupResults(SHOW, "series");
+    expect(defaultExpandedKeys(groups)).toHaveLength(1);
+  });
+
+  it("falls back when the position names a season the results do not have", () => {
+    const groups = groupResults(SHOW, "series");
+    expect(defaultExpandedKeys(groups, () => ({ season: 9, episode: 1 }))).toEqual(
+      defaultExpandedKeys(groups),
+    );
+  });
+});
+
+describe("nextUpRowKey", () => {
+  const groups = () =>
+    groupResults(
+      [
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.2160p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.2160p.WEB-DL"),
+      ],
+      "series",
+    );
+
+  it("names the row for the episode after the position", () => {
+    expect(nextUpRowKey(groups(), () => ({ season: 3, episode: 1 }))).toBe(
+      "harrowgate|series|s3|e2",
+    );
+  });
+
+  it("is null when the next episode is not in the results, so nothing phantom is marked", () => {
+    // Position says E02 watched; there is no E03 here. nextEpisode is a
+    // suggestion — it has never asked a tracker whether the episode exists.
+    expect(nextUpRowKey(groups(), () => ({ season: 3, episode: 2 }))).toBeNull();
+  });
+
+  it("is null with no position", () => {
+    expect(nextUpRowKey(groups(), () => null)).toBeNull();
+  });
+});
+
+describe("showKeyOf", () => {
+  it("takes the show out of a series group key", () => {
+    expect(showKeyOf("harrowgate|series|s3|e1")).toBe("harrowgate");
+    expect(showKeyOf("harrowgate|series|s3")).toBe("harrowgate");
+  });
+
+  it("leaves a film key alone", () => {
+    expect(showKeyOf("kestrel|2010|movie")).toBe("kestrel|2010|movie");
+  });
+});
+
+describe("positionNote", () => {
+  it("says how far through a season you are", () => {
+    expect(positionNote(3, { season: 3, episode: 7 })).toBe("up to E07");
+  });
+
+  it("says nothing for a season you have not started", () => {
+    expect(positionNote(4, { season: 3, episode: 7 })).toBe("");
+  });
+
+  it("says nothing without a position", () => {
+    expect(positionNote(3, null)).toBe("");
   });
 });

@@ -22,8 +22,13 @@ import {
   groupHeading,
   groupResults,
   groupRowPlan,
+  nextUpRowKey,
+  positionNote,
   resultAtRow,
+  showKeyOf,
+  type PositionLookup,
 } from "../../util/resultGroup";
+import type { EpisodeRef } from "../../util/episode";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -245,6 +250,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     toggleFavourite,
     isFavourited,
     adultEnabled,
+    streamHistory,
     omdbApiKey,
     cachedHashes,
     refreshCachedHashes,
@@ -266,6 +272,22 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     () => enabledSources(disabledSources, adultEnabled),
     [disabledSources, adultEnabled],
   );
+
+  // Where the user is in each show, by the same normalised show key the group
+  // keys use — one normaliser since titleKey.ts unified them. Memoised so the
+  // seeding effects below do not re-run every render.
+  const positionFor = useMemo<PositionLookup>(() => {
+    const byShow = new Map<string, EpisodeRef>();
+    // `?? []` is not paranoia: Results.ratePrompt.test.tsx builds a partial store
+    // with `as unknown as Store`, and a crash here takes the whole results list
+    // down. A missing convenience list must degrade to "no position known".
+    for (const item of streamHistory ?? []) {
+      if (item.type !== "series") continue;
+      if (item.season === undefined || item.episode === undefined) continue;
+      byShow.set(item.key.replace(/\|series$/, ""), { season: item.season, episode: item.episode });
+    }
+    return (showKey) => byShow.get(showKey) ?? null;
+  }, [streamHistory]);
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);
@@ -315,6 +337,9 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   // lives BELOW the query-change effect that clears `expanded`: effects run in
   // declaration order, and seeding above it just gets wiped on mount.
   const seeded = useRef(false);
+  // Landing on the next episode is a second one-shot, tracked separately: the
+  // expansion seed runs before `rows` exists, and the cursor move needs them.
+  const landed = useRef(false);
   // The row the user navigated to; null until they move. Keeps the cursor on
   // their row while streamed-in sources reshuffle the list.
   //
@@ -353,6 +378,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     setExpanded(new Set());
     // Let the next result set seed its season open again.
     seeded.current = false;
+    landed.current = false;
   }, [query, section]);
 
   // Seeds the season the user most likely wants, once per result set. Declared
@@ -360,13 +386,15 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   useEffect(() => {
     if (results.length === 0) {
       seeded.current = false;
+      landed.current = false;
       return;
     }
     if (seeded.current) return;
     seeded.current = true;
-    const keys = defaultExpandedKeys(groupResults(results, hintForSection(section)));
+    landed.current = true;
+    const keys = defaultExpandedKeys(groupResults(results, hintForSection(section)), positionFor);
     if (keys.length > 0) setExpanded(new Set(keys));
-  }, [results, section]);
+  }, [results, section, positionFor]);
 
 
   useEffect(() => {
@@ -516,11 +544,29 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const p = parseRelease(name, hintForSection(section));
     if (p?.title) void openUrl(imdbFindUrl(p.year ? `${p.title} ${p.year}` : p.title));
   };
+  // SEASON AND EPISODE ARE PART OF THE CACHE IDENTITY. `parsed.key` is
+  // `title|year|type`, which for a series is the same string for every episode
+  // of every season — exactly what makes quality variants share one lookup, and
+  // exactly what would make every episode render episode one's plot.
+  const previewEpisode =
+    parsed?.type === "series" && parsed.season !== undefined && parsed.episode !== undefined
+      ? { season: parsed.season, episode: parsed.episode }
+      : null;
   const preview = useTitlePreview({
     omdbApiKey,
     enabled: showPreview,
-    cacheKey: parsed?.key ?? "",
-    query: parsed ? { by: "name", title: parsed.title, year: parsed.year, type: parsed.type } : null,
+    cacheKey: parsed
+      ? `${parsed.key}|${previewEpisode ? `s${previewEpisode.season}e${previewEpisode.episode}` : ""}`
+      : "",
+    query: parsed
+      ? {
+          by: "name",
+          title: parsed.title,
+          year: parsed.year,
+          type: parsed.type,
+          ...(previewEpisode ?? {}),
+        }
+      : null,
     posterCols: Math.max(8, previewWidth - 4),
     posterMaxRows: Math.max(4, panelOuter - 8),
   });
@@ -572,6 +618,32 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const hash = row ? resultAtRow(row)?.infoHash : undefined;
     selRef.current = row && hash ? { key: row.key, hash } : null;
   };
+
+  // Land on the episode you are up to. Declared AFTER moveTo, which it calls.
+  //
+  // Once per result set, like the expansion seed and for the same reason: a
+  // running rule would drag the cursor back every time a source streams in.
+  // Null when the results do not have that episode — a position is a
+  // suggestion, and the results are the authority on what can be selected.
+  useEffect(() => {
+    if (!landed.current || rows.length === 0) return;
+    const key = nextUpRowKey(groupResults(results, hintForSection(section)), positionFor);
+    if (!key) {
+      landed.current = false; // nothing to land on; stop looking
+      return;
+    }
+    const at = rows.findIndex((row) => row.key === key);
+    // NOT FOUND YET is not "not found". The expansion seed and this run in the
+    // same commit, so on the first pass `rows` was still built from the empty
+    // expanded set and the episode row does not exist. Keep the one-shot armed
+    // until the row is actually there, or the cursor never moves.
+    if (at < 0) return;
+    landed.current = false;
+    moveTo(at);
+    // moveTo is recreated every render and intentionally left out: this fires
+    // once per result set, and depending on it would re-run on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, results, section, positionFor]);
 
   useInput(
     (input, key) => {
@@ -889,9 +961,16 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                   // the short form — the season row above them already states the
                   // show, and repeating it at every level is noise.
                   const indent = "  ".repeat(row.depth);
+                  // How far through this season you are — "up to E07", never
+                  // "watched": the store is a high-water mark, so it cannot
+                  // honestly claim the episodes below it were all seen.
+                  const note =
+                    row.kind === "season"
+                      ? positionNote(row.season, positionFor(showKeyOf(row.key)))
+                      : "";
                   const label =
                     row.kind === "season"
-                      ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}`
+                      ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}${note ? ` ${ICON.dot} ${note}` : ""}`
                       : row.kind === "group"
                         ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row, { underSeason: row.depth > 0 })}`
                         : `${indent}${cleanText(r.name)}`;

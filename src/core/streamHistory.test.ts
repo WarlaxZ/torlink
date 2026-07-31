@@ -7,6 +7,7 @@ import {
   historyItemFor,
   nextEpisode,
   nextLabel,
+  recordPlayedFile,
   recordStream,
   removeStreamHistory,
   STREAM_HISTORY_CAP,
@@ -297,5 +298,54 @@ describe("loadStreamHistory / saveStreamHistory", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// Playing E03 out of "Harrowgate.S03.COMPLETE" used to store a season and NO
+// episode, because historyItemFor parses the torrent's name. nextEpisode returns
+// null without one, so there was nothing to offer — and the season tree made
+// that the likely path, since a collapsed season acts on its best pack.
+describe("recordPlayedFile", () => {
+  const packEntry = (): StreamHistoryItem =>
+    item({
+      key: "harrowgate|series",
+      title: "Harrowgate",
+      type: "series",
+      season: 3,
+      episode: undefined,
+      rawName: "Harrowgate.S03.COMPLETE.1080p.WEB-DL",
+      infoHash: HASH,
+    });
+
+  it("takes the episode from the file when the torrent name had none", () => {
+    const next = recordPlayedFile([packEntry()], HASH, "Harrowgate.S03E03.1080p.WEB-DL.mkv");
+    expect(next[0]!.season).toBe(3);
+    expect(next[0]!.episode).toBe(3);
+    // The whole point: there is now a next episode to offer.
+    expect(nextEpisode(next[0]!)).toEqual({ season: 3, episode: 4 });
+  });
+
+  it("is a high-water mark, so replaying an earlier file does not rewind", () => {
+    const at5 = recordPlayedFile([packEntry()], HASH, "Harrowgate.S03E05.mkv");
+    const back = recordPlayedFile(at5, HASH, "Harrowgate.S03E02.mkv");
+    expect(back[0]!.episode).toBe(5);
+  });
+
+  it("returns the SAME reference when nothing changed, which is the write gate", () => {
+    const at5 = recordPlayedFile([packEntry()], HASH, "Harrowgate.S03E05.mkv");
+    expect(recordPlayedFile(at5, HASH, "Harrowgate.S03E02.mkv")).toBe(at5);
+    expect(recordPlayedFile(at5, HASH, "Harrowgate.S03E05.mkv")).toBe(at5);
+  });
+
+  it("ignores a file that names no episode, and an unknown info hash", () => {
+    const one = [packEntry()];
+    expect(recordPlayedFile(one, HASH, "readme.txt")).toBe(one);
+    expect(recordPlayedFile(one, "b".repeat(40), "Harrowgate.S03E03.mkv")).toBe(one);
+  });
+
+  it("advances across a season boundary", () => {
+    const s4 = recordPlayedFile([packEntry()], HASH, "Harrowgate.S04E01.mkv");
+    expect(s4[0]!.season).toBe(4);
+    expect(s4[0]!.episode).toBe(1);
   });
 });
