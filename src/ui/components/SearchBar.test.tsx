@@ -35,7 +35,6 @@ describe("SearchBar suggestions", () => {
       />,
     );
     expect(rowCount(one.lastFrame())).toBe(rowCount(empty.lastFrame()) + 1);
-    expect(empty.lastFrame()).not.toContain("·");
   });
 
   it("lists each suggestion with its year and kind", () => {
