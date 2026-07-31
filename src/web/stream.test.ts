@@ -12,7 +12,7 @@ import {
   parseStreamPath,
   playlistFilename,
   requestOrigin,
-  splitPlaylistSuffix,
+  splitRepresentation,
 } from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
@@ -634,14 +634,203 @@ function hostlessGet(port: number, path: string): Promise<{ status: number; body
   });
 }
 
-describe("splitPlaylistSuffix", () => {
+describe("splitRepresentation", () => {
   it("splits a .m3u off and leaves everything else alone", () => {
-    expect(splitPlaylistSuffix("/stream/a/0.m3u")).toEqual({ path: "/stream/a/0", playlist: true });
-    expect(splitPlaylistSuffix("/stream/a/0")).toEqual({ path: "/stream/a/0", playlist: false });
-    expect(splitPlaylistSuffix("/stream/a/0.m3u8")).toEqual({
+    expect(splitRepresentation("/stream/a/0.m3u")).toEqual({ path: "/stream/a/0", rep: "playlist" });
+    expect(splitRepresentation("/stream/a/0")).toEqual({ path: "/stream/a/0", rep: "media" });
+    expect(splitRepresentation("/stream/a/0.m3u8")).toEqual({
       path: "/stream/a/0.m3u8",
-      playlist: false,
+      rep: "media",
     });
+  });
+
+  it("splits a .info off", () => {
+    expect(splitRepresentation("/stream/a/0.info")).toEqual({ path: "/stream/a/0", rep: "info" });
+  });
+
+  it("does not treat a near-miss suffix as a representation", () => {
+    expect(splitRepresentation("/stream/a/0.information")).toEqual({
+      path: "/stream/a/0.information",
+      rep: "media",
+    });
+    expect(splitRepresentation("/stream/a/0.INFO")).toEqual({
+      path: "/stream/a/0.INFO",
+      rep: "media",
+    });
+  });
+});
+
+describe("GET /stream/:sid/:idx.info", () => {
+  const MKV = "Kestrel.2010.1080p.BluRay.x264.mkv";
+  const CDN = "https://cdn.real-debrid.example/d/SECRETTOKEN123/1.mkv";
+
+  async function infoSession(
+    over: {
+      files?: StreamFile[];
+      streamDeps?: NonNullable<Parameters<typeof startWebServer>[1]>["streamDeps"];
+      name?: string;
+    } = {},
+  ): Promise<{ base: string; capability: string; id: string }> {
+    const reg = registry({
+      idFactory: () => "sid-info",
+      capabilityFactory: () => "cap-info",
+      resolveDebridImpl: async () => over.files ?? [{ url: CDN, filename: MKV, bytes: 123 }],
+    });
+    const s = await reg.start({
+      infoHash: "0".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "0".repeat(40),
+      name: over.name ?? "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    expect(s.state).toBe("ready");
+    const base = await start(reg, { streamDeps: over.streamDeps });
+    return { base, capability: "cap-info", id: "sid-info" };
+  }
+
+  it("401s without the capability, before it probes anything", async () => {
+    let probes = 0;
+    const { base, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => {
+          probes += 1;
+          return null;
+        },
+      },
+    });
+    const res = await fetch(`${base}/stream/${id}/0.info`);
+    expect(res.status).toBe(401);
+    // The expensive thing must be behind the guard, not beside it.
+    expect(probes).toBe(0);
+  });
+
+  it("404s for an unknown session", async () => {
+    const { base, capability } = await infoSession();
+    const res = await fetch(`${base}/stream/nope/0.info?k=${capability}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for an index past the end of the file list", async () => {
+    const { base, capability, id } = await infoSession();
+    const res = await fetch(`${base}/stream/${id}/99.info?k=${capability}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("classifies from the name when there is no ffprobe", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: { probeImpl: async () => null },
+    });
+    const res = await fetch(`${base}/stream/${id}/0.info?k=${capability}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.facts.source).toBe("name");
+    expect(body.facts.videoCodec).toBe("h264");
+    expect(body.blockers).toEqual(["container"]);
+    expect(body.hls).toBeNull();
+  });
+
+  it("prefers the probe when there is one", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => ({
+          container: "mkv",
+          videoCodec: "hevc",
+          audioCodec: "dts",
+          source: "probe" as const,
+        }),
+      },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.facts.source).toBe("probe");
+    // The name said x264; the file is really hevc. This is the case the probe
+    // exists for, and the name-only path would have got it wrong.
+    expect(body.blockers).toEqual(["container", "video", "audio"]);
+  });
+
+  it("probes once for repeated requests", async () => {
+    let probes = 0;
+    const { base, capability, id } = await infoSession({
+      streamDeps: {
+        probeImpl: async () => {
+          probes += 1;
+          return { container: "mkv", videoCodec: "h264", audioCodec: "aac", source: "probe" as const };
+        },
+      },
+    });
+    await fetch(`${base}/stream/${id}/0.info?k=${capability}`);
+    await fetch(`${base}/stream/${id}/0.info?k=${capability}`);
+    expect(probes).toBe(1);
+  });
+
+  it("does not probe a file the name already says is playable", async () => {
+    // The common path. A probe is a spawn plus a network round trip bounded at
+    // 15s; paying it for an mp4 that was going to play anyway would make every
+    // player page load slower to catch a rare mislabelled file.
+    let probes = 0;
+    const { base, capability, id } = await infoSession({
+      files: [{ url: CDN, filename: "Ashfall.1999.1080p.mp4", bytes: 1 }],
+      name: "Ashfall.1999.1080p-GROUP",
+      streamDeps: {
+        probeImpl: async () => {
+          probes += 1;
+          return null;
+        },
+      },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(probes).toBe(0);
+    expect(body.blockers).toEqual([]);
+    expect(body.facts.source).toBe("name");
+  });
+
+  it("uses the session's release name for codecs, not just the filename", async () => {
+    // A debrid provider often renames the file to something useless; the release
+    // it came from is the richer signal and the server has both.
+    const { base, capability, id } = await infoSession({
+      files: [{ url: CDN, filename: "1.mkv", bytes: 1 }],
+      name: "Tin.Rivers.2024.2160p.WEB-DL.x265.DTS-GROUP",
+      streamDeps: { probeImpl: async () => null },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.facts.videoCodec).toBe("hevc");
+    expect(body.facts.audioCodec).toBe("dts");
+  });
+
+  it("never puts the upstream url in the response", async () => {
+    // The debrid link is a credential against the user's account. The page has
+    // no business seeing it and must keep using /stream/:sid/:idx.
+    const { base, capability, id } = await infoSession({
+      streamDeps: { probeImpl: async () => null },
+    });
+    const text = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).text();
+    expect(text).not.toContain("SECRETTOKEN123");
+  });
+
+  it("never logs the capability", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: { probeImpl: async () => null },
+    });
+    await fetch(`${base}/stream/${id}/0.info?k=${capability}`);
+    expect(logs.join("\n")).not.toContain("cap-info");
+  });
+
+  it("rejects a method other than GET or HEAD", async () => {
+    const { base, capability, id } = await infoSession();
+    const res = await fetch(`${base}/stream/${id}/0.info?k=${capability}`, { method: "POST" });
+    expect(res.status).toBe(405);
+  });
+
+  it("still serves media at the unsuffixed path", async () => {
+    // The suffix generalisation must not have broken the route it grew out of.
+    const { base, capability, id } = await infoSession();
+    const res = await fetch(`${base}/stream/${id}/0?k=${capability}`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+  });
+
+  it("still serves the playlist at .m3u", async () => {
+    const { base, capability, id } = await infoSession();
+    const res = await fetch(`${base}/stream/${id}/0.m3u?k=${capability}`);
+    expect(res.headers.get("content-type")).toContain("audio/x-mpegurl");
   });
 });
 
