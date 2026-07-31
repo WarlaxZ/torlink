@@ -29,6 +29,7 @@ import {
   type StreamDeps,
 } from "./stream";
 import { ProbeCache } from "../core/probeCache";
+import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
@@ -245,12 +246,11 @@ export async function startWebServer(
   // spawn ffprobe twice. Bounded, so it needs no teardown of its own.
   const probeCache = new ProbeCache();
 
-  // Rung 2 of the player's source ladder — the debrid provider's own HLS
-  // transcode — is deliberately NOT wired in yet. `makeResolveHls` in
-  // ./hlsSource.ts is built and tested, but passing it into the stream deps
-  // before the player page can mount a manifest would make a file with a
-  // perfectly good manifest display a card claiming its container is unplayable.
-  // The next change adds the hls.js mount and enables it here.
+  // Rung 2 of the player's source ladder: the debrid provider's own HLS
+  // transcode, which lets a browser play an MKV without this machine
+  // transcoding or carrying a byte. Built once; it reads config per call, so a
+  // token changed in the TUI is picked up without a restart.
+  const resolveHls = makeResolveHls();
 
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
@@ -425,6 +425,9 @@ export async function startWebServer(
       if (isStreamPath(urlPath)) {
         const wrote = await handleStreamRequest(
           {
+            resolveHls,
+            // Spread after the default so a test can override it, and before the
+            // fields below so it cannot override those.
             ...options.streamDeps,
             sessions: runtime.sessions,
             log,

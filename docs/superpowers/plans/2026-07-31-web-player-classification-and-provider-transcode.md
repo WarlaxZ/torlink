@@ -2103,6 +2103,20 @@ grep -c 'from"hls.js"' dist/web/*.js || echo "correctly bundled"
 
 hls.js should appear as its own dynamically-imported chunk in `dist/web/`.
 
+**WHAT WAS AND WAS NOT VERIFIED, 2026-07-31.**
+
+Verified in a real Chrome against a live Real-Debrid session on an HEVC MKV:
+
+- The hls.js chunk is fetched **only** when a manifest is actually mounted — an mp4 that direct-plays never requests it.
+- The provider manifest loads cross-origin from the page (`200`), so the Task 0 CORS finding holds from a browser and not just from curl.
+- hls.js parses it correctly: one level, 1988 fragments, 9935s duration.
+
+**One bug found and fixed by this run, which no unit test could have caught.** The first version of `hlsStrategy` preferred native HLS whenever `canPlayType` was non-empty. Chrome on macOS answers `"maybe"` for `application/vnd.apple.mpegurl` and then plays nothing, with no `error` event — so the page set `video.src`, nothing happened, and the stall timer showed the card twelve seconds later. That would have broken rung 2 on **every desktop browser**. The priority is now MSE-first, with native reserved for the no-MSE case (iPhone Safari), and there is a named regression test.
+
+**NOT verified: playback itself.** `MEDIA_ATTACHED` never fires in the automated Chrome tab used here, so hls.js never buffers a fragment. A control run against a known-good public HLS stream failed in exactly the same way, which places the cause in the automation environment (no MSE `sourceopen` for a non-focused tab) rather than in this code. Everything up to the MSE handoff works; the handoff itself is unexercised.
+
+**So this step is still open** and needs a human at a normal browser window:
+
 - [ ] **Step 8: Run it for real, on two devices**
 
 Run: `npm run dev -- serve --web` with a Real-Debrid token configured. Stream an MKV, open the player.

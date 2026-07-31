@@ -3,8 +3,10 @@
 // is kept boring on purpose so that reading it is enough to know what reaches
 // the page.
 //
-// Bundled for the browser: nothing from node:*, nothing from the repo outside
-// this directory.
+// Bundled for the browser: nothing from node:*. Types from `../wire.ts` are
+// fair game (they are erased at build time) and so is `src/util/`, the layer
+// both front ends share — `npm run build` is what proves any such import is
+// browser-safe, following transitive imports where a grep cannot.
 //
 // SAME HARD RULE AS app.ts: every node here is built with createElement and
 // filled with textContent. The filename comes out of a torrent — i.e. from
@@ -24,6 +26,7 @@ import {
   type FallbackReason,
   type PlayerTarget,
 } from "./playerModel";
+import { mountHls } from "./hlsMount";
 import type { StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -87,7 +90,7 @@ function showFallback(reason: FallbackReason, filename: string): void {
   stage.replaceChildren(card);
 }
 
-function mountVideo(target: PlayerTarget, src: string): void {
+function createVideo(): HTMLVideoElement {
   const video = document.createElement("video");
   video.className = "player";
   video.controls = true;
@@ -97,12 +100,22 @@ function mountVideo(target: PlayerTarget, src: string): void {
   // first frame — which is exactly what tells us whether it can play this at
   // all — without pulling the whole file through the proxy behind it.
   video.preload = "metadata";
-  video.src = src;
+  return video;
+}
 
-  // The silent failure is the one that matters. A container the browser hates
-  // often produces no `error` event at all: the element simply never reaches
-  // `loadeddata`. So the timer is the primary detector and the event is the
-  // fast path, and the first of them to fire wins.
+/**
+ * Watch a `<video>` for the failure that produces no event.
+ *
+ * Shared by every rung that mounts an element, because an HLS mount needs
+ * exactly the same "no frame, no error, twelve seconds" detection as a direct
+ * `src` does — and two copies of it would drift.
+ *
+ * The silent failure is the one that matters. A container the browser hates
+ * often produces no `error` event at all: the element simply never reaches
+ * `loadeddata`. So the timer is the primary detector and the event is the fast
+ * path, and the first of them to fire wins.
+ */
+function watch(video: HTMLVideoElement, target: PlayerTarget): { fail: (r: FallbackReason) => void } {
   let settled = false;
   const fail = (reason: FallbackReason): void => {
     if (settled) return;
@@ -125,12 +138,22 @@ function mountVideo(target: PlayerTarget, src: string): void {
   video.addEventListener("error", () => fail("error"));
   video.addEventListener("loadeddata", ok);
   video.addEventListener("playing", ok);
+  return { fail };
+}
 
-  stage.replaceChildren(video);
-  // autoplay is blocked without a user gesture in every browser that matters;
-  // the rejection is expected and is not a playback failure, so it must not
-  // reach `fail`. The controls are right there.
+// autoplay is blocked without a user gesture in every browser that matters; the
+// rejection is expected and is not a playback failure, so it must never reach
+// `fail`. The controls are right there.
+function tryPlay(video: HTMLVideoElement): void {
   void video.play().catch(() => {});
+}
+
+function mountVideo(target: PlayerTarget, src: string): void {
+  const video = createVideo();
+  video.src = src;
+  watch(video, target);
+  stage.replaceChildren(video);
+  tryPlay(video);
 }
 
 async function render(): Promise<void> {
@@ -181,13 +204,14 @@ async function render(): Promise<void> {
     showFallback(chosen.reason ?? "container", target.filename);
     return;
   }
-  if (chosen.rung === "provider-hls") {
-    // Task 9 replaces this with mountHls. Until then `resolveHls` is left unset
-    // in the server's StreamDeps, so `info.hls` is always null in production and
-    // this branch is unreachable — see the note in server.ts. It is written out
-    // rather than left to fall through because a branch that silently renders
-    // nothing is the failure mode this file is built to avoid.
-    showFallback("container", target.filename);
+  if (chosen.rung === "provider-hls" && info?.hls) {
+    const video = createVideo();
+    const settle = watch(video, target);
+    stage.replaceChildren(video);
+    // The manifest is on the provider's own host, so no capability is appended:
+    // it is already a capability, being an unguessable URL minted for this file.
+    await mountHls(video, info.hls, { onError: () => settle.fail("error") });
+    tryPlay(video);
     return;
   }
   mountVideo(target, stream);

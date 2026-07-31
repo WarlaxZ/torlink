@@ -35,7 +35,15 @@ for (const file of ['index.html', 'player.html', 'styles.css']) {
 // `noExternal`. A guard that cries wolf gets deleted, which costs more than the
 // bug it was watching for. `.`, a word character, or `$` before the keyword
 // means it is a property access, not an import.
-const BARE_IMPORT = /(?<![.\w$])(?:from|import)\s*\(?\s*["'](?![./])([^"']+)["']/g;
+//
+// The SPECIFIER shape is load-bearing for the same reason, and for a case that
+// actually fired: `[^"']+` matched the interpolation in one of hls.js's own
+// error messages — `` `Failed to remove ${t}-${s} from "${e}" SourceBuffer` `` —
+// and failed the build advising that `${e}` be added to `noExternal`. Requiring
+// the specifier to look like a package name (`node:fs`, `hls.js`,
+// `@scope/pkg`) rules that out while still matching every real stowaway, which
+// is why this is narrowed rather than the whole check being relaxed.
+const BARE_IMPORT = /(?<![.\w$])(?:from|import)\s*\(?\s*["'](?![./])([@\w][\w@:./-]*)["']/g;
 const stowaways = new Map();
 for (const file of readdirSync(webOut).filter((f) => f.endsWith('.js'))) {
   const code = readFileSync(resolve(webOut, file), 'utf8');
