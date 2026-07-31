@@ -567,13 +567,6 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
           ...(previewEpisode ?? {}),
         }
       : null,
-    // The poster stays the SERIES poster while stepping down a season — see the
-    // posterQuery note on the hook.
-    posterQuery:
-      previewEpisode && parsed
-        ? { by: "name", title: parsed.title, year: parsed.year, type: parsed.type }
-        : null,
-    posterMetaKey: previewEpisode && parsed ? parsed.key : "",
     posterCols: Math.max(8, previewWidth - 4),
     posterMaxRows: Math.max(4, panelOuter - 8),
   });
