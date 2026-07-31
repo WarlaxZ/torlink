@@ -544,11 +544,36 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const p = parseRelease(name, hintForSection(section));
     if (p?.title) void openUrl(imdbFindUrl(p.year ? `${p.title} ${p.year}` : p.title));
   };
+  // SEASON AND EPISODE ARE PART OF THE CACHE IDENTITY. `parsed.key` is
+  // `title|year|type`, which for a series is the same string for every episode
+  // of every season — exactly what makes quality variants share one lookup, and
+  // exactly what would make every episode render episode one's plot.
+  const previewEpisode =
+    parsed?.type === "series" && parsed.season !== undefined && parsed.episode !== undefined
+      ? { season: parsed.season, episode: parsed.episode }
+      : null;
   const preview = useTitlePreview({
     omdbApiKey,
     enabled: showPreview,
-    cacheKey: parsed?.key ?? "",
-    query: parsed ? { by: "name", title: parsed.title, year: parsed.year, type: parsed.type } : null,
+    cacheKey: parsed
+      ? `${parsed.key}|${previewEpisode ? `s${previewEpisode.season}e${previewEpisode.episode}` : ""}`
+      : "",
+    query: parsed
+      ? {
+          by: "name",
+          title: parsed.title,
+          year: parsed.year,
+          type: parsed.type,
+          ...(previewEpisode ?? {}),
+        }
+      : null,
+    // The poster stays the SERIES poster while stepping down a season — see the
+    // posterQuery note on the hook.
+    posterQuery:
+      previewEpisode && parsed
+        ? { by: "name", title: parsed.title, year: parsed.year, type: parsed.type }
+        : null,
+    posterMetaKey: previewEpisode && parsed ? parsed.key : "",
     posterCols: Math.max(8, previewWidth - 4),
     posterMaxRows: Math.max(4, panelOuter - 8),
   });

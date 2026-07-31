@@ -80,11 +80,26 @@ export async function fetchTitleMeta(
 export async function fetchTitleMetaByName(
   title: string,
   apiKey: string,
-  opts: { year?: number; type?: OmdbType; fetchImpl?: FetchImpl; timeoutMs?: number } = {},
+  opts: {
+    year?: number;
+    type?: OmdbType;
+    /**
+     * One episode of a series. OMDb returns THAT episode's own title and plot,
+     * which is what makes a preview pane useful while stepping down a season.
+     * Meaningless for a film — sending them gets a Response:"False", which the
+     * existing miss path already turns into `{ ok: false }` rather than a throw.
+     */
+    season?: number;
+    episode?: number;
+    fetchImpl?: FetchImpl;
+    timeoutMs?: number;
+  } = {},
 ): Promise<FetchTitleMetaResult> {
   if (!title.trim()) return { ok: false, error: "no title" };
   const params = new URLSearchParams({ t: title.trim() });
   if (opts.year) params.set("y", String(opts.year));
   if (opts.type) params.set("type", opts.type);
+  if (opts.season !== undefined) params.set("Season", String(opts.season));
+  if (opts.episode !== undefined) params.set("Episode", String(opts.episode));
   return request(params, apiKey, opts, `by name ${title}`);
 }

@@ -76,6 +76,39 @@ describe("fetchTitleMetaByName", () => {
     expect(u).toContain("type=series");
   });
 
+  it("asks OMDb for one episode when season and episode are given", async () => {
+    const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt9", Plot: "The episode's own plot." });
+    const res = await fetchTitleMetaByName("Harrowgate", "KEY", {
+      type: "series",
+      season: 3,
+      episode: 2,
+      fetchImpl: impl,
+    });
+    expect(res).toEqual({ ok: true, type: null, imdbId: "tt9", plot: "The episode's own plot.", posterUrl: null });
+    expect(urls[0]).toContain("Season=3");
+    expect(urls[0]).toContain("Episode=2");
+  });
+
+  it("omits Season/Episode when not given", async () => {
+    const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt10" });
+    await fetchTitleMetaByName("Harrowgate", "KEY", { type: "series", fetchImpl: impl });
+    expect(urls[0]).not.toContain("Season=");
+    expect(urls[0]).not.toContain("Episode=");
+  });
+
+  it("treats an episode OMDb does not have as a miss, not a throw", async () => {
+    // A season that aired more episodes than OMDb lists is ordinary. The preview
+    // pane must render "no plot available", not an error state.
+    const { impl } = jsonImpl(200, { Response: "False", Error: "Series or episode not found!" });
+    const res = await fetchTitleMetaByName("Harrowgate", "KEY", {
+      type: "series",
+      season: 3,
+      episode: 99,
+      fetchImpl: impl,
+    });
+    expect(res.ok).toBe(false);
+  });
+
   it("omits year/type when not given", async () => {
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt3" });
     await fetchTitleMetaByName("Tollgate", "KEY", { fetchImpl: impl });

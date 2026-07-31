@@ -7,7 +7,18 @@ import { cachedPosterRows } from "../../core/posterCache";
 // name parsed from a release string (search results).
 export type MetaQuery =
   | { by: "id"; imdbId: string }
-  | { by: "name"; title: string; year?: number; type?: OmdbType };
+  | {
+      by: "name";
+      title: string;
+      year?: number;
+      type?: OmdbType;
+      /**
+       * One episode of a series. OMDb answers with THAT episode's plot, which is
+       * the point of stepping down a season in the preview pane.
+       */
+      season?: number;
+      episode?: number;
+    };
 
 interface Meta {
   imdbId: string | null;
@@ -38,6 +49,19 @@ interface Args {
   // repeat visits don't re-request.
   cacheKey: string;
   query: MetaQuery | null;
+  /**
+   * Where the POSTER comes from, when it should not come from `query`.
+   *
+   * An episode lookup returns the episode's own artwork, which OMDb has for some
+   * episodes and not others — so stepping down a season would flicker between a
+   * poster and a blank frame. Point this at the series instead and the artwork
+   * holds still while only the plot changes.
+   *
+   * Cached under `posterMetaKey`, so it costs ONE extra lookup per show rather
+   * than one per episode. Omit both to take the poster from `query` as before.
+   */
+  posterQuery?: MetaQuery | null;
+  posterMetaKey?: string;
   posterCols: number;
   posterMaxRows: number;
   fetchImpl?: FetchImpl;
@@ -53,6 +77,8 @@ export function useTitlePreview(args: Args): TitlePreview {
     posterEnabled = enabled,
     cacheKey,
     query,
+    posterQuery = null,
+    posterMetaKey = "",
     posterCols,
     posterMaxRows,
     fetchImpl,
@@ -66,8 +92,14 @@ export function useTitlePreview(args: Args): TitlePreview {
   // uniquely identifies it) and read the query itself from a ref.
   const queryRef = useRef(query);
   queryRef.current = query;
+  const posterQueryRef = useRef(posterQuery);
+  posterQueryRef.current = posterQuery;
 
-  const posterKey = cacheKey ? `${cacheKey}:${posterCols}` : "";
+  // Keyed on whichever meta owns the poster. For episodes that is the SERIES,
+  // so every episode of a show shares one rendered poster instead of
+  // re-rasterising the same image per row.
+  const posterOwner = posterMetaKey || cacheKey;
+  const posterKey = posterOwner ? `${posterOwner}:${posterCols}` : "";
 
   // Metadata (plot + poster URL), debounced so scrolling doesn't spam OMDb.
   useEffect(() => {
@@ -79,7 +111,13 @@ export function useTitlePreview(args: Args): TitlePreview {
       const p =
         q.by === "id"
           ? fetchTitleMeta(q.imdbId, omdbApiKey, { fetchImpl })
-          : fetchTitleMetaByName(q.title, omdbApiKey, { year: q.year, type: q.type, fetchImpl });
+          : fetchTitleMetaByName(q.title, omdbApiKey, {
+              year: q.year,
+              type: q.type,
+              season: q.season,
+              episode: q.episode,
+              fetchImpl,
+            });
       void p.then((res) => {
         if (cancelled) return;
         metas.current.set(
@@ -97,8 +135,41 @@ export function useTitlePreview(args: Args): TitlePreview {
     };
   }, [omdbApiKey, enabled, cacheKey, fetchImpl, debounceMs]);
 
+  // The series-level lookup that owns the poster, when one was asked for. Same
+  // debounce and same cache as the main one — it is the same shape of request.
+  useEffect(() => {
+    if (!omdbApiKey || !posterEnabled || !posterMetaKey || metas.current.has(posterMetaKey)) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      const q = posterQueryRef.current;
+      if (!q) return;
+      const p =
+        q.by === "id"
+          ? fetchTitleMeta(q.imdbId, omdbApiKey, { fetchImpl })
+          : fetchTitleMetaByName(q.title, omdbApiKey, { year: q.year, type: q.type, fetchImpl });
+      void p.then((res) => {
+        if (cancelled) return;
+        metas.current.set(
+          posterMetaKey,
+          res.ok
+            ? { imdbId: res.imdbId, plot: res.plot, posterUrl: res.posterUrl, type: res.type ?? null }
+            : { imdbId: null, plot: null, posterUrl: null, type: null },
+        );
+        bump((n) => n + 1);
+      });
+    }, debounceMs);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [omdbApiKey, posterEnabled, posterMetaKey, fetchImpl, debounceMs]);
+
   const meta = cacheKey ? metas.current.get(cacheKey) : undefined;
-  const posterUrl = meta?.posterUrl ?? null;
+  const posterMeta = posterMetaKey ? metas.current.get(posterMetaKey) : undefined;
+  // The series poster wins when one was asked for: an episode's own artwork is
+  // patchy, and a pane that blanks on every other episode is worse than a still
+  // one. Undefined (not yet loaded) must NOT fall through to the episode's.
+  const posterUrl = (posterMetaKey ? posterMeta?.posterUrl : meta?.posterUrl) ?? null;
 
   // Poster image (the expensive step), only once we know its URL and it's wanted.
   useEffect(() => {
@@ -117,7 +188,13 @@ export function useTitlePreview(args: Args): TitlePreview {
   return {
     imdbId: meta === undefined ? undefined : meta.imdbId,
     plot: meta === undefined ? undefined : meta.plot,
-    posterRows: meta === undefined ? undefined : meta.posterUrl === null ? null : posters.current.get(posterKey),
+    posterRows: (() => {
+      // Loading is the POSTER's own state, not the plot's: for an episode the
+      // two are separate lookups and the plot usually lands first.
+      const owner = posterMetaKey ? posterMeta : meta;
+      if (owner === undefined) return undefined;
+      return owner.posterUrl === null ? null : posters.current.get(posterKey);
+    })(),
     type: meta === undefined ? undefined : meta.type,
   };
 }

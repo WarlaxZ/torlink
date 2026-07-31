@@ -1186,6 +1186,9 @@ interface TitleLookup {
    * path — the caller of `?name=` did its own parsing and needs nothing back.
    */
   parsed?: PublicTitleParse;
+  /** One episode of a series, when the caller asked for that episode's own plot. */
+  season?: number;
+  episode?: number;
 }
 
 /**
@@ -1210,6 +1213,25 @@ interface TitleLookup {
  * to one title and cost one OMDb call between them, which is the whole reason
  * the TUI caches on `parsed.key` too.
  */
+/**
+ * `?season=&episode=` — both, or neither. A season with no episode is a pack,
+ * which OMDb has no per-episode answer for, and half a pair is a caller bug the
+ * safe reading of which is "no episode asked for".
+ */
+function episodeFromQuery(query: URLSearchParams): { season: number; episode: number } | null {
+  // PRESENCE FIRST. `Number("")` is 0 and `Number.isInteger(0)` is true, so a
+  // bare digit check answers "episode 0 of season 0" for every request that
+  // sends neither — which sent every poster lookup down the episode path.
+  const rawSeason = (query.get("season") ?? "").trim();
+  const rawEpisode = (query.get("episode") ?? "").trim();
+  if (!rawSeason || !rawEpisode) return null;
+  const season = Number(rawSeason);
+  const episode = Number(rawEpisode);
+  if (!Number.isInteger(season) || !Number.isInteger(episode)) return null;
+  if (season < 0 || episode < 0) return null;
+  return { season, episode };
+}
+
 export function parseTitleLookup(
   query: URLSearchParams,
 ): { ok: true; lookup: TitleLookup } | { ok: false; error: string; soft?: true } {
@@ -1227,6 +1249,12 @@ export function parseTitleLookup(
   // whitespace-only release with "missing name or imdb" would send the preview
   // pane looking for a parameter it did deliberately supply. Non-empty means
   // "parse this"; what parsing makes of it is the next line's problem.
+  // OPT-IN, and only the preview pane sends them. The poster cache asks this
+  // same route with `?release=` and must keep getting the SERIES, whose artwork
+  // OMDb reliably has — an episode lookup answers with the episode's own poster,
+  // which is missing often enough that grid cards would blank at random.
+  const ep = episodeFromQuery(query);
+
   const release = query.get("release") ?? "";
   if (release !== "") {
     const parsed = parseRelease(release, hintForGroup(query.get("group")));
@@ -1237,12 +1265,21 @@ export function parseTitleLookup(
     // preview pane look broken for a perfectly ordinary torrent.
     if (!parsed) return { ok: false, error: "no title in that release name", soft: true };
     const lookup: TitleLookup = {
-      cacheKey: `n:${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}`,
+      // Season and episode ARE part of the identity. Without them every episode
+      // of a season shares one cache entry and renders the first one's plot — a
+      // bug that reads as OMDb being wrong rather than a key being too coarse.
+      cacheKey: `n:${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}${
+        ep ? `|s${ep.season}e${ep.episode}` : ""
+      }`,
       name: parsed.title,
       parsed: { title: parsed.title, year: parsed.year ?? null, type: parsed.type ?? null },
     };
     if (parsed.year !== undefined) lookup.year = parsed.year;
     if (parsed.type !== undefined) lookup.type = parsed.type;
+    if (ep) {
+      lookup.season = ep.season;
+      lookup.episode = ep.episode;
+    }
     return { ok: true, lookup };
   }
 
@@ -1363,6 +1400,8 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
       : await (deps.fetchTitleMetaByNameImpl ?? fetchTitleMetaByName)(lookup.name ?? "", apiKey, {
           ...(lookup.year !== undefined ? { year: lookup.year } : {}),
           ...(lookup.type !== undefined ? { type: lookup.type } : {}),
+          ...(lookup.season !== undefined ? { season: lookup.season } : {}),
+          ...(lookup.episode !== undefined ? { episode: lookup.episode } : {}),
         });
 
   if (!result.ok) {

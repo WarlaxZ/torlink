@@ -85,6 +85,8 @@ import {
   previewCopy,
   type PreviewState,
   type PublicTitleMeta,
+
+  previewEpisodeFor,
 } from "./previewModel";
 import {
   createPosterCache,
@@ -2464,6 +2466,13 @@ const preview = createPreviewController({
     // The group, not a parsed hint: the server maps it (hintForGroup) so the
     // browser never has to know that "TV" means OMDb's "series".
     if (group && group !== ALL_TAB) params.set("group", group);
+    // Ask for THIS episode's plot. Only the preview sends these — the poster
+    // cache asks the same route and must keep getting the series artwork.
+    const ep = previewEpisodeFor(release, group && group !== ALL_TAB ? group : null);
+    if (ep) {
+      params.set("season", String(ep.season));
+      params.set("episode", String(ep.episode));
+    }
     try {
       const res = await fetch(`/api/title?${params.toString()}`, { headers: authHeaders() });
       if (!res.ok) return null;

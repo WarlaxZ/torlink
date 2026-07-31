@@ -8,6 +8,8 @@ import {
   type PreviewEffects,
   type PreviewState,
   type PublicTitleMeta,
+
+  previewEpisodeFor,
 } from "./previewModel";
 
 const OK: PublicTitleMeta = {
@@ -256,5 +258,26 @@ describe("posterPath / imdbSearchUrl", () => {
     expect(imdbSearchUrl("Tin & Rivers", null)).toBe(
       "https://www.imdb.com/find/?q=Tin%20%26%20Rivers&s=tt",
     );
+  });
+});
+
+describe("previewEpisodeFor", () => {
+  it("names the episode a release is of", () => {
+    expect(previewEpisodeFor("Harrowgate.S03E02.1080p.WEB-DL", "TV")).toEqual({
+      season: 3,
+      episode: 2,
+    });
+  });
+
+  it("is null for a season pack, which has no per-episode plot", () => {
+    expect(previewEpisodeFor("Harrowgate.S03.COMPLETE.1080p.WEB-DL", "TV")).toBeNull();
+  });
+
+  it("is null for a film", () => {
+    expect(previewEpisodeFor("Kestrel.2010.1080p.BluRay.x264", "Movies")).toBeNull();
+  });
+
+  it("is null for a name with no title in it", () => {
+    expect(previewEpisodeFor("1080p.WEB-DL.x265", "TV")).toBeNull();
   });
 });

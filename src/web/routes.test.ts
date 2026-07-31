@@ -1698,6 +1698,41 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     });
   });
 
+  it("asks OMDb for one episode when season and episode are sent", async () => {
+    const byName = vi.fn(async () => ({ ok: true as const, imdbId: "tt9", plot: "P", posterUrl: null, type: null }));
+    const d = deps({ fetchTitleMetaByNameImpl: byName, loadConfigImpl: async () => ({ ...defaultConfig, omdbApiKey: "key" }) });
+    await handleWebApi(
+      d,
+      "GET",
+      "/api/title",
+      new URLSearchParams({ release: "Harrowgate.S03E02.1080p.WEB-DL", group: "TV", season: "3", episode: "2" }),
+      undefined,
+      "",
+    );
+    expect(byName).toHaveBeenCalledWith("Harrowgate", "key", expect.objectContaining({ season: 3, episode: 2 }));
+  });
+
+  it("does NOT ask for an episode when the params are absent", async () => {
+    // Number("") is 0 and Number.isInteger(0) is true, so a bare digit check
+    // sends every poster lookup down the episode path — and an episode's own
+    // artwork is missing often enough to blank grid cards at random.
+    const byName = vi.fn(async () => ({ ok: true as const, imdbId: "tt9", plot: "P", posterUrl: null, type: null }));
+    const d = deps({ fetchTitleMetaByNameImpl: byName, loadConfigImpl: async () => ({ ...defaultConfig, omdbApiKey: "key" }) });
+    await handleWebApi(
+      d,
+      "GET",
+      "/api/title",
+      new URLSearchParams({ release: "Harrowgate.S03E02.1080p.WEB-DL", group: "TV" }),
+      undefined,
+      "",
+    );
+    const opts = (byName.mock.calls as unknown as unknown[][])[0]?.[2] as
+      | Record<string, unknown>
+      | undefined;
+    expect(opts?.season).toBeUndefined();
+    expect(opts?.episode).toBeUndefined();
+  });
+
   it("lets a parsed season override the tab's hint", async () => {
     const fetchTitleMetaByNameImpl = vi.fn(async () => OK_META);
     await title(
