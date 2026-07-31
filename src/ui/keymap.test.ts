@@ -72,6 +72,13 @@ describe("accounts keymap", () => {
     expect(allKeys).not.toContain("k");
     expect(allKeys).not.toContain("R");
   });
+
+  it("advertises c for claiming in both halves of the accounts keymap", () => {
+    const help = HELP_GROUPS.find((g) => g.title === "Accounts");
+    expect(help?.hints.some((h) => h.keys === "c")).toBe(true);
+    const footer = footerHints("content", "accounts");
+    expect(footer.some((h) => h.keys === "c")).toBe(true);
+  });
 });
 
 describe("downloads/seeding key vocabulary", () => {

@@ -1110,6 +1110,13 @@ export function App({
 
   const closeImportChooser = useCallback(() => setImportChooser(false), []);
 
+  // Task 15 wires this to ReccClaimPrompt (already built in
+  // src/ui/components/ReccClaimPrompt.tsx, not yet reachable from here). The
+  // keypress and its hints land in this task so the Accounts pane's gating
+  // (claimable only when reccd reports an unclaimed account) is testable on
+  // its own; until the prompt is wired up, pressing c does nothing.
+  const onClaimRecc = useCallback(() => {}, []);
+
   const closeTraktImport = useCallback(() => {
     traktImportGen.current++; // supersede any in-flight run so it can't update state after close
     setImportingTrakt(false);
@@ -2884,6 +2891,7 @@ export function App({
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
                 onImportRecc={openImportChooser}
+                onClaimRecc={onClaimRecc}
                 omdbConfigured={store.omdbConfigured}
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}

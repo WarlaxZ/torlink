@@ -424,6 +424,7 @@ save(
           onManageRecc={() => {}}
           onSignOutRecc={() => {}}
           onImportRecc={() => {}}
+          onClaimRecc={() => {}}
           omdbConfigured
           onManageOmdb={() => {}}
           onSignOutOmdb={() => {}}
