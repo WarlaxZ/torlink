@@ -21,6 +21,28 @@ import { parseRelease } from "./release";
 import type { EpisodeRef } from "./episode";
 import type { NamedFile } from "./videoFiles";
 
+/**
+ * The episode auto-play worked out for a season pack, waiting to be consumed
+ * by the picker that opens for the torrent it came from.
+ */
+export interface PackTarget {
+  infoHash: string;
+  next: EpisodeRef;
+}
+
+/**
+ * `pending`'s episode if it was set for THIS torrent, else null.
+ *
+ * Keyed by infohash rather than just cleared on read: the picker only opens
+ * when a multi-file torrent actually resolves, and every other path (a guard
+ * bailing, a cancelled prompt, a failed resolve, a single-file torrent) leaves
+ * `pending` set. Without the key, a stale target from an abandoned play would
+ * preselect the wrong episode in a later, unrelated picker.
+ */
+export function packTargetFor(pending: PackTarget | null, infoHash: string): EpisodeRef | null {
+  return pending?.infoHash === infoHash ? pending.next : null;
+}
+
 export interface NextEpisodeHint {
   /**
    * The episode to look for.

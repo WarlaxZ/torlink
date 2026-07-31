@@ -121,6 +121,24 @@ import {
   type SavedState,
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
+import {
+  FEATURE_IDS,
+  FEATURES,
+  NEXT_FEATURE_STATE,
+  FEATURE_STATE_MARK,
+  pickSearchingLine,
+  pickNoneLine,
+  type FeatureState,
+} from "../../util/releasePick";
+import type { ReccMedium } from "../../util/autoPlayableFilm";
+import {
+  autoPlayableFilm,
+  createPickController,
+  intentForHistoryRow,
+  prefsFromWire,
+  type PickState,
+} from "./pickModel";
+import type { PreferencesResponse, PublicQualityPrefs } from "../wire";
 
 // The token is held in sessionStorage and sent as an Authorization header on
 // every API call. No cookie authenticates the API — but that does NOT mean there
@@ -151,6 +169,10 @@ const picker = el<HTMLDivElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
+
+const prefsBlock = el<HTMLDetailsElement>("prefs");
+const prefsResSelect = el<HTMLSelectElement>("pref-res");
+const prefsFeaturesBox = el<HTMLDivElement>("pref-features");
 
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
@@ -660,6 +682,84 @@ async function play(
   }
 }
 
+// ---- playback preferences ---------------------------------------------------
+// The header disclosure. It affects For You and the Continue-watching rows
+// under Saved (see index.html's comment on #prefs for why it lives here and
+// not in either pane). All it does is read/write PublicQualityPrefs through
+// POST /api/preferences and paint the rows FEATURES describes — no ranking
+// decision is made in this file; that is pickModel.ts/releasePick.ts's job.
+
+let prefs: PublicQualityPrefs = { maxResolution: null, require: [], exclude: [] };
+
+function stateOf(id: (typeof FEATURE_IDS)[number]): FeatureState {
+  if (prefs.exclude.includes(id)) return "exclude";
+  if (prefs.require.includes(id)) return "require";
+  return "off";
+}
+
+async function savePrefs(next: PublicQualityPrefs): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("/api/preferences", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set", preferences: next }),
+    });
+  } catch {
+    showNotice("That didn't reach the server.");
+    setConn("lost");
+    return;
+  }
+  if (!res.ok) {
+    const body = await readEnvelope(res);
+    showNotice(body.error ?? `That didn't stick (HTTP ${res.status}).`);
+    return;
+  }
+  // Trust the server's echo, not the local guess: it re-reads and sanitises,
+  // so an id this build sent but the server rejected must not linger in the UI.
+  prefs = ((await res.json()) as PreferencesResponse).preferences;
+  renderPrefs();
+}
+
+function renderPrefs(): void {
+  prefsFeaturesBox.replaceChildren();
+  prefsResSelect.value = prefs.maxResolution ?? "";
+  for (const id of FEATURE_IDS) {
+    const state = stateOf(id);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pref-feature";
+    btn.dataset.state = state;
+    btn.textContent = `${FEATURE_STATE_MARK[state]} ${FEATURES[id].label}`;
+    btn.setAttribute("aria-label", `${FEATURES[id].label}: ${state}`);
+    btn.addEventListener("click", () => {
+      const next = NEXT_FEATURE_STATE[state];
+      void savePrefs({
+        maxResolution: prefs.maxResolution,
+        require: next === "require" ? [...prefs.require, id] : prefs.require.filter((x) => x !== id),
+        exclude: next === "exclude" ? [...prefs.exclude, id] : prefs.exclude.filter((x) => x !== id),
+      });
+    });
+    prefsFeaturesBox.appendChild(btn);
+  }
+}
+
+prefsResSelect.addEventListener("change", () => {
+  const value = prefsResSelect.value;
+  void savePrefs({ ...prefs, maxResolution: (value || null) as PublicQualityPrefs["maxResolution"] });
+});
+
+// `prefs` is otherwise only ever set at boot and from this tab's own POST
+// echo, so another surface changing the stored preference (the TUI's `P`,
+// or another browser tab) would sit unseen until reload — and the next click
+// here would build its whole-object POST from that stale snapshot and quietly
+// wipe the other surface's change. Re-read the moment the disclosure opens,
+// through the same fetch `loadSources()` already does, so there is no second
+// endpoint or parse path for the same data.
+prefsBlock.addEventListener("toggle", () => {
+  if (prefsBlock.open) void loadSources();
+});
+
 // ---- search ---------------------------------------------------------------
 // Everything to the next banner is the search pane. As with Play, the decisions
 // live in pure modules — searchModel.ts and previewModel.ts — and what is here
@@ -761,6 +861,11 @@ async function loadSources(): Promise<void> {
     const body = (await res.json()) as unknown;
     if (!body || typeof body !== "object") return;
     sources = body as SourcesResponse;
+    // The one thing the browser fetches before it can render anything also
+    // carries the stored preference (wire.ts's SourcesResponse.preferences
+    // doc comment) — so the header disclosure opens on it rather than on
+    // the placeholder default for however long the search results take.
+    prefs = sources.preferences;
   } catch {
     // A tab strip we cannot build is survivable — "All" still searches
     // everything, and the source badges fall back to raw ids. Failing the whole
@@ -769,6 +874,7 @@ async function loadSources(): Promise<void> {
   }
   renderTabs();
   renderResults();
+  renderPrefs();
 }
 
 function stopSearch(): void {
@@ -881,6 +987,82 @@ function startSearch(raw: string): void {
     else if (typeof body.error === "string" && body.error.trim()) showNotice(body.error);
     renderResults();
   });
+}
+
+/**
+ * One search across every source, resolved once instead of streamed.
+ *
+ * The same transport `startSearch` drives (`GET /api/search`, `EventSource`,
+ * `searchUrl`) — there is no separate one-shot search route, so this is that
+ * transport collected to a Promise rather than a second way to ask the
+ * server for results. It runs on its own `EventSource`, independent of
+ * `searchStream`: the pane's own in-progress search (or lack of one) must not
+ * be disturbed by a Play button's background lookup, and vice versa.
+ */
+function searchOnce(title: string): Promise<PublicSearchResult[]> {
+  return new Promise((resolve) => {
+    const source = new EventSource(searchUrl(title, ALL_TAB, token));
+    let latest: PublicSearchResult[] = [];
+    const frame = (event: Event): PublicSearchSnapshot | null => {
+      try {
+        return JSON.parse((event as MessageEvent<string>).data) as PublicSearchSnapshot;
+      } catch {
+        return null;
+      }
+    };
+    const finish = (results: PublicSearchResult[]): void => {
+      source.close();
+      resolve(results);
+    };
+    source.addEventListener("results", (event) => {
+      const snapshot = frame(event);
+      if (snapshot) latest = snapshot.results;
+    });
+    source.addEventListener("done", (event) => {
+      const snapshot = frame(event);
+      finish(snapshot ? snapshot.results : latest);
+    });
+    // A transport drop is not a reason to hang the picker forever — resolve
+    // with whatever arrived before it, same as the live pane's own `error`
+    // handler treats an incomplete snapshot as the final one.
+    source.addEventListener("error", () => finish(latest));
+  });
+}
+
+/**
+ * The one-click Play flow behind both a For You film card and a Continue
+ * Watching row: search, rank against the current preference, play. Owned by
+ * pickModel.ts's `createPickController` — the staleness counter (a slow
+ * search resolving after a newer one is discarded, not played under the
+ * newer title's status) and the `onNone` fallback both live there, not here.
+ */
+const pickController = createPickController<PublicSearchResult>({
+  search: (title) => searchOnce(title),
+  // Read fresh on every call: the header disclosure can change the
+  // preference while a search is in flight, and start() itself is the one
+  // place that reads it once and keeps that snapshot for the whole pick.
+  prefs: () => prefsFromWire(prefs),
+  play: (pick, intent) => {
+    // pick.fromPack means the winner is a season pack, so the episode inside
+    // still has to be selected — the same `next` hint playContinueWatching
+    // already hands to play() for a Continue-watching row that names one.
+    const next = pick.fromPack && intent.kind === "episode"
+      ? { season: intent.season, episode: intent.episode }
+      : undefined;
+    void play(rowForPlay(pick.chosen), undefined, next);
+  },
+  render: (state) => renderPickPhase(state),
+});
+
+// Pure DOM: switch on state.phase.kind and paint the four variants into the
+// existing notice area. It decides nothing — the phase already says what to
+// show, and the "playing" note is pickStatusLine's output, computed inside
+// the controller.
+function renderPickPhase(state: PickState): void {
+  const phase = state.phase;
+  if (phase.kind === "searching") showNotice(pickSearchingLine(phase.title));
+  else if (phase.kind === "playing") showNotice(phase.note);
+  else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
 }
 
 searchForm.addEventListener("submit", (event) => {
@@ -1448,12 +1630,34 @@ const preview = createPreviewController({
 // OMDb lookups against a key with a daily cap. Cleared (and revoked) whenever
 // the feed itself is re-fetched, which is the only time the set of picks can
 // change underneath it.
-const reccPosterCache = new Map<string, ReccPosterOutcome>();
-const reccPosterPending = new Map<string, Promise<ReccPosterOutcome>>();
+/**
+ * What one `/api/title?imdb=` lookup learned: the artwork outcome (unchanged
+ * shape, `ReccPosterOutcome`) and, as a SIBLING field rather than folded into
+ * it, the medium OMDb reported. The two are orthogonal — a title with no
+ * poster still has a type — so widening the three-variant poster union to fit
+ * the medium in would have made "no poster, but it's a series" inexpressible.
+ * `medium` is `null` whenever OMDb was not reached or said nothing (`no-key`,
+ * a network failure, or a status other than `"ok"`), never a fresh request:
+ * Task 14's Play button reads this same field, it does not ask again.
+ */
+interface ReccPosterLookup {
+  poster: ReccPosterOutcome;
+  medium: ReccMedium | null;
+}
+
+// Poster object URLs (and medium) by IMDb id, and the lookups still in flight.
+//
+// Cached across renders because the list is rebuilt whenever a card is rated
+// away, and re-fetching twenty posters for a one-card change would cost twenty
+// OMDb lookups against a key with a daily cap. Cleared (and revoked) whenever
+// the feed itself is re-fetched, which is the only time the set of picks can
+// change underneath it.
+const reccPosterCache = new Map<string, ReccPosterLookup>();
+const reccPosterPending = new Map<string, Promise<ReccPosterLookup>>();
 
 function clearReccPosters(): void {
-  for (const outcome of reccPosterCache.values()) {
-    if (outcome.kind === "poster") URL.revokeObjectURL(outcome.url);
+  for (const { poster } of reccPosterCache.values()) {
+    if (poster.kind === "poster") URL.revokeObjectURL(poster.url);
   }
   reccPosterCache.clear();
   reccPosterPending.clear();
@@ -1469,13 +1673,14 @@ function clearReccPosters(): void {
  * would leave the frames unexplained meanwhile.
  */
 function paintReccHint(): void {
-  const hint = reccPosterHint(reccPosterCache.values());
+  const hint = reccPosterHint(Array.from(reccPosterCache.values(), (v) => v.poster));
   reccHintLine.textContent = hint ?? "";
   reccHintLine.hidden = hint === null;
 }
 
 /**
- * A pick's poster: OMDb by IMDb id, then the bytes through `/api/poster`.
+ * A pick's poster and medium: OMDb by IMDb id, then the bytes through
+ * `/api/poster`.
  *
  * Two hops because reccd returns no artwork — only an id — and because the
  * poster must not be fetched from the CDN by the browser directly: an `<img
@@ -1487,22 +1692,28 @@ function paintReccHint(): void {
  * the server answers `{status:"no-key"}` for all twenty picks, and a reader given
  * twenty bare "No poster" boxes concludes the feature is broken instead of that
  * they are one setting away from artwork.
+ *
+ * `medium` is read even when there is no poster to show (`PublicTitleMeta.type`
+ * on an `"ok"` answer with no `posterUrl`) — it is Task 14's only way to learn
+ * whether a For You row is a film, and gating that on artwork existing would
+ * silently withhold the Play button from posterless films.
  */
-async function fetchReccPoster(imdbId: string): Promise<ReccPosterOutcome> {
+async function fetchReccPoster(imdbId: string): Promise<ReccPosterLookup> {
   try {
     const metaRes = await fetch(`/api/title?imdb=${encodeURIComponent(imdbId)}`, {
       headers: authHeaders(),
     });
-    if (!metaRes.ok) return { kind: "none" };
+    if (!metaRes.ok) return { poster: { kind: "none" }, medium: null };
     const meta = (await metaRes.json()) as PublicTitleMeta;
-    if (!meta) return { kind: "none" };
-    if (meta.status === "no-key") return { kind: "no-key" };
-    if (meta.status !== "ok" || !meta.posterUrl) return { kind: "none" };
+    if (!meta) return { poster: { kind: "none" }, medium: null };
+    if (meta.status === "no-key") return { poster: { kind: "no-key" }, medium: null };
+    const medium: ReccMedium | null = meta.status === "ok" ? (meta.type ?? null) : null;
+    if (meta.status !== "ok" || !meta.posterUrl) return { poster: { kind: "none" }, medium };
     const posterRes = await fetch(posterPath(meta.posterUrl), { headers: authHeaders() });
-    if (!posterRes.ok) return { kind: "none" };
-    return { kind: "poster", url: URL.createObjectURL(await posterRes.blob()) };
+    if (!posterRes.ok) return { poster: { kind: "none" }, medium };
+    return { poster: { kind: "poster", url: URL.createObjectURL(await posterRes.blob()) }, medium };
   } catch {
-    return { kind: "none" };
+    return { poster: { kind: "none" }, medium: null };
   }
 }
 
@@ -1529,7 +1740,7 @@ function paintReccPoster(host: HTMLElement, outcome: ReccPosterOutcome): void {
 function mountReccPoster(imdbId: string, host: HTMLElement): void {
   const cached = reccPosterCache.get(imdbId);
   if (cached !== undefined) {
-    paintReccPoster(host, cached);
+    paintReccPoster(host, cached.poster);
     return;
   }
   paintPosterNote(host, "Loading");
@@ -1542,8 +1753,8 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
       // than leaked back into an empty map. The outcome is dropped with it, so a
       // late answer cannot resurrect the note over a feed that has moved on.
       if (reccPosterCache.size === 0 && reccPosterPending.size === 0) {
-        if (outcome.kind === "poster") URL.revokeObjectURL(outcome.url);
-        return { kind: "none" };
+        if (outcome.poster.kind === "poster") URL.revokeObjectURL(outcome.poster.url);
+        return { poster: { kind: "none" }, medium: null } as ReccPosterLookup;
       }
       reccPosterCache.set(imdbId, outcome);
       paintReccHint();
@@ -1554,8 +1765,48 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
   void inflight.then((outcome) => {
     // The card this was for may have been rated away or re-rendered while the
     // two round trips were in flight; a detached node is not worth painting.
-    if (host.isConnected) paintReccPoster(host, outcome);
+    if (host.isConnected) paintReccPoster(host, outcome.poster);
   });
+}
+
+/**
+ * The For You Play button's medium input: whatever this card's poster lookup
+ * already learned, synchronously if it has settled, `undefined` if it has not
+ * — never a fresh request (see `PickEffects` in pickModel.ts and
+ * `autoPlayableFilm`'s own doc comment for why `undefined` is the right
+ * "don't know yet" value, distinct from `null`'s "OMDb said nothing").
+ */
+function mountReccPlay(item: PublicRecommendation, actions: HTMLElement, filter: ReccType): void {
+  const cached = reccPosterCache.get(item.imdbId);
+  paintReccPlay(actions, item, cached?.medium, filter);
+  if (cached !== undefined) return;
+  const pending = reccPosterPending.get(item.imdbId);
+  if (!pending) return; // a feed reload dropped this lookup before this card asked
+  void pending.then((outcome) => {
+    // Same guard as mountReccPoster: the card may be gone by the time the two
+    // round trips settle.
+    if (actions.isConnected) paintReccPlay(actions, item, outcome.medium, filter);
+  });
+}
+
+// The whole decision is `autoPlayableFilm` (pickModel.ts, re-exporting
+// util/autoPlayableFilm.ts) — this function only looks up its two inputs and
+// paints or removes one button. A conditional here that decided WHAT to show
+// would be the thing review has caught twice in this codebase.
+function paintReccPlay(
+  actions: HTMLElement,
+  item: PublicRecommendation,
+  medium: ReccMedium | null | undefined,
+  filter: ReccType,
+): void {
+  actions.querySelector<HTMLButtonElement>(".recc-play")?.remove();
+  if (!autoPlayableFilm(medium, filter)) return;
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "play recc-play";
+  playButton.textContent = "Play";
+  playButton.addEventListener("click", () => pickController.start(item.title, { kind: "film" }));
+  actions.prepend(playButton);
 }
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
@@ -1598,6 +1849,23 @@ async function actOnPick(action: ReccAction, item: PublicRecommendation): Promis
   showNotice(actionNotice(action, item));
 }
 
+/**
+ * Hand a title over to the search pane — the escape hatch every list ties
+ * into: a saved query, a For You pick (`searchForPick`, below), and a
+ * Continue Watching row's unconditional `search` button both land here.
+ * `group`, when given, switches the category tab first; a Continue Watching
+ * row has no type filter to map, so it is omitted and the current tab stands.
+ */
+function searchForTitle(title: string, group?: string): void {
+  if (group !== undefined) {
+    searchView = { ...searchView, group };
+    renderTabs();
+  }
+  queryInput.value = title;
+  showView("search");
+  startSearch(title);
+}
+
 /** Hand a pick to the search pane — the feed's way out into the rest of the app. */
 function searchForPick(item: PublicRecommendation): void {
   // A blank title from reccd must not fall through to browse mode: an empty
@@ -1609,17 +1877,13 @@ function searchForPick(item: PublicRecommendation): void {
     return;
   }
   const group = searchGroupForType(recc.state().filters.type, sources);
-  searchView = { ...searchView, group };
-  renderTabs();
-  queryInput.value = title;
-  showView("search");
-  startSearch(title);
+  searchForTitle(title, group);
 }
 
 // Same createElement/textContent rule as every other list on this page, and for
 // the same reason: a title and a "because you liked …" line are strings from a
 // remote service this app does not control.
-function renderPick(item: PublicRecommendation): HTMLLIElement {
+function renderPick(item: PublicRecommendation, filter: ReccType): HTMLLIElement {
   const li = document.createElement("li");
   li.className = "row recc-card";
 
@@ -1675,12 +1939,17 @@ function renderPick(item: PublicRecommendation): HTMLLIElement {
   }
 
   li.append(actions);
+  // After the card is fully built: mountReccPlay may re-paint `actions`
+  // asynchronously once the poster lookup settles, and it does that with a
+  // querySelector/prepend, not by returning a new node — so `actions` has to
+  // be the one this li actually holds.
+  mountReccPlay(item, actions, filter);
   return li;
 }
 
 function renderRecc(state: ReccState): void {
   const items = reccItems(state);
-  reccList.replaceChildren(...items.map(renderPick));
+  reccList.replaceChildren(...items.map((item) => renderPick(item, state.filters.type)));
 
   const status = reccStatus(state);
   reccStatusLine.textContent = status.text;
@@ -1939,6 +2208,37 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   playButton.addEventListener("click", () => void playContinueWatching(item));
   actions.append(playButton);
 
+  // Unconditional, exactly like the For You card's own `search` button and
+  // the terminal's `s` key on both panes (ForYou.tsx and
+  // ContinueWatching.tsx): a way to see the other releases for this title
+  // without resuming or auto-playing. item.title is not a decision — it is
+  // simply what this row is — so there is nothing for pickModel.ts to own
+  // here.
+  const searchButton = document.createElement("button");
+  searchButton.type = "button";
+  searchButton.className = "play";
+  searchButton.textContent = "search";
+  searchButton.addEventListener("click", () => searchForTitle(item.title));
+  actions.append(searchButton);
+
+  // Null intent means a film or a season pack: there is no honest next
+  // episode (intentForHistoryRow, pickModel.ts), so no Play-next button and
+  // the resume action above stands alone.
+  const intent = intentForHistoryRow(item);
+  if (intent) {
+    const playNext = document.createElement("button");
+    playNext.type = "button";
+    playNext.className = "play";
+    playNext.textContent = "Play next";
+    // onNone falls back to the same "remembered torrent" resume the plain
+    // play button above uses — a fresh pick found nothing, not a reason to
+    // strand the row with no action at all.
+    playNext.addEventListener("click", () =>
+      pickController.start(item.title, intent, () => void playContinueWatching(item)),
+    );
+    actions.prepend(playNext);
+  }
+
   const remove = document.createElement("button");
   remove.type = "button";
   remove.textContent = "remove";
@@ -2001,8 +2301,12 @@ async function probe(): Promise<Probe> {
 function showAuth(message?: string): void {
   app.hidden = true;
   // The pane switch is meaningless with nothing behind it, and leaving it up
-  // over the token form invites a click that does nothing visible.
+  // over the token form invites a click that does nothing visible. The
+  // preferences disclosure is the same story, plus a sharper failure mode:
+  // touching it before unlocking would fire an unauthenticated POST
+  // /api/preferences and get a 401 for its trouble.
   viewsNav.hidden = true;
+  prefsBlock.hidden = true;
   authForm.hidden = false;
   if (message === undefined) {
     authError.hidden = true;
@@ -2021,6 +2325,7 @@ function showUnreachable(detail: string): void {
   authForm.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
+  prefsBlock.hidden = false;
   // On the queue pane, because that is where the explanation goes — a search
   // box over an unreachable server is an invitation to a second failure.
   showView("queue");
@@ -2036,11 +2341,13 @@ function openApp(payload: StatusPayload): void {
   authError.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
+  prefsBlock.hidden = false;
   showView(view);
   renderTabs();
   layoutSelect.value = layout;
   renderResults();
   renderSaved();
+  renderPrefs();
   rows = mergeRows(rows, rowsFromStatus(payload));
   render();
   connect();

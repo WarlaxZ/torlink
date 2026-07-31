@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextEpisodeIndex } from "./nextEpisodeFile";
+import { nextEpisodeIndex, packTargetFor, type PackTarget } from "./nextEpisodeFile";
 
 // The shape both front ends' file lists satisfy: Node's ResolvedFile and the
 // browser's PublicStreamFile both carry a filename, which is all this reads.
@@ -149,5 +149,48 @@ describe("nextEpisodeIndex", () => {
 
   it("has no opinion about an empty list", () => {
     expect(nextEpisodeIndex([], { next: { season: 3, episode: 5 } })).toBeNull();
+  });
+});
+
+describe("packTargetFor", () => {
+  it("returns the pending episode when it was set for this infohash", () => {
+    const pending: PackTarget = { infoHash: "abc", next: { season: 3, episode: 5 } };
+    expect(packTargetFor(pending, "abc")).toEqual({ season: 3, episode: 5 });
+  });
+
+  it("returns null for a torrent the target was not set for — the stale case", () => {
+    const pending: PackTarget = { infoHash: "abc", next: { season: 3, episode: 5 } };
+    expect(packTargetFor(pending, "xyz")).toBeNull();
+  });
+
+  it("returns null when nothing is pending", () => {
+    expect(packTargetFor(null, "abc")).toBeNull();
+  });
+
+  // The composed behaviour `openStreamPicker` actually relies on:
+  // `packTargetFor(...) ?? (recorded ? nextEpisode(recorded) : null)`. A match
+  // on `packTargetFor` alone proves the lookup, not the fallback — this proves
+  // a picker opened for a DIFFERENT torrent than the one auto-play set the
+  // target for lands on the history row's own suggestion instead, and that the
+  // two answers are genuinely different positions, not the same file twice.
+  it("composed with nextEpisode: a stale target falls back to the recorded row's own suggestion", () => {
+    const pending: PackTarget = { infoHash: "abc", next: { season: 3, episode: 2 } };
+    const recordedNext = { season: 3, episode: 5 };
+    const files = [
+      f("Harrowgate.S03E02.1080p.WEB-DL.mkv"),
+      f("Harrowgate.S03E04.1080p.WEB-DL.mkv"),
+      f("Harrowgate.S03E05.1080p.WEB-DL.mkv"),
+    ];
+
+    // Matched hash: the picker opens on the pack's own target, S03E02.
+    const matched = nextEpisodeIndex(files, { next: packTargetFor(pending, "abc") ?? recordedNext });
+    expect(matched).toBe(0);
+
+    // Mismatched hash: this picker is for a different torrent, so the stale
+    // target is discarded and the recorded row's suggestion (S03E05) is used.
+    const stale = nextEpisodeIndex(files, { next: packTargetFor(pending, "xyz") ?? recordedNext });
+    expect(stale).toBe(2);
+
+    expect(matched).not.toBe(stale);
   });
 });

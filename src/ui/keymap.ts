@@ -20,6 +20,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "esc", label: "Back" },
       { keys: "o", label: "Default download folder" },
       { keys: "S", label: "Choose sources" },
+      { keys: "P", label: "Playback quality (resolution and features)" },
       { keys: "D", label: "Custom DNS (bypass blocked networks)" },
       { keys: "t", label: "Extra trackers" },
       { keys: "L", label: "Transfer and seeding limits" },
@@ -65,7 +66,8 @@ export const HELP_GROUPS: HelpGroup[] = [
     title: "For You",
     hints: [
       { keys: "↑ ↓", label: "Move between picks" },
-      { keys: "↵", label: "Search this title" },
+      { keys: "↵", label: "Play the best release (confirmed films) / otherwise search the title" },
+      { keys: "s", label: "Search this title instead of playing it" },
       { keys: "i", label: "Open the IMDb page" },
       { keys: "p", label: "Toggle poster / plot preview (needs OMDb key)" },
       { keys: "t", label: "Cycle movie / TV / all" },
@@ -75,6 +77,16 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "f", label: "Rate — watched / like / dislike" },
       { keys: "w", label: "Save this title as a search" },
       { keys: "r", label: "Refresh recommendations" },
+    ],
+  },
+  {
+    title: "Continue watching",
+    hints: [
+      { keys: "↑ ↓", label: "Move between titles" },
+      { keys: "↵", label: "Play the next episode, or resume where there is none" },
+      { keys: "r", label: "Resume the remembered torrent" },
+      { keys: "s", label: "Search this title instead of playing it" },
+      { keys: "x", label: "Remove from the list" },
     ],
   },
   {
@@ -152,7 +164,15 @@ export function footerHints(
     ? { keys: "x", label: "Stop stream" }
     : { keys: "x", label: "Remove" };
   if (section === "continueWatching") {
-    return [NAVIGATE, { keys: "↵", label: "Play" }, REMOVE, SWITCH, ALWAYS];
+    return [
+      NAVIGATE,
+      { keys: "↵", label: "Play" },
+      { keys: "r", label: "Resume" },
+      { keys: "s", label: "Search" },
+      REMOVE,
+      SWITCH,
+      ALWAYS,
+    ];
   }
   if (section === "savedSearches") {
     return [NAVIGATE, { keys: "↵", label: "Run" }, REMOVE, SWITCH, ALWAYS];
@@ -163,7 +183,8 @@ export function footerHints(
   if (section === "forYou") {
     return [
       NAVIGATE,
-      { keys: "↵", label: "Search title" },
+      { keys: "↵", label: "Play" },
+      { keys: "s", label: "Search" },
       { keys: "i", label: "IMDb" },
       { keys: "f", label: "Rate" },
       { keys: "w", label: "Watch" },

@@ -15,9 +15,11 @@ import {
 import {
   loadConfig,
   resolveActiveDebrid,
+  qualityPrefsFrom,
   resolveAdultContent,
   resolveOmdbApiKey,
   resolveReccConfig,
+  sanitiseQualityPrefs,
   saveConfig,
   type Config,
   type FavouriteItem,
@@ -61,7 +63,9 @@ import type {
   CachedResponse,
   ContinueWatchingResponse,
   LibraryResponse,
+  PreferencesResponse,
   PublicFavourite,
+  PublicQualityPrefs,
   PublicSearchResult,
   PublicTitleParse,
   PublicSearchSnapshot,
@@ -728,6 +732,19 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // the browser must agree with the TUI about whether artwork is available,
     // and the TUI resolves it the same way.
     omdbConfigured: resolveOmdbApiKey(config) !== "",
+    // Read only. `POST /api/preferences` is the write path; this is here so
+    // fetching it costs no extra round trip on the page the browser loads first.
+    preferences: toPublicQualityPrefs(config),
+  };
+}
+
+/** `Config`'s quality preference, sanitised and shaped for the wire. */
+function toPublicQualityPrefs(config: Config): PublicQualityPrefs {
+  const prefs = qualityPrefsFrom(config);
+  return {
+    maxResolution: prefs.maxResolution ?? null,
+    require: [...prefs.require],
+    exclude: [...prefs.exclude],
   };
 }
 
@@ -1038,6 +1055,53 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
   return { status: 200, json: out };
 }
 
+/**
+ * `POST /api/preferences` — the browser's half of the quality picker.
+ * `PUT` would read more naturally for a whole-resource replace, but this
+ * codebase has no `PUT` route anywhere: every mutation here is `POST` with an
+ * `action` discriminator (`savedSearchesAction`, `libraryAction`,
+ * `continueWatchingAction` above), and a `PUT` here would be one inconsistent
+ * route for a caller to trip over. `"set"` is the only action because there is
+ * nothing to toggle or remove — a preference is either the current value or
+ * the previous one, never a list entry.
+ */
+async function preferencesAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+  if (body.action !== "set") return { status: 400, json: { error: "invalid action" } };
+
+  const raw = body.preferences;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { status: 400, json: { error: "missing preferences" } };
+  }
+  const incoming = raw as Record<string, unknown>;
+
+  // Sanitised with the same helper `loadConfig` uses, so a value the browser
+  // sends can never be stored in a form the terminal would reject — an unknown
+  // feature id is dropped rather than round-tripped into the config file.
+  const clean = sanitiseQualityPrefs({
+    maxResolution: incoming.maxResolution,
+    requireFeatures: incoming.require,
+    excludeFeatures: incoming.exclude,
+  });
+
+  // Re-read, per the note at the top of the saved-lists section: `serve --web`
+  // is a separate process from any running TUI, so writing back a snapshot
+  // taken before this request would silently revert a token, sort, or
+  // disabled-source edit the TUI made in between.
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const next: Config = {
+    ...config,
+    maxResolution: clean.maxResolution,
+    requireFeatures: clean.requireFeatures,
+    excludeFeatures: clean.excludeFeatures,
+  };
+  await (deps.saveConfigImpl ?? saveConfig)(next);
+
+  const out: PreferencesResponse = { preferences: toPublicQualityPrefs(next) };
+  return { status: 200, json: out };
+}
+
 // ---- title metadata ----------------------------------------------------
 
 /**
@@ -1225,6 +1289,7 @@ function withParse(meta: PublicTitleMeta, parsed: PublicTitleParse | undefined):
       imdbId: meta.imdbId,
       plot: meta.plot,
       posterUrl: meta.posterUrl,
+      ...(meta.type !== undefined ? { type: meta.type } : {}),
       parsed,
     };
   }
@@ -1285,6 +1350,12 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
     imdbId: result.imdbId,
     plot: result.plot,
     posterUrl: allowedPosterUrl(result.posterUrl),
+    // Optional, and only added when OMDb actually reported a `Type` — the
+    // `?imdb=`/`?name=` fixtures used throughout this file's existing tests
+    // never set it, and adding an always-present `type: null` would change
+    // their exact-equality assertions for no benefit. Task 14's Play-button
+    // gate is the reason this field exists at all; see PublicTitleMeta.
+    ...(result.type !== undefined ? { type: result.type } : {}),
   };
   cacheSet(lookup.cacheKey, out);
   return { status: 200, json: withParse(out, lookup.parsed) };
@@ -1536,6 +1607,10 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === "/api/continue-watching") {
     return continueWatchingAction(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/preferences") {
+    return preferencesAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

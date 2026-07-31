@@ -7,6 +7,7 @@ import type { SourceGroup, SourceId } from "../sources/types";
 import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
 import type { Sort } from "./sort";
 import type { StreamHistoryItem } from "../core/streamHistory";
+import type { PickIntent } from "../util/releasePick";
 
 export type View = "splash" | "browser";
 
@@ -104,6 +105,13 @@ export interface Store {
   streamHistory: StreamHistoryItem[];
   openStreamHistory: (item: StreamHistoryItem) => void;
   removeStreamHistory: (key: string) => void;
+  /**
+   * Search for `title`, choose a release with the user's quality preference,
+   * and play it. `fallback` runs when nothing usable was found — Continue
+   * Watching passes its existing resume action so an offline or aged-out title
+   * still does something.
+   */
+  autoPlayTitle: (title: string, intent: PickIntent, fallback?: () => void) => void;
 
   section: Section;
   setSection: (s: Section) => void;

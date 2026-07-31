@@ -136,3 +136,21 @@ describe("footerHints while a stream is active", () => {
     }
   });
 });
+
+describe("play and search keys", () => {
+  it("documents s in the For You help group", () => {
+    const group = HELP_GROUPS.find((g) => g.title === "For You")!;
+    expect(group.hints.map((h) => h.keys)).toContain("s");
+  });
+
+  it("has a Continue Watching help group covering play and search", () => {
+    const group = HELP_GROUPS.find((g) => g.title === "Continue watching");
+    expect(group).toBeDefined();
+    expect(group!.hints.map((h) => h.keys)).toEqual(expect.arrayContaining(["↵", "s", "x"]));
+  });
+
+  it("offers s in both footers", () => {
+    expect(footerHints("content", "forYou").map((h) => h.keys)).toContain("s");
+    expect(footerHints("content", "continueWatching").map((h) => h.keys)).toContain("s");
+  });
+});

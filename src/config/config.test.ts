@@ -11,7 +11,10 @@ import {
   resolveActiveDebrid,
   resolveDebridTokenFor,
   resolveTorBoxToken,
+  qualityPrefsFrom,
+  sanitiseQualityPrefs,
 } from "./config";
+import type { Config } from "./config";
 
 describe("config realDebridToken", () => {
   it("round-trips the token through save and load", async () => {
@@ -329,5 +332,44 @@ describe("resolveDebridTokenFor", () => {
     const cfg = { ...defaultConfig, realDebridToken: "rd-1", torBoxToken: "tb-1" };
     expect(resolveDebridTokenFor(cfg, "realdebrid")).toBe("rd-1");
     expect(resolveDebridTokenFor(cfg, "torbox")).toBe("tb-1");
+  });
+});
+
+describe("sanitiseQualityPrefs", () => {
+  it("keeps a valid preference", () => {
+    const out = sanitiseQualityPrefs({
+      maxResolution: "1080p", requireFeatures: ["atmos"], excludeFeatures: ["dv"],
+    });
+    expect(out).toEqual({ maxResolution: "1080p", requireFeatures: ["atmos"], excludeFeatures: ["dv"] });
+  });
+
+  it("drops an invalid resolution", () => {
+    expect(sanitiseQualityPrefs({ maxResolution: "8k" }).maxResolution).toBeUndefined();
+  });
+
+  it("drops unknown feature ids and non-strings", () => {
+    const out = sanitiseQualityPrefs({ requireFeatures: ["atmos", "laserdisc", 7] as unknown as string[] });
+    expect(out.requireFeatures).toEqual(["atmos"]);
+  });
+
+  it("collapses duplicates", () => {
+    expect(sanitiseQualityPrefs({ requireFeatures: ["hdr", "hdr"] }).requireFeatures).toEqual(["hdr"]);
+  });
+
+  it("resolves a require/exclude collision in favour of exclude", () => {
+    const out = sanitiseQualityPrefs({ requireFeatures: ["dv", "hdr"], excludeFeatures: ["dv"] });
+    expect(out.excludeFeatures).toEqual(["dv"]);
+    expect(out.requireFeatures).toEqual(["hdr"]);
+  });
+});
+
+describe("qualityPrefsFrom", () => {
+  it("returns empty lists when nothing is configured", () => {
+    expect(qualityPrefsFrom({} as Config)).toEqual({ require: [], exclude: [] });
+  });
+
+  it("carries the configured preference through", () => {
+    expect(qualityPrefsFrom({ maxResolution: "720p", requireFeatures: ["dd"] } as Config))
+      .toEqual({ maxResolution: "720p", require: ["dd"], exclude: [] });
   });
 });

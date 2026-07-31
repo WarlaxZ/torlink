@@ -348,4 +348,71 @@ describe("ForYou", () => {
     expect(toggleSavedSearch).toHaveBeenCalledWith("Windmere");
     expect(lastFrame()).toContain("Windmere"); // stays in the list
   });
+
+  it("auto-plays on Enter once the filter is on films", async () => {
+    const played: { title: string; intent: unknown }[] = [];
+    const { impl } = fetchStub();
+    const { stdin } = render(
+      <ForYou reccConfig={CONFIG} visible active fetchImpl={impl}
+        setSection={vi.fn()} submitQuery={vi.fn()}
+        autoPlayTitle={(title, intent) => played.push({ title, intent })} />,
+    );
+    await flush();
+    stdin.write("t"); // all -> movie
+    await flush();
+    stdin.write("\r");
+    await flush();
+    expect(played).toEqual([{ title: "Windmere", intent: { kind: "film" } }]);
+  });
+
+  it("does not auto-play with the default 'all' filter and no OMDb medium", async () => {
+    const played: string[] = [];
+    const submitted: string[] = [];
+    const { impl } = fetchStub();
+    const { stdin } = render(
+      <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
+        autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
+    );
+    await flush();
+    stdin.write("\r");
+    await flush();
+    expect(played).toEqual([]);
+    expect(submitted).toEqual(["Windmere"]);
+  });
+
+  it("does not auto-play a show — that needs the episode picker", async () => {
+    const played: string[] = [];
+    const submitted: string[] = [];
+    const { impl } = fetchStub();
+    const { stdin } = render(
+      <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
+        autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
+    );
+    await flush();
+    stdin.write("t"); // all -> movie
+    await flush();
+    stdin.write("t"); // movie -> tv
+    await flush();
+    stdin.write("\r");
+    await flush();
+    expect(played).toEqual([]);
+    expect(submitted).toEqual(["Windmere"]);
+  });
+
+  it("s searches the title without playing", async () => {
+    const played: string[] = [];
+    const submitted: string[] = [];
+    const { impl } = fetchStub();
+    const { stdin } = render(
+      <ForYou reccConfig={CONFIG} visible active fetchImpl={impl} setSection={vi.fn()}
+        autoPlayTitle={(t) => played.push(t)} submitQuery={(q) => submitted.push(q)} />,
+    );
+    await flush();
+    stdin.write("t");
+    await flush();
+    stdin.write("s");
+    await flush();
+    expect(played).toEqual([]);
+    expect(submitted).toEqual(["Windmere"]);
+  });
 });

@@ -123,3 +123,29 @@ describe("parseRelease — season and episode", () => {
     expect(parseRelease("Kepler.S02E04.1080p")?.type).toBe("series");
   });
 });
+
+describe("parseRelease quality fields", () => {
+  it("exposes resolution, colour, audio, channels and group features", () => {
+    const p = parseRelease("Tin.Rivers.2024.2160p.WEB-DL.DV.HDR.Atmos.7.1-GROUP");
+    expect(p?.resolution).toBe("2160p");
+    expect(p?.colorList).toEqual(expect.arrayContaining(["HDR", "DV"]));
+    expect(p?.audioList).toEqual(expect.arrayContaining(["atmos"]));
+    expect(p?.channels).toBe(7.1);
+  });
+
+  it("exposes codec", () => {
+    expect(parseRelease("Kestrel.2010.1080p.BluRay.x264")?.codec).toBe("x264");
+  });
+
+  it("leaves quality fields undefined when the name states none", () => {
+    const p = parseRelease("Ashfall.1999.1080p");
+    expect(p?.resolution).toBe("1080p");
+    expect(p?.codec).toBeUndefined();
+    expect(p?.audioList).toBeUndefined();
+    expect(p?.remux).toBeUndefined();
+  });
+
+  it("does not change the cache key", () => {
+    expect(parseRelease("Kestrel.2010.1080p.BluRay.x264")?.key).toBe("kestrel|2010|movie");
+  });
+});

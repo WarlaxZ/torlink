@@ -158,6 +158,7 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     streamHistory: [],
     openStreamHistory: noop,
     removeStreamHistory: noop,
+    autoPlayTitle: noop,
     section: "all",
     setSection: noop,
     reccConfigured: false,

@@ -24,6 +24,7 @@ import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 import type {
   LibraryResponse,
+  PreferencesResponse,
   PublicSearchSnapshot,
   PublicStreamHistoryItem,
   SavedResponse,
@@ -1271,6 +1272,131 @@ describe("sourcesResponse — omdbConfigured", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Quality preference (Task 12)
+// ---------------------------------------------------------------------------
+
+describe("POST /api/preferences", () => {
+  async function post(body: unknown, over: Partial<WebDeps> = {}) {
+    return handleWebApi(deps(over), "POST", "/api/preferences", new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
+  it("saves a valid preference and echoes it back", async () => {
+    let saved: Config | null = null;
+    const res = await post(
+      { action: "set", preferences: { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(res.status).toBe(200);
+    expect(saved!.maxResolution).toBe("1080p");
+    expect(saved!.requireFeatures).toEqual(["atmos"]);
+    expect(saved!.excludeFeatures).toEqual(["dv"]);
+    expect((res.json as PreferencesResponse).preferences).toEqual({
+      maxResolution: "1080p", require: ["atmos"], exclude: ["dv"],
+    });
+  });
+
+  it("drops an unknown feature id rather than storing it", async () => {
+    let saved: Config | null = null;
+    await post(
+      { action: "set", preferences: { maxResolution: null, require: ["laserdisc"], exclude: [] } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(saved!.requireFeatures).toEqual([]);
+    expect(saved!.maxResolution).toBeUndefined();
+  });
+
+  it("rejects a body with no action", async () => {
+    expect((await post({})).status).toBe(400);
+  });
+
+  it("rejects a body with an unrecognised action", async () => {
+    expect(
+      (await post({ action: "toggle", preferences: { maxResolution: null, require: [], exclude: [] } })).status,
+    ).toBe(400);
+  });
+
+  it("rejects a body whose preferences is not an object", async () => {
+    expect((await post({ action: "set", preferences: [] })).status).toBe(400);
+  });
+
+  it("rejects a body with no preferences at all", async () => {
+    expect((await post({ action: "set" })).status).toBe(400);
+  });
+
+  it("re-reads config so a concurrent change to another field is not clobbered", async () => {
+    let saved: Config | null = null;
+    // A spy, so "did this request read config at all?" is answerable. An
+    // implementation serving a cached snapshot would never call it, and would
+    // pass just as well as a correct one if this only asserted on `saved`.
+    const loadConfigImpl = vi.fn(async () => searchConfig({ savedSearches: ["kestrel"] }));
+    await post(
+      { action: "set", preferences: { maxResolution: "720p", require: [], exclude: [] } },
+      { loadConfigImpl, saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(loadConfigImpl).toHaveBeenCalledTimes(1);
+    expect(saved!.savedSearches).toEqual(["kestrel"]);
+  });
+
+  // Parity with the other config-writing routes above (saved-searches,
+  // library, continue-watching all have this exact test): this is a write to
+  // the user's config file and must sit behind the same gate they do.
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/preferences",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ action: "set", preferences: { maxResolution: null, require: [], exclude: [] } }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("preferences round trip", () => {
+  // The write path sanitises with `sanitiseQualityPrefs` and the read path
+  // projects with `qualityPrefsFrom` — two different functions doing
+  // overlapping validation. This is the only test that makes them agree on the
+  // same config object rather than on two independently-stubbed ones.
+  //
+  // `dv` is in BOTH `require` and `exclude` on the way in: exclude must win and
+  // require must lose it (sanitiseQualityPrefs's collision rule). An input that
+  // needed no sanitising would make both sides compute the exact same object
+  // and the assertion would only prove self-consistency, not agreement on a
+  // sanitised shape — so this is chosen specifically to exercise that rule at
+  // the route level, and the expected value is pinned explicitly rather than
+  // only compared to the write's own echo.
+  it("what POST stores is what GET reports", async () => {
+    let saved: Config | null = null;
+    const written = await handleWebApi(
+      deps({ loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } }),
+      "POST", "/api/preferences", new URLSearchParams(), AUTH,
+      JSON.stringify({ action: "set", preferences: { maxResolution: "1080p", require: ["atmos", "dv"], exclude: ["dv"] } }),
+    );
+    const expected = { maxResolution: "1080p", require: ["atmos"], exclude: ["dv"] };
+    expect((written.json as PreferencesResponse).preferences).toEqual(expected);
+
+    const read = await handleWebApi(
+      deps({ loadConfigImpl: async () => saved! }),
+      "GET", "/api/sources", new URLSearchParams(), AUTH, "",
+    );
+    expect((read.json as SourcesResponse).preferences).toEqual(expected);
+  });
+});
+
+describe("GET /api/sources preferences", () => {
+  it("reports the stored preference", async () => {
+    const res = await handleWebApi(
+      deps({ loadConfigImpl: async () => searchConfig({ maxResolution: "720p", requireFeatures: ["hdr"] }) }),
+      "GET", "/api/sources", new URLSearchParams(), AUTH, "",
+    );
+    expect((res.json as SourcesResponse).preferences).toEqual({
+      maxResolution: "720p", require: ["hdr"], exclude: [],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Title metadata
 // ---------------------------------------------------------------------------
 
@@ -1493,6 +1619,27 @@ describe("GET /api/title", () => {
       expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
     });
   });
+
+  describe("medium", () => {
+    // Task 14 gates the Play button on the item's medium, and this route is
+    // the only way the browser can learn it — so the field has to survive the
+    // trip from OMDb's `Type` through `FetchTitleMetaResult` to the wire.
+    it("echoes the medium OMDb reported", async () => {
+      const res = await title(
+        titleDeps({ fetchTitleMetaByNameImpl: async () => ({ ...OK, type: "movie" }) }),
+        "name=Kestrel",
+      );
+      expect(res.json).toMatchObject({ status: "ok", type: "movie" });
+    });
+
+    // The existing fixture never sets `type`, and its exact-equality tests
+    // above must keep passing — a field that shows up unasked would be a
+    // regression the caller here didn't sign up for.
+    it("omits the field when OMDb reported no type", async () => {
+      const res = await title(titleDeps({ fetchTitleMetaByNameImpl: async () => OK }), "name=Kestrel");
+      expect(res.json).not.toHaveProperty("type");
+    });
+  });
 });
 
 describe("GET /api/title?release= — server-side release parsing", () => {
@@ -1612,6 +1759,17 @@ describe("GET /api/title?release= — server-side release parsing", () => {
     );
     expect(fetchTitleMetaImpl).toHaveBeenCalledOnce();
     expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  // `withParse`'s `parsed`-present branch is a separate code path from the
+  // direct construction `?name=`/`?imdb=` hit, and it is the one search-result
+  // rows actually use — the rows Task 14 gates a Play button on by medium.
+  it("carries the medium through alongside the release parse", async () => {
+    const res = await title(
+      releaseDeps({ fetchTitleMetaByNameImpl: async () => ({ ...OK_META, type: "movie" }) }),
+      "release=Kestrel.2010.1080p.BluRay.x264-GROUP&group=Movies",
+    );
+    expect(res.json).toMatchObject({ status: "ok", type: "movie", parsed: { title: "Kestrel", year: 2010 } });
   });
 });
 

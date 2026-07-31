@@ -12,9 +12,21 @@ import {
   resolveReccConfig,
   resolveOmdbApiKey,
   resolveAdultContent,
+  qualityPrefsFrom,
   type Config,
   type FavouriteItem,
 } from "../config/config";
+import {
+  pickBestRelease,
+  pickStatusLine,
+  pickSearchingLine,
+  pickNoneLine,
+  type PickIntent,
+  type FeatureId,
+  type MaxResolution,
+} from "../util/releasePick";
+import { runSearch } from "../core/search";
+import { enabledSources } from "../sources/registry";
 import { setDnsServers } from "../util/dns";
 import { expandHome, normalizeDownloadDir } from "../config/folder";
 import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
@@ -37,7 +49,7 @@ import {
   saveStreamHistory,
   type StreamHistoryItem,
 } from "../core/streamHistory";
-import { nextEpisodeIndex } from "../util/nextEpisodeFile";
+import { nextEpisodeIndex, packTargetFor, type PackTarget } from "../util/nextEpisodeFile";
 import { keepMovePlan, moveKeptFiles } from "./streamKeep";
 import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
@@ -96,6 +108,7 @@ import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
+import { QualityPrompt } from "./components/QualityPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
@@ -246,6 +259,7 @@ export function App({
   const [reccStatus, setReccStatus] = useState<ReccStatus | null>(null);
   const [editingPlayer, setEditingPlayer] = useState(false);
   const [editingSources, setEditingSources] = useState(false);
+  const [editingQuality, setEditingQuality] = useState(false);
   const [editingDns, setEditingDns] = useState(false);
   const [editingRutracker, setEditingRutracker] = useState(false);
   const [rutrackerStatus, setRutrackerStatus] = useState<LoginStatus>({ kind: "idle" });
@@ -681,6 +695,25 @@ export function App({
       return next;
     });
   }, []);
+
+  // Same functional-update-then-save shape as toggleSource, so a stale
+  // snapshot from outside the updater never overwrites a concurrent write.
+  const setQualityPrefs = useCallback(
+    (next: { maxResolution?: MaxResolution; require: FeatureId[]; exclude: FeatureId[] }) => {
+      setConfigState((prev) => {
+        if (!prev) return prev;
+        const updated = {
+          ...prev,
+          maxResolution: next.maxResolution,
+          requireFeatures: next.require,
+          excludeFeatures: next.exclude,
+        };
+        void saveConfig(updated);
+        return updated;
+      });
+    },
+    [],
+  );
 
   const toggleSavedSearch = useCallback((raw: string) => {
     const query = raw.trim();
@@ -1229,9 +1262,17 @@ export function App({
     (candidates: ResolvedFile[], input: DownloadInput, recorded: StreamHistoryItem | null) => {
       setStreamedFiles(new Set());
       setStreamSource(input);
+      // KEYED BY INFOHASH, not just cleared on read. `openStreamPicker` runs
+      // only when a MULTI-FILE torrent actually resolves, so every other path
+      // leaves the ref set: `streamResult` bailing on its guard, the
+      // torrent-stream ack prompt being cancelled, an RD resolve failing, or a
+      // single-file torrent. Without the key, a stale target from an abandoned
+      // play preselects the wrong episode in a later, unrelated picker.
+      const packTarget = packTargetFor(packTargetRef.current, input.id);
+      if (packTarget) packTargetRef.current = null;
       setStreamPreselect(
         nextEpisodeIndex(candidates, {
-          next: recorded ? nextEpisode(recorded) : null,
+          next: packTarget ?? (recorded ? nextEpisode(recorded) : null),
           watched: watchedFor(config?.favourites ?? [], input.id),
         }),
       );
@@ -1484,6 +1525,78 @@ export function App({
       streamResult({ id: item.infoHash, name: item.rawName, magnet: item.magnet, source: item.source });
     },
     [streamResult],
+  );
+
+  // Search, pick, play. Calls `runSearch` directly rather than going through
+  // `submitQuery`: that only sets query state, and the fetch lives in
+  // `useConcurrentSearch`, which a callback cannot invoke. This is the same
+  // core entry point the hook uses, so results are identical to what the
+  // Results pane would have shown.
+  // Cancels any auto-play already in flight. `runSearch`'s per-source timeout
+  // is 25 SECONDS, so without this a user who hits Enter and then moves on gets
+  // a player for a title they left, and a double Enter runs two searches whose
+  // second `streamResult` bounces off "Stop the current stream first". Note the
+  // guards inside `streamResult` cannot help: they are evaluated after the
+  // await, when nothing is streaming yet. `useConcurrentSearch` aborts the same
+  // way on cleanup; this is the keypress path's equivalent.
+  const autoPlayRef = useRef<AbortController | null>(null);
+
+  // The episode auto-play is actually after, when it had to settle for a pack.
+  // Beats `nextEpisode(recorded)` because the pack's own history row has no
+  // episode to derive one from. Keyed by infohash and cleared on use.
+  const packTargetRef = useRef<PackTarget | null>(null);
+
+  const autoPlayTitle = useCallback(
+    (title: string, intent: PickIntent, fallback?: () => void) => {
+      if (!config) return;
+      // Cancel-and-replace rather than ignore-while-busy: pressing Enter on a
+      // different row is a clear statement about what the user now wants.
+      autoPlayRef.current?.abort();
+      const ctrl = new AbortController();
+      autoPlayRef.current = ctrl;
+      void (async () => {
+        setNotice(pickSearchingLine(title));
+        const sources = enabledSources(
+          (config.disabledSources ?? []) as SourceId[],
+          resolveAdultContent(config),
+        );
+        const snap = await runSearch(title, sources, { signal: ctrl.signal });
+        // An aborted search RESOLVES rather than rejecting, with whatever the
+        // snapshot held when the abort landed — usually empty
+        // (src/core/search.ts:108-111 documents this, and requires callers to
+        // treat an abort as a discard). So no try/catch: the identity check
+        // below is what discards it, and it must come before anything that
+        // reads `snap`, or a superseded search would report "no release found"
+        // over the newer one's status line.
+        if (autoPlayRef.current !== ctrl) return;
+        autoPlayRef.current = null;
+        const prefs = qualityPrefsFrom(config);
+        const pick = pickBestRelease(snap.results, prefs, intent);
+        if (!pick) {
+          // Say so even when there is a fallback: `openStreamHistory` (the
+          // fallback Continue Watching passes) only starts a stream — it does
+          // not set a notice of its own — so without this the resumed torrent
+          // just appears with no explanation, unlike the browser, which shows
+          // "No release found…" before it falls back to the same replay.
+          setNotice(pickNoneLine(title));
+          fallback?.();
+          return;
+        }
+        setNotice(pickStatusLine(pick, prefs.maxResolution));
+        packTargetRef.current =
+          pick.fromPack && intent.kind === "episode"
+            ? { infoHash: pick.chosen.infoHash, next: { season: intent.season, episode: intent.episode } }
+            : null;
+        streamResult({
+          id: pick.chosen.infoHash,
+          name: pick.chosen.name,
+          magnet: pick.chosen.magnet,
+          source: pick.chosen.source,
+          sizeBytes: pick.chosen.sizeBytes,
+        });
+      })();
+    },
+    [config, streamResult],
   );
 
   // Optimistic locally, re-read on disk. The row must vanish under the cursor
@@ -1913,6 +2026,7 @@ export function App({
       streamHistory,
       openStreamHistory,
       removeStreamHistory: removeStreamHistoryEntry,
+      autoPlayTitle,
       section,
       setSection: changeSection,
       sort,
@@ -1920,7 +2034,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -1972,6 +2086,7 @@ export function App({
     streamHistory,
     openStreamHistory,
     removeStreamHistoryEntry,
+    autoPlayTitle,
     section,
     changeSection,
     sort,
@@ -1984,6 +2099,7 @@ export function App({
     editingOmdb,
     editingPlayer,
     editingSources,
+    editingQuality,
     editingDns,
     editingRutracker,
     editingTrackers,
@@ -2042,6 +2158,7 @@ export function App({
       if (importingTrakt) return; // the Trakt import prompt owns input
       if (editingPlayer) return; // the media-player prompt owns input
       if (editingSources) return; // the sources panel owns input
+      if (editingQuality) return; // the quality prompt owns input
       if (editingDns) return; // the DNS prompt owns input
       if (editingRutracker) return; // the RuTracker prompt owns input
       if (editingTrackers) return; // the trackers prompt owns input
@@ -2090,6 +2207,11 @@ export function App({
       if (input === "S") {
         setShowHelp(false);
         setEditingSources(true);
+        return;
+      }
+      if (input === "P") {
+        setShowHelp(false);
+        setEditingQuality(true);
         return;
       }
       if (input === "D") {
@@ -2361,6 +2483,19 @@ export function App({
               adultEnabled={store.adultEnabled}
               onToggle={toggleSource}
               onCancel={() => setEditingSources(false)}
+            />
+          </Box>
+        ) : null}
+
+        {editingQuality ? (
+          <Box marginTop={1}>
+            <QualityPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              maxResolution={store.config.maxResolution}
+              require={store.config.requireFeatures ?? []}
+              exclude={store.config.excludeFeatures ?? []}
+              onChange={setQualityPrefs}
+              onCancel={() => setEditingQuality(false)}
             />
           </Box>
         ) : null}
@@ -2654,7 +2789,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2734,6 +2869,7 @@ export function App({
                 setCaptureMode={store.setCaptureMode}
                 onRatePick={openRatePick}
                 toggleSavedSearch={store.toggleSavedSearch}
+                autoPlayTitle={store.autoPlayTitle}
               />
             </Box>
           </Box>
@@ -2742,7 +2878,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }

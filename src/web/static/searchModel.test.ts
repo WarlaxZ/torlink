@@ -100,6 +100,7 @@ const sourcesResponse = (over: Partial<SourcesResponse> = {}): SourcesResponse =
   debridProvider: null,
   debridCachedCheck: false,
   omdbConfigured: false,
+  preferences: { maxResolution: null, require: [], exclude: [] },
   ...over,
 });
 

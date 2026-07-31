@@ -120,6 +120,7 @@ function makeStore(
     streamHistory: [],
     openStreamHistory: noop,
     removeStreamHistory: noop,
+    autoPlayTitle: noop,
     section: "all",
     setSection: noop,
     sort: "none",

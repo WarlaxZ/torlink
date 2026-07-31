@@ -30,6 +30,27 @@
       <span id="conn" class="conn" data-state="connecting">connecting</span>
     </header>
 
+    <!-- Playback preference. Outside every pane on purpose: it changes what
+         Play does on For You AND on the Continue Watching rows under Saved, so
+         it belongs to neither. A fifth nav tab is not an option — see the note
+         on #views above. Checkbox rows are built by app.ts from FEATURES, so
+         the terminal and the browser cannot drift apart. -->
+    <details id="prefs" class="card prefs" hidden>
+      <summary>playback preferences</summary>
+      <label class="control" for="pref-res">
+        <span>max resolution</span>
+        <select id="pref-res">
+          <option value="" selected>no limit</option>
+          <option value="2160p">2160p</option>
+          <option value="1080p">1080p</option>
+          <option value="720p">720p</option>
+          <option value="480p">480p</option>
+        </select>
+      </label>
+      <div id="pref-features" class="pref-features"></div>
+      <p class="hint">With nothing set, the best resolution available wins — then the largest file.</p>
+    </details>
+
     <form id="auth" class="card" hidden>
       <label for="token">Access token</label>
       <input id="token" type="password" autocomplete="current-password" />

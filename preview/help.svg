@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="832" height="1860" viewBox="0 0 832 1860" style="max-width: 832px; width: 100%; height: auto;" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="832" height="2058" viewBox="0 0 832 2058" style="max-width: 832px; width: 100%; height: auto;" role="img">
   <rect width="100%" height="100%" rx="14" fill="#0a0810"/>
-  <rect x="0.5" y="0.5" width="831" height="1859" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
+  <rect x="0.5" y="0.5" width="831" height="2057" rx="14" fill="none" stroke="#2d2b31" stroke-width="1"/>
   <text x="416" y="23" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="13" fill="#8a8a8a">torlink</text>
   <g font-family='ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace' font-size="16" fill="#ddd8ea">
     <text x="99.2" y="84" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#5ae87a" font-weight="600">𐓏</text>
@@ -53,272 +53,304 @@
     <rect x="387.2" y="123" width="9.6" height="11" fill="#4e3c8d"/>
     <rect x="396.8" y="112" width="9.6" height="11" fill="#4c3a8a"/>
     <text x="41.6" y="150" textLength="748.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#6b6577">──────────────────────────────────────────────────────────────────────────────</text>
-    <text x="41.6" y="194" textLength="633.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#8676b2">╭────────────────────────────────────────────────────────────────╮</text>
+    <text x="41.6" y="194" textLength="748.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#8676b2">╭────────────────────────────────────────────────────────────────────────────╮</text>
     <rect x="45.7" y="200" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="200" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="200" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="222" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="238" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#a78bfa" font-weight="600">Keyboard</text>
-    <rect x="669.7" y="222" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="222" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="244" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="244" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="244" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="266" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="282" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Navigate</text>
-    <rect x="669.7" y="266" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="266" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="288" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="304" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑↓←→ / hjkl</text>
     <text x="195.2" y="304" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Navigate panes and lists</text>
-    <rect x="669.7" y="288" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="288" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="310" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="326" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
     <text x="195.2" y="326" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open</text>
-    <rect x="669.7" y="310" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="310" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="332" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="348" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">tab</text>
     <text x="195.2" y="348" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Switch pane</text>
-    <rect x="669.7" y="332" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="332" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="354" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="370" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">esc</text>
     <text x="195.2" y="370" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Back</text>
-    <rect x="669.7" y="354" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="354" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="376" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="392" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">o</text>
     <text x="195.2" y="392" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Default download folder</text>
-    <rect x="669.7" y="376" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="376" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="398" width="1.4" height="22" fill="#8676b2"/>
     <text x="70.4" y="414" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">S</text>
     <text x="195.2" y="414" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Choose sources</text>
-    <rect x="669.7" y="398" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="398" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="420" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="436" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">D</text>
-    <text x="195.2" y="436" textLength="345.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Custom DNS (bypass blocked networks)</text>
-    <rect x="669.7" y="420" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="436" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">P</text>
+    <text x="195.2" y="436" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Playback quality (resolution and features)</text>
+    <rect x="784.9" y="420" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="442" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="458" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">t</text>
-    <text x="195.2" y="458" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Extra trackers</text>
-    <rect x="669.7" y="442" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="458" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">D</text>
+    <text x="195.2" y="458" textLength="345.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Custom DNS (bypass blocked networks)</text>
+    <rect x="784.9" y="442" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="464" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="480" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">L</text>
-    <text x="195.2" y="480" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Transfer and seeding limits</text>
-    <rect x="669.7" y="464" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="480" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">t</text>
+    <text x="195.2" y="480" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Extra trackers</text>
+    <rect x="784.9" y="464" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="486" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">V</text>
-    <text x="195.2" y="502" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">VPN kill switch</text>
-    <rect x="669.7" y="486" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="502" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">L</text>
+    <text x="195.2" y="502" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Transfer and seeding limits</text>
+    <rect x="784.9" y="486" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="508" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="524" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+w</text>
-    <text x="195.2" y="524" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open the web UI in a browser (needs --web)</text>
-    <rect x="669.7" y="508" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="524" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">V</text>
+    <text x="195.2" y="524" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">VPN kill switch</text>
+    <rect x="784.9" y="508" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="530" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="546" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+x</text>
-    <text x="195.2" y="546" textLength="345.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle adult content (Porn category)</text>
-    <rect x="669.7" y="530" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="546" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+w</text>
+    <text x="195.2" y="546" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open the web UI in a browser (needs --web)</text>
+    <rect x="784.9" y="530" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="552" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="568" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">q</text>
-    <text x="195.2" y="568" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Quit</text>
-    <rect x="669.7" y="552" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="568" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+x</text>
+    <text x="195.2" y="568" textLength="345.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle adult content (Porn category)</text>
+    <rect x="784.9" y="552" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="574" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="574" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="590" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">q</text>
+    <text x="195.2" y="590" textLength="38.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Quit</text>
+    <rect x="784.9" y="574" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="596" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="612" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Accounts</text>
-    <rect x="669.7" y="596" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="596" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="618" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="634" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑ ↓</text>
-    <text x="195.2" y="634" textLength="201.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between services</text>
-    <rect x="669.7" y="618" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="634" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Accounts</text>
+    <rect x="784.9" y="618" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="640" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="656" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
-    <text x="195.2" y="656" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in / switch account</text>
-    <rect x="669.7" y="640" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="656" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑ ↓</text>
+    <text x="195.2" y="656" textLength="201.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between services</text>
+    <rect x="784.9" y="640" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="662" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="678" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">x</text>
-    <text x="195.2" y="678" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign out</text>
-    <rect x="669.7" y="662" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="678" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
+    <text x="195.2" y="678" textLength="230.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign in / switch account</text>
+    <rect x="784.9" y="662" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="684" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="700" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
-    <text x="195.2" y="700" textLength="393.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Import history — Netflix or Trakt (reccd)</text>
-    <rect x="669.7" y="684" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="700" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">x</text>
+    <text x="195.2" y="700" textLength="76.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sign out</text>
+    <rect x="784.9" y="684" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="706" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="722" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">a</text>
-    <text x="195.2" y="722" textLength="412.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Make the highlighted debrid provider active</text>
-    <rect x="669.7" y="706" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="722" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
+    <text x="195.2" y="722" textLength="393.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Import history — Netflix or Trakt (reccd)</text>
+    <rect x="784.9" y="706" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="728" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="728" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="744" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">a</text>
+    <text x="195.2" y="744" textLength="412.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Make the highlighted debrid provider active</text>
+    <rect x="784.9" y="728" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="750" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="766" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Search</text>
-    <rect x="669.7" y="750" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="750" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="772" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="788" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">/</text>
-    <text x="195.2" y="788" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Edit search</text>
-    <rect x="669.7" y="772" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="788" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Search</text>
+    <rect x="784.9" y="772" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="794" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="810" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
-    <text x="195.2" y="810" textLength="96" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Run search</text>
-    <rect x="669.7" y="794" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="810" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">/</text>
+    <text x="195.2" y="810" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Edit search</text>
+    <rect x="784.9" y="794" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="816" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="832" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑</text>
-    <text x="195.2" y="832" textLength="364.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Recall recent searches (while editing)</text>
-    <rect x="669.7" y="816" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="832" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
+    <text x="195.2" y="832" textLength="96" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Run search</text>
+    <rect x="784.9" y="816" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="838" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="854" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
-    <text x="195.2" y="854" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open on IMDb (exact match, or a title search)</text>
-    <rect x="669.7" y="838" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="854" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑</text>
+    <text x="195.2" y="854" textLength="364.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Recall recent searches (while editing)</text>
+    <rect x="784.9" y="838" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="860" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="876" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
-    <text x="195.2" y="876" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter list</text>
-    <rect x="669.7" y="860" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="876" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
+    <text x="195.2" y="876" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open on IMDb (exact match, or a title search)</text>
+    <rect x="784.9" y="860" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="882" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="898" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
-    <text x="195.2" y="898" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle poster / plot preview (needs OMDb key)</text>
-    <rect x="669.7" y="882" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="898" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
+    <text x="195.2" y="898" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter list</text>
+    <rect x="784.9" y="882" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="904" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="920" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
-    <text x="195.2" y="920" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sort results</text>
-    <rect x="669.7" y="904" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="920" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
+    <text x="195.2" y="920" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle poster / plot preview (needs OMDb key)</text>
+    <rect x="784.9" y="904" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="926" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="942" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">z</text>
-    <text x="195.2" y="942" textLength="268.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Hide results with no seeders</text>
-    <rect x="669.7" y="926" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="942" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
+    <text x="195.2" y="942" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Sort results</text>
+    <rect x="784.9" y="926" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="948" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="964" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">w</text>
-    <text x="195.2" y="964" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Save or remove current search</text>
-    <rect x="669.7" y="948" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="964" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">z</text>
+    <text x="195.2" y="964" textLength="268.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Hide results with no seeders</text>
+    <rect x="784.9" y="948" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="970" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="986" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">d</text>
-    <text x="195.2" y="986" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download (P2P)</text>
-    <rect x="669.7" y="970" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="986" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">w</text>
+    <text x="195.2" y="986" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Save or remove current search</text>
+    <rect x="784.9" y="970" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="992" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1008" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+d</text>
-    <text x="195.2" y="1008" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download to a chosen folder</text>
-    <rect x="669.7" y="992" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1008" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">d</text>
+    <text x="195.2" y="1008" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download (P2P)</text>
+    <rect x="784.9" y="992" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1014" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1030" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">r</text>
-    <text x="195.2" y="1030" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download via debrid (Real-Debrid / TorBox)</text>
-    <rect x="669.7" y="1014" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1030" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">shift+d</text>
+    <text x="195.2" y="1030" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download to a chosen folder</text>
+    <rect x="784.9" y="1014" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1036" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1052" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">v</text>
-    <text x="195.2" y="1052" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stream</text>
-    <rect x="669.7" y="1036" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1052" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">r</text>
+    <text x="195.2" y="1052" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download via debrid (Real-Debrid / TorBox)</text>
+    <rect x="784.9" y="1036" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1058" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1074" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">b</text>
-    <text x="195.2" y="1074" textLength="451.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Favourite a video (detail view / stream picker)</text>
-    <rect x="669.7" y="1058" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1074" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">v</text>
+    <text x="195.2" y="1074" textLength="57.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stream</text>
+    <rect x="784.9" y="1058" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1080" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1096" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">y</text>
-    <text x="195.2" y="1096" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Copy magnet</text>
-    <rect x="669.7" y="1080" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1096" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">b</text>
+    <text x="195.2" y="1096" textLength="451.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Favourite a video (detail view / stream picker)</text>
+    <rect x="784.9" y="1080" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1102" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1118" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">m</text>
-    <text x="195.2" y="1118" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Paste magnet</text>
-    <rect x="669.7" y="1102" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1118" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">y</text>
+    <text x="195.2" y="1118" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Copy magnet</text>
+    <rect x="784.9" y="1102" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1124" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1140" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">x</text>
-    <text x="195.2" y="1140" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stop active stream</text>
-    <rect x="669.7" y="1124" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1140" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">m</text>
+    <text x="195.2" y="1140" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Paste magnet</text>
+    <rect x="784.9" y="1124" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1146" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="1146" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1162" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">x</text>
+    <text x="195.2" y="1162" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Stop active stream</text>
+    <rect x="784.9" y="1146" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1168" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1184" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">For You</text>
-    <rect x="669.7" y="1168" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1168" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1190" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1206" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑ ↓</text>
-    <text x="195.2" y="1206" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between picks</text>
-    <rect x="669.7" y="1190" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1206" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">For You</text>
+    <rect x="784.9" y="1190" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1212" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1228" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
-    <text x="195.2" y="1228" textLength="163.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Search this title</text>
-    <rect x="669.7" y="1212" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1228" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑ ↓</text>
+    <text x="195.2" y="1228" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between picks</text>
+    <rect x="784.9" y="1212" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1234" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1250" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
-    <text x="195.2" y="1250" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open the IMDb page</text>
-    <rect x="669.7" y="1234" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1250" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
+    <text x="195.2" y="1250" textLength="556.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Play the best release (confirmed films) / otherwise search</text>
+    <rect x="784.9" y="1234" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1256" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1272" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
-    <text x="195.2" y="1272" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle poster / plot preview (needs OMDb key)</text>
-    <rect x="669.7" y="1256" width="1.4" height="22" fill="#8676b2"/>
+    <text x="195.2" y="1272" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">the title</text>
+    <rect x="784.9" y="1256" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1278" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1294" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">t</text>
-    <text x="195.2" y="1294" textLength="211.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Cycle movie / TV / all</text>
-    <rect x="669.7" y="1278" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1294" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
+    <text x="195.2" y="1294" textLength="374.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Search this title instead of playing it</text>
+    <rect x="784.9" y="1278" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1300" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1316" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">g</text>
-    <text x="195.2" y="1316" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter by genre</text>
-    <rect x="669.7" y="1300" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1316" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">i</text>
+    <text x="195.2" y="1316" textLength="172.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open the IMDb page</text>
+    <rect x="784.9" y="1300" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1322" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1338" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">e</text>
-    <text x="195.2" y="1338" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle explore mode</text>
-    <rect x="669.7" y="1322" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1338" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
+    <text x="195.2" y="1338" textLength="432" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle poster / plot preview (needs OMDb key)</text>
+    <rect x="784.9" y="1322" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1344" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1360" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">b</text>
-    <text x="195.2" y="1360" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Show / hide the 'why' reasons</text>
-    <rect x="669.7" y="1344" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1360" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">t</text>
+    <text x="195.2" y="1360" textLength="211.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Cycle movie / TV / all</text>
+    <rect x="784.9" y="1344" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1366" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1382" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
-    <text x="195.2" y="1382" textLength="297.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Rate — watched / like / dislike</text>
-    <rect x="669.7" y="1366" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1382" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">g</text>
+    <text x="195.2" y="1382" textLength="144" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Filter by genre</text>
+    <rect x="784.9" y="1366" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1388" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1404" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">w</text>
-    <text x="195.2" y="1404" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Save this title as a search</text>
-    <rect x="669.7" y="1388" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1404" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">e</text>
+    <text x="195.2" y="1404" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Toggle explore mode</text>
+    <rect x="784.9" y="1388" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1410" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1426" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">r</text>
-    <text x="195.2" y="1426" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Refresh recommendations</text>
-    <rect x="669.7" y="1410" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1426" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">b</text>
+    <text x="195.2" y="1426" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Show / hide the 'why' reasons</text>
+    <rect x="784.9" y="1410" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1432" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="1432" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1448" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
+    <text x="195.2" y="1448" textLength="297.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Rate — watched / like / dislike</text>
+    <rect x="784.9" y="1432" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1454" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1470" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Downloads</text>
-    <rect x="669.7" y="1454" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1470" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">w</text>
+    <text x="195.2" y="1470" textLength="259.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Save this title as a search</text>
+    <rect x="784.9" y="1454" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1476" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1492" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
-    <text x="195.2" y="1492" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
-    <rect x="669.7" y="1476" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1492" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">r</text>
+    <text x="195.2" y="1492" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Refresh recommendations</text>
+    <rect x="784.9" y="1476" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1498" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1514" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">c</text>
-    <text x="195.2" y="1514" textLength="297.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Cancel or remove (shift+c: all)</text>
-    <rect x="669.7" y="1498" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1498" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1520" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1536" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
-    <text x="195.2" y="1536" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Retry failed</text>
-    <rect x="669.7" y="1520" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1536" textLength="163.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Continue watching</text>
+    <rect x="784.9" y="1520" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1542" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1558" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">d</text>
-    <text x="195.2" y="1558" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download again</text>
-    <rect x="669.7" y="1542" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1558" textLength="28.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↑ ↓</text>
+    <text x="195.2" y="1558" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Move between titles</text>
+    <rect x="784.9" y="1542" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1564" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1580" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">e</text>
-    <text x="195.2" y="1580" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open folder</text>
-    <rect x="669.7" y="1564" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1580" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">↵</text>
+    <text x="195.2" y="1580" textLength="499.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Play the next episode, or resume where there is none</text>
+    <rect x="784.9" y="1564" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1586" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1602" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
-    <text x="195.2" y="1602" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Export torrent file</text>
-    <rect x="669.7" y="1586" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1602" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">r</text>
+    <text x="195.2" y="1602" textLength="278.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Resume the remembered torrent</text>
+    <rect x="784.9" y="1586" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1608" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="1608" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1624" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
+    <text x="195.2" y="1624" textLength="374.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Search this title instead of playing it</text>
+    <rect x="784.9" y="1608" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1630" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1646" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Seeding</text>
-    <rect x="669.7" y="1630" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1646" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">x</text>
+    <text x="195.2" y="1646" textLength="192" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Remove from the list</text>
+    <rect x="784.9" y="1630" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1652" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1668" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
-    <text x="195.2" y="1668" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
-    <rect x="669.7" y="1652" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1652" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1674" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1690" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">c</text>
-    <text x="195.2" y="1690" textLength="153.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Remove from list</text>
-    <rect x="669.7" y="1674" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1690" textLength="86.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Downloads</text>
+    <rect x="784.9" y="1674" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1696" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1712" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">e</text>
-    <text x="195.2" y="1712" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open folder</text>
-    <rect x="669.7" y="1696" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1712" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
+    <text x="195.2" y="1712" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
+    <rect x="784.9" y="1696" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1718" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="1718" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1734" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">c</text>
+    <text x="195.2" y="1734" textLength="297.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Cancel or remove (shift+c: all)</text>
+    <rect x="784.9" y="1718" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1740" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1756" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Your downloaded files always stay on disk.</text>
-    <rect x="669.7" y="1740" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1756" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">f</text>
+    <text x="195.2" y="1756" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Retry failed</text>
+    <rect x="784.9" y="1740" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1762" width="1.4" height="22" fill="#8676b2"/>
-    <text x="70.4" y="1778" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Press ? or esc to close</text>
-    <rect x="669.7" y="1762" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1778" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">d</text>
+    <text x="195.2" y="1778" textLength="134.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Download again</text>
+    <rect x="784.9" y="1762" width="1.4" height="22" fill="#8676b2"/>
     <rect x="45.7" y="1784" width="1.4" height="22" fill="#8676b2"/>
-    <rect x="669.7" y="1784" width="1.4" height="22" fill="#8676b2"/>
-    <text x="41.6" y="1822" textLength="633.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#8676b2">╰────────────────────────────────────────────────────────────────╯</text>
+    <text x="70.4" y="1800" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">e</text>
+    <text x="195.2" y="1800" textLength="105.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Open folder</text>
+    <rect x="784.9" y="1784" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1806" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1822" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">s</text>
+    <text x="195.2" y="1822" textLength="182.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Export torrent file</text>
+    <rect x="784.9" y="1806" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1828" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1828" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1850" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1866" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" font-weight="600">Seeding</text>
+    <rect x="784.9" y="1850" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1872" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1888" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">p</text>
+    <text x="195.2" y="1888" textLength="115.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Pause/resume</text>
+    <rect x="784.9" y="1872" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1894" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1910" textLength="9.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#b9a7e6">c</text>
+    <text x="195.2" y="1910" textLength="153.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Remove from list</text>
+    <rect x="784.9" y="1894" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1916" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1916" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1938" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1954" textLength="403.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Your downloaded files always stay on disk.</text>
+    <rect x="784.9" y="1938" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1960" width="1.4" height="22" fill="#8676b2"/>
+    <text x="70.4" y="1976" textLength="220.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill-opacity="0.55">Press ? or esc to close</text>
+    <rect x="784.9" y="1960" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="45.7" y="1982" width="1.4" height="22" fill="#8676b2"/>
+    <rect x="784.9" y="1982" width="1.4" height="22" fill="#8676b2"/>
+    <text x="41.6" y="2020" textLength="748.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="#8676b2">╰────────────────────────────────────────────────────────────────────────────╯</text>
   </g>
 </svg>
