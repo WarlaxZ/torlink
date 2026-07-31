@@ -1265,12 +1265,17 @@ let suggestTimer: ReturnType<typeof setTimeout> | null = null;
 // out-of-order arrival is the normal case, not the edge case.
 let suggestSeq = 0;
 
+// Each row needs a stable id for `aria-activedescendant` to point at. By
+// position, because that is what the highlight is an index into.
+const suggestOptionId = (index: number): string => `suggest-option-${index}`;
+
 function renderSuggest(): void {
   suggestList.replaceChildren();
   const rows = rowPlan(suggestState);
   for (const [index, row] of rows.entries()) {
     const li = document.createElement("li");
     li.setAttribute("role", "option");
+    li.setAttribute("id", suggestOptionId(index));
     li.setAttribute("aria-selected", row.highlighted ? "true" : "false");
     // textContent, not innerHTML: a title is a string from a catalog we do not
     // control, and src/web/static has no innerHTML path anywhere by rule.
@@ -1294,7 +1299,15 @@ function renderSuggest(): void {
     });
     suggestList.append(li);
   }
+  // The two halves of "is the list on screen" — the visual one and the announced
+  // one — set side by side on purpose, so they cannot drift.
   suggestList.hidden = rows.length === 0;
+  queryInput.setAttribute("aria-expanded", rows.length === 0 ? "false" : "true");
+  const active = rows.findIndex((row) => row.highlighted);
+  // Removed rather than set to "": an empty idref is a dangling pointer, and some
+  // screen readers announce it as a lost element instead of as nothing.
+  if (active === -1) queryInput.removeAttribute("aria-activedescendant");
+  else queryInput.setAttribute("aria-activedescendant", suggestOptionId(active));
 }
 
 // Closes the list for good: the pending timer is dropped so a debounced request

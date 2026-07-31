@@ -83,7 +83,22 @@
         <form id="search" class="card">
           <label for="query">Search every source</label>
           <div class="suggest-wrap">
-            <input id="query" type="search" placeholder="a film or show — or leave blank to browse" autocomplete="off" />
+            <!-- role="combobox" and the aria-* pairing below are the ARIA 1.2
+                 combobox pattern. `aria-expanded` is not allowed on a bare
+                 searchbox, so without the explicit role a screen reader would
+                 announce neither the list appearing nor the moving highlight.
+                 `aria-controls` is static; `aria-expanded` and
+                 `aria-activedescendant` are kept in sync by renderSuggest. -->
+            <input
+              id="query"
+              type="search"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="suggest"
+              aria-expanded="false"
+              placeholder="a film or show — or leave blank to browse"
+              autocomplete="off"
+            />
             <!-- Title suggestions from reccd, when it is configured. An overlay,
                  positioned against .suggest-wrap rather than .card, so opening
                  it never reflows the Search / save-search buttons out from
