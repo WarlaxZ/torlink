@@ -15,6 +15,23 @@ export interface StreamFile {
   url: string;
   filename: string;
   bytes: number;
+  /**
+   * The provider's own id for this file, when a debrid service resolved it.
+   * Server-side only: it is the handle their transcode endpoint takes, and it is
+   * deliberately absent from `PublicStreamFile` because the browser has no use
+   * for it. Undefined for a WebTorrent file, which has no such thing.
+   */
+  providerFileId?: string;
+  /**
+   * Whether the provider says it can transcode this file. Undefined when the
+   * provider did not say.
+   *
+   * Load-bearing, not informational: Real-Debrid's transcode endpoint answers
+   * `200` with manifest URLs even for a file it cannot transcode (a `.rar`, say),
+   * and those URLs then fail with `invalid_duration` when fetched. So this flag
+   * is the availability signal and the endpoint's status is not.
+   */
+  providerStreamable?: boolean;
 }
 
 // Players we probe for, in preference order, when none is configured. Each has

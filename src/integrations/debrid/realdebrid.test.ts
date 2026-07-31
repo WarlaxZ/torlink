@@ -12,6 +12,7 @@ import {
   parseErrorSlug,
   isTransient,
   getInfo,
+  unrestrictLink,
   type RealDebridFetch,
 } from "./realdebrid";
 
@@ -164,6 +165,53 @@ describe("resolveMagnet", () => {
       throw new Error(`unexpected call ${c.method} ${c.url}`);
     };
   }
+
+  it("keeps the provider's file id and streamable flag, which rung 2 needs", async () => {
+    // Measured against the live API: /unrestrict/link returns `id` (the handle
+    // the transcode endpoint takes) and `streamable` (1/0). Both were being read
+    // past and dropped.
+    const fetchImpl = router((c) => {
+      if (c.method === "POST" && c.url.includes("/unrestrict/link")) {
+        return jsonRes(200, {
+          id: "ABCD1234",
+          download: "https://dl/file1",
+          filename: "Kestrel.2010.1080p.BluRay.x264.mkv",
+          filesize: 4096,
+          streamable: 1,
+        });
+      }
+      return jsonRes(200, {});
+    });
+    const file = await unrestrictLink("tok", "https://rd/link1", { fetchImpl });
+    expect(file.providerFileId).toBe("ABCD1234");
+    expect(file.providerStreamable).toBe(true);
+  });
+
+  it("reports streamable: 0 as not streamable", async () => {
+    // A .rar on the account. The transcode endpoint still answers 200 with
+    // manifest URLs for these, and those URLs then 404 with invalid_duration —
+    // so this flag, not the endpoint's status, is the availability signal.
+    const fetchImpl = router(() =>
+      jsonRes(200, {
+        id: "ABCD1234",
+        download: "https://dl/x",
+        filename: "Kestrel.rar",
+        filesize: 1,
+        streamable: 0,
+      }),
+    );
+    const file = await unrestrictLink("tok", "https://rd/link1", { fetchImpl });
+    expect(file.providerStreamable).toBe(false);
+  });
+
+  it("leaves both undefined when the response omits them", async () => {
+    const fetchImpl = router(() =>
+      jsonRes(200, { download: "https://dl/x", filename: "Ashfall.1999.1080p.mp4", filesize: 1 }),
+    );
+    const file = await unrestrictLink("tok", "https://rd/link1", { fetchImpl });
+    expect(file.providerFileId).toBeUndefined();
+    expect(file.providerStreamable).toBeUndefined();
+  });
 
   it("runs addMagnet -> selectFiles -> poll -> unrestrict and returns files", async () => {
     const progress: number[] = [];

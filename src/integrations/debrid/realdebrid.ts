@@ -302,8 +302,22 @@ export async function unrestrictLink(
   opts: RequestOptions = {},
 ): Promise<ResolvedFile> {
   const res = await request(token, "POST", "/unrestrict/link", { link }, { ...opts, retries: opts.retries ?? 4 });
-  const parsed = (await res.json()) as { download: string; filename: string; filesize?: number };
-  return { url: parsed.download, filename: parsed.filename, bytes: parsed.filesize ?? 0 };
+  const parsed = (await res.json()) as {
+    id?: string;
+    download: string;
+    filename: string;
+    filesize?: number;
+    // 1 or 0 in practice; typed loosely because it is documented as an integer
+    // and a provider that switched to a boolean should not silently read false.
+    streamable?: number | boolean;
+  };
+  return {
+    url: parsed.download,
+    filename: parsed.filename,
+    bytes: parsed.filesize ?? 0,
+    providerFileId: parsed.id,
+    providerStreamable: parsed.streamable === undefined ? undefined : Boolean(parsed.streamable),
+  };
 }
 
 /**
