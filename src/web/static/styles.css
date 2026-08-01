@@ -3,7 +3,9 @@
    The palette mirrors the TUI's so the two surfaces read as one tool. */
 
 :root {
-  color-scheme: dark light;
+  /* `dark light` with a hardcoded dark palette: a light-preference OS gets dark
+     form controls and scrollbars to match the page, which is the point. */
+  color-scheme: dark;
   --bg: #12131a;
   --fg: #e6e6ea;
   --dim: #8b8d9b;
@@ -12,11 +14,55 @@
   --error: #f7768e;
   --sunken: #0c0d13;
   --raised: #1b1d29;
+  /* The only two durations in the file, and both are short on purpose. This is
+     a tool: motion here exists to make a state change legible — which button is
+     under the cursor, that a row just arrived — never to be looked at. Anything
+     an operator waits for twice is too long. */
+  --tap: 90ms;
+  --settle: 160ms;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ---- motion -------------------------------------------------------------- *
+
+   There was none: 1500 lines of CSS with no transition, no animation and no
+   keyframes, so every hover, every selection and every appearing panel was
+   instantaneous. That is not restraint, it is a missing layer — an interface
+   that never acknowledges a pointer feels unresponsive even when it is fast.
+
+   Applied by PROPERTY, not by `all` on `*`: `transition: all` would animate
+   layout on the results list as it rebuilds 23 times during a search, which
+   would be both ugly and expensive. Only colour, border and background move —
+   nothing that triggers layout.
+
+   THE REDUCED-MOTION BLOCK IS NOT OPTIONAL. `scrollTo` in app.ts already
+   honours the preference; adding motion without extending the same courtesy
+   would be a regression for anyone who set it. */
+button,
+select,
+input,
+a,
+summary,
+.tag,
+.badge {
+  transition:
+    color var(--tap) ease-out,
+    border-color var(--tap) ease-out,
+    background-color var(--tap) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* The `hidden` attribute is only `display: none` in the user-agent stylesheet,
@@ -245,6 +291,23 @@ input {
   font: inherit;
 }
 
+/* Chrome's UA placeholder is rgb(117,117,117), which against --sunken measures
+   4.21:1 — the one real contrast failure on the page, and it was there only
+   because ::placeholder was never styled. --dim clears 4.5:1 on every surface
+   this app puts an input on. */
+::placeholder {
+  color: var(--dim);
+  opacity: 1; /* Firefox dims placeholders by default; --dim is already the dim. */
+}
+
+/* `a` and `summary` are in here now. They were not, so a plain anchor — the
+   player's back link, its breadcrumb, the two escape routes on the fallback
+   card — fell to Chrome's UA ring, which is the LIGHT-mode blue rgb(0,95,204).
+   Against this page that measures 3.09:1: it clears WCAG 1.4.11 by nine
+   hundredths, and it is a different colour from every other focused control on
+   the site. */
+a:focus-visible,
+summary:focus-visible,
 input:focus-visible,
 button:focus-visible {
   outline: 1px solid var(--accent);
@@ -319,6 +382,18 @@ button:hover {
     display: block;
   }
 
+  /* AND the name must be blockified with it. `.row-name` is a <span>, so the
+     moment its parent stops being a flex container the span goes back to
+     `display: inline` — where `overflow`, `text-overflow` and `min-width` are
+     all inert, because an inline box is not a box you can clip. The ellipsis
+     above silently stopped applying and a long torrent name pushed the queue
+     pane 310px wider than the viewport: measured `scrollWidth 700` against
+     `clientWidth 390`. The saved pane was unaffected only because its rows keep
+     a flex parent, which blockifies the span for free. */
+  .row-name {
+    display: block;
+  }
+
   .row-meta {
     display: block;
     margin-top: 0.2rem;
@@ -337,6 +412,13 @@ button:hover {
   display: block;
   height: 100%;
   background: var(--accent);
+}
+
+/* A torrent that dies at 99% drew 99% of an accent bar — the strongest signal on
+   the row saying "nearly done" while a dim grey word said "failed". The bar is
+   what gets read at a glance, so the bar is what has to be honest. */
+.bar > span.is-failed {
+  background: var(--error);
 }
 
 .row-actions {
@@ -409,12 +491,15 @@ button:hover {
   background: rgb(0 0 0 / 55%);
 }
 
+/* NO text-transform HERE. This line renders a release name, and identifying the
+   file is the dialog's entire job — uppercasing it mangles the one string whose
+   exactness is the point, and filenames are case-sensitive on every filesystem
+   this app writes to. The label keeps its small dim treatment without it. */
 .picker-title {
   margin: 0 0 0.6rem;
   font-size: 0.75rem;
   color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   overflow-wrap: anywhere;
 }
 
@@ -516,6 +601,14 @@ button:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Something in the queue has failed. Colour only — the number still reads as a
+   number, and `title` carries the same fact for anyone who cannot see the
+   change. Worth the exception to the accent budget (see .tag-quality): this is
+   the one badge that has to pull someone away from another pane. */
+.badge-error {
+  color: var(--error);
+}
+
 /* Category tabs. A wrapped strip rather than a scroller: there are at most
    seven and they must all be visible at once — a tab you have to scroll to find
    is one you never use. */
@@ -534,7 +627,9 @@ button:hover {
   color: var(--dim);
 }
 
-.tab[aria-selected="true"] {
+/* aria-pressed, matching .view-tab — these are toggle buttons, not tabs. See
+   the comment on #tabs in index.html. */
+.tab[aria-pressed="true"] {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -705,6 +800,63 @@ select:focus-visible {
 @media (max-width: 46rem) {
   body:has(#preview:not([hidden])) .to-top {
     bottom: calc(45vh + 1.5rem);
+  }
+}
+
+/* ---- touch targets ------------------------------------------------------ *
+
+   Measured at 390x844, nothing on either page reached 44px in its minor axis:
+   the four pane tabs were 26px, every row button 26px with a 6.4px gap, and
+   `.group-toggle` was 20x18 — eight percent of a 44x44 target. This is the
+   surface that is actually touched, and `play` sits a few millimetres from
+   `add` and from `remove`.
+
+   `min-height` plus centring rather than more padding, so a control grows
+   downward into empty space instead of pushing every neighbour apart — the
+   toolbar already wraps to five rows on a phone and taller rows would make that
+   worse. Type sizes are left alone: the problem was the hit area, not legibility.
+
+   Deliberately NOT gated on `(pointer: coarse)`. A narrow window on a laptop
+   gets the same layout, and a 44px control is never wrong for a mouse. */
+@media (max-width: 46rem) {
+  .view-tab,
+  .tabs .tab,
+  /* `.row-actions` is shared by the queue, the results list, the For You cards
+     and all three saved lists — one selector reaches every row control in the
+     app, which is why they were all 26px together. */
+  .row-actions button,
+  .row-actions .button-link,
+  .saved-query,
+  .recc-actions button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 6.4px between `play` and `add`, and between `play` and `remove`. On a
+     surface where the consequence of a mis-tap is a ninety-second resolve you
+     did not want, or a saved search silently gone, that is not enough. */
+  .row-actions,
+  .recc-actions {
+    gap: 0.6rem;
+  }
+
+  /* A disclosure triangle is the smallest control in the app and the one that
+     opens a collapsed group of twenty releases, so it is the one worth widening
+     most. */
+  .group-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Both of these are plain text links in a header, and both are the only way
+     off their screen. 17px and 15px tall respectively before this. */
+  .back,
+  .breadcrumb a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
 }
 
@@ -1116,11 +1268,17 @@ select:focus-visible {
 
 /* reccd's "because you liked …". Dim and small: it explains the pick, it is not
    the pick. Clamped to two lines so one verbose reason cannot make its card
-   twice the height of its neighbours and tear the grid. */
+   twice the height of its neighbours and tear the grid.
+
+   It was `var(--accent)`, directly under that first sentence — so the
+   explanation was the brightest text on the card, brighter than the title of
+   the thing being recommended, and it spent the accent budget that
+   `.tag-quality` is deliberately denied. The comment was right and the code was
+   wrong; this is the code catching up. */
 .recc-reason {
   margin: 0.3rem 0 0;
   font-size: 0.7rem;
-  color: var(--accent);
+  color: var(--dim);
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1213,10 +1371,41 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The two ways out. Links rather than buttons, and below the explanation rather
+   than beside the .m3u controls: those hand this file to another application,
+   these are about not being on this screen again. Keeping them visually
+   separate is what stops "Find a playable release" reading as a fourth way to
+   play the file you already have. */
+.fallback-outs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.9rem 0 0;
+  font-size: 0.8rem;
+}
+
+.fallback-outs a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.fallback-outs a:hover {
+  text-decoration: underline;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* The one control that actually works on this platform — VLC on a phone, the
+   .m3u everywhere else (see primaryAction). Three co-equal buttons made the
+   user pick, and on iOS two of the three did nothing useful. Borrows `.play`'s
+   accent treatment rather than inventing a second "this one" language. */
+.actions .primary {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* The rest of the torrent. Borrows the picker's vocabulary deliberately — this
@@ -1335,6 +1524,87 @@ select:focus-visible {
   }
 }
 
+/* ---- continue watching -------------------------------------------------- *
+
+   The one pane in the app that had no artwork, in a product whose search and
+   For You panes are both poster walls — and the pane most likely to be opened
+   from a sofa, where recognising a show by its cover IS the interaction. The
+   whole premise of a resume list is that you already know what these are.
+
+   A row, not a card: this list is read top to bottom to find one thing, and a
+   grid of ten covers would be a browse. So the poster is a thumbnail in a
+   two-column grid, sized to the row rather than the row to it. */
+.continue-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+/* Overrides .poster's card metrics — that rule centres a 12rem frame with a
+   bottom margin, which is right on a grid card and wrong beside three lines of
+   text. Keeps its 2:3 box, border and sunken background, so an empty frame
+   still reads as artwork that has not arrived rather than as a hole. */
+.continue-poster {
+  max-width: none;
+  margin: 0;
+  width: 3rem;
+}
+
+/* The text column. Its own stack, so the poster spans title, subtitle and
+   buttons instead of the title alone. */
+.continue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* Recent searches, under the search box. Full width of the card so they wrap on
+   their own line rather than trailing off the end of the Search button. */
+.recent {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* A label on the strip, so a lone word under the search box is not a mystery.
+   Rendered from CSS rather than markup because it is punctuation for the list,
+   not content — there is nothing for a screen reader to gain from hearing it
+   before each chip's own accessible name. */
+.recent::before {
+  content: "recent";
+  align-self: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Quieter than a saved search, which is the distinction worth drawing: a saved
+   search is a list you curated, a recent one is just where you have been.
+   `.saved-query` is borderless — right for a full-width list row, wrong for a
+   chip in a strip, where without an outline it reads as stray text rather than
+   as something to press. */
+/* `.recent .recent-chip`, not `.recent-chip`. It shares `.saved-query`, whose
+   `border: 0; padding: 0` is declared LATER in this file at equal specificity
+   and therefore wins — the same ordering hazard already recorded on `.preview`.
+   The extra class outranks it wherever these rules end up sitting, so a future
+   reshuffle cannot silently flatten the chips back to bare words. */
+.recent .recent-chip {
+  font-size: 0.7rem;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem;
+}
+
+.recent .recent-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .saved-heading {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;
@@ -1394,6 +1664,20 @@ select:focus-visible {
 .results-grid {
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   gap: 0.75rem;
+}
+
+/* One column on a phone. `minmax(10rem, 1fr)` fits two ~185px columns at 390px,
+   and the layout preference is remembered in localStorage — so someone who
+   switched to grid at a desk arrives on their phone to two cramped columns of
+   truncated names and, on mixed results, screen-filling NO POSTER voids.
+
+   The preference is HONOURED rather than overridden: a poster wall is a good
+   way to browse on a phone, it just needs the whole width. One column is the
+   grid done properly here, not a quiet demotion to list. */
+@media (max-width: 46rem) {
+  .results-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .result-card {
@@ -1508,6 +1792,69 @@ select:focus-visible {
   border-radius: 0.5rem;
   background: var(--raised);
   font-size: 0.75rem;
+}
+
+/* The error banner. Deliberately the same object as .prepare — same corner, same
+   size, same shape — because they are the same kind of thing: a message about
+   work the user started that must survive scrolling. Only the colour and the
+   persistence differ, so a user who has learned where the resolve pill appears
+   has already learned where failures appear.
+
+   Above .prepare in the stacking order and offset when both are up: a resolve
+   that fails puts them on screen together for a moment. */
+.alert {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(30rem, calc(100vw - 7rem));
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--error);
+  border-radius: 0.5rem;
+  background: var(--raised);
+  font-size: 0.75rem;
+}
+
+.alert:not([hidden]) ~ .prepare {
+  bottom: 4.2rem;
+}
+
+/* The same slot carrying an acknowledgement rather than a failure — "Removed ·
+   Undo". Accent, not error: nothing has gone wrong, and painting a successful
+   deletion red would teach the user to distrust the colour that means a real
+   problem two rows up. */
+.alert-info {
+  border-color: var(--accent);
+}
+
+.alert-line {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  /* pre-line so a message can put a value on its own line — the copy-magnet
+     refusal path puts the magnet itself here for the user to select, and a
+     magnet run into the end of a sentence is not selectable in any useful way.
+     Ordinary single-line messages are unaffected. */
+  white-space: pre-line;
+}
+
+.alert button {
+  flex-shrink: 0;
+}
+
+#alert-dismiss {
+  /* Square, so the ✕ is not a wide pill next to a text button. */
+  padding: 0.35rem 0.55rem;
+}
+
+@media (max-width: 30rem) {
+  .alert {
+    left: 1rem;
+    right: 1rem;
+    max-width: none;
+  }
 }
 
 .prepare-line {

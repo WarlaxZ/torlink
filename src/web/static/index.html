@@ -68,6 +68,25 @@
 
     <p id="notice" class="notice" hidden></p>
 
+    <!--
+      Errors do NOT go in #notice above, and that is the whole point of this
+      element. #notice is a paragraph in normal flow that hides itself after four
+      seconds — fine for "Added.", useless for "Play failed (HTTP 502)" ninety
+      seconds into a resolve, because by then the user is a thousand pixels down
+      a browse and the paragraph is off screen. That exact failure is already
+      written up on #prepare below; this applies the same remedy to the alarming
+      case rather than only the reassuring one.
+
+      Fixed to the viewport, persists until dismissed, and carries one optional
+      action so that recovering does not mean scrolling back to re-find the row.
+      role=alert because, unlike the resolve pill, this is news.
+    -->
+    <div id="alert" class="alert" role="alert" hidden>
+      <span id="alert-line" class="alert-line"></span>
+      <button id="alert-action" type="button" hidden></button>
+      <button id="alert-dismiss" type="button" aria-label="Dismiss">✕</button>
+    </div>
+
     <!-- The stream file picker. Shown only when a session resolves to more than
          one playable file; every child below the heading is built by app.js with
          createElement, because the filenames come out of a torrent.
@@ -144,6 +163,18 @@
           </div>
           <button type="submit">Search</button>
           <button id="save-search" type="button">save search</button>
+          <!--
+            Where you have been. The terminal binds `↑` in its search box to walk
+            back through recent queries; the browser made you retype, or
+            pre-emptively "save search" — which is a different feature with a
+            different meaning (a saved search is a list you curate).
+
+            Chips rather than a key binding because the surface this matters
+            most on is a phone, which has no `↑`. Distinct from #suggest above:
+            that asks reccd what a partial title might be and appears once you
+            have typed; these are yours, need no server, and are there first.
+          -->
+          <div id="recent" class="recent" hidden></div>
         </form>
 
         <!-- Tabs and controls in one PINNED strip. A browse is 25,000px of
@@ -164,7 +195,19 @@
                category is absent from the response when it is off), so a
                hardcoded tab here could show a category the server will not
                search. -->
-          <div id="tabs" class="tabs" role="tablist"></div>
+          <!--
+            A GROUP OF TOGGLE BUTTONS, not role="tablist" — which is what this
+            was, with `aria-selected` on seven children, `aria-controls` on none
+            of them, and no role="tabpanel" anywhere in the document. A tablist
+            with no panels promises a screen-reader user a structure that is not
+            there, and the arrow-key navigation the pattern implies was never
+            implemented either (all seven sat in the tab order).
+
+            The honest description is the one #views already uses: these are
+            buttons that re-run the search against a different set of sources.
+            Nothing here reveals a pre-rendered panel. app.ts sets aria-pressed.
+          -->
+          <div id="tabs" class="tabs" role="group" aria-label="Category"></div>
 
           <div class="controls">
             <label class="control" for="sort">

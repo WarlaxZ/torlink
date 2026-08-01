@@ -27,15 +27,22 @@
     </header>
 
     <!-- Everything below is filled in by player.js from the page's own URL.
-         Nothing is templated server-side: this file ships as static bytes. -->
-    <p id="breadcrumb" class="breadcrumb" hidden></p>
-    <p id="file-name" class="file-name"></p>
-    <div id="stage" class="stage"></div>
-    <div id="actions" class="actions"></div>
-    <p id="notice" class="notice" hidden></p>
-    <!-- The rest of the torrent: what is up next, and everything else in it.
-         Empty for a single-file session, so a film looks exactly as it did. -->
-    <div id="episodes" class="episodes" hidden></div>
+         Nothing is templated server-side: this file ships as static bytes.
+
+         Inside <main>, which it was not: the breadcrumb, the filename, the video
+         and every control sat outside any landmark, so "skip to main content"
+         had nothing to skip to and a screen reader's landmark list showed only
+         the header. The dashboard already has one. -->
+    <main>
+      <p id="breadcrumb" class="breadcrumb" hidden></p>
+      <p id="file-name" class="file-name"></p>
+      <div id="stage" class="stage"></div>
+      <div id="actions" class="actions"></div>
+      <p id="notice" class="notice" hidden></p>
+      <!-- The rest of the torrent: what is up next, and everything else in it.
+           Empty for a single-file session, so a film looks exactly as it did. -->
+      <div id="episodes" class="episodes" hidden></div>
+    </main>
 
     <script type="module" src="/player.js"></script>
   </body>

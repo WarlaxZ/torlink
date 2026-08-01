@@ -296,6 +296,22 @@ export function episodeTag(season: number, episode: number): string {
 }
 
 /**
+ * Which category tab a Continue-watching row's artwork should be looked up as.
+ *
+ * Not the search tab the user last clicked: these rows are not part of a
+ * search, and a show looked up under "Movies" comes back with the wrong poster
+ * or none. `type` is the store's own judgement, written when the row was
+ * recorded, so this is a translation rather than a second guess. Falls back to
+ * `ALL_TAB` when the store never decided — `previewApplies` accepts it and OMDb
+ * is left to work it out.
+ */
+export function continueWatchingGroup(item: PublicStreamHistoryItem): string {
+  if (item.type === "series") return "TV";
+  if (item.type === "movie") return "Movies";
+  return "All";
+}
+
+/**
  * A continue-watching row's subtitle: age, the last episode watched (when this
  * is a series), and the next one to offer (when the server computed one).
  *

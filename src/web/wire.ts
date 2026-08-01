@@ -60,6 +60,16 @@ export interface StatusDownload {
   peers: number;
   /** Bytes per second. */
   speed: number;
+  /**
+   * Why this download failed, when it did. Absent otherwise.
+   *
+   * `QueueItem.error` — the same string the TUI shows. The browser used to get
+   * only the word `failed`, which told the user nothing they could act on: the
+   * two most common values are "Set a Real-Debrid or TorBox token, then download
+   * again" and a tracker's own refusal, and both are the difference between a
+   * row you can fix and a row you can only delete.
+   */
+  error?: string;
 }
 
 /** One torrent being seeded. `uploaded` is bytes; `uploadSpeed` is bytes/sec. */

@@ -6,9 +6,12 @@
 // Bundled for the browser, so it must import nothing from node:* and nothing in
 // the repo outside this directory.
 import {
+  failureLine,
   formatBytes,
   formatRate,
+  hasFailed,
   mergeRows,
+  rowActions,
   rowsFromStatus,
   shortName,
   type DashRow,
@@ -130,6 +133,7 @@ import {
   applySaved,
   applySavedSearchesResponse,
   continueWatchingBody,
+  continueWatchingGroup,
   continueWatchingFallbackQuery,
   continueWatchingStatus,
   continueWatchingSub,
@@ -187,6 +191,8 @@ import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
 import { authHeadersFor, readStoredToken, storeToken } from "./token";
 import { routeFromSearch, urlForRoute, type RouteState } from "./route";
 import { rememberReturn } from "./returnTo";
+import { foldRecent, magnetFor, readRecent, writeRecent } from "./recentSearches";
+import { clipboardPorts, copyNotice, copyText } from "./copyText";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -202,6 +208,10 @@ const magnetInput = el<HTMLInputElement>("magnet");
 const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
+const alertBox = el<HTMLDivElement>("alert");
+const alertLine = el<HTMLSpanElement>("alert-line");
+const alertAction = el<HTMLButtonElement>("alert-action");
+const alertDismiss = el<HTMLButtonElement>("alert-dismiss");
 const conn = el<HTMLSpanElement>("conn");
 const picker = el<HTMLDialogElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
@@ -225,6 +235,7 @@ const viewReccTab = el<HTMLButtonElement>("view-recc");
 const viewSavedTab = el<HTMLButtonElement>("view-saved");
 const viewQueueTab = el<HTMLButtonElement>("view-queue");
 const queueCount = el<HTMLSpanElement>("queue-count");
+const recentStrip = el<HTMLDivElement>("recent");
 const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
 const paneSaved = el<HTMLElement>("pane-saved");
@@ -339,6 +350,98 @@ function showNotice(message: string): void {
   }, NOTICE_MS);
 }
 
+/**
+ * Something went wrong. Says so until the user says otherwise.
+ *
+ * SEPARATE FROM showNotice, and the split is the fix. `showNotice` writes into a
+ * paragraph in normal flow and hides it after four seconds, which is right for
+ * "Added." and wrong for every failure: a play that fails ninety seconds into a
+ * resolve reports to a paragraph the user scrolled past long ago, so the app
+ * simply goes quiet. This project already diagnosed that once — it is why
+ * `#prepare` is fixed to the viewport — and this applies the same remedy to the
+ * alarming case rather than only the reassuring one.
+ *
+ * `action` is the difference between reporting a failure and letting the user
+ * do something about it. Without it, "try again" means scrolling back to find
+ * the row that failed.
+ */
+function showError(message: string, action?: { label: string; run: () => void }): void {
+  showAlert({ message, tone: "error", action });
+}
+
+/**
+ * How long an undo stays offered.
+ *
+ * Long enough to notice a mis-tap and react — the whole reason this exists is a
+ * 26px `remove` a few millimetres from `play` on a phone — and short enough not
+ * to sit over the list. Errors get no timer at all: they persist.
+ */
+const UNDO_MS = 8000;
+
+/**
+ * "Removed · Undo".
+ *
+ * The alternative was a native `confirm()` before every delete, and this is
+ * better on the surface that matters: a confirm interrupts the ninety-nine
+ * removals that were meant in order to catch the one that wasn't, whereas an
+ * undo costs the ninety-nine nothing. It is also what makes the deletion honest
+ * about having happened, which a dialog asking permission does not.
+ *
+ * Not offered where the server cannot put the thing back — see the call sites.
+ */
+function showUndo(message: string, undo: () => void): void {
+  showAlert({ message, tone: "info", action: { label: "Undo", run: undo }, timeoutMs: UNDO_MS });
+}
+
+let alertTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showAlert(opts: {
+  message: string;
+  tone: "error" | "info";
+  action?: { label: string; run: () => void };
+  /** Absent means it stays until dismissed, which is what an error does. */
+  timeoutMs?: number;
+}): void {
+  alertLine.textContent = opts.message;
+  alertBox.classList.toggle("alert-info", opts.tone === "info");
+  if (opts.action) {
+    const { label, run } = opts.action;
+    alertAction.textContent = label;
+    alertAction.hidden = false;
+    // Assigned, not added: this element is reused for every alert, and a
+    // listener left behind would fire the PREVIOUS one's action — undoing a
+    // removal the user has since made twice, or retrying a play they gave up on.
+    alertAction.onclick = () => {
+      hideError();
+      run();
+    };
+  } else {
+    alertAction.hidden = true;
+    alertAction.onclick = null;
+  }
+  if (alertTimer !== null) clearTimeout(alertTimer);
+  alertTimer =
+    opts.timeoutMs === undefined
+      ? null
+      : setTimeout(() => {
+          alertTimer = null;
+          hideError();
+        }, opts.timeoutMs);
+  alertBox.hidden = false;
+}
+
+function hideError(): void {
+  if (alertTimer !== null) clearTimeout(alertTimer);
+  alertTimer = null;
+  alertBox.hidden = true;
+  alertBox.classList.remove("alert-info");
+  alertLine.textContent = "";
+  alertAction.hidden = true;
+  alertAction.onclick = null;
+}
+
+alertDismiss.addEventListener("click", hideError);
+
 // The waiting line, or null to take it down. This is runPlay's `progress` effect
 // — separate from `notice` because this one persists for the length of a resolve
 // (minutes) and carries a Cancel, while a notice hides itself after seconds.
@@ -409,11 +512,9 @@ prepareCancel.addEventListener("click", () => {
   prepareAbort?.abort();
 });
 
-// Every action the row buttons can take. Downloads and seeds expose different
-// sets; `delete` also removes the files, which is why it is offered only where
-// the TUI offers it.
-const DOWNLOAD_ACTIONS = ["pause", "resume", "remove"] as const;
-const SEED_ACTIONS = ["stop-seed", "delete"] as const;
+// Which actions a row offers is `rowActions` in dashboard.ts — a decision, and
+// tested there. It used to be two constants here, and the download one was a
+// fixed ["pause","resume","remove"] that put `pause` on a failed torrent.
 
 // Gate the irreversible actions. pause, resume and stop-seed are all undone by
 // the button next to them, so they fire immediately; remove discards a torrent
@@ -513,8 +614,13 @@ function renderRow(row: DashRow): HTMLLIElement {
   name.title = row.name;
 
   const meta = document.createElement("span");
-  meta.className = "row-meta";
-  meta.textContent = metaLine(row);
+  // A dead torrent's counters describe nothing: `0 peers · —` reads as a
+  // rendering bug rather than as a state. The reason it failed is the only part
+  // of the row anyone can act on, so it takes the line. failureLine is null for
+  // every row that has not failed.
+  const failure = failureLine(row);
+  meta.className = failure ? "row-meta error" : "row-meta";
+  meta.textContent = failure ?? metaLine(row);
   head.append(name, meta);
 
   const bar = document.createElement("div");
@@ -523,6 +629,11 @@ function renderRow(row: DashRow): HTMLLIElement {
   // percent is already clamped to 0..100 by dashboard.ts, so this cannot smuggle
   // anything into the style attribute.
   fill.style.width = `${row.percent}%`;
+  // A torrent that dies at 99% drew 99% of an accent-coloured bar, which is the
+  // strongest signal on the row saying "nearly done" while the weakest — a dim
+  // grey word — said "failed". The bar is the thing people read at a glance, so
+  // it is the thing that has to be honest.
+  if (hasFailed(row)) fill.classList.add("is-failed");
   bar.append(fill);
 
   const actions = document.createElement("div");
@@ -540,8 +651,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
-  const available: readonly string[] = row.kind === "seed" ? SEED_ACTIONS : DOWNLOAD_ACTIONS;
-  for (const action of available) {
+  for (const action of rowActions(row)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action;
@@ -579,6 +689,14 @@ function render(): void {
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
   queueCount.hidden = rows.length === 0;
+  // And it says whether anything in there is broken. Without this the badge
+  // reads "2" whether both downloads are running or both are dead, so a user on
+  // any other pane has no reason to look — which is exactly when a failure sits
+  // unnoticed for an evening. The count still reads as a count; only its colour
+  // changes, and the title says why for anyone who cannot see the colour.
+  const failures = rows.filter(hasFailed).length;
+  queueCount.classList.toggle("badge-error", failures > 0);
+  queueCount.title = failures > 0 ? `${failures} failed` : "";
 }
 
 // The server's error envelope. Read defensively: a proxy or a crash can return
@@ -612,13 +730,13 @@ async function control(id: string, action: string): Promise<void> {
       body: JSON.stringify({ id, action }),
     });
   } catch {
-    showNotice(`${action} failed — the server is not responding.`);
+    showError(`${action} failed — the server is not responding.`);
     setConn("lost");
     return;
   }
   if (res.ok) return;
   const body = await readEnvelope(res);
-  showNotice(body.error ?? `${action} failed (HTTP ${res.status}).`);
+  showError(body.error ?? `${action} failed (HTTP ${res.status}).`);
 }
 
 // ---- streaming ------------------------------------------------------------
@@ -693,7 +811,7 @@ async function startSession(
     // `signal.aborted` immediately after this returns and reports the cancel
     // itself, so this stays silent and lets it.
     if (signal?.aborted) return { kind: "failed" };
-    showNotice("Play failed — the server is not responding.");
+    showError("Play failed — the server is not responding.");
     setConn("lost");
     return { kind: "failed" };
   }
@@ -712,7 +830,7 @@ async function startSession(
   }
   if (!res.ok) {
     const body = await readEnvelope(res);
-    showNotice(body.error ?? `Play failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Play failed (HTTP ${res.status}).`);
     return { kind: "failed" };
   }
 
@@ -723,7 +841,7 @@ async function startSession(
     !body.session ||
     typeof body.session !== "object"
   ) {
-    showNotice("Play failed — the server sent something unreadable.");
+    showError("Play failed — the server sent something unreadable.");
     return { kind: "failed" };
   }
   return {
@@ -991,7 +1109,20 @@ async function play(
         poll: pollSession,
         stop: stopSession,
         confirm: (message) => confirm(message),
-        notice: showNotice,
+        // A cancellation clears itself; a failure persists and offers to go
+        // again. Retrying re-enters this same function with the same arguments,
+        // so "Try again" means exactly what pressing Play again would have
+        // meant — without having to scroll back and find the row.
+        notice: (message, kind) => {
+          if (kind !== "failure") {
+            showNotice(message);
+            return;
+          }
+          showError(message, {
+            label: "Try again",
+            run: () => void play(row, onUnresolved, next),
+          });
+        },
         progress: showPrepare,
         // Closes over THIS row's hash, not a module-level variable — see
         // showPicker's comment for why that distinction is load-bearing.
@@ -1172,6 +1303,41 @@ let seededExpansion = false;
 // rows that are not rendered.
 let currentRows: GroupRow<PublicSearchResult>[] = [];
 
+let recent: string[] = readRecent();
+
+/**
+ * The recent-search chips.
+ *
+ * Hidden while the box has something in it: once you are typing, `#suggest` is
+ * the list that matters and two dropdowns stacked under one input is a mess.
+ * Hidden when empty too, so a fresh install shows nothing rather than an empty
+ * strip explaining itself.
+ */
+function renderRecent(): void {
+  const show = recent.length > 0 && queryInput.value.trim() === "";
+  recentStrip.hidden = !show;
+  if (!show) {
+    recentStrip.replaceChildren();
+    return;
+  }
+  recentStrip.replaceChildren(
+    ...recent.map((query) => {
+      // createElement + textContent: this is the user's own typing, but it has
+      // been through localStorage, which anything on this origin can write.
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "saved-query recent-chip";
+      chip.textContent = query;
+      chip.title = `Search for ${query}`;
+      chip.addEventListener("click", () => {
+        queryInput.value = query;
+        startSearch(query);
+      });
+      return chip;
+    }),
+  );
+}
+
 /**
  * Put what the user is doing into the address bar.
  *
@@ -1242,8 +1408,9 @@ function renderTabs(): void {
       button.type = "button";
       button.className = "tab";
       button.textContent = group;
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-selected", String(group === searchView.group));
+      // aria-pressed, matching #views: this is a toggle button, not a tab. See
+      // the comment on #tabs in index.html for why the tablist role went.
+      button.setAttribute("aria-pressed", String(group === searchView.group));
       button.addEventListener("click", () => {
         const plan = tabClickPlan(searchView, group, queryInput.value);
         if (plan.action === "ignore") return;
@@ -1281,6 +1448,13 @@ async function loadSources(): Promise<void> {
   renderTabs();
   renderResults();
   renderPrefs();
+  // AND the saved pane, which is new here: its Continue-watching rows carry
+  // artwork now, and whether to fetch any depends on `omdbConfigured` — which
+  // arrives in this response. `loadSaved` and `loadSources` are both fired
+  // unawaited at boot, and saved usually wins, so without this the rows are
+  // built while the answer is still "no key" and stay blank until something
+  // else happens to re-render them.
+  renderSaved();
 
   const claimHint = reccClaimHint(sources?.reccAccount);
   reccClaimHintLine.textContent = claimHint ?? "";
@@ -1361,6 +1535,13 @@ function startSearch(raw: string): void {
   // After searchView.query is set, so the address bar names the search actually
   // running rather than the one before it.
   syncUrl();
+  // Recorded on RUN, not on submit: this is also the path a recent chip, a saved
+  // search, a Continue-watching fallback and the player's "find a playable
+  // release" all take, and every one of them is a search worth being able to get
+  // back to. foldRecent ignores the blank query that means browse.
+  recent = foldRecent(recent, query);
+  writeRecent(recent);
+  renderRecent();
 
   const source = new EventSource(searchUrl(query, searchView.group, token));
   searchStream = source;
@@ -1589,6 +1770,8 @@ async function loadSuggest(raw: string, seq: number): Promise<void> {
 }
 
 queryInput.addEventListener("input", () => {
+  // The chips give way to #suggest as soon as there is something to suggest on.
+  renderRecent();
   if (suggestTimer !== null) clearTimeout(suggestTimer);
   // The capability flag from /api/sources, so a reccd-less server never spends
   // a request per character discovering that again.
@@ -1803,7 +1986,9 @@ const posterObserver: IntersectionObserver | null =
           // Stop watching this frame specifically; the others stay armed.
           posterObserver?.unobserve(entry.target);
           const pending = posterTargets.get(entry.target);
-          if (pending) startPoster(pending.release, entry.target as HTMLElement, pending.compact);
+          if (pending) {
+            startPoster(pending.release, entry.target as HTMLElement, pending.compact, pending.group);
+          }
         }
       })
     : null;
@@ -1811,10 +1996,17 @@ const posterObserver: IntersectionObserver | null =
 // What each observed frame is waiting for. A WeakMap so a frame discarded by a
 // re-render is collectable — a Map keyed on elements would be the leak this
 // design is avoiding, just spelled differently.
-const posterTargets = new WeakMap<Element, { release: string; compact: boolean }>();
+const posterTargets = new WeakMap<
+  Element,
+  { release: string; compact: boolean; group?: string }
+>();
 
-function startPoster(release: string, host: HTMLElement, compact: boolean): void {
-  const outcome = resultPosters.want(release, searchView.group);
+function startPoster(release: string, host: HTMLElement, compact: boolean, group?: string): void {
+  // `group` is what OMDb is asked to look the title up as. It defaults to the
+  // search tab because that is where posters started — but the Continue-watching
+  // rows are not part of a search, and asking for a show under whatever tab the
+  // user last clicked would look it up as a film.
+  const outcome = resultPosters.want(release, group ?? searchView.group);
   if (!(outcome instanceof Promise)) {
     paintPoster(host, outcome, compact);
     return;
@@ -1835,7 +2027,12 @@ function startPoster(release: string, host: HTMLElement, compact: boolean): void
  * naturally ~20 picks and needs no such gate, which is why its own mount is
  * eager.
  */
-function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void {
+function mountResultPoster(
+  release: string,
+  host: HTMLElement,
+  compact: boolean,
+  group?: string,
+): void {
   const known = resultPosters.peek(release);
   if (known !== undefined) {
     // Settled already: paint it and never observe it. This is the path almost
@@ -1850,10 +2047,10 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
   // hole, and the row does not resize when the image lands.
   host.replaceChildren();
   if (posterObserver === null) {
-    startPoster(release, host, compact);
+    startPoster(release, host, compact, group);
     return;
   }
-  posterTargets.set(host, { release, compact });
+  posterTargets.set(host, { release, compact, group });
   posterObserver.observe(host);
 }
 
@@ -1912,6 +2109,41 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
+
+  // The terminal's `y`. The browser had no way at all to get a magnet out of a
+  // result — the one thing you need to hand a release to any other client, or
+  // to paste back into the queue's own add box.
+  //
+  // Built client-side by magnetFor rather than shipped on the wire, and that is
+  // not a shortcut: `PublicSearchResult` deliberately carries no magnet, because
+  // the tracker list would be a few hundred bytes per row for something almost
+  // no row needs. A hash-and-name magnet is what `y` copies too.
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "copy magnet";
+  tagControl(copyButton, rowKey, "copy");
+  copyButton.addEventListener("click", () => {
+    const magnet = magnetFor(result.infoHash, result.name);
+    // THROUGH copyText, not navigator.clipboard directly. `navigator.clipboard`
+    // exists only in a secure context, and the normal way this dashboard is
+    // reached is a LAN address — so a bare `writeText` here would do nothing but
+    // explain itself on the very surface this button is for. copyText falls back
+    // to execCommand, which is why it must be called straight from the click
+    // with nothing awaited in front of it: the browser only permits that inside
+    // the task the gesture started.
+    const outcome = copyText(magnet, clipboardPorts());
+    void Promise.resolve(outcome).then((res) => {
+      if (res === "copied") {
+        showNotice(copyNotice(res, "Magnet"));
+        return;
+      }
+      // Refused. The alert is this page's equivalent of the player's read-only
+      // field: it persists, and its line is selectable text — so putting the
+      // magnet in it means the button still gets the user what they came for.
+      showError(`${copyNotice(res, "Magnet", "below — select it and copy")}\n${magnet}`);
+    });
+  });
+  actions.append(copyButton);
 
   return actions;
 }
@@ -2571,13 +2803,13 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
       body: JSON.stringify(addBody(result, plan.via)),
     });
   } catch {
-    showNotice("Add failed — the server is not responding.");
+    showError("Add failed — the server is not responding.");
     setConn("lost");
     return;
   }
   const body = await readEnvelope(res);
   if (!res.ok) {
-    showNotice(body.error ?? `Add failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Add failed (HTTP ${res.status}).`);
     return;
   }
   if (body.outcome === "duplicate") {
@@ -3167,6 +3399,17 @@ async function removeSavedSearch(query: string): Promise<void> {
   if (!body) return;
   savedState = applySavedSearchesResponse(savedState, body);
   renderSaved();
+  // A saved search is the user's own typing and nothing else in the app holds a
+  // copy, so a mis-tap on a 26px button next to `search` lost it for good.
+  // `toggle` re-adds it, because it is absent now.
+  showUndo(`Removed “${query}”.`, () => {
+    void (async () => {
+      const back = await postSaved("/api/saved-searches", savedSearchesBody(query, "toggle"));
+      if (!back) return;
+      savedState = applySavedSearchesResponse(savedState, back);
+      renderSaved();
+    })();
+  });
 }
 
 // Called by the favourite button on each search row.
@@ -3186,8 +3429,20 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
   savedState = applyLibraryResponse(savedState, body);
   renderSaved();
   renderResults();
+  // Same reasoning as removeSavedSearch. The watched-episode count does not
+  // survive the round trip — the server keeps that per info hash and a re-add
+  // starts a fresh favourite — so the undo restores the row, not its history.
+  showUndo(`Removed “${shortName(name)}”.`, () => {
+    void toggleLibrary({ infoHash, name });
+  });
 }
 
+// NO UNDO HERE, and the reason is the server rather than an oversight:
+// `POST /api/continue-watching` takes one action, `remove`, because nothing
+// plays a title and then un-plays it — so there is no request that would put
+// the row back. It is also the least costly of the three to lose: the row is
+// derived from stream history and reappears the next time the title is played,
+// where a saved search and a favourite are gone for good.
 async function removeContinueWatching(key: string): Promise<void> {
   const body = await postSaved("/api/continue-watching", continueWatchingBody(key));
   if (!body) return;
@@ -3295,7 +3550,7 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
 // string `renderLibraryRow`'s `name` is.
 function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   const li = document.createElement("li");
-  li.className = "row";
+  li.className = "row continue-row";
 
   const head = document.createElement("div");
   head.className = "result-head";
@@ -3304,6 +3559,22 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   name.textContent = item.title;
   name.title = item.rawName;
   head.append(name);
+
+  // ARTWORK. This was the only pane in the app with none — five grey text slabs
+  // in a product whose search and For You panes are both poster walls — and it
+  // is the pane most likely to be opened from a sofa, where recognising a show
+  // by its cover is the entire interaction. The whole point of "continue
+  // watching" is that you already know what these are.
+  //
+  // The SAME cache and the same lazy mount the results list uses, keyed on the
+  // release name, so a title showing in both places is fetched once and the
+  // daily-capped OMDb key is spent once. Small: this is a resume list, not a
+  // browse, and the row stays a row.
+  const poster = document.createElement("div");
+  poster.className = "poster continue-poster";
+  if (postersApply(continueWatchingGroup(item), sources?.omdbConfigured === true)) {
+    mountResultPoster(item.rawName, poster, true, continueWatchingGroup(item));
+  }
 
   const meta = document.createElement("span");
   meta.className = "row-meta";
@@ -3369,7 +3640,13 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   remove.addEventListener("click", () => void removeContinueWatching(item.key));
   actions.append(remove);
 
-  li.append(head, meta, actions);
+  // The poster is a sibling of the text column, not inside it: the row becomes
+  // a two-column grid (see .continue-row) so the artwork spans title, subtitle
+  // and buttons rather than sitting above them.
+  const body = document.createElement("div");
+  body.className = "continue-body";
+  body.append(head, meta, actions);
+  li.append(poster, body);
   return li;
 }
 
@@ -3500,7 +3777,18 @@ function openApp(payload: StatusPayload): void {
   // savedState: without this, a hit already in the library opens reading
   // "favourite" and the first click removes it.
   void loadSaved();
+  renderRecent();
   queryInput.focus();
+  // `?prefs=1` — the player page's "Avoid this next time", from the card that
+  // says a release cannot play here. A ONE-SHOT INTENT, not view state, so it is
+  // read straight off `location` rather than through RouteState: the next
+  // `syncUrl` rebuilds the query from the route and drops it, which is exactly
+  // right. Reloading the page should not keep reopening a disclosure.
+  if (new URLSearchParams(location.search).get("prefs") === "1") {
+    prefsBlock.open = true;
+    prefsBlock.scrollIntoView({ block: "nearest" });
+    syncUrl();
+  }
   // The search the URL asked for — last, and only when there is one.
   //
   // This is what makes coming back from the player work: the player page is a
@@ -3587,7 +3875,7 @@ addForm.addEventListener("submit", (event) => {
         body: JSON.stringify({ magnet }),
       });
     } catch {
-      showNotice("Add failed — the server is not responding.");
+      showError("Add failed — the server is not responding.");
       setConn("lost");
       return;
     }
@@ -3597,7 +3885,7 @@ addForm.addEventListener("submit", (event) => {
       showNotice(body.outcome === "duplicate" ? "Already in the queue." : "Added.");
       return;
     }
-    showNotice(body.error ?? `Add failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Add failed (HTTP ${res.status}).`);
   })();
 });
 

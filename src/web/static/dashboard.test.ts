@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  failureLine,
+  hasFailed,
+  rowActions,
   formatBytes,
   formatRate,
   mergeRows,
@@ -226,5 +229,73 @@ describe("shortName", () => {
     const clipped = shortName("y".repeat(400));
     expect(clipped).toHaveLength(80);
     expect(clipped.endsWith("…")).toBe(true);
+  });
+});
+
+const dl = (over: Partial<DashRow> = {}): DashRow => ({
+  id: "a".repeat(40),
+  name: "Kestrel.2010.1080p.BluRay.x264",
+  kind: "download",
+  status: "downloading",
+  percent: 42,
+  peers: 3,
+  rate: 1024,
+  uploaded: 0,
+  ...over,
+});
+
+describe("rowActions", () => {
+  it("offers pause and resume to a live download", () => {
+    expect(rowActions(dl())).toEqual(["pause", "resume", "remove"]);
+  });
+
+  /**
+   * THE POINT OF THE FUNCTION. This was a fixed array, so a dead torrent
+   * offered `pause` (meaningless) and `resume` (a no-op — resume un-pauses, and
+   * a failed item is not paused). The rows most in need of an action were the
+   * only ones with none that worked.
+   */
+  it("offers retry, not pause, to a failed download", () => {
+    expect(rowActions(dl({ status: "failed" }))).toEqual(["retry", "remove"]);
+  });
+
+  it("leaves seeds alone", () => {
+    expect(rowActions(dl({ kind: "seed" }))).toEqual(["stop-seed", "delete"]);
+  });
+
+  it("does not offer retry to a seed that happens to say failed", () => {
+    // Seeds have their own vocabulary; only a download can be retried.
+    expect(rowActions(dl({ kind: "seed", status: "failed" }))).toEqual(["stop-seed", "delete"]);
+  });
+});
+
+describe("hasFailed", () => {
+  it("is true only for a failed download", () => {
+    expect(hasFailed(dl({ status: "failed" }))).toBe(true);
+    expect(hasFailed(dl())).toBe(false);
+    expect(hasFailed(dl({ kind: "seed", status: "failed" }))).toBe(false);
+  });
+});
+
+describe("failureLine", () => {
+  it("is the server's reason when there is one", () => {
+    expect(failureLine(dl({ status: "failed", error: "Set a Real-Debrid token." }))).toBe(
+      "Set a Real-Debrid token.",
+    );
+  });
+
+  /**
+   * A dead torrent's `0 peers · —` describes nothing and reads as a rendering
+   * bug. Even with no reason from the server, saying so beats showing counters
+   * for a thing that stopped counting.
+   */
+  it("says so when the server gave no reason", () => {
+    expect(failureLine(dl({ status: "failed" }))).toBe("failed — no reason given");
+    expect(failureLine(dl({ status: "failed", error: "   " }))).toBe("failed — no reason given");
+  });
+
+  it("is null for a row that has not failed", () => {
+    expect(failureLine(dl())).toBeNull();
+    expect(failureLine(dl({ kind: "seed", status: "missing" }))).toBeNull();
   });
 });

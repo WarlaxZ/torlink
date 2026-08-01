@@ -54,10 +54,29 @@ export function copyText(text: string, ports: CopyPorts): CopyOutcome | Promise<
   }
 }
 
-export function copyNotice(outcome: CopyOutcome): string {
-  return outcome === "copied"
-    ? "Stream URL copied."
-    : "This browser won't let the page copy — the URL is in the field, already selected.";
+/**
+ * What to tell the user, for either outcome.
+ *
+ * `subject` names the thing that was copied and defaults to the player page's,
+ * which was the only caller when this was written. The dashboard's results list
+ * copies a magnet through the same `copyText`, and one function deciding the
+ * wording for both is what stops the two drifting into saying different things
+ * about the same refusal.
+ *
+ * `where` is the whole trailing clause, not just a place name, because the two
+ * callers differ in more than location. The player page appends a read-only
+ * field and calls `select()` on it, so "already selected" is true there. The
+ * dashboard reveals the magnet as text in the alert, where nothing is selected
+ * — and telling someone their selection is ready when it is not is worse than
+ * saying nothing, because they will press ⌘C and get whatever they had before.
+ */
+export function copyNotice(
+  outcome: CopyOutcome,
+  subject = "Stream URL",
+  where = "in the field, already selected",
+): string {
+  if (outcome === "copied") return `${subject} copied.`;
+  return `This browser won't let the page copy — the URL is ${where}.`;
 }
 
 /** The ports as this browser actually provides them. */

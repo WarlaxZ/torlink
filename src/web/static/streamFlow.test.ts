@@ -502,6 +502,11 @@ function harness(over: Partial<PlayEffects> = {}) {
     }[],
     polls: 0,
     progress: [] as (string | null)[],
+    // Paired with `notices` so a test can assert not just WHAT was said but
+    // whether the flow called it a cancellation or a failure — app.ts routes
+    // the two to different places (a self-clearing line vs a persistent alert
+    // with a Try again), so getting the kind wrong is silently losing an error.
+    noticeKinds: [] as (string | undefined)[],
     slept: [] as { ms: number; aborts: boolean }[],
   };
   let clock = 0;
@@ -519,7 +524,10 @@ function harness(over: Partial<PlayEffects> = {}) {
       calls.confirms.push(message);
       return false;
     },
-    notice: (message) => calls.notices.push(message),
+    notice: (message, kind) => {
+      calls.notices.push(message);
+      calls.noticeKinds.push(kind);
+    },
     progress: (line) => calls.progress.push(line),
     choose: (sessionId, capability, _name, files, preselect) =>
       calls.chosen.push({ sessionId, capability, files, preselect }),
@@ -570,6 +578,11 @@ describe("runPlay", () => {
     expect(calls.confirms[0]).toContain("your premium expired");
     expect(calls.opened).toEqual([]);
     expect(calls.notices).toEqual(["Playback cancelled — nothing was streamed."]);
+    // The user declined the prompt, so this is their own doing. It must NOT be
+    // reported as a failure: app.ts turns a failure into a persistent alert
+    // with a Try again, and offering to retry something someone just said no to
+    // is the app arguing with them.
+    expect(calls.noticeKinds).toEqual(["cancelled"]);
   });
 
   it("retries with confirm: true only after the user accepts", async () => {
@@ -707,6 +720,11 @@ describe("runPlay", () => {
     });
     await runPlay(row(), fx);
     expect(calls.notices).toEqual(["Couldn't reach the swarm."]);
+    // A FAILURE, so app.ts keeps it on screen with a Try again. Reported as an
+    // ordinary notice this would clear itself after four seconds — and a play
+    // can fail minutes in, by which point the user is far down a browse and the
+    // line they needed has already gone.
+    expect(calls.noticeKinds).toEqual(["failure"]);
     expect(calls.stopped).toEqual(["s1"]);
     expect(calls.opened).toEqual([]);
   });
@@ -716,6 +734,43 @@ describe("runPlay", () => {
     await runPlay(row(), fx);
     expect(calls.stopped).toEqual(["s1"]);
     expect(calls.opened).toEqual([]);
+    expect(calls.noticeKinds).toEqual(["failure"]);
+  });
+
+  /**
+   * The one thing this distinction exists for: every ending that is not the
+   * user's own cancellation has to be reported as a failure, or it lands in the
+   * self-clearing line and the app goes quiet about something that went wrong.
+   * Asserted as a set over the whole flow rather than per case, so a new ending
+   * added later cannot default to silence unnoticed.
+   */
+  it("calls every non-cancellation ending a failure", async () => {
+    const endings = [
+      // A session that resolves forever, and one that becomes unreadable —
+      // both reached only from a start that SUCCEEDED, which the default
+      // harness's start does not.
+      {
+        name: "resolve timed out",
+        over: {
+          start: async () => started({ state: "resolving" }),
+          poll: async () => session({ state: "resolving", progress: 5 }),
+        },
+      },
+      {
+        name: "session unreadable",
+        over: { start: async () => started({ state: "resolving" }), poll: async () => null },
+      },
+      {
+        name: "session errored",
+        over: { start: async () => started({ state: "error", error: "nope" }) },
+      },
+      { name: "no playable files", over: { start: async () => started({ files: [] }) } },
+    ];
+    for (const ending of endings) {
+      const { fx, calls } = harness(ending.over as Partial<PlayEffects>);
+      await runPlay(row(), fx);
+      expect(`${ending.name}: ${calls.noticeKinds.at(-1)}`).toBe(`${ending.name}: failure`);
+    }
   });
 
   it("says nothing extra when the start itself already failed and reported why", async () => {

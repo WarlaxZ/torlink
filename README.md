@@ -225,7 +225,13 @@ anything other than loopback requires a token.
 #### What the browser can't do yet
 
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which
-  the browser can't see.
+  the browser can't see. (A failed *download* is a different thing and does have a **Retry** button.)
+- **No exporting a `.torrent` and no "open folder".** Both are TUI-only: one needs a file the browser
+  would have to be handed, the other means opening a file manager on the machine torlink is running on,
+  which a phone on your sofa is not.
+- **Two keyboard shortcuts, not the terminal's hundred-odd.** `/` focuses the search box from anywhere
+  and the arrow keys walk the results. There is no `?` overlay — the browser is buttons, and the
+  shortcuts worth having on a surface you mostly touch are few.
 - **No subtitles, no scrubber.** [Continue watching](#continue-watching) does play the next episode
   automatically when a row names one — it just can't resume *where* you left off, because nothing here
   reads back from mpv, iina, vlc, or a browser tab; none of them report a position.

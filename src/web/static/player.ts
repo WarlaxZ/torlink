@@ -24,6 +24,7 @@ import {
   interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  primaryAction,
   restPlaylistPath,
   routeFailure,
   streamPath,
@@ -32,8 +33,9 @@ import {
   type PlayerTarget,
 } from "./playerModel";
 import { clipboardPorts, copyNotice, copyText } from "./copyText";
+import type { MediaFacts } from "../../util/playability";
 import { mountHls } from "./hlsMount";
-import { breadcrumbFor, upNextView, type EpisodeRow } from "./upNext";
+import { breadcrumbFor, escapeRoutes, upNextView, type EpisodeRow } from "./upNext";
 import { authHeadersFor, readStoredToken } from "./token";
 import { backTarget, readReturn } from "./returnTo";
 import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
@@ -137,7 +139,7 @@ function linkButton(label: string, href: string): HTMLAnchorElement {
  * `<video>` is removed rather than hidden, so nothing keeps buffering a file
  * that is not going to play and no black rectangle is left behind it.
  */
-function showFallback(reason: FallbackReason, filename: string): void {
+function showFallback(reason: FallbackReason, filename: string, facts?: MediaFacts): void {
   const card = document.createElement("div");
   card.className = "card fallback";
 
@@ -146,9 +148,31 @@ function showFallback(reason: FallbackReason, filename: string): void {
 
   const body = document.createElement("p");
   body.className = "fallback-body";
-  body.textContent = fallbackMessage(reason, filename);
+  // `facts` is what the server actually probed. Passing it turns "most releases
+  // are MKV with HEVC or DTS audio" into the codec this file really carries,
+  // which is the difference between a message you can act on and one you can
+  // only accept.
+  body.textContent = fallbackMessage(reason, filename, facts);
 
   card.append(title, body);
+
+  // TWO WAYS OUT, because this card is the end of the most common journey
+  // through the app and it used to be a cul-de-sac that blamed the browser.
+  // Both are ordinary links to the dashboard, so they work on a phone that
+  // holds this session's capability and no bearer token.
+  const outs = escapeRoutes(filename);
+  if (outs.length > 0) {
+    const nav = document.createElement("p");
+    nav.className = "fallback-outs";
+    for (const out of outs) {
+      const a = document.createElement("a");
+      a.textContent = out.label;
+      a.href = out.href;
+      nav.append(a);
+    }
+    card.append(nav);
+  }
+
   stage.replaceChildren(card);
 }
 
@@ -305,8 +329,20 @@ async function render(): Promise<void> {
   const stream = absoluteUrl(location.origin, streamPath(target));
   const playlist = absoluteUrl(location.origin, playlistPath(target));
 
+  const platform = detectPlatform(navigator.userAgent);
+  const m3u = linkButton("Download .m3u", playlist);
+  const vlc = vlcLinks(stream, platform).map((link) => linkButton(link.label, link.href));
+
+  // Ordered by what actually works here, not by a fixed list. `primaryAction`
+  // carries the reasoning; the effect is that a phone leads with Open in VLC
+  // rather than with a download its OS will not hand to a player, and the lead
+  // control is the only highlighted one so there is a first thing to press.
+  const lead = primaryAction(platform) === "vlc" && vlc.length > 0 ? vlc : [m3u];
+  const rest = lead === vlc ? [m3u] : vlc;
+  lead[0]?.classList.add("primary");
+
   const controls: (HTMLButtonElement | HTMLAnchorElement)[] = [
-    linkButton("Download .m3u", playlist),
+    ...lead,
     button("Copy stream URL", () => {
       // copyText must be called straight from the click with nothing awaited in
       // front of it: on an insecure origin — the normal way this dashboard is
@@ -322,10 +358,12 @@ async function render(): Promise<void> {
         else clearManualCopy();
       });
     }),
+    ...rest,
   ];
-  for (const link of vlcLinks(stream, detectPlatform(navigator.userAgent))) {
-    controls.push(linkButton(link.label, link.href));
-  }
+  // The vlcLinks append that used to sit here is gone, not lost: `lead` and
+  // `rest` above already place those buttons, and by platform rather than
+  // always last. Appending them again would render VLC twice.
+  //
   // replaceChildren drops any field left over from the previous target, so the
   // reference has to go with it.
   manualField = null;
@@ -353,7 +391,7 @@ async function render(): Promise<void> {
   const info = await fetchInfo(target);
   const chosen = chooseSource(info, target.filename);
   if (chosen.rung === "card") {
-    showFallback(chosen.reason ?? "container", target.filename);
+    showFallback(chosen.reason ?? "container", target.filename, info?.facts);
     return;
   }
   if (chosen.rung === "provider-hls" && info?.hls) {

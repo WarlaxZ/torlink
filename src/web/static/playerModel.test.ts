@@ -10,6 +10,7 @@ import {
   interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  primaryAction,
   restPlaylistPath,
   routeFailure,
   streamPath,
@@ -151,7 +152,7 @@ describe("filesPath", () => {
 
 describe("chooseSource", () => {
   const info = (over: Partial<StreamInfoResponse> = {}): StreamInfoResponse => ({
-    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" },
+    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const },
     blockers: [],
     hls: null,
     ...over,
@@ -186,7 +187,7 @@ describe("chooseSource", () => {
     expect(
       chooseSource(
         info({
-          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" },
+          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" as const },
           blockers: ["video"],
         }),
         "Tin.Rivers.2024.2160p.mp4",
@@ -327,6 +328,38 @@ describe("fallbackMessage", () => {
   it("tells a user with a capability-less link what to do", () => {
     expect(fallbackMessage("no-link", "")).toContain("reopen the player");
   });
+
+  /**
+   * The server already probed this file and told us exactly what it is, and the
+   * card was still guessing in prose — "most releases are MKV with HEVC or DTS
+   * audio", "HEVC or AV1", "usually DTS or TrueHD". Naming the real codec is the
+   * difference between a message a user can act on (search for an x264 release)
+   * and one they can only accept.
+   */
+  it("names the codec the server actually found", () => {
+    const facts = { container: "mkv", videoCodec: "hevc", audioCodec: "dts", source: "probe" as const };
+    expect(fallbackMessage("video-codec", "a.mkv", facts)).toContain("HEVC");
+    expect(fallbackMessage("video-codec", "a.mkv", facts)).not.toContain("or AV1");
+    expect(fallbackMessage("audio-codec", "a.mkv", facts)).toContain("DTS");
+    expect(fallbackMessage("audio-codec", "a.mkv", facts)).not.toContain("usually");
+    expect(fallbackMessage("container", "a.mkv", facts)).toContain("MKV");
+  });
+
+  /**
+   * A guess is labelled as one. `source: "name"` means the codec was inferred
+   * from the release name, and a release named x265 can carry something else —
+   * so the card must not state it as fact the way a probe result is stated.
+   */
+  it("hedges a codec that was only inferred from the release name", () => {
+    const guessed = { container: "mkv", videoCodec: "hevc", audioCodec: "", source: "name" as const };
+    expect(fallbackMessage("video-codec", "a.mkv", guessed)).toContain("looks like");
+  });
+
+  it("falls back to the old prose when the server told us nothing", () => {
+    const unknown = { container: "", videoCodec: "", audioCodec: "", source: "name" as const };
+    expect(fallbackMessage("video-codec", "a.mkv", unknown)).toContain("HEVC or AV1");
+    expect(fallbackMessage("video-codec", "a.mkv")).toContain("HEVC or AV1");
+  });
 });
 
 describe("routeFailure", () => {
@@ -367,5 +400,34 @@ describe("interruptedNotice", () => {
 
   it("distinguishes a stall from an outright failure", () => {
     expect(interruptedNotice("stall")).not.toBe(interruptedNotice("error"));
+  });
+});
+
+describe("primaryAction", () => {
+  /**
+   * On a phone the three controls were in the wrong order twice over: a
+   * downloaded .m3u is not handed to a media player the way a desktop OS does
+   * it, "Copy stream URL" is a riddle rather than an action, and the one that
+   * works was last.
+   */
+  it("leads with VLC on the platforms that have a working scheme", () => {
+    expect(primaryAction("ios")).toBe("vlc");
+    expect(primaryAction("android")).toBe("vlc");
+  });
+
+  it("leads with the .m3u on desktop, where vlcLinks offers nothing", () => {
+    // "other" is Windows and Linux — see Platform. Neither registers a
+    // vlc://-style scheme, so the .m3u is the only control that works there.
+    expect(primaryAction("other")).toBe("m3u");
+  });
+
+  /**
+   * macOS is a desktop, and `vlcLinks` returns nothing for it — the
+   * vlc-x-callback scheme belongs to VLC's iOS app, not the desktop one. So
+   * there is no VLC button to lead with even if this said otherwise.
+   */
+  it("keeps the .m3u first on macOS", () => {
+    expect(primaryAction("macos")).toBe("m3u");
+    expect(vlcLinks("http://x/y", "macos")).toEqual([]);
   });
 });
