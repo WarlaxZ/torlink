@@ -33,7 +33,7 @@
 // a hand-written copy of the picker's shapes — `{ season, episode }` had
 // already drifted once — the exact drift this file was created to stop.
 // Anything with a runtime value in it still does not belong in this module.
-import type { Blocker, MediaFacts } from "../util/playability";
+import type { Blocker, EmbeddedSubtitle, MediaFacts } from "../util/playability";
 import type { EpisodeRef } from "../util/episode";
 import type { FeatureId, MaxResolution } from "../util/releasePick";
 import type { TitleSuggestion } from "../util/titleSuggest";
@@ -122,6 +122,24 @@ export interface PublicStreamFile {
 }
 
 /**
+ * A subtitle file that ships alongside the video in the same torrent, as the
+ * browser is allowed to see it.
+ *
+ * `index` addresses it on `/stream/:sid/:idx.vtt`, the same grammar as the
+ * video's own handle. `renderable` is false for ass/ssa/sub: those are matched
+ * and offered to external players, but `<track>` cannot show them.
+ */
+export interface SubtitleFile {
+  index: number;
+  filename: string;
+  /** BCP-47 tag ("en"), or "" when the filename gave no language. */
+  language: string;
+  /** Human label for a track menu: "English", "English (forced)". */
+  label: string;
+  renderable: boolean;
+}
+
+/**
  * `GET /stream/:sid/:idx.info?k=…` — what this file is, and how to play it.
  *
  * Capability-authenticated rather than bearer-authenticated, and that is the
@@ -139,6 +157,12 @@ export interface StreamInfoResponse {
   blockers: Blocker[];
   /** A provider HLS manifest the browser can play directly, or null. */
   hls: string | null;
+  /**
+   * What subtitles exist for this file. `embedded` is muxed inside it and is
+   * reported only — nothing extracts it. `files` are siblings in the torrent,
+   * fetchable as WebVTT from `/stream/:sid/:idx.vtt`.
+   */
+  subtitles: { embedded: EmbeddedSubtitle[]; files: SubtitleFile[] };
 }
 
 /**

@@ -8,6 +8,7 @@ import { startWebServer, type WebServerHandle } from "./server";
 import {
   isPlayPath,
   isStreamPath,
+  MAX_SUBTITLE_BYTES,
   parsePlayPath,
   parseStreamPath,
   playlistFilename,
@@ -19,6 +20,7 @@ import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSes
 import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 import type { Runtime } from "../daemon/runtime";
+import type { MediaFacts } from "../util/playability";
 
 /**
  * The URL lines of a playlist body — everything that is not a directive.
@@ -1702,6 +1704,206 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     const all = logs.join("\n");
     expect(all).toContain(`GET /stream/${id}/0.m3u -> 200`);
     expect(all).not.toContain(capability);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The .vtt subtitle representation, the .m3u input-slave line, and the .info
+// subtitle report.
+//
+// `readySession`/`request` are local adaptations of the shape the design brief
+// sketched, built on the helpers this file already has (`torrentSession`,
+// `registry`, `start`, `rawGet`): a real `StreamSessionRegistry` and a real
+// `http.Server`, with `fetchSubtitle` and `probeImpl` injected as `StreamDeps`
+// so no network call is ever made for a placeholder `http://up.test/...` URL.
+//
+// `fetchSubtitle`'s fake reproduces the real default's received-bytes
+// contract — returning null once the body would exceed `MAX_SUBTITLE_BYTES` —
+// rather than exercising the real `node:http` path, which is covered by the
+// WebTorrent-proxy tests' pattern already; there is no upstream server for
+// `up.test` to be a real endpoint here.
+async function readySession(
+  files: StreamFile[],
+  opts: { body?: string; fail?: boolean; probe?: MediaFacts } = {},
+): Promise<{ deps: string; sid: string; cap: string }> {
+  const streamDeps: NonNullable<Parameters<typeof startWebServer>[1]>["streamDeps"] = {
+    fetchSubtitle: async () => {
+      if (opts.fail) return null;
+      if (opts.body === undefined) return null;
+      const bytes = new TextEncoder().encode(opts.body);
+      if (bytes.length > MAX_SUBTITLE_BYTES) return null;
+      return bytes;
+    },
+    // Never null → skip probing an unreachable host: without this, a `.info`
+    // request with no `probe` override would fall through to the real
+    // `probeUrl`, which would try to actually reach `up.test`.
+    probeImpl: async () => opts.probe ?? null,
+  };
+  const { reg, id, capability } = await torrentSession(files, "cap-vtt", "sid-vtt");
+  // Tokened so a non-loopback Host (used by the .m3u host tests) is accepted.
+  const base = await start(reg, { streamDeps, token: "server-token" });
+  return { deps: base, sid: id, cap: capability };
+}
+
+function request(
+  deps: string,
+  path: string,
+  opts: { host?: string } = {},
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+  const port = Number(new URL(deps).port);
+  return rawGet(port, path, opts.host ? { Host: opts.host } : {});
+}
+
+describe("the .vtt representation", () => {
+  it("serves a matched subtitle as WebVTT", async () => {
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { body: "1\n00:00:01,000 --> 00:00:02,000\nHello\n" },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("text/vtt; charset=utf-8");
+    expect(res.body).toMatch(/^WEBVTT/);
+    expect(res.body).toContain("00:00:01.000 --> 00:00:02.000");
+  });
+
+  it("refuses an index that is not a subtitle file", async () => {
+    // THE GUARD THIS ROUTE NEEDS MOST. Without it, .vtt is a general-purpose
+    // "pull this whole file into memory and call it text" route aimed at a
+    // 12 GB video.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 9e9 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.vtt?k=${cap}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("requires the capability, like every other representation", async () => {
+    const { deps, sid } = await readySession([
+      { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt`);
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a subtitle larger than the cap", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 9e8 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(413);
+  });
+
+  it("stops reading a body that exceeds the cap even when file.bytes lied", async () => {
+    // file.bytes is what upstream CLAIMED. This is what it actually sent.
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { body: "x".repeat(MAX_SUBTITLE_BYTES + 1) },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(502);
+  });
+
+  it("answers 502 when the upstream subtitle fetch fails", async () => {
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { fail: true },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(502);
+  });
+});
+
+describe("the .m3u with a matched subtitle", () => {
+  it("adds an input-slave line pointing at the .vtt handle", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).toBe(
+      `#EXTM3U\n` +
+        `#EXTVLCOPT:input-slave=http://box.test:9161/stream/${sid}/1.vtt?k=${cap}\n` +
+        `http://box.test:9161/stream/${sid}/0?k=${cap}\n`,
+    );
+  });
+
+  it("is byte-identical to the old single-URL form when nothing matches", async () => {
+    // Fail-soft, and the reason this is asserted on the exact bytes: every
+    // player in the world already parses today's playlist, and a feature that
+    // has nothing to add must add nothing.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Harrowgate.S03.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
+  });
+
+  it("puts no torrent-supplied text in the playlist body", async () => {
+    // The constraint the original one-bare-URL form existed to guarantee. Both
+    // URLs are built from streamHandle and the capability, so a filename with a
+    // newline or a quote in it cannot reach a file another application parses.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: 'Kepler.S02E04\n#EXTVLCOPT:evil="x".eng.srt', url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).not.toContain("evil");
+    expect(res.body.split("\n").filter(Boolean)).toHaveLength(3);
+  });
+
+  it("prefers the English subtitle for the input-slave", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.spa.srt", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).toContain(`/stream/${sid}/2.vtt?k=${cap}`);
+  });
+});
+
+describe("the .info subtitle report", () => {
+  it("lists matched sibling files with language and renderability", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.spa.ass", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.info?k=${cap}`);
+    const body = JSON.parse(res.body);
+    expect(body.subtitles.files).toEqual([
+      { index: 1, filename: "Kepler.S02E04.eng.srt", language: "en", label: "English", renderable: true },
+      { index: 2, filename: "Kepler.S02E04.spa.ass", language: "es", label: "Spanish", renderable: false },
+    ]);
+  });
+
+  it("reports embedded tracks from the probe", async () => {
+    const { deps, sid, cap } = await readySession(
+      [{ filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 }],
+      {
+        probe: {
+          container: "mkv",
+          videoCodec: "hevc",
+          audioCodec: "eac3",
+          source: "probe",
+          subtitles: [{ language: "eng", label: "" }],
+        },
+      },
+    );
+    const res = await request(deps, `/stream/${sid}/0.info?k=${cap}`);
+    expect(JSON.parse(res.body).subtitles.embedded).toEqual([{ language: "eng", label: "" }]);
   });
 });
 
