@@ -252,16 +252,19 @@ describe("detectPlatform", () => {
 describe("vlcLinks", () => {
   const url = "http://box.local:9162/stream/sid-1/0?k=cap-1";
 
-  it("offers the x-callback scheme on iOS and macOS", () => {
-    for (const platform of ["ios", "macos"] as const) {
-      expect(vlcLinks(url, platform)).toEqual([
-        {
-          id: "vlc-callback",
-          label: "Open in VLC",
-          href: `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(url)}`,
-        },
-      ]);
-    }
+  it("offers the x-callback scheme on iOS", () => {
+    expect(vlcLinks(url, "ios")).toEqual([
+      {
+        id: "vlc-callback",
+        label: "Open in VLC",
+        href: `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(url)}`,
+      },
+    ]);
+  });
+
+  // The platform is still detected; only what we offer it changed.
+  it("still recognises a Mac", () => {
+    expect(detectPlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe("macos");
   });
 
   it("offers an intent on Android, carrying the original scheme", () => {
@@ -289,10 +292,18 @@ describe("vlcLinks", () => {
     expect(href.split("#Intent;")).toHaveLength(2);
   });
 
-  // Desktop Windows and Linux register no VLC URL scheme; a button there is a
-  // button that does nothing.
-  it("offers nothing on other platforms", () => {
-    expect(vlcLinks(url, "other")).toEqual([]);
+  /**
+   * NO DESKTOP REGISTERS A VLC URL SCHEME, macOS included — which is where this
+   * was wrong: macOS sat in the iOS branch above and got `vlc-x-callback://`, a
+   * scheme belonging to the iOS app alone, so the click was a silent no-op.
+   * Verified against a real install: VLC.app's Info.plist registers http, https,
+   * ftp, mms, mmsh, rtsp, udp, rtp, rtmp*, sftp and smb, and nothing else. A
+   * button here is a button that does nothing, so there is no button.
+   */
+  it("offers nothing on desktop, macOS included", () => {
+    for (const platform of ["macos", "other"] as const) {
+      expect(vlcLinks(url, platform)).toEqual([]);
+    }
   });
 
   it("offers no intent for a URL that is not http(s)", () => {
@@ -342,9 +353,15 @@ describe("interruptedNotice", () => {
     expect(notice).not.toContain("container");
   });
 
-  it("points at the hand-off that does work", () => {
+  /**
+   * Specifically the `.m3u`, and NOT VLC. Desktop has no VLC button any more —
+   * no desktop registers the scheme — so naming one sends the user looking for a
+   * control that is not on screen. The `.m3u` button is there on every platform.
+   */
+  it("points at the hand-off that does work, and names no absent button", () => {
     for (const reason of ["error", "stall"] as const) {
-      expect(interruptedNotice(reason)).toMatch(/\.m3u|VLC/);
+      expect(interruptedNotice(reason)).toContain(".m3u");
+      expect(interruptedNotice(reason)).not.toContain("VLC");
     }
   });
 

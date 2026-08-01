@@ -27,7 +27,8 @@ import type { ProbeCache } from "../core/probeCache";
 import type { HlsVerdictCache } from "../core/hlsVerdictCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
 import { streamCandidates } from "../util/videoFiles";
-import { sortStreamFiles } from "../util/streamFileSort";
+import { playlistTitle } from "../util/playlistTitle";
+import { restPlaylist } from "../util/restPlaylist";
 import type { StreamFilesResponse, StreamInfoResponse } from "./wire";
 import {
   HTTP_AND_HTTPS,
@@ -169,28 +170,6 @@ export function splitRepresentation(urlPath: string): { path: string; rep: Strea
     return { path: urlPath.slice(0, -FILES_SUFFIX.length), rep: "files" };
   }
   return { path: urlPath, rep: "media" };
-}
-
-/**
- * The session indexes for `?rest=1`: this file, then every later one.
- *
- * "Later" is in DISPLAY order, not session order — the two differ whenever a
- * torrent names its files in some order of its own, which is most of them, and
- * a playlist in session order would run E08 then E02. `sortStreamFiles` is the
- * ordering the picker and the player page's episode list already use, so all
- * three agree about what "the rest of the season" means.
- *
- * Returns just `[index]` when the file is not among the candidates — a `.nfo`
- * addressed directly, say. That is the pre-`rest` behaviour, which is the right
- * answer for a file that is not part of any run.
- */
-function restOfSession(session: StreamSession, index: number): number[] {
-  const ordered = sortStreamFiles(
-    streamCandidates(session.files.map((file, at) => ({ ...file, at }))),
-    "name",
-  );
-  const from = ordered.findIndex((file) => file.at === index);
-  return from >= 0 ? ordered.slice(from).map((file) => file.at) : [index];
 }
 
 const PLAY_BASE = "/play";
@@ -499,26 +478,40 @@ export async function handleStreamRequest(
     const handleUrl = (index: number): string =>
       `${origin}${streamHandle(parsed.sid, index)}?k=${encodeURIComponent(k!)}`;
 
-    // `?rest=1` — this file and every later one, so a season plays unattended
-    // rather than one download per episode. A PARAMETER on the existing
-    // representation rather than a route of its own: the guards above, the
-    // origin check, and the body rule below all apply unchanged, and a second
-    // playlist route would be a second place to forget one of them.
+    // `?rest=1` — this file and the rest of its season, so a season plays
+    // unattended rather than one download per episode. A PARAMETER on the
+    // existing representation rather than a route of its own: the guards above,
+    // the origin check, and the body rules below all apply unchanged, and a
+    // second playlist route would be a second place to forget one of them.
     //
-    // Order is `sortStreamFiles`, the module the picker and the player page's
-    // episode list already share — a playlist that ran E08, E02, E03 would be
-    // the same bug that helper was extracted to fix — and `streamCandidates`
-    // drops the `.nfo`s, because handing a text file to a media player is how a
-    // playlist stalls halfway through a season.
+    // WHICH files that is, is `restPlaylist` in `src/util/`, not a rule written
+    // here: the player page needs the same answer to word its button — "rest of
+    // season" is a promise, and it was being made for playlists that were
+    // nothing of the kind — and two copies of one rule is the copy-then-drift
+    // bug this codebase has recorded four times.
     const wantsRest = (query.get("rest") ?? "") === "1";
-    const indexes = wantsRest ? restOfSession(session, parsed.index) : [parsed.index];
+    const indexes = wantsRest
+      ? restPlaylist(
+          session.files.map((f, index) => ({ ...f, index })),
+          parsed.index,
+        ).indexes
+      : [parsed.index];
 
-    // Bare URLs, no #EXTM3U and no #EXTINF title. Every player accepts the
-    // simplest form, and the alternative would mean interpolating a torrent's
-    // filename — attacker-controlled text — into a file another application
-    // parses. Nothing in this body is derived from the media at all, and adding
-    // a second entry does not change that.
-    const body = `${indexes.map(handleUrl).join("\n")}\n`;
+    // `#EXTINF` titles, and note what makes them safe rather than what makes
+    // them nice: a filename comes from whoever made the torrent, and this file
+    // is parsed line by line by another application. `playlistTitle` strips CR,
+    // LF and every control character, so a name cannot ADD an entry pointing
+    // wherever its author liked, and it can never return "" — an `#EXTINF:-1,`
+    // with nothing after the comma is worse than no title. Without them a
+    // thirteen-episode playlist is thirteen indistinguishable URLs.
+    //
+    // The URLs are still built from `streamHandle` and the request's own origin,
+    // so nothing a client put in the path is reflected into the body, and
+    // `file.url` — a debrid credential — appears nowhere in it.
+    const entries = indexes.map(
+      (index) => `#EXTINF:-1,${playlistTitle(session.files[index]?.filename ?? "")}\n${handleUrl(index)}`,
+    );
+    const body = `#EXTM3U\n${entries.join("\n")}\n`;
     res.writeHead(200, {
       // The content type is what makes the browser hand the file to the OS
       // instead of rendering it. text/plain and octet-stream both end with the

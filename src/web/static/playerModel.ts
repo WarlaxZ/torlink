@@ -251,13 +251,21 @@ function androidIntent(absolute: string): string | null {
 /**
  * The "open in VLC" links that can actually work on this platform.
  *
- * Empty on desktop Windows and Linux, and that is the point: neither has a
- * registered `vlc://`-style scheme, so a button there would be a button that
- * does nothing. Those platforms get the `.m3u` download, which does work, and
- * are not offered a dead control next to it.
+ * Empty on EVERY desktop — Windows, Linux and macOS — and that is the point:
+ * none of them registers a `vlc://`-style scheme, so a button there would be a
+ * button that does nothing. Those platforms get the `.m3u` download, which does
+ * work, and are not offered a dead control next to it.
+ *
+ * macOS used to sit in the iOS branch below, and that was exactly the bug this
+ * comment describes. `vlc-x-callback://` belongs to VLC's *iOS* app; the desktop
+ * app registers no scheme of its own — checked against a real install, VLC.app's
+ * Info.plist claims http, https, ftp, mms, mmsh, rtsp, udp, rtp, rtmp*, sftp and
+ * smb and nothing else — so the click went nowhere, with nothing on screen to
+ * explain why. Desktop is also the platform least safe to assume about: VLC may
+ * simply not be what the user plays video in, and the `.m3u` opens whatever is.
  */
 export function vlcLinks(absolute: string, platform: Platform): ExternalLink[] {
-  if (platform === "ios" || platform === "macos") {
+  if (platform === "ios") {
     return [
       {
         id: "vlc-callback",
@@ -355,14 +363,19 @@ export const PLAYBACK_STALL_MS = 30_000;
  * video and has room; this is a one-line notice sitting under a player the user
  * is still looking at, and they know what they were watching.
  *
- * Both branches point at the `.m3u` and VLC, because those buttons are still on
- * screen and — for the provider-transcode failure this exists for — they are the
- * route that genuinely works: the playlist streams the original file rather than
- * anything the provider had to transcode first.
+ * Both branches point at the `.m3u`, because that button is still on screen and —
+ * for the provider-transcode failure this exists for — it is the route that
+ * genuinely works: the playlist streams the original file rather than anything
+ * the provider had to transcode first.
+ *
+ * It names the `.m3u` and NOT VLC, which it used to do. `vlcLinks` offers nothing
+ * on any desktop, so on the platform most likely to be reading this there is no
+ * VLC button to look for — and the `.m3u` is what opens whichever player they do
+ * use. A notice that names an absent control sends the user hunting for it.
  */
 export function interruptedNotice(reason: FallbackReason): string {
   if (reason === "stall") {
-    return "Playback stopped — no more of the stream arrived. Download the .m3u or open it in VLC to carry on watching.";
+    return "Playback stopped — no more of the stream arrived. Download the .m3u and carry on watching there.";
   }
-  return "Playback stopped partway through — the stream failed upstream. Download the .m3u or open it in VLC to carry on watching.";
+  return "Playback stopped partway through — the stream failed upstream. Download the .m3u and carry on watching there.";
 }

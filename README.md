@@ -308,8 +308,10 @@ give up after twelve seconds:
   while it's on, these releases fall through to the next line too.
 - **Anything left over** — a release streamed from the swarm, or one the provider won't transcode — gets a
   card naming the part your browser can't handle, plus a **Download .m3u** button: your OS hands that tiny
-  playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get
-  a direct VLC link.
+  playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android there's also
+  a direct **Open in VLC** button, because those apps register a URL scheme a web page can link to.
+  Desktop VLC registers none — not on macOS, Windows or Linux — so there's no button to offer there, and
+  the `.m3u` is the route that works. It also doesn't assume VLC is what you watch things in.
 
 #### The player page knows what else is in the torrent
 
@@ -320,7 +322,11 @@ reopen the picker. This is the browser catching up to the terminal, whose picker
 after launching a player so the next episode is one keypress away.
 
 There is also **Download rest of season .m3u**, which is one playlist containing this episode and every
-later one in order — hand it to VLC once and it runs the rest of the season unattended.
+later one *of the same season* — hand it to VLC once and it runs the rest of the season unattended.
+Bonus features and extras are left out, so a gag reel can't interrupt episode four, and every entry is
+titled, so a thirteen-episode playlist reads as episodes rather than as thirteen identical URLs. Open a
+bonus feature instead and the button says **Download the rest as .m3u**, because there's no season there
+to be the rest of.
 
 Above the filename is a breadcrumb back to the show, and the header's **back to results** goes back to the
 search you ran rather than to an empty box: the dashboard now keeps its query and category in its own URL,
