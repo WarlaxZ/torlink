@@ -51,7 +51,7 @@ Three reasons people stick with it:
 - **[Watching something](#watching-something)** — streaming, one-click play, continue watching
 - **[Debrid](#debrid-real-debrid-or-torbox)** — Real-Debrid or TorBox, for full speed and a private IP
 - **[Downloads and seeding](#downloads-and-seeding)** — the queue, file picking, limits, giving back
-- **[Recommendations](#recommendations-optional)** — a For You tab, from your own reccd server
+- **[Recommendations](#recommendations)** — a For You tab, on by default, or your own reccd
 - **[Privacy and staying safe](#privacy-and-staying-safe)** — what's exposed, and the VPN kill switch
 - **[Reference](#reference)** — remote access, tokens, DNS, headless modes, containers, the three names
 - **[Contributing](#contributing)** — build from source, house style
@@ -232,11 +232,13 @@ anything other than loopback requires a token.
 - **No settings page, but there is a settings control.** Tokens, sources, limits and folders are still
   TUI-only — the browser has no page for them, and that includes reccd's own URL and bearer token; the
   browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the
-  **For You** tab), never its address or token. Playback preference is the exception: the header's
-  disclosure reads and writes it directly, over the same Origin-checked API as everything else here.
-  Counting that, the browser writes four things: your saved searches, your library, your
-  continue-watching list (the same searches, favourites and stream history the TUI's `w`, `b`, and
-  Continue-watching pane create), and that playback preference.
+  **For You** tab), never its address or token. It also includes claiming your
+  [reccd](#recommendations) account: that's credential entry too, so it stays where tokens live, and the
+  browser names the account and points you to the terminal instead. Playback preference is the
+  exception: the header's disclosure reads and writes it directly, over the same Origin-checked API as
+  everything else here. Counting that, the browser writes four things: your saved searches, your
+  library, your continue-watching list (the same searches, favourites and stream history the TUI's `w`,
+  `b`, and Continue-watching pane create), and that playback preference.
 
 ### In your terminal
 
@@ -513,12 +515,47 @@ pause or resume any of them.
   <img src="preview/seeding.svg" alt="torlink's Seeding tab: items being shared, with upload speed, peers, and pause controls" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
-## Recommendations (optional)
+## Recommendations
 
-If you run [reccd](https://github.com/WarlaxZ/reccd) — a small, self-hosted recommendations engine —
-torlink can suggest what to watch next in a **For You** tab. Connect it from the **Accounts** tab: select
-reccd, enter its URL and the bearer token from reccd's `user:add`. (Prefer to keep it off disk? Set
-`TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your environment instead.)
+On first launch, torlink creates an anonymous account on `https://reccd.stream` — [reccd](https://github.com/WarlaxZ/reccd),
+its recommendations engine — and turns on a **For You** tab. That's one request, sends nothing about
+you beyond the request itself, and fails silently: if reccd is unreachable, recommendations stay off and
+nothing else about torlink changes. It only happens when nothing is already configured and you haven't
+opted out — no token, no `reccUrl` pointing anywhere but the default host, and `reccAutoSignup` not set
+to `false`. A `reccUrl` you've pointed at your own reccd is never signed up against.
+
+The account it creates has a generated name like `quiet-heron-4f2a` and no password, so as it stands it
+lives in that one `config.json` and nowhere else. **Claiming** it — press **`c`** on the reccd row in the
+**Accounts** tab — sets a username and password of your choosing, keeping the account's id, its token,
+and everything it's already learned. Claiming is terminal-only, because it's credential entry, the same
+as tokens; the browser instead shows a line naming the account and pointing here. Claim it before you
+copy `config.json` to a second machine or put a config directory on a sync service — an unclaimed account
+only exists from the machine that holds that file, and doing either beforehand can leave you with two
+accounts and a split history.
+
+**If you claim your account and then sign in with it at reccd.stream — the exact reason claiming
+exists — recommendations will stop.** reccd's sign-in reissues the account's bearer token and retires
+the old one, so the token torlink is holding is no longer valid; the Accounts row starts reading `Token
+rejected` and the For You tab goes quiet. It's recoverable: sign in at reccd.stream, then press `↵` on
+the reccd row in Accounts and paste the token it gives you back. If this happens, torlink isn't broken —
+it's holding a token reccd just replaced.
+
+**To stop torlink signing you up**, point `TORLINK_RECC_URL` at your own instance instead of the default
+host, or add `"reccAutoSignup": false` to `config.json` (create the file yourself if you haven't run
+torlink yet) — either one heads off the auto-signup described above. (Neither undoes an account that
+already exists: `reccAutoSignup: false` with a token still in `config.json` leaves that account working
+exactly as before, and pointing `reccUrl` elsewhere redirects recommendations rather than switching them
+off.) To disconnect an account entirely,
+clear it from the Accounts pane instead — **`x`**, or blank both fields in the prompt. Either one sets
+`reccAutoSignup: false` for you as part of clearing everything else, so a cleared connection stays
+cleared rather than being re-provisioned on the next launch. Both clear paths refuse if the connection
+came from `TORLINK_RECC_URL`/`TORLINK_RECC_TOKEN`, since config can't override an environment variable.
+
+**Prefer to run your own reccd** — a small, self-hosted recommendations engine — instead of the hosted
+one? Connect it from the **Accounts** tab: select reccd, enter its URL and the bearer token from reccd's
+`user:add`. (Prefer to keep it off disk? Set `TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your
+environment instead.) Pointing `reccUrl` at anything other than `https://reccd.stream` is what
+self-hosting looks like to torlink, and it's the one case the auto-signup above leaves alone.
 
 This version of torlink expects reccd's list endpoints to answer with its newer `results`
 envelope, so upgrade reccd and torlink together. Against an older reccd, the For You tab reports
@@ -561,9 +598,9 @@ Seed reccd with what you've already watched on Netflix, so its recommendations k
      give it the CSV path — you can drag the file onto the terminal to paste the path.
    - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
 
-torlink doesn't care what you watch — titles go only to your own reccd server to seed recommendations,
-and nothing else is done with them. Large exports upload in batches automatically, and re-importing the
-same file won't double-count anything.
+torlink doesn't care what you watch — titles go only to reccd (the hosted one by default, or your own
+if you've connected that instead) to seed recommendations, and nothing else is done with them. Large
+exports upload in batches automatically, and re-importing the same file won't double-count anything.
 
 #### From Trakt
 
@@ -582,7 +619,12 @@ This needs the reccd server to have a Trakt app configured (`RECCD_TRAKT_CLIENT_
 ## Privacy and staying safe
 
 Your files stay on your disk, and nothing routes through a central server; torlink only talks to the
-torrent network directly.
+torrent network directly. Two things torlink contacts on its own, unconfigured: on launch it checks
+GitHub for a newer release, the same check behind the banner mentioned in [Get started](#get-started) —
+set `TORLINK_NO_UPDATE_CHECK` to skip it. And, on first launch only, [Recommendations](#recommendations)
+makes a single request to `reccd.stream` to create an account — `reccAutoSignup: false` stops that
+signup from happening (it won't touch an account that already exists; see
+[Recommendations](#recommendations) to disconnect one).
 
 **What's exposed, and when.** A plain `d` download or a torrent stream is peer-to-peer, so your IP is
 visible to peers — torlink warns you once before the first one, and warns again on `d` if a debrid

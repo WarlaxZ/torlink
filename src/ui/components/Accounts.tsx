@@ -36,6 +36,7 @@ interface AccountsProps {
   onManageRecc: () => void;
   onSignOutRecc: () => void;
   onImportRecc: () => void;
+  onClaimRecc: () => void;
   omdbConfigured: boolean;
   omdbEnvOverride?: boolean;
   onManageOmdb: () => void;
@@ -60,6 +61,12 @@ interface Row {
   onSignOut: () => void;
   importable?: boolean;
   onImport?: () => void;
+  // Offered only when reccd reports an account with no password yet. A claimed
+  // account, or a self-hosted reccd that reports no account at all, must not
+  // advertise the key — a hint for something the keypress will not do is worse
+  // than no hint.
+  claimable?: boolean;
+  onClaim?: () => void;
   activatable?: boolean;
   isActive?: boolean;
   onActivate?: () => void;
@@ -79,6 +86,7 @@ export function Accounts({
   onManageRecc,
   onSignOutRecc,
   onImportRecc,
+  onClaimRecc,
   omdbConfigured,
   omdbEnvOverride = false,
   onManageOmdb,
@@ -142,6 +150,8 @@ export function Accounts({
       onSignOut: onSignOutRecc,
       importable: true,
       onImport: onImportRecc,
+      claimable: reccStatus?.state === "connected" && reccStatus.account?.claimed === false,
+      onClaim: onClaimRecc,
     },
     {
       tag: "OMDb",
@@ -169,6 +179,7 @@ export function Accounts({
       else if (key.return) rows[clamped]!.onManage();
       else if (input === "x" && !streamActive && rows[clamped]!.signedIn) rows[clamped]!.onSignOut();
       else if (input === "i" && rows[clamped]!.importable && rows[clamped]!.signedIn) rows[clamped]!.onImport?.();
+      else if (input === "c" && rows[clamped]!.claimable) rows[clamped]!.onClaim?.();
       else if (input === "a" && rows[clamped]!.activatable) rows[clamped]!.onActivate?.();
     },
     { isActive: focused },
@@ -237,6 +248,13 @@ export function Accounts({
                         <Text dimColor>{`  ${ICON.dot}  `}</Text>
                         <Text color={COLOR.alt}>i</Text>
                         <Text dimColor> import</Text>
+                      </Text>
+                    ) : null}
+                    {r.claimable ? (
+                      <Text>
+                        <Text dimColor>{`  ${ICON.dot}  `}</Text>
+                        <Text color={COLOR.alt}>c</Text>
+                        <Text dimColor> claim</Text>
                       </Text>
                     ) : null}
                     {r.activatable ? (

@@ -337,6 +337,23 @@ export interface PreferencesResponse {
   preferences: PublicQualityPrefs;
 }
 
+/**
+ * The reccd account this install is using, or null when there isn't one.
+ *
+ * The name is not a credential — it is what the user logs in *with* once
+ * claimed, and reccd shows it publicly — so unlike `reccToken` it is safe to
+ * put on the wire. The token never is.
+ *
+ * Nested rather than a flat `reccClaimed: boolean` on purpose: a flat boolean
+ * is false both for "unclaimed account" and "no account at all", so every
+ * reader would have to cross-reference something else to tell them apart, and
+ * one reader eventually won't.
+ */
+export interface PublicReccAccount {
+  name: string;
+  claimed: boolean;
+}
+
 /** The body of `GET /api/sources`. */
 export interface SourcesResponse {
   groups: PublicSourceGroup[];
@@ -402,6 +419,19 @@ export interface SourcesResponse {
    * that is true for the whole session.
    */
   reccConfigured: boolean;
+  /**
+   * The reccd account, or null when none is known. Null covers both "no reccd
+   * configured" and "a self-hosted reccd configured by hand", which never went
+   * through auto-provisioning and so has no name recorded — claiming does not
+   * apply to it.
+   *
+   * Distinct from `reccConfigured` above, and both are needed: that one answers
+   * "can this server reach reccd at all", which gates autocomplete; this one
+   * carries who the account is and whether it has a password yet, which is what
+   * lets the browser name it and point at the terminal to claim it. A reachable
+   * reccd with no provisioned account reports `true` and `null` respectively.
+   */
+  reccAccount: PublicReccAccount | null;
   /**
    * The stored viewing preference — quality-picker state the TUI has always
    * had. It rides on this response rather than getting its own `GET` route for

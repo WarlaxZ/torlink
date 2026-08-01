@@ -27,6 +27,16 @@ vi.mock("./runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./runtime")>()),
   startRuntime,
 }));
+// runServe auto-provisions an anonymous reccd account on every call. The
+// ambient TORLINK_RECC_URL guard in test-setup.ts already stops this from
+// reaching the real host, but this file calls the real runServe directly, so
+// it gets its own mock too — same belt-and-braces layering as
+// App.web.test.tsx, for the same reason: a single line of defence is exactly
+// what let the earlier incident happen.
+vi.mock("../recc/provision", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../recc/provision")>()),
+  ensureReccAccount: vi.fn(async () => {}),
+}));
 
 const { runServe, shouldOpenBrowser } = await import("./serve");
 const { disarmBootMarker } = await import("../download/bootguard");

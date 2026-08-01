@@ -240,6 +240,11 @@
         </div>
 
         <p id="recc-status" class="empty">Picks based on what you've watched.</p>
+        <!-- The reccd account has no password yet. Shown only while the feed
+             itself is working — reccStatus above suppresses its own line in
+             that case, so this is a separate line rather than folded into it.
+             Filled in by app.ts from PublicReccAccount on GET /api/sources. -->
+        <p id="recc-claim-hint" class="empty" hidden></p>
         <!-- Shown once, not per card, when the poster lookups come back saying
              there is no OMDb key: twenty copies of one fix-it sentence are worse
              than the twenty blank frames they explain. Filled in by app.ts from

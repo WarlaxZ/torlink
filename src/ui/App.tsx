@@ -34,7 +34,8 @@ import { getDebridProvider, DEBRID_PROVIDER_IDS } from "../integrations/debrid";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
 import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
-import { postEvent } from "../recc/client";
+import { postEvent, claimReccAccount } from "../recc/client";
+import { ensureReccAccount } from "../recc/provision";
 import { uploadNetflixCsv } from "../recc/netflixImport";
 import { runTraktFlow, type TraktStatus } from "../recc/traktImport";
 import { classifyStreamRoute } from "../core/streamRoute";
@@ -113,6 +114,7 @@ import { QualityPrompt } from "./components/QualityPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
 import { RutrackerPrompt, type LoginStatus } from "./components/RutrackerPrompt";
 import { ReccdPrompt } from "./components/ReccdPrompt";
+import { ReccClaimPrompt } from "./components/ReccClaimPrompt";
 import { OmdbPrompt } from "./components/OmdbPrompt";
 import { NetflixImportPrompt, type NetflixImportView } from "./components/NetflixImportPrompt";
 import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
@@ -168,6 +170,34 @@ export type StartWebServerImpl = (
   runtime: Runtime,
   options: WebServerOptions,
 ) => Promise<WebServerHandle>;
+
+/**
+ * Everything that must be unset to genuinely disconnect reccd. Shared by the
+ * two paths that can clear it — the `x` key on the Accounts row, and blanking
+ * both fields in the reccd prompt — because they make the same promise to the
+ * user and must therefore have the same effect. reccAutoSignup: false is the
+ * load-bearing part: without it the next launch signs them straight back up,
+ * and the user who cleared it watches it come back.
+ */
+const RECC_CLEARED: Partial<Config> = {
+  reccUrl: undefined,
+  reccToken: undefined,
+  reccAccountName: undefined,
+  reccAccountClaimed: undefined,
+  reccAutoSignup: false,
+};
+
+/**
+ * True when reccd's connection comes from the environment, which config cannot
+ * override — so both clear paths must refuse rather than write a change that
+ * will not take effect and a notice that would be a lie.
+ */
+function reccSetByEnv(): boolean {
+  return Boolean(process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim());
+}
+
+const RECC_CLEARED_NOTICE = "reccd connection cleared. Recommendations stay off until you set it up again.";
+const RECC_ENV_VAR_NOTICE = "reccd is set via TORLINK_RECC_* env vars — unset them to clear it.";
 
 export function App({
   initialMagnet,
@@ -243,6 +273,16 @@ export function App({
   const [editingFolder, setEditingFolder] = useState(false);
   const [editingToken, setEditingToken] = useState<{ provider: DebridProviderId } | null>(null);
   const [editingRecc, setEditingRecc] = useState(false);
+  // The claim overlay is local state, exactly as editingRecc is — no Store field.
+  const [claimingRecc, setClaimingRecc] = useState(false);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState<string | undefined>(undefined);
+  // Bumped whenever the claim overlay opens or closes. Same generation guard as
+  // netflixImportGen / traktImportGen below: a claim request can't be aborted, so
+  // a late one must not flash stale state onto a reopened overlay — and, worse
+  // than a flash, must not clear `claimBusy` while a second attempt is still in
+  // flight, which would invite a third.
+  const claimGen = useRef(0);
   const [editingOmdb, setEditingOmdb] = useState(false);
   const [importingNetflix, setImportingNetflix] = useState(false);
   const [netflixImport, setNetflixImport] = useState<NetflixImportView>({ phase: "form" });
@@ -985,18 +1025,55 @@ export function App({
     [config, setConfig],
   );
 
-  const refreshReccStatus = useCallback((cfg: Config | null) => {
-    const rc = cfg ? resolveReccConfig(cfg) : {};
-    if (!rc.reccUrl) {
-      setReccStatus(null);
-      return;
-    }
-    void checkReccConnection(rc).then(setReccStatus);
-  }, []);
+  const refreshReccStatus = useCallback(
+    (cfg: Config | null) => {
+      const rc = cfg ? resolveReccConfig(cfg) : {};
+      if (!rc.reccUrl) {
+        setReccStatus(null);
+        return;
+      }
+      void checkReccConnection(rc).then((status) => {
+        setReccStatus(status);
+        const account = status.account;
+        if (!account) return;
+        // Differs-only, deliberately: this runs on every status refresh, and an
+        // unconditional write here would turn a network read into a config write
+        // on a timer — the same two-process race provision.ts takes a lock to
+        // avoid, reintroduced.
+        if (account.name !== cfg?.reccAccountName || account.claimed !== cfg?.reccAccountClaimed) {
+          persistConfig({ reccAccountName: account.name, reccAccountClaimed: account.claimed });
+        }
+      });
+    },
+    [persistConfig],
+  );
 
   useEffect(() => {
     refreshReccStatus(config);
   }, [config?.reccUrl, config?.reccToken, refreshReccStatus]);
+
+  // Auto-provision an anonymous reccd account on first run. Fire-and-forget and
+  // never awaited: reccd is a value-add, and nothing here may delay or break the
+  // TUI.
+  //
+  // onProvisioned is NOT optional here. persistConfig writes the whole config
+  // object from React state (see its definition above), so an account written to
+  // config.json behind that state's back is silently reverted by the next
+  // unrelated setting change. Applying the patch to state without re-saving
+  // keeps the two in agreement.
+  const provisionStarted = useRef(false);
+  useEffect(() => {
+    if (!config || provisionStarted.current) return;
+    provisionStarted.current = true;
+    void ensureReccAccount({
+      onProvisioned: (patch) => {
+        setConfigState((prev) => (prev ? { ...prev, ...patch } : prev));
+        setNotice(
+          `${ICON.done} Recommendations are on — reccd account ${patch.reccAccountName} created.`,
+        );
+      },
+    }).catch(() => {});
+  }, [config]);
 
   const closeReccPrompt = useCallback(() => setEditingRecc(false), []);
 
@@ -1012,20 +1089,40 @@ export function App({
       closeReccPrompt();
       const url = rawUrl.trim().replace(/\/+$/, "");
       const token = rawToken.trim();
-      persistConfig({ reccUrl: url || undefined, reccToken: token || undefined });
-      setNotice(url ? `${ICON.done} reccd set to ${url}` : "reccd connection cleared.");
+      if (url) {
+        // Clear the remembered account only when the host is genuinely
+        // changing: the account name belongs to whoever is at the old URL, and
+        // /api/sources would otherwise keep publishing it. Deliberately NOT
+        // unconditional — re-pasting a token for the SAME host is the
+        // documented recovery after reccd's sign-in reissues one, and the
+        // stored name is what names the account while offline.
+        const switchingHost = url !== config?.reccUrl;
+        persistConfig({
+          reccUrl: url,
+          reccToken: token || undefined,
+          ...(switchingHost ? { reccAccountName: undefined, reccAccountClaimed: undefined } : {}),
+        });
+        setNotice(`${ICON.done} reccd set to ${url}`);
+      } else {
+        if (reccSetByEnv()) {
+          setNotice(RECC_ENV_VAR_NOTICE);
+          return;
+        }
+        persistConfig(RECC_CLEARED);
+        setNotice(RECC_CLEARED_NOTICE);
+      }
     },
-    [closeReccPrompt, persistConfig],
+    [closeReccPrompt, persistConfig, config?.reccUrl],
   );
 
   const clearReccConfig = useCallback(() => {
     closeReccPrompt();
-    if (process.env["TORLINK_RECC_URL"]?.trim() || process.env["TORLINK_RECC_TOKEN"]?.trim()) {
-      setNotice("reccd is set via TORLINK_RECC_* env vars — unset them to clear it.");
+    if (reccSetByEnv()) {
+      setNotice(RECC_ENV_VAR_NOTICE);
       return;
     }
-    persistConfig({ reccUrl: undefined, reccToken: undefined });
-    setNotice("reccd connection cleared.");
+    persistConfig(RECC_CLEARED);
+    setNotice(RECC_CLEARED_NOTICE);
   }, [closeReccPrompt, persistConfig]);
 
   const closeOmdbPrompt = useCallback(() => setEditingOmdb(false), []);
@@ -1109,6 +1206,83 @@ export function App({
   }, []);
 
   const closeImportChooser = useCallback(() => setImportChooser(false), []);
+
+  const openClaimPrompt = useCallback(() => {
+    claimGen.current++; // supersede any in-flight claim so it can't touch this overlay
+    setView("browser");
+    setShowHelp(false);
+    // Clearing the error here is what stops a failure that landed after an esc
+    // from greeting the user again the next time they open the prompt.
+    setClaimError(undefined);
+    setClaimingRecc(true);
+  }, []);
+
+  const closeClaimPrompt = useCallback(() => {
+    claimGen.current++; // as above: esc does not cancel the request, so supersede it
+    setClaimingRecc(false);
+    setClaimBusy(false);
+    setClaimError(undefined);
+  }, []);
+
+  const submitClaim = useCallback(
+    (name: string, password: string) => {
+      if (!config) return;
+      const gen = ++claimGen.current;
+      const isCurrent = (): boolean => claimGen.current === gen;
+      setClaimBusy(true);
+      setClaimError(undefined);
+      void (async () => {
+        try {
+          const result = await claimReccAccount(resolveReccConfig(config), name, password);
+          // The guard is asymmetric ON PURPOSE, and a uniform one would be a bug.
+          // Only this overlay's own state — busy and the error message — belongs
+          // to the attempt that is currently on screen, so only those are gated.
+          // What reccd already did is not ours to discard: a claim that succeeded
+          // must be persisted and reported even if the user pressed esc while it
+          // was in flight, so the branches below stay ungated.
+          if (isCurrent()) setClaimBusy(false);
+          if (result.ok) {
+            closeClaimPrompt();
+            const claimed = { reccAccountName: result.name, reccAccountClaimed: true };
+            persistConfig(claimed);
+            setNotice(`${ICON.done} reccd account claimed as ${result.name}.`);
+            // The POST-CLAIM config, not `config`. Passing the stale one means the
+            // differs-only check in refreshReccStatus compares /profile's
+            // `claimed: true` against a snapshot still saying false, and writes the
+            // whole config a second time for no reason — defeating the very rule
+            // that check exists to enforce.
+            refreshReccStatus({ ...config, ...claimed });
+            return;
+          }
+          if (result.reason === "alreadyClaimed") {
+            // Claimed from another machine. Local state was simply stale, so close
+            // and let the status check correct it rather than nagging. Ungated for
+            // the same reason as the success branch: it is reccd's word, not this
+            // overlay's state.
+            closeClaimPrompt();
+            persistConfig({ reccAccountClaimed: true });
+            setNotice(result.message);
+            refreshReccStatus({ ...config, reccAccountClaimed: true });
+            return;
+          }
+          // nameTaken / invalid / unauthorized / unreachable: keep the prompt open
+          // with the message so the user can try again without retyping.
+          if (isCurrent()) setClaimError(result.message);
+        } catch {
+          // Unreachable as things stand — claimReccAccount catches everything and
+          // always returns a result. Kept because the cost of being wrong is a
+          // prompt that can never be submitted again: ReccClaimPrompt's submit()
+          // returns early while busy, so a leaked `claimBusy` wedges it until the
+          // user escapes out.
+          if (isCurrent()) {
+            setClaimBusy(false);
+            setClaimError("couldn't reach reccd");
+          }
+        }
+      })();
+    },
+    [config, closeClaimPrompt, persistConfig, refreshReccStatus],
+  );
 
   const closeTraktImport = useCallback(() => {
     traktImportGen.current++; // supersede any in-flight run so it can't update state after close
@@ -2061,7 +2235,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -2123,6 +2297,7 @@ export function App({
     editingFolder,
     editingToken,
     editingRecc,
+    claimingRecc,
     editingOmdb,
     editingPlayer,
     editingSources,
@@ -2179,6 +2354,7 @@ export function App({
       if (editingFolder) return; // the folder prompt owns input (its own esc + enter)
       if (editingToken) return; // the token prompt owns input
       if (editingRecc) return; // the reccd prompt owns input
+      if (claimingRecc) return; // the claim prompt owns input
       if (editingOmdb) return; // the OMDb key prompt owns input
       if (importingNetflix) return; // the Netflix import prompt owns input
       if (importChooser) return; // the import-source chooser owns input
@@ -2447,6 +2623,19 @@ export function App({
               status={reccStatus}
               onSubmit={saveReccConfig}
               onCancel={closeReccPrompt}
+            />
+          </Box>
+        ) : null}
+
+        {claimingRecc ? (
+          <Box marginTop={1}>
+            <ReccClaimPrompt
+              width={Math.max(24, Math.min(cols - 4, 62))}
+              accountName={reccStatus?.account?.name ?? store.config.reccAccountName}
+              error={claimError}
+              busy={claimBusy}
+              onSubmit={submitClaim}
+              onCancel={closeClaimPrompt}
             />
           </Box>
         ) : null}
@@ -2832,7 +3021,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -2884,6 +3073,7 @@ export function App({
                 onManageRecc={openReccPrompt}
                 onSignOutRecc={clearReccConfig}
                 onImportRecc={openImportChooser}
+                onClaimRecc={openClaimPrompt}
                 omdbConfigured={store.omdbConfigured}
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}
@@ -2921,7 +3111,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }

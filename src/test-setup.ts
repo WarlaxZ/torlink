@@ -23,3 +23,18 @@ import path from "node:path";
 const workerTag = `${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}`;
 const root = process.env.TORLINK_TEST_STATE_ROOT ?? path.join(os.tmpdir(), "torlink-test-state");
 process.env.TORLINK_STATE_DIR = path.join(root, workerTag);
+
+// Never let a test reach the hosted reccd. `ensureReccAccount` is called from
+// two fire-and-forget sites now (App.tsx, serve.ts's runServe), and any test
+// that renders App or calls runServe without remembering to mock
+// "../recc/provision" would otherwise POST a real anonymous signup to
+// https://reccd.stream — that endpoint is rate-limited to 3/hour per IP, and
+// it already happened once (see App.web.test.tsx's mock, added after the
+// fact). `shouldProvision` (src/recc/provision.ts) treats any reccUrl other
+// than the default host as self-hosted and refuses to sign up against it, so
+// pointing TORLINK_RECC_URL at a bogus non-default host here makes every
+// unmocked call site a no-op network-wise, without weakening any assertion —
+// tests that specifically exercise reccd's default-host behaviour
+// (provision.test.ts, config.test.ts, routes.test.ts) already set or clear
+// this env var themselves per test, which overrides this default.
+process.env.TORLINK_RECC_URL = "http://torlink-test-guard.invalid";

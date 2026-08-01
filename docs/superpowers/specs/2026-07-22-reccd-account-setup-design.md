@@ -2,6 +2,13 @@
 
 **Date:** 2026-07-22
 **Status:** Approved (design)
+
+> **Superseded in part, 2026-07-31.** This document's framing of reccd as "a private, self-hosted
+> service" configured by hand is no longer the default — see
+> `2026-07-31-reccd-auto-account-design.md`, under which torlink provisions an account on
+> `https://reccd.stream` on first run. Everything here still describes the self-hosted path, which
+> is still supported and still the only path for your own deployment.
+
 **Depends on:** the reccd integration and "For You" UI already on branch `docs/recommendation-engine-spec`
 (config fields `reccUrl`/`reccToken`, `resolveReccConfig`, the `ForYou` view).
 

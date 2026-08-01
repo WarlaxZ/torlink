@@ -40,6 +40,21 @@ export interface Config {
   reccUrl?: string;
   // Bearer token for authenticating with reccd
   reccToken?: string;
+  // The reccd account's name, for display in the Accounts pane. Written once
+  // when an account is auto-provisioned, and afterwards only by the TUI, and
+  // only when GET /profile reports something different -- see
+  // src/recc/provision.ts for why this must not become a write-per-poll.
+  reccAccountName?: string;
+  // Whether that account has a username and password of the user's choosing.
+  // Persisted rather than fetched because `/api/sources` is the one payload the
+  // browser fetches before it can render anything, and it must not grow a
+  // network round trip to learn a fact that changes once per account lifetime.
+  reccAccountClaimed?: boolean;
+  // Auto-provision an anonymous reccd account on first run. Absent or true
+  // means yes -- absent has to mean yes, because the whole point is a fresh
+  // install with no config.json at all. Set false to opt out; every path that
+  // clears the reccd connection sets it, so "clear" stays cleared.
+  reccAutoSignup?: boolean;
   // OMDb API key, used to fetch short plot summaries for For You picks (reccd
   // deliberately carries no plot text). Stored as-is; a TORLINK_OMDB_KEY env
   // var overrides it at read time.

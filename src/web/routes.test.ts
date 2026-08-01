@@ -1283,6 +1283,65 @@ describe("sourcesResponse — omdbConfigured", () => {
   });
 });
 
+describe("sourcesResponse — reccAccount", () => {
+  beforeEach(() => {
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  const ask = (config: Partial<Config>) =>
+    handleWebApi(
+      deps({ loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...config }) }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+
+  it("is null when no reccd is configured", async () => {
+    const res = await ask({});
+    expect((res.json as SourcesResponse).reccAccount).toBeNull();
+  });
+
+  it("reports an unclaimed account", async () => {
+    const res = await ask({
+      reccUrl: "https://reccd.stream",
+      reccToken: "tok",
+      reccAccountName: "quiet-heron-4f2a",
+      reccAccountClaimed: false,
+    });
+    expect((res.json as SourcesResponse).reccAccount).toEqual({ name: "quiet-heron-4f2a", claimed: false });
+  });
+
+  it("reports a claimed account", async () => {
+    const res = await ask({
+      reccUrl: "https://reccd.stream",
+      reccToken: "tok",
+      reccAccountName: "chosen",
+      reccAccountClaimed: true,
+    });
+    expect((res.json as SourcesResponse).reccAccount).toEqual({ name: "chosen", claimed: true });
+  });
+
+  // A hand-configured self-hosted reccd has a token but no name — it never went
+  // through provisioning. Claiming does not apply, so say nothing rather than
+  // inventing a name or claiming it is unclaimed.
+  it("is null when reccd is configured but no account name is known", async () => {
+    const res = await ask({ reccUrl: "http://192.168.0.98:4100", reccToken: "tok" });
+    expect((res.json as SourcesResponse).reccAccount).toBeNull();
+  });
+
+  it("never puts the reccd token on the wire", async () => {
+    const res = await ask({
+      reccUrl: "https://reccd.stream",
+      reccToken: "super-secret-recc-token",
+      reccAccountName: "quiet-heron-4f2a",
+    });
+    expect(JSON.stringify(res.json)).not.toContain("super-secret-recc-token");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Quality preference (Task 12)
 // ---------------------------------------------------------------------------

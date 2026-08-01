@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { StoreContext, type Store } from "../store";
 import { Accounts, type DebridAccountProps } from "./Accounts";
@@ -79,6 +79,7 @@ const baseProps = {
   onManageRecc: noop,
   onSignOutRecc: noop,
   onImportRecc: noop,
+  onClaimRecc: noop,
   omdbConfigured: false,
   omdbEnvOverride: false,
   onManageOmdb: noop,
@@ -164,7 +165,7 @@ describe("Accounts", () => {
     // Not every row fits, so the last one starts off screen.
     expect(lastFrame() ?? "").not.toContain("omdbapi.com");
     // Up from the first row wraps to the last, which must scroll into view.
-    stdin.write("[A");
+    stdin.write("\x1b[A");
     await flush();
     expect(lastFrame() ?? "").toContain("omdbapi.com");
   });
@@ -223,5 +224,68 @@ describe("Accounts", () => {
     }).lastFrame() ?? "";
     expect(frame).toContain("Unreachable");
     expect(frame).toContain("⚠");
+  });
+
+  // Asserting the "c claim" hint pair, not the bare substring "claim": that
+  // substring also matches formatReccStatus's own "(unclaimed)" suffix, which
+  // would make these assertions pass regardless of whether the hint itself
+  // is gated correctly.
+  it("offers c to claim an unclaimed reccd account", () => {
+    const { lastFrame } = renderAccounts({
+      reccConfigured: true,
+      reccStatus: { state: "connected", host: "reccd.stream", account: { name: "quiet-heron-4f2a", claimed: false } },
+    });
+    expect(lastFrame()).toContain("c claim");
+  });
+
+  it("does not offer c once the account is claimed", () => {
+    const { lastFrame } = renderAccounts({
+      reccConfigured: true,
+      reccStatus: { state: "connected", host: "reccd.stream", account: { name: "ash", claimed: true } },
+    });
+    expect(lastFrame()).not.toContain("c claim");
+  });
+
+  // A hand-configured self-hosted reccd reports no account. Offering a claim
+  // there would promise something the keypress cannot do.
+  it("does not offer c when the connection reports no account", () => {
+    const { lastFrame } = renderAccounts({
+      reccConfigured: true,
+      reccStatus: { state: "connected", host: "192.168.0.98:4100" },
+    });
+    expect(lastFrame()).not.toContain("c claim");
+  });
+
+  it("fires onClaimRecc when c is pressed on the reccd row", async () => {
+    const onClaimRecc = vi.fn();
+    const { lastFrame, stdin } = renderAccounts({
+      reccConfigured: true,
+      reccStatus: { state: "connected", host: "reccd.stream", account: { name: "quiet-heron-4f2a", claimed: false } },
+      onClaimRecc,
+    });
+    // Move the cursor to the reccd row — it is third, after the two debrid
+    // rows and RuTracker. Confirm we actually landed on it (rather than
+    // hard-coding the down count) by checking the pointer sits on the reccd
+    // line before pressing c.
+    stdin.write("\x1b[B");
+    await flush();
+    stdin.write("\x1b[B");
+    await flush();
+    stdin.write("\x1b[B");
+    await flush();
+    const lines = (lastFrame() ?? "").split("\n");
+    const reccdLine = lines.find((l) => l.includes("reccd"));
+    expect(reccdLine).toContain("❯");
+    stdin.write("c");
+    await flush();
+    expect(onClaimRecc).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores c on a row that cannot be claimed", async () => {
+    const onClaimRecc = vi.fn();
+    const { stdin } = renderAccounts({ onClaimRecc });
+    stdin.write("c"); // cursor starts on a debrid row
+    await flush();
+    expect(onClaimRecc).not.toHaveBeenCalled();
   });
 });

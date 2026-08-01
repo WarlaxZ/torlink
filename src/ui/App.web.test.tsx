@@ -98,6 +98,14 @@ vi.mock("../core/search", async (importOriginal) => {
     runSearch: vi.fn(async () => ({ results: [], perSource: {}, done: 0, total: 0 })),
   };
 });
+// Same reason as runSearch above, with a sharper edge: App auto-provisions an
+// anonymous reccd account on first run, and the mocked loadConfig above has no
+// reccToken — so the real one would POST to the hosted reccd from a UI test, on
+// a signup endpoint that is rate-limited per IP.
+vi.mock("../recc/provision", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../recc/provision")>()),
+  ensureReccAccount: vi.fn(async () => {}),
+}));
 vi.mock("../sources/rutracker/session", () => ({
   loadSession: async () => null,
   getSession: () => null,

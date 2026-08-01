@@ -11,6 +11,7 @@ import {
   reasonLine,
   reasonTitle,
   RECC_ACTIONS,
+  reccClaimHint,
   reccEventBody,
   reccItems,
   reccPosterHint,
@@ -23,6 +24,7 @@ import {
   titleToSave,
   type PublicRecommendation,
   type PublicRecommendations,
+  type PublicReccAccount,
   type ReccFilters,
   type ReccPosterOutcome,
   type ReccState,
@@ -541,5 +543,30 @@ describe("the no-key wording is shared with the search preview", () => {
     });
     expect(reccPosterHint([{ kind: "no-key" }])).toBe(copy.body);
     expect(reccPosterNote({ kind: "no-key" })).toBe(copy.posterNote);
+  });
+});
+
+describe("reccClaimHint", () => {
+  it("prompts to claim an unclaimed account, naming it", () => {
+    const account: PublicReccAccount = { name: "quiet-heron-4f2a", claimed: false };
+    expect(reccClaimHint(account)).toBe(
+      "Your picks are saved to quiet-heron-4f2a, an account with no password yet. Claim it in the terminal UI to sign in on another machine.",
+    );
+  });
+
+  it("says nothing for a claimed account", () => {
+    const account: PublicReccAccount = { name: "ash", claimed: true };
+    expect(reccClaimHint(account)).toBeNull();
+  });
+
+  it("says nothing when there is no account", () => {
+    expect(reccClaimHint(null)).toBeNull();
+  });
+
+  // /api/sources has not answered yet. Staying quiet stops the sentence
+  // flashing on a slow load — the same rule resultPosters.ts follows for
+  // omdbConfigured: boolean | null.
+  it("says nothing before /api/sources has answered", () => {
+    expect(reccClaimHint(undefined)).toBeNull();
   });
 });
