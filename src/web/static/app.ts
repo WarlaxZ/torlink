@@ -362,25 +362,75 @@ function showNotice(message: string): void {
  * the row that failed.
  */
 function showError(message: string, action?: { label: string; run: () => void }): void {
-  alertLine.textContent = message;
-  if (action) {
-    alertAction.textContent = action.label;
+  showAlert({ message, tone: "error", action });
+}
+
+/**
+ * How long an undo stays offered.
+ *
+ * Long enough to notice a mis-tap and react — the whole reason this exists is a
+ * 26px `remove` a few millimetres from `play` on a phone — and short enough not
+ * to sit over the list. Errors get no timer at all: they persist.
+ */
+const UNDO_MS = 8000;
+
+/**
+ * "Removed · Undo".
+ *
+ * The alternative was a native `confirm()` before every delete, and this is
+ * better on the surface that matters: a confirm interrupts the ninety-nine
+ * removals that were meant in order to catch the one that wasn't, whereas an
+ * undo costs the ninety-nine nothing. It is also what makes the deletion honest
+ * about having happened, which a dialog asking permission does not.
+ *
+ * Not offered where the server cannot put the thing back — see the call sites.
+ */
+function showUndo(message: string, undo: () => void): void {
+  showAlert({ message, tone: "info", action: { label: "Undo", run: undo }, timeoutMs: UNDO_MS });
+}
+
+let alertTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showAlert(opts: {
+  message: string;
+  tone: "error" | "info";
+  action?: { label: string; run: () => void };
+  /** Absent means it stays until dismissed, which is what an error does. */
+  timeoutMs?: number;
+}): void {
+  alertLine.textContent = opts.message;
+  alertBox.classList.toggle("alert-info", opts.tone === "info");
+  if (opts.action) {
+    const { label, run } = opts.action;
+    alertAction.textContent = label;
     alertAction.hidden = false;
-    // Replaced wholesale rather than added to: this element is reused for every
-    // error, and a listener left behind would fire the previous failure's retry.
+    // Assigned, not added: this element is reused for every alert, and a
+    // listener left behind would fire the PREVIOUS one's action — undoing a
+    // removal the user has since made twice, or retrying a play they gave up on.
     alertAction.onclick = () => {
       hideError();
-      action.run();
+      run();
     };
   } else {
     alertAction.hidden = true;
     alertAction.onclick = null;
   }
+  if (alertTimer !== null) clearTimeout(alertTimer);
+  alertTimer =
+    opts.timeoutMs === undefined
+      ? null
+      : setTimeout(() => {
+          alertTimer = null;
+          hideError();
+        }, opts.timeoutMs);
   alertBox.hidden = false;
 }
 
 function hideError(): void {
+  if (alertTimer !== null) clearTimeout(alertTimer);
+  alertTimer = null;
   alertBox.hidden = true;
+  alertBox.classList.remove("alert-info");
   alertLine.textContent = "";
   alertAction.hidden = true;
   alertAction.onclick = null;
@@ -3244,6 +3294,17 @@ async function removeSavedSearch(query: string): Promise<void> {
   if (!body) return;
   savedState = applySavedSearchesResponse(savedState, body);
   renderSaved();
+  // A saved search is the user's own typing and nothing else in the app holds a
+  // copy, so a mis-tap on a 26px button next to `search` lost it for good.
+  // `toggle` re-adds it, because it is absent now.
+  showUndo(`Removed “${query}”.`, () => {
+    void (async () => {
+      const back = await postSaved("/api/saved-searches", savedSearchesBody(query, "toggle"));
+      if (!back) return;
+      savedState = applySavedSearchesResponse(savedState, back);
+      renderSaved();
+    })();
+  });
 }
 
 // Called by the favourite button on each search row.
@@ -3263,8 +3324,20 @@ async function removeFromLibrary(infoHash: string, name: string): Promise<void> 
   savedState = applyLibraryResponse(savedState, body);
   renderSaved();
   renderResults();
+  // Same reasoning as removeSavedSearch. The watched-episode count does not
+  // survive the round trip — the server keeps that per info hash and a re-add
+  // starts a fresh favourite — so the undo restores the row, not its history.
+  showUndo(`Removed “${shortName(name)}”.`, () => {
+    void toggleLibrary({ infoHash, name });
+  });
 }
 
+// NO UNDO HERE, and the reason is the server rather than an oversight:
+// `POST /api/continue-watching` takes one action, `remove`, because nothing
+// plays a title and then un-plays it — so there is no request that would put
+// the row back. It is also the least costly of the three to lose: the row is
+// derived from stream history and reappears the next time the title is played,
+// where a saved search and a favourite are gone for good.
 async function removeContinueWatching(key: string): Promise<void> {
   const body = await postSaved("/api/continue-watching", continueWatchingBody(key));
   if (!body) return;

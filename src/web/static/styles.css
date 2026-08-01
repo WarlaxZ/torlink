@@ -735,6 +735,63 @@ select:focus-visible {
   }
 }
 
+/* ---- touch targets ------------------------------------------------------ *
+
+   Measured at 390x844, nothing on either page reached 44px in its minor axis:
+   the four pane tabs were 26px, every row button 26px with a 6.4px gap, and
+   `.group-toggle` was 20x18 — eight percent of a 44x44 target. This is the
+   surface that is actually touched, and `play` sits a few millimetres from
+   `add` and from `remove`.
+
+   `min-height` plus centring rather than more padding, so a control grows
+   downward into empty space instead of pushing every neighbour apart — the
+   toolbar already wraps to five rows on a phone and taller rows would make that
+   worse. Type sizes are left alone: the problem was the hit area, not legibility.
+
+   Deliberately NOT gated on `(pointer: coarse)`. A narrow window on a laptop
+   gets the same layout, and a 44px control is never wrong for a mouse. */
+@media (max-width: 46rem) {
+  .view-tab,
+  .tabs .tab,
+  /* `.row-actions` is shared by the queue, the results list, the For You cards
+     and all three saved lists — one selector reaches every row control in the
+     app, which is why they were all 26px together. */
+  .row-actions button,
+  .row-actions .button-link,
+  .saved-query,
+  .recc-actions button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 6.4px between `play` and `add`, and between `play` and `remove`. On a
+     surface where the consequence of a mis-tap is a ninety-second resolve you
+     did not want, or a saved search silently gone, that is not enough. */
+  .row-actions,
+  .recc-actions {
+    gap: 0.6rem;
+  }
+
+  /* A disclosure triangle is the smallest control in the app and the one that
+     opens a collapsed group of twenty releases, so it is the one worth widening
+     most. */
+  .group-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Both of these are plain text links in a header, and both are the only way
+     off their screen. 17px and 15px tall respectively before this. */
+  .back,
+  .breadcrumb a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
 /* ---- grouped results ---------------------------------------------------- */
 
 /* A heading stands in for every release of one title. It differs from a release
@@ -1454,6 +1511,20 @@ select:focus-visible {
   gap: 0.75rem;
 }
 
+/* One column on a phone. `minmax(10rem, 1fr)` fits two ~185px columns at 390px,
+   and the layout preference is remembered in localStorage — so someone who
+   switched to grid at a desk arrives on their phone to two cramped columns of
+   truncated names and, on mixed results, screen-filling NO POSTER voids.
+
+   The preference is HONOURED rather than overridden: a poster wall is a good
+   way to browse on a phone, it just needs the whole width. One column is the
+   grid done properly here, not a quiet demotion to list. */
+@media (max-width: 46rem) {
+  .results-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .result-card {
   display: flex;
   flex-direction: column;
@@ -1594,6 +1665,14 @@ select:focus-visible {
 
 .alert:not([hidden]) ~ .prepare {
   bottom: 4.2rem;
+}
+
+/* The same slot carrying an acknowledgement rather than a failure — "Removed ·
+   Undo". Accent, not error: nothing has gone wrong, and painting a successful
+   deletion red would teach the user to distrust the colour that means a real
+   problem two rows up. */
+.alert-info {
+  border-color: var(--accent);
 }
 
 .alert-line {
