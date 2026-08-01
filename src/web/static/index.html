@@ -163,6 +163,18 @@
           </div>
           <button type="submit">Search</button>
           <button id="save-search" type="button">save search</button>
+          <!--
+            Where you have been. The terminal binds `↑` in its search box to walk
+            back through recent queries; the browser made you retype, or
+            pre-emptively "save search" — which is a different feature with a
+            different meaning (a saved search is a list you curate).
+
+            Chips rather than a key binding because the surface this matters
+            most on is a phone, which has no `↑`. Distinct from #suggest above:
+            that asks reccd what a partial title might be and appears once you
+            have typed; these are yours, need no server, and are there first.
+          -->
+          <div id="recent" class="recent" hidden></div>
         </form>
 
         <!-- Tabs and controls in one PINNED strip. A browse is 25,000px of

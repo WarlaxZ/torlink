@@ -1560,6 +1560,51 @@ select:focus-visible {
   min-width: 0;
 }
 
+/* Recent searches, under the search box. Full width of the card so they wrap on
+   their own line rather than trailing off the end of the Search button. */
+.recent {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* A label on the strip, so a lone word under the search box is not a mystery.
+   Rendered from CSS rather than markup because it is punctuation for the list,
+   not content — there is nothing for a screen reader to gain from hearing it
+   before each chip's own accessible name. */
+.recent::before {
+  content: "recent";
+  align-self: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Quieter than a saved search, which is the distinction worth drawing: a saved
+   search is a list you curated, a recent one is just where you have been.
+   `.saved-query` is borderless — right for a full-width list row, wrong for a
+   chip in a strip, where without an outline it reads as stray text rather than
+   as something to press. */
+/* `.recent .recent-chip`, not `.recent-chip`. It shares `.saved-query`, whose
+   `border: 0; padding: 0` is declared LATER in this file at equal specificity
+   and therefore wins — the same ordering hazard already recorded on `.preview`.
+   The extra class outranks it wherever these rules end up sitting, so a future
+   reshuffle cannot silently flatten the chips back to bare words. */
+.recent .recent-chip {
+  font-size: 0.7rem;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.2rem 0.6rem;
+}
+
+.recent .recent-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .saved-heading {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;

@@ -191,6 +191,7 @@ import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
 import { authHeadersFor, readStoredToken, storeToken } from "./token";
 import { routeFromSearch, urlForRoute, type RouteState } from "./route";
 import { rememberReturn } from "./returnTo";
+import { foldRecent, magnetFor, readRecent, writeRecent } from "./recentSearches";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -233,6 +234,7 @@ const viewReccTab = el<HTMLButtonElement>("view-recc");
 const viewSavedTab = el<HTMLButtonElement>("view-saved");
 const viewQueueTab = el<HTMLButtonElement>("view-queue");
 const queueCount = el<HTMLSpanElement>("queue-count");
+const recentStrip = el<HTMLDivElement>("recent");
 const paneSearch = el<HTMLElement>("pane-search");
 const paneRecc = el<HTMLElement>("pane-recc");
 const paneSaved = el<HTMLElement>("pane-saved");
@@ -1300,6 +1302,41 @@ let seededExpansion = false;
 // rows that are not rendered.
 let currentRows: GroupRow<PublicSearchResult>[] = [];
 
+let recent: string[] = readRecent();
+
+/**
+ * The recent-search chips.
+ *
+ * Hidden while the box has something in it: once you are typing, `#suggest` is
+ * the list that matters and two dropdowns stacked under one input is a mess.
+ * Hidden when empty too, so a fresh install shows nothing rather than an empty
+ * strip explaining itself.
+ */
+function renderRecent(): void {
+  const show = recent.length > 0 && queryInput.value.trim() === "";
+  recentStrip.hidden = !show;
+  if (!show) {
+    recentStrip.replaceChildren();
+    return;
+  }
+  recentStrip.replaceChildren(
+    ...recent.map((query) => {
+      // createElement + textContent: this is the user's own typing, but it has
+      // been through localStorage, which anything on this origin can write.
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "saved-query recent-chip";
+      chip.textContent = query;
+      chip.title = `Search for ${query}`;
+      chip.addEventListener("click", () => {
+        queryInput.value = query;
+        startSearch(query);
+      });
+      return chip;
+    }),
+  );
+}
+
 /**
  * Put what the user is doing into the address bar.
  *
@@ -1497,6 +1534,13 @@ function startSearch(raw: string): void {
   // After searchView.query is set, so the address bar names the search actually
   // running rather than the one before it.
   syncUrl();
+  // Recorded on RUN, not on submit: this is also the path a recent chip, a saved
+  // search, a Continue-watching fallback and the player's "find a playable
+  // release" all take, and every one of them is a search worth being able to get
+  // back to. foldRecent ignores the blank query that means browse.
+  recent = foldRecent(recent, query);
+  writeRecent(recent);
+  renderRecent();
 
   const source = new EventSource(searchUrl(query, searchView.group, token));
   searchStream = source;
@@ -1725,6 +1769,8 @@ async function loadSuggest(raw: string, seq: number): Promise<void> {
 }
 
 queryInput.addEventListener("input", () => {
+  // The chips give way to #suggest as soon as there is something to suggest on.
+  renderRecent();
   if (suggestTimer !== null) clearTimeout(suggestTimer);
   // The capability flag from /api/sources, so a reccd-less server never spends
   // a request per character discovering that again.
@@ -2062,6 +2108,37 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));
     actions.append(debridButton);
   }
+
+  // The terminal's `y`. The browser had no way at all to get a magnet out of a
+  // result — the one thing you need to hand a release to any other client, or
+  // to paste back into the queue's own add box.
+  //
+  // Built client-side by magnetFor rather than shipped on the wire, and that is
+  // not a shortcut: `PublicSearchResult` deliberately carries no magnet, because
+  // the tracker list would be a few hundred bytes per row for something almost
+  // no row needs. A hash-and-name magnet is what `y` copies too.
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.textContent = "copy magnet";
+  tagControl(copyButton, rowKey, "copy");
+  copyButton.addEventListener("click", () => {
+    // Same two failure modes as the player page's copy button, reported for the
+    // same reason: clipboard.writeText does not exist on an insecure origin —
+    // which is the normal way this dashboard is reached over a LAN — and
+    // rejects when the page is not focused. A copy button that silently does
+    // nothing is worse than no button.
+    const clip = navigator.clipboard;
+    const magnet = magnetFor(result.infoHash, result.name);
+    if (!clip) {
+      showNotice("Copying needs a secure context (https or localhost).");
+      return;
+    }
+    void clip.writeText(magnet).then(
+      () => showNotice("Magnet copied."),
+      () => showNotice("Couldn't copy that magnet."),
+    );
+  });
+  actions.append(copyButton);
 
   return actions;
 }
@@ -3695,6 +3772,7 @@ function openApp(payload: StatusPayload): void {
   // savedState: without this, a hit already in the library opens reading
   // "favourite" and the first click removes it.
   void loadSaved();
+  renderRecent();
   queryInput.focus();
   // `?prefs=1` — the player page's "Avoid this next time", from the card that
   // says a release cannot play here. A ONE-SHOT INTENT, not view state, so it is
