@@ -1293,6 +1293,22 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* The URL, spelled out, for when the browser refuses to copy it on the page's
+   behalf — which is every insecure origin, i.e. most LANs. It takes the whole
+   row rather than sitting between the buttons: it appears mid-gesture, and a
+   new element that reflowed the buttons the user is aiming at would be worse
+   than the problem it solves. */
+.manual-copy {
+  flex-basis: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.35rem;
+  background: var(--sunken);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
 /* ---------------------------------------------------------------------------
    The saved pane. Two lists side by side on a wide screen and stacked on a
    phone, using .rows and .row from the search pane rather than a third row
