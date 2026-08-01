@@ -245,8 +245,9 @@ anything other than loopback requires a token.
   because there's no way to show one without re-encoding it, and torlink doesn't run ffmpeg. Tracks
   muxed *inside* the file are named on the fallback card so you know they're there — pulling one out
   has the same ffmpeg problem.
-- **No settings page, but there is a settings control.** Tokens, sources, limits and folders are still
-  TUI-only — the browser has no page for them, and that includes reccd's own URL and bearer token; the
+- **No settings page, but there is a settings control.** Tokens, sources, limits, folders and the
+  [cast device address](#casting-to-a-tv) are still TUI-only — the browser has no page for them, and
+  that includes reccd's own URL and bearer token; the
   browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the
   **For You** tab), never its address or token. It also includes claiming your
   [reccd](#recommendations) account: that's credential entry too, so it stays where tokens live, and the
@@ -324,10 +325,51 @@ give up after twelve seconds:
   while it's on, these releases fall through to the next line too.
 - **Anything left over** — a release streamed from the swarm, or one the provider won't transcode — gets a
   card naming the part your browser can't handle, plus a **Download .m3u** button: your OS hands that tiny
-  playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android there's also
+  playlist to VLC (or whatever your default player is) and it plays there. That card also offers to
+  [cast it](#casting-to-a-tv) when the file is one a Chromecast can play but your browser can't — an MP4
+  carrying AC3 is the common case. On iOS and Android there's also
   a direct **Open in VLC** button, because those apps register a URL scheme a web page can link to.
   Desktop VLC registers none — not on macOS, Windows or Linux — so there's no button to offer there, and
   the `.m3u` is the route that works. It also doesn't assume VLC is what you watch things in.
+
+#### Casting to a TV
+
+Both front ends can put a stream on a Chromecast. In the browser it's a **Cast to TV** button next to the
+other hand-off buttons; in the terminal it's `c` in the stream file picker, which lists what it found and
+casts to the one you pick. Once it's playing you get pause, resume, stop and a position — the seek bar and
+the volume stay with the TV's own remote, which is already in the room.
+
+torlnk drives the device itself rather than going through Google's web SDK, and that's the reason it works
+at all: the SDK only runs on a secure origin, and the normal way to reach this dashboard is
+`http://192.168.x.x`. A cast button built on it would work from `localhost` and nowhere else, which is the
+same dead-button problem desktop VLC has.
+
+What it will and won't play, stated plainly, because a Chromecast is fussier than a browser in one
+direction and less fussy in another:
+
+- **MP4 and WebM carrying H.264 cast directly.** Nothing is transcoded and nothing passes through this
+  machine twice.
+- **AC3 and E-AC3 are passed through to the television.** Your browser refuses those, so this is one case
+  where the TV can play something the dashboard can't — the fallback card offers to cast it. The catch: it's
+  passthrough, so on a TV or receiver that can't decode it you get picture and no sound. Stop the cast and
+  play it locally.
+- **An MKV casts only on the debrid backend**, via the provider's transcode — the same rung the browser
+  player uses. Straight from the swarm there's nothing to transcode it with, so the button says so instead
+  of failing at the television.
+- **HEVC casts on neither backend.** That needs a full re-encode, which needs per-platform hardware
+  acceleration; it's a deliberate gap rather than an oversight, and the `.m3u` hand-off is still there.
+- **The subtitle you'd have seen in the browser goes with it**, as a sidecar track.
+
+Discovery uses mDNS, which does not cross a Docker bridge or a VLAN — so if you run torlnk in a container
+and the list comes back empty, that's why. The device list lets you type an address (`192.168.0.40`, or
+`host:port`) and remembers it, so a device mDNS can't reach still casts.
+
+Two limits worth knowing. Casting needs the television to fetch the file *from this machine*, so a cast
+started in the terminal brings the browser UI up on your LAN address with a token if it isn't already
+running — it tells you when it does, because that's a real change to what the machine is serving. And a
+cast is per-process: one started in the terminal isn't visible to a separate `torlnk serve --web`, and the
+other way round. Where the TUI is hosting the browser UI itself (`shift+w`), it's one process and both
+surfaces see the one cast.
 
 #### The player page knows what else is in the torrent
 
