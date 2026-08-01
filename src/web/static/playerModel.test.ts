@@ -152,7 +152,7 @@ describe("filesPath", () => {
 
 describe("chooseSource", () => {
   const info = (over: Partial<StreamInfoResponse> = {}): StreamInfoResponse => ({
-    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const },
+    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const, subtitles: [] },
     blockers: [],
     hls: null,
     ...over,
@@ -187,7 +187,7 @@ describe("chooseSource", () => {
     expect(
       chooseSource(
         info({
-          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" as const },
+          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" as const, subtitles: [] },
           blockers: ["video"],
         }),
         "Tin.Rivers.2024.2160p.mp4",

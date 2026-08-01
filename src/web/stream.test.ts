@@ -989,6 +989,7 @@ describe("GET /stream/:sid/:idx.info", () => {
           videoCodec: "hevc",
           audioCodec: "dts",
           source: "probe" as const,
+          subtitles: [],
         }),
       },
     });
@@ -1005,7 +1006,13 @@ describe("GET /stream/:sid/:idx.info", () => {
       streamDeps: {
         probeImpl: async () => {
           probes += 1;
-          return { container: "mkv", videoCodec: "h264", audioCodec: "aac", source: "probe" as const };
+          return {
+            container: "mkv",
+            videoCodec: "h264",
+            audioCodec: "aac",
+            source: "probe" as const,
+            subtitles: [],
+          };
         },
       },
     });

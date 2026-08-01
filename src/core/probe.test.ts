@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ffprobeArgs, parseFfprobe, probeUrl } from "./probe";
 
-const output = (formatName: string, streams: { codec_type: string; codec_name: string }[]) =>
-  JSON.stringify({ format: { format_name: formatName }, streams });
+const output = (
+  formatName: string,
+  streams: {
+    codec_type: string;
+    codec_name: string;
+    tags?: { language?: string; title?: string };
+  }[],
+) => JSON.stringify({ format: { format_name: formatName }, streams });
 
 describe("ffprobeArgs", () => {
   it("asks for json, quietly, and bounds how much it reads", () => {
@@ -37,6 +43,7 @@ describe("parseFfprobe", () => {
       videoCodec: "h264",
       audioCodec: "aac",
       source: "probe",
+      subtitles: [],
     });
   });
 
@@ -75,16 +82,66 @@ describe("parseFfprobe", () => {
     expect(facts?.audioCodec).toBe("truehd");
   });
 
-  it("ignores subtitle and attachment streams", () => {
+  it("reports subtitle streams instead of discarding them", () => {
+    // This test used to assert the opposite. Subtitle rows were dropped, so a
+    // file with three muxed tracks looked identical to one with none, and the
+    // player page could not tell the user they existed. Attachment streams
+    // (fonts, cover art) are still ignored — they are not tracks.
+    const facts = parseFfprobe(
+      output("mov,mp4", [
+        { codec_type: "video", codec_name: "hevc" },
+        { codec_type: "audio", codec_name: "eac3" },
+        { codec_type: "subtitle", codec_name: "mov_text", tags: { language: "spa" } },
+        { codec_type: "subtitle", codec_name: "mov_text", tags: { language: "eng" } },
+        { codec_type: "attachment", codec_name: "ttf" },
+      ]),
+      "mp4",
+    );
+    expect(facts?.subtitles).toEqual([
+      { language: "spa", label: "" },
+      { language: "eng", label: "" },
+    ]);
+  });
+
+  it("keeps a subtitle stream's title tag as its label", () => {
     const facts = parseFfprobe(
       output("matroska,webm", [
-        { codec_type: "subtitle", codec_name: "subrip" },
         { codec_type: "video", codec_name: "h264" },
+        { codec_type: "subtitle", codec_name: "subrip", tags: { language: "eng", title: "SDH" } },
       ]),
       "mkv",
     );
-    expect(facts?.videoCodec).toBe("h264");
-    expect(facts?.audioCodec).toBe("");
+    expect(facts?.subtitles).toEqual([{ language: "eng", label: "SDH" }]);
+  });
+
+  it("reports an untagged subtitle stream with an empty language", () => {
+    // Present but unnamed is still information: the player can say "1 subtitle
+    // track" rather than nothing.
+    const facts = parseFfprobe(
+      output("matroska,webm", [
+        { codec_type: "video", codec_name: "h264" },
+        { codec_type: "subtitle", codec_name: "subrip" },
+      ]),
+      "mkv",
+    );
+    expect(facts?.subtitles).toEqual([{ language: "", label: "" }]);
+  });
+
+  it("reports an empty subtitle list for a file with none", () => {
+    const facts = parseFfprobe(
+      output("matroska,webm", [{ codec_type: "video", codec_name: "h264" }]),
+      "mkv",
+    );
+    expect(facts?.subtitles).toEqual([]);
+  });
+
+  it("asks ffprobe for the language and title tags", () => {
+    // Without this the tags are absent from the JSON and every track reports an
+    // empty language — the failure would look like "no subtitles have names".
+    const entries = ffprobeArgs("http://example.test/a.mkv")[
+      ffprobeArgs("http://example.test/a.mkv").indexOf("-show_entries") + 1
+    ];
+    expect(entries).toContain("stream_tags=language,title");
   });
 
   it("returns null on output that is not json", () => {

@@ -7,6 +7,7 @@ const facts = (videoCodec: string): MediaFacts => ({
   videoCodec,
   audioCodec: "aac",
   source: "probe",
+  subtitles: [],
 });
 
 describe("ProbeCache", () => {

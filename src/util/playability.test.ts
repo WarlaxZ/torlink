@@ -6,6 +6,7 @@ const facts = (over: Partial<MediaFacts> = {}): MediaFacts => ({
   videoCodec: "h264",
   audioCodec: "aac",
   source: "name",
+  subtitles: [],
   ...over,
 });
 
@@ -26,6 +27,7 @@ describe("classifyFromName", () => {
       videoCodec: "h264",
       audioCodec: "",
       source: "name",
+      subtitles: [],
     });
   });
 
@@ -65,6 +67,7 @@ describe("classifyFromName", () => {
       videoCodec: "",
       audioCodec: "",
       source: "name",
+      subtitles: [],
     });
   });
 });
