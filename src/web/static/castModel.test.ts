@@ -4,9 +4,10 @@ import {
   castButtonView,
   castControls,
   castStatusLine,
+  castSubtitleIndex,
   formatCastTime,
 } from "./castModel";
-import type { CastDevicesResponse, CastStatusResponse } from "../wire";
+import type { CastDevicesResponse, CastStatusResponse, StreamInfoResponse } from "../wire";
 
 const ONE_DEVICE: CastDevicesResponse = {
   devices: [{ id: "abc", name: "Living Room TV", model: "Chromecast" }],
@@ -200,5 +201,38 @@ describe("castBlockerReason", () => {
 
   it("never returns an empty string, so a disabled button always says why", () => {
     expect(castBlockerReason([])).not.toBe("");
+  });
+});
+
+describe("castSubtitleIndex", () => {
+  const info = (files: { index: number; language: string; renderable: boolean }[]) =>
+    ({
+      subtitles: {
+        embedded: [],
+        files: files.map((f) => ({ ...f, filename: `sub.${f.language}.srt`, label: f.language })),
+      },
+    }) as unknown as StreamInfoResponse;
+
+  it("picks the first English renderable sibling, matching what <track> defaults to", () => {
+    // The page cannot know which track the browser's own menu has selected, so
+    // the cast takes the one the page marked default. Same rule as
+    // `subtitleTracks`, so the television shows what the browser would have.
+    expect(castSubtitleIndex(info([
+      { index: 1, language: "fr", renderable: true },
+      { index: 2, language: "en", renderable: true },
+    ]))).toBe(2);
+  });
+
+  it("falls back to the first renderable when nothing is English", () => {
+    expect(castSubtitleIndex(info([{ index: 3, language: "fr", renderable: true }]))).toBe(3);
+  });
+
+  it("ignores a track a browser could not render, because the .vtt route refuses it too", () => {
+    expect(castSubtitleIndex(info([{ index: 4, language: "en", renderable: false }]))).toBeUndefined();
+  });
+
+  it("is undefined with no info and with no siblings", () => {
+    expect(castSubtitleIndex(null)).toBeUndefined();
+    expect(castSubtitleIndex(info([]))).toBeUndefined();
   });
 });

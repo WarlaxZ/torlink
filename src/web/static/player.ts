@@ -45,7 +45,20 @@ import {
   subtitleTracks,
   type TrackSpec,
 } from "./subtitleModel";
-import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
+import {
+  castButtonView,
+  castControls,
+  castStatusLine,
+  castSubtitleIndex,
+  type CastControl,
+} from "./castModel";
+import type {
+  CastDevicesResponse,
+  CastStatusResponse,
+  LibraryRequest,
+  StreamFilesResponse,
+  StreamInfoResponse,
+} from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -198,10 +211,18 @@ function showFallback(
   }
 
   stage.replaceChildren(card);
+  // The <video> is gone, so there is nothing for a stopped cast to resume. The
+  // cast button itself stays: a file the browser refuses is often one the
+  // television takes (an mp4 carrying AC3), which is the point of two profiles.
+  castVideo = null;
+  renderCast();
 }
 
 function createVideo(): HTMLVideoElement {
   const video = document.createElement("video");
+  // Recorded so a cast can pause it and a stopped cast can resume it. One place,
+  // because every path onto the stage comes through here.
+  castVideo = video;
   video.className = "player";
   video.controls = true;
   video.autoplay = true;
@@ -367,6 +388,208 @@ function mountVideo(target: PlayerTarget, src: string, tracks: TrackSpec[]): voi
   tryPlay(video);
 }
 
+// ---- casting ----------------------------------------------------------------
+//
+// Wiring only. Every decision — the label, the disabled reason, the status line,
+// which controls to offer, which subtitle to send — is in `castModel.ts`, which
+// has tests. Nothing below chooses anything.
+
+const castBox = el<HTMLDivElement>("cast");
+
+/**
+ * What the cast UI is drawn from. All three start null, which `castButtonView`
+ * reports as "hidden" — so nothing appears until the server has answered.
+ */
+let castDevices: CastDevicesResponse | null = null;
+let castStatus: CastStatusResponse | null = null;
+let castInfo: StreamInfoResponse | null = null;
+let castTarget: PlayerTarget | null = null;
+/** The <video> element on screen, so a cast can pause it and a stop can resume. */
+let castVideo: HTMLVideoElement | null = null;
+/** True while the device list is expanded, so a re-render does not collapse it. */
+let castPickerOpen = false;
+
+function castHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json", ...authHeadersFor(readStoredToken()) };
+}
+
+/**
+ * Ask the server what can be cast to.
+ *
+ * Null on any failure, including the 401 a cold-opened player link gets: this
+ * page authenticates media with the session capability in `?k=`, but `/api/cast/*`
+ * needs the bearer token, which only a tab that came from the dashboard has. Null
+ * means the button stays hidden, which is the honest answer — someone else's link
+ * cannot drive the devices in this house.
+ */
+async function fetchCastDevices(): Promise<CastDevicesResponse | null> {
+  try {
+    const res = await fetch("/api/cast/devices", { headers: castHeaders() });
+    if (!res.ok) return null;
+    return (await res.json()) as CastDevicesResponse;
+  } catch {
+    return null;
+  }
+}
+
+async function castCommand(action: CastControl): Promise<void> {
+  try {
+    const res = await fetch("/api/cast/command", {
+      method: "POST",
+      headers: castHeaders(),
+      body: JSON.stringify({ action }),
+    });
+    const body = (await res.json()) as CastStatusResponse & { error?: string };
+    if (!res.ok) {
+      showNotice(body.error ?? "That did not work.");
+      return;
+    }
+    castStatus = body;
+    renderCast();
+  } catch {
+    showNotice("Could not reach torlnk.");
+  }
+}
+
+async function startCast(deviceId: string): Promise<void> {
+  if (!castTarget) return;
+  castPickerOpen = false;
+  const subtitleIndex = castSubtitleIndex(castInfo);
+  try {
+    const res = await fetch("/api/cast/start", {
+      method: "POST",
+      headers: castHeaders(),
+      body: JSON.stringify({
+        deviceId,
+        sid: castTarget.sid,
+        index: castTarget.index,
+        ...(subtitleIndex === undefined ? {} : { subtitleIndex }),
+      }),
+    });
+    const body = (await res.json()) as CastStatusResponse & { error?: string };
+    if (!res.ok) {
+      // The server's message is already fit for the screen — a CastError's is
+      // written to be read by a person. Persisted, because it explains a
+      // television that is going to stay blank.
+      showNotice(body.error ?? "Could not cast that.", { persist: true });
+      renderCast();
+      return;
+    }
+    castStatus = body;
+    renderCast();
+  } catch {
+    showNotice("Could not reach torlnk.");
+  }
+}
+
+function renderCast(): void {
+  const view = castButtonView({
+    devices: castDevices,
+    status: castStatus,
+    castBlockers: castInfo?.castBlockers ?? [],
+    hasHls: castInfo?.hls != null,
+  });
+  const children: HTMLElement[] = [];
+
+  if (view.state === "casting" && castStatus) {
+    // The local element stops: two copies of the same film, half a minute apart,
+    // is the worst thing this feature could do.
+    castVideo?.pause();
+    const label = document.createElement("p");
+    label.className = "cast-label";
+    label.textContent = view.label;
+    children.push(label);
+    const line = castStatusLine(castStatus);
+    if (line) {
+      const status = document.createElement("p");
+      status.className = "cast-status";
+      status.textContent = line;
+      children.push(status);
+    }
+    for (const control of castControls(castStatus)) {
+      children.push(
+        button(control === "stop" ? "Stop casting" : control === "play" ? "Resume" : "Pause", () => {
+          void castCommand(control);
+        }),
+      );
+    }
+  } else if (view.state === "ready") {
+    const devices = castDevices?.devices ?? [];
+    if (castPickerOpen && devices.length > 1) {
+      for (const device of devices) {
+        // textContent, never markup: a device name is whatever someone typed
+        // into the Google Home app.
+        children.push(
+          button(device.model ? `${device.name} · ${device.model}` : device.name, () => {
+            void startCast(device.id);
+          }),
+        );
+      }
+      children.push(
+        button("Cancel", () => {
+          castPickerOpen = false;
+          renderCast();
+        }),
+      );
+    } else {
+      children.push(
+        button(view.label, () => {
+          // One device casts straight away; several open the list. A picker for a
+          // single television is a click that asks a question with one answer.
+          if (devices.length === 1) void startCast(devices[0]!.id);
+          else {
+            castPickerOpen = true;
+            renderCast();
+          }
+        }),
+      );
+    }
+  } else if (view.state === "disabled" || view.state === "finding") {
+    const b = button(view.label, () => {});
+    b.disabled = true;
+    children.push(b);
+    if (view.disabledReason !== null) {
+      // A paragraph, not a `title` attribute: a phone can never show a tooltip,
+      // and this is the whole explanation.
+      const why = document.createElement("p");
+      why.className = "cast-why";
+      why.textContent = view.disabledReason;
+      children.push(why);
+    }
+  }
+
+  castBox.replaceChildren(...children);
+  // The local player comes back when a cast ends, wherever it ended — the Stop
+  // button here, the TV's own remote, or a dropped connection.
+  if (view.state !== "casting") castVideo?.play().catch(() => {});
+}
+
+/**
+ * Follow cast state for as long as this page is open.
+ *
+ * The same `/api/events` stream the dashboard uses, so a cast started on a laptop
+ * shows on a phone looking at this server. The token rides in `?k=` because
+ * `EventSource` cannot set a header; with no token there is nothing to follow,
+ * and the button is hidden anyway.
+ */
+function followCast(): void {
+  const token = readStoredToken();
+  if (!token) return;
+  const source = new EventSource(`/api/events?k=${encodeURIComponent(token)}`);
+  source.addEventListener("cast", (event) => {
+    try {
+      const body = JSON.parse((event as MessageEvent<string>).data) as CastStatusResponse;
+      castStatus = body;
+      // A cast that ended badly says so once, and persists: it explains a
+      // television that has stopped, which a four-second notice would not.
+      if (body.notice) showNotice(body.notice, { persist: true });
+      renderCast();
+    } catch {
+      // A frame this page cannot parse is not worth interrupting playback for.
+    }
+  });
+}
+
 async function render(): Promise<void> {
   const target = parsePlayerLocation(location.pathname, location.search);
   if (!target || !target.capability) {
@@ -374,6 +597,15 @@ async function render(): Promise<void> {
     showFallback("no-link", "");
     return;
   }
+
+  castTarget = target;
+  // Not awaited: discovery listens on a multicast socket for two seconds, and a
+  // player page must not wait on the network to show a film. The button appears
+  // when it answers (`castButtonView` reports "hidden" until then).
+  void fetchCastDevices().then((devices) => {
+    castDevices = devices;
+    renderCast();
+  });
 
   nameLabel.textContent = target.filename || "Unnamed file";
   nameLabel.title = target.filename;
@@ -447,6 +679,8 @@ async function render(): Promise<void> {
   // browser refuses is now known up front rather than discovered by a decode
   // error that, for mkv in Chrome, never even fires.
   const info = await fetchInfo(target);
+  castInfo = info;
+  renderCast();
   const tracks = subtitleTracks(info, target);
   const download = subtitleDownload(info, target);
   if (download) {
@@ -660,4 +894,5 @@ if (back.kind === "href") {
   });
 }
 
+followCast();
 void render();

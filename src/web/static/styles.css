@@ -1416,6 +1416,32 @@ select:focus-visible {
   color: var(--accent);
 }
 
+/* Casting. A hand-off like the buttons above it, so it borrows their layout
+   rather than introducing a second row language; `align-items` centres the
+   status text against the buttons beside it. */
+.cast {
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+/* "Playing on Living Room TV" — the one line that says the television, not the
+   browser, is showing this. Weighted, because it changes what every other
+   control on the page means. */
+.cast-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* The clock, and why a button is disabled. Both are secondary to the controls,
+   and both are prose rather than labels. `.cast-why` is a paragraph and not a
+   `title` attribute because a phone can never show a tooltip. */
+.cast-status,
+.cast-why {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+
 /* The rest of the torrent. Borrows the picker's vocabulary deliberately — this
    is the same list of the same files, and it should not look like a new idea
    just because it is on a different page. */

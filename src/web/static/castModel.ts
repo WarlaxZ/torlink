@@ -1,5 +1,5 @@
 import type { Blocker } from "../../util/playability";
-import type { CastDevicesResponse, CastStatusResponse } from "../wire";
+import type { CastDevicesResponse, CastStatusResponse, StreamInfoResponse } from "../wire";
 
 /**
  * Every decision the cast button makes, as functions.
@@ -120,4 +120,22 @@ export function castControls(status: CastStatusResponse): CastControl[] {
   // Loading, or finished. Pausing something that has not started is a button
   // that appears to do nothing.
   return ["stop"];
+}
+
+/**
+ * Which subtitle to send with the cast, as an index into the session's files.
+ *
+ * The page cannot know which track the browser's own subtitle menu has selected
+ * — that state lives inside the `<video>` element and is not readable — so the
+ * cast takes the one the page marked `default`, which is the same rule
+ * `subtitleTracks` (./subtitleModel.ts) applies. The television then shows what
+ * the browser would have shown.
+ *
+ * Renderable only, for the same reason the `.vtt` route refuses anything else:
+ * an ass/ssa track converted to WebVTT is neither.
+ */
+export function castSubtitleIndex(info: StreamInfoResponse | null): number | undefined {
+  const files = (info?.subtitles.files ?? []).filter((f) => f.renderable);
+  const chosen = files.find((f) => f.language === "en") ?? files[0];
+  return chosen?.index;
 }
