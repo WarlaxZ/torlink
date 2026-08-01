@@ -1450,6 +1450,42 @@ select:focus-visible {
   }
 }
 
+/* ---- continue watching -------------------------------------------------- *
+
+   The one pane in the app that had no artwork, in a product whose search and
+   For You panes are both poster walls — and the pane most likely to be opened
+   from a sofa, where recognising a show by its cover IS the interaction. The
+   whole premise of a resume list is that you already know what these are.
+
+   A row, not a card: this list is read top to bottom to find one thing, and a
+   grid of ten covers would be a browse. So the poster is a thumbnail in a
+   two-column grid, sized to the row rather than the row to it. */
+.continue-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+/* Overrides .poster's card metrics — that rule centres a 12rem frame with a
+   bottom margin, which is right on a grid card and wrong beside three lines of
+   text. Keeps its 2:3 box, border and sunken background, so an empty frame
+   still reads as artwork that has not arrived rather than as a hole. */
+.continue-poster {
+  max-width: none;
+  margin: 0;
+  width: 3rem;
+}
+
+/* The text column. Its own stack, so the poster spans title, subtitle and
+   buttons instead of the title alone. */
+.continue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .saved-heading {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;

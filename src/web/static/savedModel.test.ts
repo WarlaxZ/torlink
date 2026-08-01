@@ -21,6 +21,7 @@ import {
   savedSearchesStatus,
   savedSearchesToggleNotice,
   type SavedState,
+  continueWatchingGroup,
 } from "./savedModel";
 import type { PublicFavourite, PublicStreamHistoryItem } from "../wire";
 // Fine to import here even though `src/core/streamHistory.ts` pulls in
@@ -490,5 +491,31 @@ describe("continueWatchingStatus", () => {
   it("hides once there are rows", () => {
     const state = { ...emptySaved(), loaded: true, continueWatching: [{ ...base }] };
     expect(continueWatchingStatus(state).show).toBe(false);
+  });
+});
+
+describe("continueWatchingGroup", () => {
+  const item = (over: Partial<PublicStreamHistoryItem>): PublicStreamHistoryItem => ({
+    key: "k",
+    title: "Harrowgate",
+    next: null,
+    rawName: "Harrowgate.S03.1080p.WEB-DL",
+    infoHash: "a".repeat(40),
+    startedAt: 0,
+    ...over,
+  });
+
+  /**
+   * The search tab would be wrong here: these rows are not part of a search, so
+   * a show looked up under whatever tab was last clicked comes back with the
+   * wrong artwork or none.
+   */
+  it("uses the row's own type, not the search tab", () => {
+    expect(continueWatchingGroup(item({ type: "series" }))).toBe("TV");
+    expect(continueWatchingGroup(item({ type: "movie" }))).toBe("Movies");
+  });
+
+  it("falls back to All when the store never decided", () => {
+    expect(continueWatchingGroup(item({}))).toBe("All");
   });
 });

@@ -133,6 +133,7 @@ import {
   applySaved,
   applySavedSearchesResponse,
   continueWatchingBody,
+  continueWatchingGroup,
   continueWatchingFallbackQuery,
   continueWatchingStatus,
   continueWatchingSub,
@@ -1408,6 +1409,13 @@ async function loadSources(): Promise<void> {
   renderTabs();
   renderResults();
   renderPrefs();
+  // AND the saved pane, which is new here: its Continue-watching rows carry
+  // artwork now, and whether to fetch any depends on `omdbConfigured` — which
+  // arrives in this response. `loadSaved` and `loadSources` are both fired
+  // unawaited at boot, and saved usually wins, so without this the rows are
+  // built while the answer is still "no key" and stay blank until something
+  // else happens to re-render them.
+  renderSaved();
 
   const claimHint = reccClaimHint(sources?.reccAccount);
   reccClaimHintLine.textContent = claimHint ?? "";
@@ -1930,7 +1938,9 @@ const posterObserver: IntersectionObserver | null =
           // Stop watching this frame specifically; the others stay armed.
           posterObserver?.unobserve(entry.target);
           const pending = posterTargets.get(entry.target);
-          if (pending) startPoster(pending.release, entry.target as HTMLElement, pending.compact);
+          if (pending) {
+            startPoster(pending.release, entry.target as HTMLElement, pending.compact, pending.group);
+          }
         }
       })
     : null;
@@ -1938,10 +1948,17 @@ const posterObserver: IntersectionObserver | null =
 // What each observed frame is waiting for. A WeakMap so a frame discarded by a
 // re-render is collectable — a Map keyed on elements would be the leak this
 // design is avoiding, just spelled differently.
-const posterTargets = new WeakMap<Element, { release: string; compact: boolean }>();
+const posterTargets = new WeakMap<
+  Element,
+  { release: string; compact: boolean; group?: string }
+>();
 
-function startPoster(release: string, host: HTMLElement, compact: boolean): void {
-  const outcome = resultPosters.want(release, searchView.group);
+function startPoster(release: string, host: HTMLElement, compact: boolean, group?: string): void {
+  // `group` is what OMDb is asked to look the title up as. It defaults to the
+  // search tab because that is where posters started — but the Continue-watching
+  // rows are not part of a search, and asking for a show under whatever tab the
+  // user last clicked would look it up as a film.
+  const outcome = resultPosters.want(release, group ?? searchView.group);
   if (!(outcome instanceof Promise)) {
     paintPoster(host, outcome, compact);
     return;
@@ -1962,7 +1979,12 @@ function startPoster(release: string, host: HTMLElement, compact: boolean): void
  * naturally ~20 picks and needs no such gate, which is why its own mount is
  * eager.
  */
-function mountResultPoster(release: string, host: HTMLElement, compact: boolean): void {
+function mountResultPoster(
+  release: string,
+  host: HTMLElement,
+  compact: boolean,
+  group?: string,
+): void {
   const known = resultPosters.peek(release);
   if (known !== undefined) {
     // Settled already: paint it and never observe it. This is the path almost
@@ -1977,10 +1999,10 @@ function mountResultPoster(release: string, host: HTMLElement, compact: boolean)
   // hole, and the row does not resize when the image lands.
   host.replaceChildren();
   if (posterObserver === null) {
-    startPoster(release, host, compact);
+    startPoster(release, host, compact, group);
     return;
   }
-  posterTargets.set(host, { release, compact });
+  posterTargets.set(host, { release, compact, group });
   posterObserver.observe(host);
 }
 
@@ -3445,7 +3467,7 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
 // string `renderLibraryRow`'s `name` is.
 function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   const li = document.createElement("li");
-  li.className = "row";
+  li.className = "row continue-row";
 
   const head = document.createElement("div");
   head.className = "result-head";
@@ -3454,6 +3476,22 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   name.textContent = item.title;
   name.title = item.rawName;
   head.append(name);
+
+  // ARTWORK. This was the only pane in the app with none — five grey text slabs
+  // in a product whose search and For You panes are both poster walls — and it
+  // is the pane most likely to be opened from a sofa, where recognising a show
+  // by its cover is the entire interaction. The whole point of "continue
+  // watching" is that you already know what these are.
+  //
+  // The SAME cache and the same lazy mount the results list uses, keyed on the
+  // release name, so a title showing in both places is fetched once and the
+  // daily-capped OMDb key is spent once. Small: this is a resume list, not a
+  // browse, and the row stays a row.
+  const poster = document.createElement("div");
+  poster.className = "poster continue-poster";
+  if (postersApply(continueWatchingGroup(item), sources?.omdbConfigured === true)) {
+    mountResultPoster(item.rawName, poster, true, continueWatchingGroup(item));
+  }
 
   const meta = document.createElement("span");
   meta.className = "row-meta";
@@ -3519,7 +3557,13 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   remove.addEventListener("click", () => void removeContinueWatching(item.key));
   actions.append(remove);
 
-  li.append(head, meta, actions);
+  // The poster is a sibling of the text column, not inside it: the row becomes
+  // a two-column grid (see .continue-row) so the artwork spans title, subtitle
+  // and buttons rather than sitting above them.
+  const body = document.createElement("div");
+  body.className = "continue-body";
+  body.append(head, meta, actions);
+  li.append(poster, body);
   return li;
 }
 
