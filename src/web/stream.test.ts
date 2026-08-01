@@ -1823,6 +1823,55 @@ describe("the .vtt representation", () => {
     const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
     expect(res.status).toBe(502);
   });
+
+  /**
+   * The test above proves the ROUTE's contract ("fetchSubtitle returned null
+   * -> 502"), but the fake fetchSubtitle re-implements the cap itself — it
+   * would still pass if the REAL `defaultFetchSubtitle` buffered the whole
+   * body with `Buffer.concat` and checked the size only after `end`, which is
+   * an unbounded-memory remote DoS. This test runs the real implementation
+   * against a real socket and proves two things a fake cannot: that a body
+   * which never legitimately ends (the `/slow` branch drips forever) is cut
+   * off rather than buffered, and that the upstream connection is actually
+   * torn down — via the same live-socket-count signal the WebTorrent proxy's
+   * own abandonment test uses — rather than merely abandoned mid-read.
+   */
+  it(
+    "stops reading a body that exceeds the cap over a real socket, and closes it",
+    async () => {
+      upstream = await startUpstream();
+      const { reg, id, capability } = await torrentSession(
+        [
+          {
+            filename: "Kestrel.2010.1080p.BluRay.x264.mkv",
+            url: `${upstream.base}/webtorrent/hash/one.mp4`,
+            bytes: MEDIA.length,
+          },
+          // Claimed size is tiny — the claimed-size cap (413) must not be what
+          // stops this request, or the test would prove nothing about the
+          // received-bytes path.
+          {
+            filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt",
+            url: `${upstream.base}/slow`,
+            bytes: 40,
+          },
+        ],
+        "cap-slow-vtt",
+        "sid-slow-vtt",
+      );
+      // No fetchSubtitle override: this is the real defaultFetchSubtitle.
+      const base = await start(reg);
+      const res = await fetch(`${base}/stream/${id}/1.vtt?k=${capability}`);
+      expect(res.status).toBe(502);
+      // Not merely abandoned: the upstream socket is actually gone. `/slow`
+      // drips 4 KiB every 5ms forever and only clears its interval and drops
+      // out of `open` once its response closes, so this can only pass if the
+      // cap destroyed the connection rather than reading it to a "completion"
+      // that never comes.
+      await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 10000 });
+    },
+    15000,
+  );
 });
 
 describe("the .m3u with a matched subtitle", () => {
