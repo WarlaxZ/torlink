@@ -10,10 +10,18 @@
   <body>
     <header id="page-header">
       <h1>torlnk</h1>
-      <!-- Search / For You / Saved / Queue. Buttons rather than links or a
-           router: it is one page with four panes, and a URL that could be
-           bookmarked mid-search would promise a restored search it cannot
-           deliver (the stream is not replayable).
+      <!-- Search / For You / Saved / Queue. Buttons rather than links: it is one
+           page with four panes, and there is no route to navigate to.
+
+           There IS now URL state (route.ts writes ?q= &group= &view= with
+           replaceState), which this comment used to rule out on the grounds
+           that a bookmarked URL "would promise a restored search it cannot
+           deliver (the stream is not replayable)". That is right about STREAMS,
+           and still holds: no session id and no ?k= is ever written here, so
+           nothing in this URL promises to resume a dead session. It was wrong
+           about SEARCHES — a query and a tab replay by definition — and the
+           cost of pretending otherwise was that leaving the player page, which
+           is a separate document, dropped the user on an empty search box.
 
            Saved holds both of the TUI's lists — saved searches (saved search
            queries) and the library (favourited torrents) — in one pane rather

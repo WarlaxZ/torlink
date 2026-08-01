@@ -274,6 +274,7 @@ describe("toPublicSession", () => {
       capability: CAPABILITY,
       backendHandle: null,
       backend: "torrent",
+      infoHash: "f".repeat(40),
       name: "Some Release",
       state: "ready",
       files: [

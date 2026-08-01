@@ -20,13 +20,15 @@
 import http from "node:http";
 import https from "node:https";
 import { isAuthorized } from "../daemon/auth";
-import { streamHandle } from "./routes";
+import { streamHandle, toPublicSession } from "./routes";
 import { probeUrl } from "../core/probe";
 import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../util/playability";
 import type { ProbeCache } from "../core/probeCache";
 import type { HlsVerdictCache } from "../core/hlsVerdictCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
-import type { StreamInfoResponse } from "./wire";
+import { streamCandidates } from "../util/videoFiles";
+import { sortStreamFiles } from "../util/streamFileSort";
+import type { StreamFilesResponse, StreamInfoResponse } from "./wire";
 import {
   HTTP_AND_HTTPS,
   HTTP_ONLY,
@@ -135,24 +137,26 @@ export function parseStreamPath(urlPath: string): { sid: string; index: number }
 
 const PLAYLIST_SUFFIX = ".m3u";
 const INFO_SUFFIX = ".info";
+const FILES_SUFFIX = ".files";
 
 /** Which representation of the stream handle a path is asking for. */
-export type StreamRep = "media" | "playlist" | "info";
+export type StreamRep = "media" | "playlist" | "info" | "files";
 
 /**
- * Split a trailing `.m3u` or `.info` off a stream path.
+ * Split a trailing `.m3u`, `.info` or `.files` off a stream path.
  *
- * Both are *representations* of the handle, not second resources, so neither is
- * a second route: stripping the suffix here means the session lookup, the
+ * All are *representations* of the handle, not second resources, so none is a
+ * second route: stripping the suffix here means the session lookup, the
  * capability check, the readiness check and the bounds check below are literally
- * the same code for all three. A `.m3u` that skipped the capability would hand
- * out a playable URL to anyone who guessed a session id, and a `.info` that
- * skipped it would hand out a filename and codec list; the only durable way to
- * stop both is for there to be one guard, not three.
+ * the same code for all four. A `.m3u` that skipped the capability would hand
+ * out a playable URL to anyone who guessed a session id, a `.info` that skipped
+ * it would hand out a filename and codec list, and a `.files` that skipped it
+ * would hand out every filename in the torrent; the only durable way to stop
+ * all three is for there to be one guard, not four.
  *
- * Matched with `endsWith` on an exact lowercase suffix, so `.m3u8`, `.INFO` and
- * `.information` are all just filenames — a near-miss must fall through to the
- * media branch rather than be helpfully interpreted.
+ * Matched with `endsWith` on an exact lowercase suffix, so `.m3u8`, `.INFO`,
+ * `.information` and `.profiles` are all just filenames — a near-miss must fall
+ * through to the media branch rather than be helpfully interpreted.
  */
 export function splitRepresentation(urlPath: string): { path: string; rep: StreamRep } {
   if (urlPath.endsWith(PLAYLIST_SUFFIX)) {
@@ -161,7 +165,32 @@ export function splitRepresentation(urlPath: string): { path: string; rep: Strea
   if (urlPath.endsWith(INFO_SUFFIX)) {
     return { path: urlPath.slice(0, -INFO_SUFFIX.length), rep: "info" };
   }
+  if (urlPath.endsWith(FILES_SUFFIX)) {
+    return { path: urlPath.slice(0, -FILES_SUFFIX.length), rep: "files" };
+  }
   return { path: urlPath, rep: "media" };
+}
+
+/**
+ * The session indexes for `?rest=1`: this file, then every later one.
+ *
+ * "Later" is in DISPLAY order, not session order — the two differ whenever a
+ * torrent names its files in some order of its own, which is most of them, and
+ * a playlist in session order would run E08 then E02. `sortStreamFiles` is the
+ * ordering the picker and the player page's episode list already use, so all
+ * three agree about what "the rest of the season" means.
+ *
+ * Returns just `[index]` when the file is not among the candidates — a `.nfo`
+ * addressed directly, say. That is the pre-`rest` behaviour, which is the right
+ * answer for a file that is not part of any run.
+ */
+function restOfSession(session: StreamSession, index: number): number[] {
+  const ordered = sortStreamFiles(
+    streamCandidates(session.files.map((file, at) => ({ ...file, at }))),
+    "name",
+  );
+  const from = ordered.findIndex((file) => file.at === index);
+  return from >= 0 ? ordered.slice(from).map((file) => file.at) : [index];
 }
 
 const PLAY_BASE = "/play";
@@ -339,6 +368,31 @@ export async function handleStreamRequest(
     return 404;
   }
 
+  // The `.files`: what else is in this session, so the player page can offer
+  // the next episode instead of being a dead end. Same position as `.info` and
+  // the playlist — after every guard, before the backend split — because the
+  // answer is about the session, not about who is serving its bytes.
+  //
+  // `toPublicSession` does the mapping, not a local loop: it is the one place
+  // that swaps a file's upstream URL (a Real-Debrid credential, or an
+  // unreachable localhost address) for a `/stream/:sid/:idx` handle, and it
+  // builds by picking fields so a field added to `StreamSession` later stays
+  // private by default. A second mapping here would inherit neither property.
+  //
+  // `streamCandidates` filters to the video files — the same rule the picker
+  // uses, so the two lists cannot disagree about what is in a torrent — and it
+  // falls back to every file when nothing looks like video, because a release
+  // that ships one unrecognised container is still worth handing to VLC.
+  if (rep === "files") {
+    const body: StreamFilesResponse = {
+      name: session.name,
+      infoHash: session.infoHash,
+      files: streamCandidates(toPublicSession(session).files),
+    };
+    writeJson(res, 200, body);
+    return 200;
+  }
+
   // The `.info`: what this file is, and how the player page should try to play
   // it. Same position as the playlist below — after every guard, before the
   // backend split — because the answer is about the media, not about which
@@ -442,12 +496,29 @@ export async function handleStreamRequest(
     // session, so nothing a client put in the URL is reflected into the body.
     // The capability is re-encoded from the value that just passed the auth
     // check — omit it and the playlist is a 401 in whatever player opens it.
-    const url = `${origin}${streamHandle(parsed.sid, parsed.index)}?k=${encodeURIComponent(k!)}`;
-    // One bare URL, no #EXTM3U and no #EXTINF title. Every player accepts the
+    const handleUrl = (index: number): string =>
+      `${origin}${streamHandle(parsed.sid, index)}?k=${encodeURIComponent(k!)}`;
+
+    // `?rest=1` — this file and every later one, so a season plays unattended
+    // rather than one download per episode. A PARAMETER on the existing
+    // representation rather than a route of its own: the guards above, the
+    // origin check, and the body rule below all apply unchanged, and a second
+    // playlist route would be a second place to forget one of them.
+    //
+    // Order is `sortStreamFiles`, the module the picker and the player page's
+    // episode list already share — a playlist that ran E08, E02, E03 would be
+    // the same bug that helper was extracted to fix — and `streamCandidates`
+    // drops the `.nfo`s, because handing a text file to a media player is how a
+    // playlist stalls halfway through a season.
+    const wantsRest = (query.get("rest") ?? "") === "1";
+    const indexes = wantsRest ? restOfSession(session, parsed.index) : [parsed.index];
+
+    // Bare URLs, no #EXTM3U and no #EXTINF title. Every player accepts the
     // simplest form, and the alternative would mean interpolating a torrent's
     // filename — attacker-controlled text — into a file another application
-    // parses. Nothing in this body is derived from the media at all.
-    const body = `${url}\n`;
+    // parses. Nothing in this body is derived from the media at all, and adding
+    // a second entry does not change that.
+    const body = `${indexes.map(handleUrl).join("\n")}\n`;
     res.writeHead(200, {
       // The content type is what makes the browser hand the file to the OS
       // instead of rendering it. text/plain and octet-stream both end with the

@@ -1153,6 +1153,24 @@ select:focus-visible {
   color: var(--accent);
 }
 
+/* The way back to the show, above the filename it belongs to. Quiet: it is an
+   escape hatch for when there is no history to go back through, not a thing to
+   look at while the episode plays. */
+.breadcrumb {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
+.breadcrumb a {
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+}
+
 .file-name {
   margin: 0 0 1rem;
   overflow-wrap: anywhere;
@@ -1199,6 +1217,51 @@ select:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* The rest of the torrent. Borrows the picker's vocabulary deliberately — this
+   is the same list of the same files, and it should not look like a new idea
+   just because it is on a different page. */
+.episodes {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.episodes-heading {
+  margin: 0.9rem 0 0.35rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.episodes-heading:first-child {
+  margin-top: 0;
+}
+
+.episode-row {
+  display: block;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.episode-row:hover {
+  border-color: var(--line);
+  background: var(--raised);
+}
+
+/* The file this page is already for. Dimmed rather than hidden: it is the
+   anchor that tells you where in the season you are, so removing it would make
+   the list harder to read, but it is not somewhere to click. */
+.episode-row.is-current {
+  color: var(--dim);
+  background: var(--sunken);
 }
 
 /* An <a> that has to sit next to a <button> and be indistinguishable from it.

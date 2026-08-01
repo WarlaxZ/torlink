@@ -66,21 +66,48 @@ export function parsePlayerLocation(pathname: string, search: string): PlayerTar
 }
 
 /**
- * The stream handle path for a target: `/stream/:sid/:idx?k=…`.
+ * One representation of the stream handle: `/stream/:sid/:idx<suffix>?k=…`.
+ *
+ * Written once and shared by the four public builders below, which are the same
+ * address four times over — `splitRepresentation` on the server treats them as
+ * one route with one set of guards, and it would be odd for the client to spell
+ * the address four times and risk them drifting apart.
  *
  * Mirrors `streamHandle` in ../routes.ts — the same encodeURIComponent, for the
- * same reason. A session id with a slash in it must not become a different
- * path here than the one the server will parse.
+ * same reason. A session id with a slash in it must not become a different path
+ * here than the one the server will parse.
  */
-export function streamPath(target: PlayerTarget): string {
-  const base = `/stream/${encodeURIComponent(target.sid)}/${target.index}`;
+function repPath(target: PlayerTarget, suffix: string): string {
+  const base = `/stream/${encodeURIComponent(target.sid)}/${target.index}${suffix}`;
   return target.capability ? `${base}?k=${encodeURIComponent(target.capability)}` : base;
+}
+
+/** The media itself: `/stream/:sid/:idx?k=…`. */
+export function streamPath(target: PlayerTarget): string {
+  return repPath(target, "");
 }
 
 /** The `.m3u` path for a target. Same address, playlist representation. */
 export function playlistPath(target: PlayerTarget): string {
-  const base = `/stream/${encodeURIComponent(target.sid)}/${target.index}.m3u`;
-  return target.capability ? `${base}?k=${encodeURIComponent(target.capability)}` : base;
+  return repPath(target, ".m3u");
+}
+
+/**
+ * The `.m3u` for this file AND every later one — the rest of the season in one
+ * playlist, so VLC runs on without coming back here between episodes.
+ *
+ * A parameter on the playlist rather than a fifth representation, mirroring the
+ * server: `?rest=1` reuses the same guards, the same origin check and the same
+ * "no filename in the body" rule, and a route of its own would be a second
+ * place to forget one of them.
+ *
+ * Built by appending rather than through `repPath`, because the separator
+ * depends on whether a capability put a `?` there first. A tokenless loopback
+ * server has no capability on the URL and would otherwise get `?k=&rest=1`.
+ */
+export function restPlaylistPath(target: PlayerTarget): string {
+  const base = playlistPath(target);
+  return `${base}${base.includes("?") ? "&" : "?"}rest=1`;
 }
 
 /** Resolve one of the paths above against the page's own origin. */
@@ -95,8 +122,19 @@ export { extensionOf };
 
 /** The `.info` path for a target. Same address, facts representation. */
 export function infoPath(target: PlayerTarget): string {
-  const base = `/stream/${encodeURIComponent(target.sid)}/${target.index}.info`;
-  return target.capability ? `${base}?k=${encodeURIComponent(target.capability)}` : base;
+  return repPath(target, ".info");
+}
+
+/**
+ * The `.files` path for a target. Same address, session-listing representation.
+ *
+ * Capability-carrying like the other three, and for the reason the page exists
+ * at all: this document may be a phone that was handed a link, so it holds the
+ * session capability and not the server's bearer token, and `/api/stream/:sid`
+ * is closed to it.
+ */
+export function filesPath(target: PlayerTarget): string {
+  return repPath(target, ".files");
 }
 
 /**

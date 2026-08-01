@@ -5,10 +5,12 @@ import {
   detectPlatform,
   extensionOf,
   fallbackMessage,
+  filesPath,
   infoPath,
   interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  restPlaylistPath,
   routeFailure,
   streamPath,
   vlcLinks,
@@ -118,6 +120,32 @@ describe("infoPath", () => {
 
   it("omits the query entirely when there is no capability", () => {
     expect(infoPath(target({ capability: "" }))).toBe("/stream/sid-1/0.info");
+  });
+});
+
+describe("restPlaylistPath", () => {
+  it("appends to the capability's query string", () => {
+    expect(restPlaylistPath(target())).toBe("/stream/sid-1/0.m3u?k=cap-1&rest=1");
+  });
+
+  it("starts a query string when there is no capability", () => {
+    // A tokenless loopback server puts no ?k= on the URL, and "?k=&rest=1"
+    // would be a capability the server reads as empty.
+    expect(restPlaylistPath(target({ capability: "" }))).toBe("/stream/sid-1/0.m3u?rest=1");
+  });
+});
+
+describe("filesPath", () => {
+  it("is the stream handle plus .files, carrying the capability", () => {
+    expect(filesPath(target())).toBe("/stream/sid-1/0.files?k=cap-1");
+  });
+
+  it("encodes a session id with a slash in it", () => {
+    expect(filesPath(target({ sid: "a/b" }))).toBe("/stream/a%2Fb/0.files?k=cap-1");
+  });
+
+  it("omits the query entirely when there is no capability", () => {
+    expect(filesPath(target({ capability: "" }))).toBe("/stream/sid-1/0.files");
   });
 });
 

@@ -184,16 +184,9 @@ import {
   type ListState,
 } from "./suggestModel";
 import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
-
-// The token is held in sessionStorage and sent as an Authorization header on
-// every API call. No cookie authenticates the API — but that does NOT mean there
-// is no CSRF vector, which is what this comment used to claim: the usual way to
-// run the dashboard is with no token at all, and then there is no credential to
-// forge in the first place. A cross-origin page's POST would simply have been
-// authorized. The server rejects state-changing requests whose Origin /
-// Sec-Fetch-Site say cross-site (daemon/auth.ts, isCrossSiteRequest); this
-// page's own fetches are same-origin and unaffected.
-const TOKEN_KEY = "torlnk.token";
+import { authHeadersFor, readStoredToken, storeToken } from "./token";
+import { routeFromSearch, urlForRoute, type RouteState } from "./route";
+import { rememberReturn } from "./returnTo";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -282,26 +275,15 @@ const previewSub = el<HTMLParagraphElement>("preview-sub");
 const previewBody = el<HTMLParagraphElement>("preview-body");
 const previewImdb = el<HTMLAnchorElement>("preview-imdb");
 
-// sessionStorage throws, rather than returning null, when storage is blocked
-// (Safari private mode, a hardened profile). Losing the remembered token is a
-// re-prompt; letting it throw here would leave the page dead before it renders.
-function readStoredToken(): string {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function storeToken(value: string): void {
-  try {
-    sessionStorage.setItem(TOKEN_KEY, value);
-  } catch {
-    /* not remembering the token is survivable; failing the unlock is not */
-  }
-}
-
+// readStoredToken/storeToken moved to ./token.ts when the player page became a
+// second reader of the same sessionStorage slot — moved down rather than copied,
+// as always.
 let token = readStoredToken();
+
+// What this URL says the user was doing, read BEFORE the token strip below —
+// which rewrites the address bar and, if it ran first, would be reading the
+// route out of a URL it had already replaced. `openApp` applies it.
+const bootRoute = routeFromSearch(location.search);
 
 // A magic link (`…/#k=<token>`) hands this page a working token so the user
 // never types one. Adopted into the same sessionStorage slot the unlock form
@@ -315,7 +297,12 @@ if (linkToken) {
   token = linkToken;
   storeToken(token);
   try {
-    history.replaceState(null, "", location.pathname + location.search);
+    // `urlForRoute`, not `location.pathname + location.search`, which is what
+    // this used to be: the search string now carries the route, and rebuilding
+    // it from `bootRoute` is what keeps the strip from being order-dependent.
+    // The fragment is not an input to that function, so the token cannot come
+    // back out of it.
+    history.replaceState(null, "", urlForRoute(location.pathname, bootRoute));
   } catch {
     // Same defence, and the same reason, as readStoredToken/storeToken above:
     // an opaque origin (a sandboxed iframe without allow-same-origin) breaks
@@ -332,7 +319,7 @@ let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 let reprobing = false;
 
 function authHeaders(): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return authHeadersFor(token);
 }
 
 function setConn(state: "connecting" | "live" | "lost"): void {
@@ -780,14 +767,22 @@ function stopSession(sessionId: string): void {
 // Navigate this tab, rather than window.open(): by the time a session is ready
 // the click that started it is seconds or minutes old, so the popup has lost its
 // user activation and every browser blocks it — and on a phone there is nowhere
-// useful for a second tab to go anyway. The player page carries a "back to
-// queue" link.
+// useful for a second tab to go anyway. The player page carries a link back
+// here.
+//
+// THE NOTE IS WHY THAT LINK WORKS. The player page cannot tell where it came
+// from: it sets `no-referrer` deliberately, because its URL carries a stream
+// capability in `?k=` and a Referer would hand that to anything it links at. So
+// this side writes down where it is going *from*, into sessionStorage, which is
+// per tab — and this is the same tab, because of the `location.assign` below.
+// See returnTo.ts.
 //
 // The session is deliberately NOT stopped here. It is what the player is about
 // to fetch. Nothing in this tab outlives the navigation, so a session whose
 // player tab is simply closed is cleaned up by the registry's idle reaping —
 // the player page cannot DELETE it itself, having a capability but no token.
 function openPlayer(path: string): void {
+  rememberReturn(`${location.pathname}${location.search}`);
   location.assign(path);
 }
 
@@ -1177,6 +1172,39 @@ let seededExpansion = false;
 // rows that are not rendered.
 let currentRows: GroupRow<PublicSearchResult>[] = [];
 
+/**
+ * Put what the user is doing into the address bar.
+ *
+ * WHY THIS PAGE HAS A URL NOW. The player at `/play/:sid/:idx` is a separate
+ * document, so leaving it — by its back link or by the browser's Back button —
+ * is a full page load of `/`. With nothing in the URL that booted to
+ * `emptyView()`: an empty box and no results, having discarded the search that
+ * got the user there. Finish an episode, want the next one, start again.
+ *
+ * `index.html` used to carry a comment refusing a router outright, because "a
+ * URL that could be bookmarked mid-search would promise a restored search it
+ * cannot deliver (the stream is not replayable)". That is true of STREAMS and
+ * route.ts keeps it true — no session id and no `?k=` goes in here, ever. It is
+ * not true of searches: a query and a tab replay by definition, and within
+ * `cachedSearch`'s five minutes they replay out of memory.
+ *
+ * `replaceState`, NOT `pushState`. Switching tabs is not a history entry the
+ * user asked for, and the one entry that matters — `/` → `/play/…` — has to be
+ * crossable in a single press of Back. Pushing here would bury it under one
+ * entry per keystroke-driven search.
+ *
+ * Wrapped for the reason the token strip above is: the History API throws on an
+ * opaque origin, and a tidy address bar is not worth a dead page.
+ */
+function syncUrl(): void {
+  const state: RouteState = { view, query: searchView.query, group: searchView.group };
+  try {
+    history.replaceState(null, "", urlForRoute(location.pathname, state));
+  } catch {
+    /* an opaque origin has no History API; the app is unaffected */
+  }
+}
+
 function showView(next: ViewName): void {
   view = next;
   paneSearch.hidden = next !== "search";
@@ -1195,6 +1223,7 @@ function showView(next: ViewName): void {
   // while this pane sat hidden must be here when the user opens it, and the
   // response is two small arrays.
   if (next === "saved") void loadSaved();
+  syncUrl();
 }
 
 viewSearchTab.addEventListener("click", () => showView("search"));
@@ -1329,6 +1358,9 @@ function startSearch(raw: string): void {
   cachedHashes = new Set();
   paintSearchHint();
   renderResults();
+  // After searchView.query is set, so the address bar names the search actually
+  // running rather than the one before it.
+  syncUrl();
 
   const source = new EventSource(searchUrl(query, searchView.group, token));
   searchStream = source;
@@ -3436,6 +3468,12 @@ function openApp(payload: StatusPayload): void {
   app.hidden = false;
   viewsNav.hidden = false;
   prefsBlock.hidden = false;
+  // The URL's tab, before the first render, so the strip and the state agree
+  // from the outset. The QUERY is run at the end of this function, once the
+  // panes exist and `loadSaved` has been kicked off — running it here would
+  // paint results into a `hidden` #app.
+  view = bootRoute.view;
+  searchView = { ...searchView, group: bootRoute.group };
   showView(view);
   renderTabs();
   layoutSelect.value = layout;
@@ -3463,6 +3501,17 @@ function openApp(payload: StatusPayload): void {
   // "favourite" and the first click removes it.
   void loadSaved();
   queryInput.focus();
+  // The search the URL asked for — last, and only when there is one.
+  //
+  // This is what makes coming back from the player work: the player page is a
+  // separate document, so Back is a full page load, and the query the user ran
+  // has to come from somewhere. It comes from here. A blank query is left alone
+  // rather than run as a browse: an empty `/` must not fan out to 23 trackers
+  // because someone opened the dashboard.
+  if (bootRoute.query.trim()) {
+    queryInput.value = bootRoute.query;
+    startSearch(bootRoute.query);
+  }
 }
 
 function connect(): void {

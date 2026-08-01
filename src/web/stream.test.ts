@@ -872,6 +872,10 @@ describe("splitRepresentation", () => {
     expect(splitRepresentation("/stream/a/0.info")).toEqual({ path: "/stream/a/0", rep: "info" });
   });
 
+  it("splits a .files off", () => {
+    expect(splitRepresentation("/stream/a/0.files")).toEqual({ path: "/stream/a/0", rep: "files" });
+  });
+
   it("does not treat a near-miss suffix as a representation", () => {
     expect(splitRepresentation("/stream/a/0.information")).toEqual({
       path: "/stream/a/0.information",
@@ -879,6 +883,16 @@ describe("splitRepresentation", () => {
     });
     expect(splitRepresentation("/stream/a/0.INFO")).toEqual({
       path: "/stream/a/0.INFO",
+      rep: "media",
+    });
+    expect(splitRepresentation("/stream/a/0.FILES")).toEqual({
+      path: "/stream/a/0.FILES",
+      rep: "media",
+    });
+    // A real filename, not a representation: `.files` is matched on the whole
+    // suffix, and "profiles" merely ends in the same five letters.
+    expect(splitRepresentation("/stream/a/0.profiles")).toEqual({
+      path: "/stream/a/0.profiles",
       rep: "media",
     });
   });
@@ -1160,6 +1174,184 @@ describe("GET /stream/:sid/:idx.info", () => {
     const { base, capability, id } = await infoSession();
     const res = await fetch(`${base}/stream/${id}/0.m3u?k=${capability}`);
     expect(res.headers.get("content-type")).toContain("audio/x-mpegurl");
+  });
+});
+
+describe("GET /stream/:sid/:idx.files", () => {
+  const PACK = "Harrowgate.S03.1080p.WEB-DL";
+  const EPISODES: StreamFile[] = [
+    { url: "https://cdn.example/3", filename: "Harrowgate.S03E03.1080p.WEB-DL.mkv", bytes: 300 },
+    { url: "https://cdn.example/1", filename: "Harrowgate.S03E01.1080p.WEB-DL.mkv", bytes: 100 },
+    { url: "https://cdn.example/nfo", filename: "Harrowgate.S03/readme.nfo", bytes: 1 },
+    { url: "https://cdn.example/2", filename: "Harrowgate.S03E02.1080p.WEB-DL.mkv", bytes: 200 },
+  ];
+
+  async function packSession(
+    over: { files?: StreamFile[]; name?: string; token?: string } = {},
+  ): Promise<{ base: string; capability: string; id: string }> {
+    const reg = registry({
+      idFactory: () => "sid-files",
+      capabilityFactory: () => "cap-files",
+      resolveDebridImpl: async () => over.files ?? EPISODES,
+    });
+    const s = await reg.start({
+      infoHash: "1".repeat(40),
+      magnet: "magnet:?xt=urn:btih:" + "1".repeat(40),
+      name: over.name ?? PACK,
+      route: { kind: "debrid", provider: "realdebrid" },
+      debridToken: "rd-token",
+    });
+    expect(s.state).toBe("ready");
+    const base = await start(reg, over.token ? { token: over.token } : {});
+    return { base, capability: "cap-files", id: "sid-files" };
+  }
+
+  it("401s without the capability", async () => {
+    const { base, id } = await packSession();
+    const res = await fetch(`${base}/stream/${id}/0.files`);
+    expect(res.status).toBe(401);
+  });
+
+  it("401s for the wrong capability", async () => {
+    const { base, id } = await packSession();
+    const res = await fetch(`${base}/stream/${id}/0.files?k=not-the-capability`);
+    expect(res.status).toBe(401);
+  });
+
+  /**
+   * The capability is the ONLY key to this representation. `?k=` deliberately
+   * satisfies no `/api/*` route, and the converse has to hold too: the server's
+   * bearer token is not a substitute for a session's own capability, or the
+   * "one guard" this handler funnels everything through would have a second
+   * door beside it.
+   */
+  it("is not reachable with the server's bearer token in place of ?k=", async () => {
+    const { base, id, capability } = await packSession({ token: "server-token" });
+    const res = await fetch(`${base}/stream/${id}/0.files`, {
+      headers: { Authorization: "Bearer server-token" },
+    });
+    expect(res.status).toBe(401);
+    // And the capability still opens it on the same tokened server: two
+    // separate doors, not both shut.
+    expect((await fetch(`${base}/stream/${id}/0.files?k=${capability}`)).status).toBe(200);
+  });
+
+  it("404s for an unknown session", async () => {
+    const { base, capability } = await packSession();
+    const res = await fetch(`${base}/stream/nope/0.files?k=${capability}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s for an index past the end of the file list", async () => {
+    const { base, capability, id } = await packSession();
+    const res = await fetch(`${base}/stream/${id}/99.files?k=${capability}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("lists the session's video files with their session indexes", async () => {
+    const { base, capability, id } = await packSession();
+    const res = await fetch(`${base}/stream/${id}/0.files?k=${capability}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe(PACK);
+    // Session order is preserved — the DISPLAY order is the page's business,
+    // and it applies the same sortStreamFiles the picker does.
+    expect(body.files.map((f: { filename: string }) => f.filename)).toEqual([
+      "Harrowgate.S03E03.1080p.WEB-DL.mkv",
+      "Harrowgate.S03E01.1080p.WEB-DL.mkv",
+      "Harrowgate.S03E02.1080p.WEB-DL.mkv",
+    ]);
+    // The .nfo is dropped, so the indexes are NOT 0,1,2 — they still address
+    // the session, which is the whole point of sending them.
+    expect(body.files.map((f: { index: number }) => f.index)).toEqual([0, 1, 3]);
+    expect(body.files[0].handle).toBe(`/stream/${id}/0`);
+  });
+
+  it("never includes the upstream URL", async () => {
+    const { base, capability, id } = await packSession();
+    const text = await (await fetch(`${base}/stream/${id}/0.files?k=${capability}`)).text();
+    expect(text).not.toContain("cdn.example");
+  });
+
+  it("never logs the capability", async () => {
+    const { base, capability, id } = await packSession();
+    await fetch(`${base}/stream/${id}/0.files?k=${capability}`);
+    expect(logs.join("\n")).not.toContain("cap-files");
+  });
+
+  it("rejects a method other than GET or HEAD", async () => {
+    const { base, capability, id } = await packSession();
+    const res = await fetch(`${base}/stream/${id}/0.files?k=${capability}`, { method: "POST" });
+    expect(res.status).toBe(405);
+  });
+
+  it("falls back to every file when nothing looks like video", async () => {
+    const { base, capability, id } = await packSession({
+      files: [{ url: "https://cdn.example/a", filename: "disc.bin", bytes: 9 }],
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.files?k=${capability}`)).json();
+    expect(body.files).toHaveLength(1);
+    expect(body.files[0].filename).toBe("disc.bin");
+  });
+
+  /**
+   * `?rest=1` on the EXISTING playlist branch, not a new route: same path
+   * grammar, same guards, same absent filenames in the body. VLC gets one file
+   * per line and plays the rest of the season unattended.
+   */
+  describe("?rest=1", () => {
+    it("lists this file and every later one, in display order", async () => {
+      const { base, capability, id } = await packSession();
+      const res = await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`);
+      expect(res.status).toBe(200);
+      const lines = (await res.text()).trim().split("\n");
+      // Session index 1 is E01, which sorts first — so all three, in E01, E02,
+      // E03 order, which is session indexes 1, 3, 0.
+      expect(lines).toEqual([
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/1?k=${capability}`,
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/3?k=${capability}`,
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/0?k=${capability}`,
+      ]);
+    });
+
+    it("is just this file when it is the last one", async () => {
+      const { base, capability, id } = await packSession();
+      // Session index 0 is E03, which sorts last.
+      const text = await (await fetch(`${base}/stream/${id}/0.m3u?rest=1&k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
+
+    it("skips the non-video files the picker skips", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`)).text();
+      // The .nfo is session index 2 and must not be handed to a media player.
+      expect(text).not.toContain(`/stream/${id}/2?`);
+    });
+
+    it("still contains no filename at all", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`)).text();
+      // The whole point of the plain-URL body: another application parses this
+      // file, and nothing in it comes from a release name.
+      expect(text).not.toContain("Harrowgate");
+      expect(text).not.toContain("#EXTINF");
+    });
+
+    it("is unchanged without the parameter", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
+
+    /**
+     * The value is read as a presence flag, but `rest=0` reading as "yes" would
+     * be a trap for anyone building the URL by hand.
+     */
+    it("treats rest=0 as off", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=0&k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
   });
 });
 

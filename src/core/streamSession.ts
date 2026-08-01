@@ -19,6 +19,13 @@ export interface StreamSession {
   backend: StreamBackend;
   // Which debrid service served it, when `backend` is "debrid".
   provider?: DebridProviderId;
+  // The torrent this session is of. Kept because it is the key every store in
+  // the app is written under — `markWatched` and `recordPlayedFile` both take
+  // it — and the player page, which is a separate document that knows only its
+  // own URL, has to be able to say "this episode was opened" without it.
+  // NOT part of `PublicStreamSession`: `toPublicSession` picks fields, and a
+  // polled session body has no use for it.
+  infoHash: string;
   name: string;
   state: StreamSessionState;
   // Upstream URLs: a Real-Debrid link, or a localhost WebTorrent URL. These stay
@@ -130,6 +137,7 @@ export class StreamSessionRegistry {
       backendHandle: null,
       backend: viaDebrid ? "debrid" : "torrent",
       ...(viaDebrid && input.route.kind === "debrid" ? { provider: input.route.provider } : {}),
+      infoHash: input.infoHash,
       name: input.name,
       state: "resolving",
       files: [],
