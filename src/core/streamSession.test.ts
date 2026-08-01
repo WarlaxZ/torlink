@@ -435,3 +435,72 @@ describe("StreamSessionRegistry — stopAll", () => {
     expect(registry.list()).toEqual([]);
   });
 });
+
+describe("StreamSessionRegistry — adopt", () => {
+  it("registers a ready session without calling either resolver", () => {
+    const streamTorrentImpl = vi.fn();
+    const resolveDebridImpl = vi.fn();
+    const registry = new StreamSessionRegistry({
+      streamTorrentImpl: streamTorrentImpl as never,
+      resolveDebridImpl: resolveDebridImpl as never,
+    });
+    const session = registry.adopt({
+      infoHash: "abc",
+      name: "Kepler.S02.1080p.WEB-DL",
+      backend: "debrid",
+      provider: "realdebrid",
+      files: FILES,
+    });
+    expect(session.state).toBe("ready");
+    expect(session.files).toEqual(FILES);
+    expect(session.capability).toBeTruthy();
+    expect(session.provider).toBe("realdebrid");
+    expect(registry.get(session.id)).toBe(session);
+    // The whole point: the TUI already paid for this resolve.
+    expect(streamTorrentImpl).not.toHaveBeenCalled();
+    expect(resolveDebridImpl).not.toHaveBeenCalled();
+  });
+
+  it("mints a distinct id and capability per adopted session", () => {
+    const registry = new StreamSessionRegistry();
+    const a = registry.adopt({
+      infoHash: "abc",
+      name: "Kestrel.2010.1080p.BluRay.x264",
+      backend: "torrent",
+      files: FILES,
+    });
+    const b = registry.adopt({
+      infoHash: "abc",
+      name: "Kestrel.2010.1080p.BluRay.x264",
+      backend: "torrent",
+      files: FILES,
+    });
+    expect(a.id).not.toBe(b.id);
+    expect(a.capability).not.toBe(b.capability);
+  });
+
+  it("omits provider entirely for a torrent-backed session", () => {
+    const registry = new StreamSessionRegistry();
+    const session = registry.adopt({
+      infoHash: "abc",
+      name: "Ashfall.1999.1080p",
+      backend: "torrent",
+      files: FILES,
+    });
+    expect("provider" in session).toBe(false);
+  });
+
+  it("stops without touching a backend it does not own", async () => {
+    const registry = new StreamSessionRegistry();
+    const session = registry.adopt({
+      infoHash: "abc",
+      name: "Ashfall.1999.1080p",
+      backend: "torrent",
+      files: FILES,
+    });
+    // The TUI owns the WebTorrent session behind these files and stops it itself
+    // on picker cancel. Dropping the row must not reach for it.
+    await expect(registry.stop(session.id)).resolves.toBeUndefined();
+    expect(registry.get(session.id)).toBeNull();
+  });
+});

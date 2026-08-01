@@ -70,6 +70,20 @@ export interface StartStreamInput {
 export const NO_DEBRID_TOKEN = "No debrid token configured for this stream.";
 
 /**
+ * Files a front end has already resolved, for {@link StreamSessionRegistry.adopt}.
+ *
+ * No `magnet`: nothing will ever re-resolve an adopted session, and
+ * `StreamSession` does not carry one.
+ */
+export interface AdoptStreamInput {
+  infoHash: string;
+  name: string;
+  backend: StreamBackend;
+  provider?: DebridProviderId;
+  files: StreamFile[];
+}
+
+/**
  * Owns live stream sessions for the whole process, so the TUI and the browser
  * see one list: a session started in the terminal is playable in a browser and
  * vice versa. One session type covers both backends — a debrid resolve and
@@ -202,6 +216,37 @@ export class StreamSessionRegistry {
     } finally {
       this.aborts.delete(session.id);
     }
+    return session;
+  }
+
+  /**
+   * Register files a front end has ALREADY resolved.
+   *
+   * The TUI resolves its own streams and hands the URLs straight to mpv, so its
+   * files were never in this registry. Casting needs them here, because a
+   * Chromecast can only fetch `/stream/:sid/:idx` — it cannot reach a debrid
+   * link it has no token for, nor the `localhost` WebTorrent server. Adopting is
+   * how that happens without spending a second resolve on the user's account.
+   *
+   * `backendHandle` is deliberately null: the caller still owns whatever serves
+   * these bytes and stops it on its own terms (the picker's cancel path). So
+   * `stop()` on an adopted session drops the row and reaches for nothing.
+   */
+  adopt(input: AdoptStreamInput): StreamSession {
+    const session: StreamSession = {
+      id: this.idFactory(),
+      capability: this.capabilityFactory(),
+      backendHandle: null,
+      backend: input.backend,
+      ...(input.provider ? { provider: input.provider } : {}),
+      infoHash: input.infoHash,
+      name: input.name,
+      state: "ready",
+      files: input.files,
+      progress: 1,
+      createdAt: this.now(),
+    };
+    this.sessions.set(session.id, session);
     return session;
   }
 
