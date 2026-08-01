@@ -41,6 +41,7 @@ import { backTarget, readReturn } from "./returnTo";
 import {
   createTrackFailureTracker,
   embeddedNotice,
+  subtitleDownload,
   subtitleTracks,
   type TrackSpec,
 } from "./subtitleModel";
@@ -447,6 +448,10 @@ async function render(): Promise<void> {
   // error that, for mkv in Chrome, never even fires.
   const info = await fetchInfo(target);
   const tracks = subtitleTracks(info, target);
+  const download = subtitleDownload(info, target);
+  if (download) {
+    actions.appendChild(linkButton(download.label, download.href));
+  }
   const chosen = chooseSource(info, target.filename);
   if (chosen.rung === "card") {
     showFallback(chosen.reason ?? "container", target.filename, info?.facts, info);

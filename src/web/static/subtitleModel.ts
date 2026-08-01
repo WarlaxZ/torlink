@@ -6,7 +6,7 @@
 // CLAUDE.md keeps out of the wiring file.
 import { subtitlePath, type PlayerTarget } from "./playerModel";
 import type { StreamInfoResponse } from "../wire";
-import { LANGUAGE_NAMES } from "../../util/subtitleFiles";
+import { LANGUAGE_NAMES, preferredSubtitle } from "../../util/subtitleFiles";
 
 /** One `<track>` the page should build. */
 export interface TrackSpec {
@@ -95,6 +95,40 @@ export function createTrackFailureTracker(): TrackFailureTracker {
       return subtitleErrorNotice(spec);
     },
   };
+}
+
+/** A "Download subtitle" link for the player page's action row, or none. */
+export interface SubtitleDownload {
+  label: string;
+  href: string;
+}
+
+/**
+ * The preferred renderable subtitle's `.vtt` URL, as a download link — or
+ * `null` when nothing matched.
+ *
+ * This exists because the `.m3u` no longer carries an `#EXTVLCOPT:input-slave`
+ * line: measured against a real VLC 3.0.11, that line is refused outright
+ * ("unsafe option \"input-slave\" has been ignored for security reasons"), so
+ * it never side-loaded anything. mpv and IINA still get the subtitle
+ * side-loaded via `subtitleArgs` (src/util/subtitleFlags.ts) when torlink
+ * itself launches the player, but VLC users who download the playlist and
+ * open it themselves get nothing that way — this link is what closes that
+ * gap: they can save the file and open it in VLC by hand.
+ *
+ * Only renderable siblings, same rule as `subtitleTracks`: an .ass/.ssa
+ * source would download as bytes that are valid WebVTT syntactically but
+ * carry none of the original styling, and offering it under "Download
+ * subtitle" implies it is the real file, which it is not.
+ */
+export function subtitleDownload(
+  info: StreamInfoResponse | null,
+  target: PlayerTarget,
+): SubtitleDownload | null {
+  const files = (info?.subtitles.files ?? []).filter((f) => f.renderable);
+  const preferred = preferredSubtitle(files);
+  if (!preferred) return null;
+  return { label: "Download subtitle", href: subtitlePath(target, preferred.index) };
 }
 
 export function embeddedNotice(info: StreamInfoResponse | null): string {

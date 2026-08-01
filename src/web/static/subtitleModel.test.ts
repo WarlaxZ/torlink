@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createTrackFailureTracker,
   embeddedNotice,
+  subtitleDownload,
   subtitleErrorNotice,
   subtitleTracks,
   type TrackSpec,
@@ -102,6 +103,67 @@ describe("subtitleTracks", () => {
       { ...target, capability: "a b&c" },
     );
     expect(tracks[0]?.src).toBe("/stream/abc/1.vtt?k=a%20b%26c");
+  });
+});
+
+describe("subtitleDownload", () => {
+  // Exists because the .m3u no longer carries an input-slave line (VLC 3
+  // refuses it as an unsafe option) — this is what a VLC user gets instead: a
+  // link they can save and open by hand.
+  it("points at the preferred renderable subtitle's .vtt handle", () => {
+    const download = subtitleDownload(
+      info({
+        subtitles: {
+          embedded: [],
+          files: [
+            { index: 1, filename: "Kepler.S02E04.eng.srt", language: "en", label: "English", renderable: true },
+          ],
+        },
+      }),
+      target,
+    );
+    expect(download).toEqual({ label: "Download subtitle", href: "/stream/abc/1.vtt?k=cap" });
+  });
+
+  it("prefers the English file among several matches", () => {
+    const download = subtitleDownload(
+      info({
+        subtitles: {
+          embedded: [],
+          files: [
+            { index: 1, filename: "a.spa.srt", language: "es", label: "Spanish", renderable: true },
+            { index: 2, filename: "a.eng.srt", language: "en", label: "English", renderable: true },
+          ],
+        },
+      }),
+      target,
+    );
+    expect(download?.href).toBe("/stream/abc/2.vtt?k=cap");
+  });
+
+  it("ignores a non-renderable match", () => {
+    // Same rule as subtitleTracks: an .ass/.ssa source run through the .vtt
+    // route produces bytes valid as neither format, so it must not be offered.
+    const download = subtitleDownload(
+      info({
+        subtitles: {
+          embedded: [],
+          files: [
+            { index: 1, filename: "Kepler.S02E04.eng.ass", language: "en", label: "English", renderable: false },
+          ],
+        },
+      }),
+      target,
+    );
+    expect(download).toBeNull();
+  });
+
+  it("returns null when nothing matched", () => {
+    expect(subtitleDownload(info({}), target)).toBeNull();
+  });
+
+  it("returns null for a null info", () => {
+    expect(subtitleDownload(null, target)).toBeNull();
   });
 });
 
