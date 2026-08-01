@@ -1,4 +1,5 @@
 import type { Blocker } from "../../util/playability";
+import { castClock, formatCastTime } from "../../util/castStatus";
 import type { CastDevicesResponse, CastStatusResponse, StreamInfoResponse } from "../wire";
 
 /**
@@ -81,32 +82,13 @@ export function castButtonView(input: CastButtonInput): CastButtonView {
 }
 
 /**
- * `h:mm:ss`.
+ * The line under "Playing on <device>", or null when nothing is casting.
  *
- * Defensive about its input because the input is a float from a television: the
- * receiver reports `currentTime` as a float, and has been seen to report a small
- * negative one while it is still seeking.
+ * The formatting itself is `castClock` in `src/util/`, shared with the terminal's
+ * cast row — this is only the "is anything casting" half.
  */
-export function formatCastTime(seconds: number): string {
-  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `${String(h)}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-/** The line under "Playing on <device>", or null when nothing is casting. */
 export function castStatusLine(status: CastStatusResponse): string | null {
-  const casting = status.casting;
-  if (!casting) return null;
-  if (casting.state === "loading") return "Loading on the TV…";
-  if (casting.state === "idle") return "Finished on the TV.";
-  // A duration the receiver has not reported is null, not zero: showing
-  // "0:00:05 / 0:00:00" would read as a broken file rather than an unknown length.
-  const elapsed = formatCastTime(casting.positionSec);
-  const clock =
-    casting.durationSec === null ? elapsed : `${elapsed} / ${formatCastTime(casting.durationSec)}`;
-  return casting.state === "paused" ? `Paused · ${clock}` : clock;
+  return status.casting ? castClock(status.casting) : null;
 }
 
 export type CastControl = "play" | "pause" | "stop";
@@ -139,3 +121,7 @@ export function castSubtitleIndex(info: StreamInfoResponse | null): number | und
   const chosen = files.find((f) => f.language === "en") ?? files[0];
   return chosen?.index;
 }
+
+// Re-exported so this module stays the browser's one cast vocabulary, even though
+// the implementation now lives in src/util for the terminal to share.
+export { formatCastTime };
