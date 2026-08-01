@@ -29,6 +29,7 @@ import {
   type FallbackReason,
   type PlayerTarget,
 } from "./playerModel";
+import { clipboardPorts, copyNotice, copyText } from "./copyText";
 import { mountHls } from "./hlsMount";
 import type { StreamInfoResponse } from "../wire";
 
@@ -44,8 +45,11 @@ let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * `persist` for a notice the user must still be able to read after they look
- * back at the screen. The copy-button notices are acknowledgements of something
- * the user just did and self-clear; a stream that died mid-playback is not, and
+ * back at the screen. Most copy-button notices are acknowledgements of
+ * something the user just did and self-clear — the exception is the one that
+ * asks the user to copy the revealed field by hand, which is an instruction
+ * rather than an acknowledgement and outlives its four seconds. A stream that
+ * died mid-playback is not an acknowledgement either, and
  * a four-second explanation of a video that is going to stay frozen is worse
  * than none — they would be left with the silence this notice exists to break.
  */
@@ -74,6 +78,37 @@ function button(label: string, onClick: () => void): HTMLButtonElement {
   b.textContent = label;
   b.addEventListener("click", onClick);
   return b;
+}
+
+/**
+ * The last resort when the browser refuses to copy on the page's behalf: the
+ * URL, in a field, already selected, so ⌘C or Ctrl+C finishes the job.
+ *
+ * It lives inside `actions` so that the per-target `replaceChildren` clears it;
+ * a stale URL left under a different file would be worse than no field at all.
+ */
+let manualField: HTMLInputElement | null = null;
+
+function revealManualCopy(url: string): void {
+  if (manualField === null) {
+    manualField = document.createElement("input");
+    manualField.type = "text";
+    manualField.className = "manual-copy";
+    manualField.readOnly = true;
+    manualField.setAttribute("aria-label", "Stream URL");
+    actions.append(manualField);
+  }
+  // A property assignment, not markup.
+  manualField.value = url;
+  manualField.focus();
+  manualField.select();
+  // iOS ignores select() on a readonly field by itself.
+  manualField.setSelectionRange(0, url.length);
+}
+
+function clearManualCopy(): void {
+  manualField?.remove();
+  manualField = null;
 }
 
 function linkButton(label: string, href: string): HTMLAnchorElement {
@@ -260,24 +295,27 @@ async function render(): Promise<void> {
   const controls: (HTMLButtonElement | HTMLAnchorElement)[] = [
     linkButton("Download .m3u", playlist),
     button("Copy stream URL", () => {
-      // clipboard.writeText is unavailable on insecure origins — which is the
-      // normal way this dashboard is reached over a LAN — and rejects when the
-      // page is not focused. Both are reported rather than swallowed, because a
-      // copy button that silently does nothing is worse than no button.
-      const clip = navigator.clipboard;
-      if (!clip) {
-        showNotice("Copying needs a secure context — download the .m3u instead.");
-        return;
-      }
-      void clip.writeText(stream).then(
-        () => showNotice("Stream URL copied."),
-        () => showNotice("Couldn't copy — download the .m3u instead."),
-      );
+      // copyText must be called straight from the click with nothing awaited in
+      // front of it: on an insecure origin — the normal way this dashboard is
+      // reached over a LAN — it copies via execCommand, which the browser only
+      // permits inside the task the gesture started.
+      const outcome = copyText(stream, clipboardPorts());
+      void Promise.resolve(outcome).then((result) => {
+        // Persisted for "manual" alone: that notice is an instruction attached
+        // to a field that stays on screen, so letting it self-clear would leave
+        // an unlabelled selected URL box and no reason for it.
+        showNotice(copyNotice(result), { persist: result === "manual" });
+        if (result === "manual") revealManualCopy(stream);
+        else clearManualCopy();
+      });
     }),
   ];
   for (const link of vlcLinks(stream, detectPlatform(navigator.userAgent))) {
     controls.push(linkButton(link.label, link.href));
   }
+  // replaceChildren drops any field left over from the previous target, so the
+  // reference has to go with it.
+  manualField = null;
   actions.replaceChildren(...controls);
 
   // Ask the server what this file actually is before creating any element. This
