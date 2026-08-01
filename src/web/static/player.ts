@@ -24,6 +24,7 @@ import {
   interruptedNotice,
   parsePlayerLocation,
   playlistPath,
+  restPlaylistPath,
   routeFailure,
   streamPath,
   vlcLinks,
@@ -443,6 +444,16 @@ function renderEpisodes(body: StreamFilesResponse, target: PlayerTarget): void {
   // page exists to offer, and it must not depend on scrolling past sixty rows.
   if (view.next) {
     nodes.push(listHeading("up next"), episodeRow(view.next));
+    // Only when there IS something after this one — a playlist of one file is
+    // the button that is already at the top of the page. Appended rather than
+    // built with the others because it depends on `.files`, which lands after
+    // the first paint.
+    actions.append(
+      linkButton(
+        "Download rest of season .m3u",
+        absoluteUrl(location.origin, restPlaylistPath(target)),
+      ),
+    );
   }
   nodes.push(listHeading(view.next ? "all episodes" : "everything in this torrent"));
   for (const row of view.rows) {

@@ -311,6 +311,24 @@ give up after twelve seconds:
   playlist to VLC (or whatever your default player is) and it plays there. On iOS and Android you also get
   a direct VLC link.
 
+#### The player page knows what else is in the torrent
+
+Play an episode out of a season pack and the page you land on lists the rest of it: **up next** first, then
+every episode in the torrent, headed by season when there is more than one. Each is a link to the same
+page for that file, so the next episode is one click — you never go back to the search, and you never
+reopen the picker. This is the browser catching up to the terminal, whose picker has always stayed open
+after launching a player so the next episode is one keypress away.
+
+There is also **Download rest of season .m3u**, which is one playlist containing this episode and every
+later one in order — hand it to VLC once and it runs the rest of the season unattended.
+
+Above the filename is a breadcrumb back to the show, and the header's **back to results** goes back to the
+search you ran rather than to an empty box: the dashboard now keeps its query and category in its own URL,
+so a full page load — which is what the browser's Back button does here, because the player is a separate
+page — restores what you were looking at. That also means a search is a link you can bookmark or send to
+another device. Only the query and the tab; a stream is per-session and dies with it, so nothing in that
+URL claims to resume one.
+
 That check is also why the card is honest about *which* part is the problem. An `.mp4` that turns out to be
 carrying HEVC used to look playable right up until it wasn't; now it's caught before anything loads.
 

@@ -92,6 +92,24 @@ export function playlistPath(target: PlayerTarget): string {
   return repPath(target, ".m3u");
 }
 
+/**
+ * The `.m3u` for this file AND every later one — the rest of the season in one
+ * playlist, so VLC runs on without coming back here between episodes.
+ *
+ * A parameter on the playlist rather than a fifth representation, mirroring the
+ * server: `?rest=1` reuses the same guards, the same origin check and the same
+ * "no filename in the body" rule, and a route of its own would be a second
+ * place to forget one of them.
+ *
+ * Built by appending rather than through `repPath`, because the separator
+ * depends on whether a capability put a `?` there first. A tokenless loopback
+ * server has no capability on the URL and would otherwise get `?k=&rest=1`.
+ */
+export function restPlaylistPath(target: PlayerTarget): string {
+  const base = playlistPath(target);
+  return `${base}${base.includes("?") ? "&" : "?"}rest=1`;
+}
+
 /** Resolve one of the paths above against the page's own origin. */
 export function absoluteUrl(origin: string, path: string): string {
   return `${origin.replace(/\/+$/, "")}${path}`;

@@ -1293,6 +1293,66 @@ describe("GET /stream/:sid/:idx.files", () => {
     expect(body.files).toHaveLength(1);
     expect(body.files[0].filename).toBe("disc.bin");
   });
+
+  /**
+   * `?rest=1` on the EXISTING playlist branch, not a new route: same path
+   * grammar, same guards, same absent filenames in the body. VLC gets one file
+   * per line and plays the rest of the season unattended.
+   */
+  describe("?rest=1", () => {
+    it("lists this file and every later one, in display order", async () => {
+      const { base, capability, id } = await packSession();
+      const res = await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`);
+      expect(res.status).toBe(200);
+      const lines = (await res.text()).trim().split("\n");
+      // Session index 1 is E01, which sorts first — so all three, in E01, E02,
+      // E03 order, which is session indexes 1, 3, 0.
+      expect(lines).toEqual([
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/1?k=${capability}`,
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/3?k=${capability}`,
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/0?k=${capability}`,
+      ]);
+    });
+
+    it("is just this file when it is the last one", async () => {
+      const { base, capability, id } = await packSession();
+      // Session index 0 is E03, which sorts last.
+      const text = await (await fetch(`${base}/stream/${id}/0.m3u?rest=1&k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
+
+    it("skips the non-video files the picker skips", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`)).text();
+      // The .nfo is session index 2 and must not be handed to a media player.
+      expect(text).not.toContain(`/stream/${id}/2?`);
+    });
+
+    it("still contains no filename at all", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`)).text();
+      // The whole point of the plain-URL body: another application parses this
+      // file, and nothing in it comes from a release name.
+      expect(text).not.toContain("Harrowgate");
+      expect(text).not.toContain("#EXTINF");
+    });
+
+    it("is unchanged without the parameter", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
+
+    /**
+     * The value is read as a presence flag, but `rest=0` reading as "yes" would
+     * be a trap for anyone building the URL by hand.
+     */
+    it("treats rest=0 as off", async () => {
+      const { base, capability, id } = await packSession();
+      const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=0&k=${capability}`)).text();
+      expect(text.trim().split("\n")).toHaveLength(1);
+    });
+  });
 });
 
 describe("requestOrigin", () => {
