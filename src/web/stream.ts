@@ -105,7 +105,11 @@ export interface StreamDeps {
    * goes through the same `resolveProxyTarget` allowlist the proxy does, which
    * is the point of it being here rather than a bare `fetch`.
    */
-  fetchSubtitle?: (url: string, allowed: readonly string[]) => Promise<Uint8Array | null>;
+  fetchSubtitle?: (
+    url: string,
+    allowed: readonly string[],
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array | null>;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -311,6 +315,16 @@ const PASS_THROUGH = ["content-type", "content-length", "content-range", "accept
  * check below is the first guard against that and this is the second.
  */
 export const MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * How long `defaultFetchSubtitle` waits for upstream before giving up. A sibling
+ * `.srt`/`.vtt` on WebTorrent can be a piece that has not arrived yet, in which
+ * case the connection is opened and simply never answers — without a bound the
+ * promise (and its socket) would live for the rest of the process. Generous
+ * relative to `MAX_SUBTITLE_BYTES`: a subtitle is at most a few MiB, so anything
+ * still incomplete after this long is stalled, not slow.
+ */
+export const SUBTITLE_FETCH_TIMEOUT_MS = 15_000;
 
 /**
  * The sibling subtitle files for one video, as the wire type.
@@ -544,7 +558,17 @@ export async function handleStreamRequest(
       return 413;
     }
     const fetchSubtitle = deps.fetchSubtitle ?? defaultFetchSubtitle;
-    const fetched = await fetchSubtitle(file.url, backendProtocols(session));
+    // This route buffers before it can answer at all, so — unlike proxyUpstream,
+    // which has already written headers by the time a client goes away — there
+    // is nothing yet to distinguish "our own end" from "abandoned": any close
+    // this early is the client leaving, so it always aborts the fetch. The
+    // listener is removed the moment the fetch settles, so a close after that
+    // (the normal end of a completed request) finds nothing to abort.
+    const controller = new AbortController();
+    const onClientClose = (): void => controller.abort();
+    res.on("close", onClientClose);
+    const fetched = await fetchSubtitle(file.url, backendProtocols(session), controller.signal);
+    res.off("close", onClientClose);
     if (!fetched) {
       // Same status and the same silence about the URL as proxyUpstream: an
       // unrestricted link is a credential against the user's account.
@@ -862,22 +886,41 @@ function proxyUpstream(
  * what it claimed — the response is destroyed the moment the buffered total
  * would exceed the cap, which is the second half of that guard (`file.bytes` in
  * the caller is the first, and it is only what upstream claimed).
+ *
+ * Two teardowns, matching `proxyUpstream`'s shape rather than inventing a
+ * second one: a `SUBTITLE_FETCH_TIMEOUT_MS` timer for the case webtorrent just
+ * never answers (a sibling `.srt` whose pieces have not arrived yet holds the
+ * connection open indefinitely), and `signal` for the caller's own
+ * client-disconnect teardown. Either one destroys the in-flight request and
+ * resolves null, exactly like any other upstream failure.
  */
 function defaultFetchSubtitle(
   target: string,
   allowedProtocols: readonly string[],
+  signal?: AbortSignal,
 ): Promise<Uint8Array | null> {
   const first = resolveProxyTarget(target, allowedProtocols, MAX_PROXY_HOPS);
   if (!first.ok) return Promise.resolve(null);
 
   return new Promise<Uint8Array | null>((resolve) => {
     let settled = false;
+    let current: http.ClientRequest | null = null;
     const done = (value: Uint8Array | null): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       resolve(value);
     };
-    let current: http.ClientRequest | null = null;
+    const onAbort = (): void => {
+      current?.destroy();
+      done(null);
+    };
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      current?.destroy();
+      done(null);
+    }, SUBTITLE_FETCH_TIMEOUT_MS);
+    signal?.addEventListener("abort", onAbort);
 
     const send = (url: URL, hopsRemaining: number): void => {
       const transport = url.protocol === "https:" ? https : http;

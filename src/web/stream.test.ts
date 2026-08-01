@@ -14,6 +14,7 @@ import {
   playlistFilename,
   requestOrigin,
   splitRepresentation,
+  SUBTITLE_FETCH_TIMEOUT_MS,
 } from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
@@ -123,6 +124,15 @@ async function startUpstream(): Promise<Upstream> {
         });
         res.end(MEDIA);
       }, 30);
+      return;
+    }
+
+    // Accepts the connection and then says NOTHING — not even headers. This is
+    // the WebTorrent-piece-not-arrived-yet case verbatim: the server is waiting
+    // on data it does not have yet, so unlike `/slow` (which at least streams,
+    // and would eventually trip a byte cap) this can only ever be freed by a
+    // timeout or a client disconnect.
+    if (req.url?.startsWith("/never")) {
       return;
     }
 
@@ -1886,6 +1896,81 @@ describe("the .vtt representation", () => {
     },
     15000,
   );
+
+  /**
+   * The hang this exists to prevent: a sibling `.srt` whose pieces have not
+   * arrived yet. `/never` accepts the connection and then sends nothing at
+   * all — no headers, no body, no error — so without a bound
+   * `defaultFetchSubtitle`'s promise (and its socket) would live for the rest
+   * of the process. `/slow` would not prove this: it streams bytes, so it
+   * would eventually trip `MAX_SUBTITLE_BYTES` on its own and the test would
+   * pass even with the timeout deleted. Runs against the real implementation
+   * and a real socket, and the test's own timeout is kept well above
+   * `SUBTITLE_FETCH_TIMEOUT_MS` so a regression (the bound silently removed)
+   * fails the assertion instead of hanging the suite.
+   */
+  it(
+    "gives up on a subtitle upstream that never answers, and closes the socket",
+    async () => {
+      upstream = await startUpstream();
+      const { reg, id, capability } = await torrentSession(
+        [
+          {
+            filename: "Kepler.S02E04.1080p.WEB-DL.mkv",
+            url: `${upstream.base}/webtorrent/hash/one.mp4`,
+            bytes: MEDIA.length,
+          },
+          {
+            filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt",
+            url: `${upstream.base}/never`,
+            bytes: 40,
+          },
+        ],
+        "cap-hang-vtt",
+        "sid-hang-vtt",
+      );
+      const base = await start(reg);
+      const res = await fetch(`${base}/stream/${id}/1.vtt?k=${capability}`);
+      expect(res.status).toBe(502);
+      await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 5000 });
+    },
+    SUBTITLE_FETCH_TIMEOUT_MS + 10000,
+  );
+
+  /**
+   * The client-disconnect teardown, matching the WebTorrent proxy's own
+   * abandonment test in shape: a client that goes away before this route ever
+   * answers must not leave the upstream socket (and the timeout timer) alive
+   * for the rest of the process.
+   */
+  it("destroys the upstream subtitle fetch when the client disconnects first", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession(
+      [
+        {
+          filename: "Kepler.S02E04.1080p.WEB-DL.mkv",
+          url: `${upstream.base}/webtorrent/hash/one.mp4`,
+          bytes: MEDIA.length,
+        },
+        {
+          filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt",
+          url: `${upstream.base}/slow`,
+          bytes: 40,
+        },
+      ],
+      "cap-abort-vtt",
+      "sid-abort-vtt",
+    );
+    const base = await start(reg);
+
+    const ac = new AbortController();
+    const pending = fetch(`${base}/stream/${id}/1.vtt?k=${capability}`, { signal: ac.signal });
+    await vi.waitFor(() => expect(upstream!.open.size).toBe(1), { timeout: 3000 });
+
+    ac.abort();
+    await expect(pending).rejects.toThrow();
+    await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 3000 });
+  });
 });
 
 describe("the .m3u with a matched subtitle", () => {
