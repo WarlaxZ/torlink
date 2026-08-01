@@ -15,6 +15,7 @@
  * with them.
  */
 import { parseRelease } from "../../util/release";
+import { restPlaylist, type RestKind } from "../../util/restPlaylist";
 import { sortStreamFiles } from "../../util/streamFileSort";
 import { fileLabel, playerPath } from "./streamFlow";
 import { searchForRoute, DEFAULT_ROUTE } from "./route";
@@ -67,6 +68,18 @@ export interface UpNextView {
   next: EpisodeRow | null;
   /** The show or film this session is, and a search that finds it. Never null. */
   breadcrumb: Breadcrumb;
+  /**
+   * The text for the "play on from here" download, or null for no button.
+   *
+   * HERE RATHER THAN IN `player.ts` because it is two decisions, and both are the
+   * kind CLAUDE.md keeps out of the DOM-wiring files: whether a playlist from this
+   * file onwards contains anything worth downloading, and whether it is honest to
+   * call it a season. `restPlaylist` (src/util/restPlaylist.ts) is the same
+   * function the server uses to pick the files, so the label and the file it
+   * downloads cannot disagree — which they did: a bonus feature offered "rest of
+   * season" and delivered every remaining extra followed by the whole show.
+   */
+  restLabel: string | null;
 }
 
 /** The dashboard, for when a release name tells us nothing to search for. */
@@ -127,7 +140,7 @@ export function upNextView(
   capability: string,
 ): UpNextView {
   const breadcrumb = breadcrumbFor(body.name);
-  if (body.files.length < 2) return { rows: [], next: null, breadcrumb };
+  if (body.files.length < 2) return { rows: [], next: null, breadcrumb, restLabel: null };
 
   // "name", the picker's default: a season pack listed in whatever order the
   // torrent named its files is the bug `sortStreamFiles` was extracted to fix,
@@ -155,6 +168,24 @@ export function upNextView(
     };
   });
 
+  // A playlist of one file is the button that is already at the top of the page,
+  // so one entry means no button. Note this is STRICTER than "there is a next
+  // row": from the last episode of a season the next row may well be an extra,
+  // and the season is still over.
+  const rest = restPlaylist(body.files, index);
+  const restLabel = rest.indexes.length > 1 ? restLabelFor(rest.kind) : null;
+
   const at = rows.findIndex((row) => row.current);
-  return { rows, next: at >= 0 ? (rows[at + 1] ?? null) : null, breadcrumb };
+  return { rows, next: at >= 0 ? (rows[at + 1] ?? null) : null, breadcrumb, restLabel };
+}
+
+/**
+ * What to call the playlist.
+ *
+ * "Rest of season" is a promise, and it is only true when the file we started
+ * from named an episode. From a bonus feature the playlist is everything from
+ * there on, and calling that a season is a lie the user only discovers in VLC.
+ */
+function restLabelFor(kind: RestKind): string {
+  return kind === "season" ? "Download rest of season .m3u" : "Download the rest as .m3u";
 }

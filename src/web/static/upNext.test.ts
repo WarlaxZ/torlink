@@ -38,6 +38,41 @@ const KESTREL: StreamFilesResponse = {
   files: [file(0, "Kestrel.2010.1080p.BluRay.x264.mkv")],
 };
 
+describe("upNextView — the rest-of-season button", () => {
+  it("offers the season by name from an episode with more to come", () => {
+    expect(upNextView(HARROWGATE, SID, 1, CAP).restLabel).toBe("Download rest of season .m3u");
+  });
+
+  /**
+   * From the last episode there is a next FILE in some torrents (an extra) but no
+   * rest of the season, and a playlist of one file is the button already at the
+   * top of the page. This is why the test is `restPlaylist`'s answer and not
+   * "is there a next row".
+   */
+  it("offers nothing from the last episode of a season", () => {
+    // Session index 0 is E03, which sorts last.
+    expect(upNextView(HARROWGATE, SID, 0, CAP).restLabel).toBeNull();
+  });
+
+  /**
+   * An extra has no season to be the rest of. The playlist still means something
+   * — everything from here — so the label says that rather than promising a
+   * season it will not deliver. `Harrowgate.Trailer.mkv` sorts after the
+   * episodes, so there really is something after it to include.
+   */
+  it("does not call an extra's playlist a season", () => {
+    const withExtra: StreamFilesResponse = {
+      ...HARROWGATE,
+      files: [file(4, "Harrowgate.Bonus_Gag_Reel_1.mkv"), ...HARROWGATE.files],
+    };
+    expect(upNextView(withExtra, SID, 4, CAP).restLabel).toBe("Download the rest as .m3u");
+  });
+
+  it("offers nothing for a film", () => {
+    expect(upNextView(KESTREL, SID, 0, CAP).restLabel).toBeNull();
+  });
+});
+
 describe("upNextView — the list", () => {
   it("orders the files the way the picker does, not the way the torrent did", () => {
     const view = upNextView(HARROWGATE, SID, 0, CAP);

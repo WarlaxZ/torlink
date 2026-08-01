@@ -508,17 +508,14 @@ function renderEpisodes(body: StreamFilesResponse, target: PlayerTarget): void {
   const nodes: HTMLElement[] = [];
   // "Up next" sits ABOVE the full list on purpose: it is the one action this
   // page exists to offer, and it must not depend on scrolling past sixty rows.
-  if (view.next) {
-    nodes.push(listHeading("up next"), episodeRow(view.next));
-    // Only when there IS something after this one — a playlist of one file is
-    // the button that is already at the top of the page. Appended rather than
-    // built with the others because it depends on `.files`, which lands after
-    // the first paint.
+  if (view.next) nodes.push(listHeading("up next"), episodeRow(view.next));
+  // Appended rather than built with the other controls because it depends on
+  // `.files`, which lands after the first paint. WHETHER to show it and WHAT to
+  // call it are `upNextView`'s answers, not this file's — it used to hang off
+  // "is there a next row", which offered "rest of season" from a bonus feature.
+  if (view.restLabel !== null) {
     actions.append(
-      linkButton(
-        "Download rest of season .m3u",
-        absoluteUrl(location.origin, restPlaylistPath(target)),
-      ),
+      linkButton(view.restLabel, absoluteUrl(location.origin, restPlaylistPath(target))),
     );
   }
   nodes.push(listHeading(view.next ? "all episodes" : "everything in this torrent"));
