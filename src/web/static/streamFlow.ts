@@ -42,6 +42,11 @@ import { nextEpisodeIndex } from "../../util/nextEpisodeFile";
 // than being copied. `release.ts` was already in this bundle via nextEpisodeFile.
 import { historyKeyFor } from "../../util/streamHistoryKey";
 import { parseRelease } from "../../util/release";
+// The sixth value import out of this directory, and the same argument as the
+// other five: what a waiting user reads is a decision both front ends make, so
+// it is shared rather than written twice. It lived inline in src/ui/App.tsx's
+// render until this file needed it. See src/util/prepareLine.ts.
+import { prepareLine } from "../../util/prepareLine";
 import type { EpisodeRef } from "../../util/episode";
 import type { PublicStreamFile, PublicStreamHistoryItem, PublicStreamSession } from "../wire";
 import { formatBytes, shortName, type DashRow } from "./dashboard";
@@ -333,6 +338,7 @@ export function pollDecision(
   session: PublicStreamSession,
   elapsedMs: number,
   name: string,
+  providerLabel?: string | null,
 ): PollDecision {
   if (session.state !== "resolving") return { kind: "settled" };
   const label = shortName(name);
@@ -345,18 +351,24 @@ export function pollDecision(
   return {
     kind: "poll",
     delayMs: POLL_MS,
-    label: `Preparing “${label}” — ${resolvePercent(session)}%`,
+    // `phase: "caching"` unconditionally: the wire has one `resolving` state and
+    // no way to distinguish the provider's link-fetch step from its cache, so
+    // the browser never renders prepareLine's "Fetching link…" arm. The TUI
+    // does, from its own richer local state. Reporting a percent of 0 as
+    // "Caching… 0%" is honest for that moment; inventing a phase would not be.
+    //
+    // The clamp on `progress` lives in prepareLine, which is why there is no
+    // longer a `resolvePercent` here — one guard, shared with the terminal,
+    // rather than two that can disagree about what 99.7% rounds to.
+    label: prepareLine({
+      source: session.backend === "debrid" ? "rd" : "torrent",
+      phase: "caching",
+      providerLabel,
+      label,
+      pct: session.progress,
+      elapsedSec: elapsedMs / 1000,
+    }),
   };
-}
-
-// The session's own percent, defended against a backend that reports something
-// outside the documented 0–100 integer range. Same floor-don't-round rule as
-// dashboard.ts: rounding 99.6 up to 100 on something that is still working
-// reads as a stuck UI.
-function resolvePercent(session: PublicStreamSession): number {
-  const pct = session.progress;
-  if (!Number.isFinite(pct)) return 0;
-  return Math.max(0, Math.min(100, Math.floor(pct)));
 }
 
 /**
@@ -406,16 +418,36 @@ export type StartResult =
  * choice). So the effects are parameters and the flow is testable end to end.
  */
 export interface PlayEffects {
-  /** POST /api/stream. `confirmed` is only ever true after a human said so. */
-  start(row: DashRow, confirmed: boolean): Promise<StartResult>;
+  /**
+   * POST /api/stream. `confirmed` is only ever true after a human said so.
+   *
+   * `signal` is `PlayOptions.signal`, passed down so a cancel kills the request
+   * in flight rather than waiting for it. An implementation that aborts must
+   * NOT report that as a transport failure — the user asked for it. See the
+   * abort check immediately after this is called in `runPlay`.
+   */
+  start(row: DashRow, confirmed: boolean, signal?: AbortSignal): Promise<StartResult>;
   /** GET /api/stream/:sid, or null when it can't be read. */
-  poll(sessionId: string): Promise<PublicStreamSession | null>;
+  poll(sessionId: string, signal?: AbortSignal): Promise<PublicStreamSession | null>;
   /** DELETE /api/stream/:sid, best effort. */
   stop(sessionId: string): void;
   /** A blocking yes/no. window.confirm in the browser. */
   confirm(message: string): boolean;
   /** Transient message in the dashboard's notice line. */
   notice(message: string): void;
+  /**
+   * The waiting line, or null to take it down.
+   *
+   * A SEPARATE CHANNEL FROM `notice`, deliberately. `notice` is a transient line
+   * that hides itself after a few seconds; this one has to persist for as long
+   * as the resolve does, which can be minutes, and it has a Cancel button
+   * attached. Sharing one effect meant the progress label re-firing every second
+   * stamped over any real message the user needed to read.
+   *
+   * REQUIRED, not optional: an implementation that forgot it would leave a pill
+   * fixed over the page for good.
+   */
+  progress(line: string | null): void;
   /**
    * Show the file picker. Ownership of the session passes to it.
    *
@@ -431,7 +463,12 @@ export interface PlayEffects {
   ): void;
   /** Go to a player URL. Ownership of the session passes to the player. */
   open(path: string): void;
-  sleep(ms: number): Promise<void>;
+  /**
+   * Wait. Takes the signal so a cancel does not have to wait out the remaining
+   * `POLL_MS` before anything visible happens — a Cancel button that looks
+   * inert for most of a second gets pressed again.
+   */
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
   now(): number;
   /**
    * Called when `start` could not start a session at all — `start.kind ===
@@ -453,6 +490,42 @@ export interface PlayEffects {
 }
 
 /**
+ * The one wording for a cancelled stream, shared with the TUI's own
+ * `cancelPreparing` (src/ui/App.tsx) by being the same string.
+ */
+export const CANCELLED_NOTICE = "Stream cancelled.";
+
+/**
+ * The three things `runPlay` needs that are DATA rather than effects.
+ *
+ * An options bag rather than three positional parameters: `wanted` was the third
+ * argument, and the other two would make a call site read
+ * `runPlay(row, fx, null, "Real-Debrid", signal)` — where transposing two
+ * arguments typechecks and silently plays the wrong episode. This is not
+ * hypothetical: the test that pins the preselection passed
+ * `{ season: 3, episode: 5 }` positionally, which is structurally exactly what a
+ * bag of options is not.
+ */
+export interface PlayOptions {
+  /**
+   * A Continue-watching row's own suggested episode, passed straight through to
+   * `streamOutcome`. Every other caller — a search result, a queue row — has no
+   * such row and passes nothing. (Named `wanted` rather than `next` only because
+   * the polling loop already has a `next`.)
+   */
+  wanted?: EpisodeRef | null;
+  /** Who is caching, for the waiting line. Absent renders "debrid". */
+  providerLabel?: string | null;
+  /**
+   * Cancels the flow. Threaded into `start`, `poll` and `sleep` rather than
+   * merely checked between them, so a cancel kills an in-flight fetch instead of
+   * waiting it out — and, crucially, a session that HAD started is stopped on
+   * the way out. See rule 3 below.
+   */
+  signal?: AbortSignal;
+}
+
+/**
  * Press Play on one row: start a session, wait for it, open something.
  *
  * The two rules this function exists to hold:
@@ -463,34 +536,70 @@ export interface PlayEffects {
  * 2. A `resolving` session is POLLED until it settles or the deadline passes.
  *    Real-Debrid caching sits mid-percent for minutes, and a loop that gave up
  *    early would strand a session that was about to be ready.
+ * 3. A CANCEL RELEASES THE SESSION. Every exit after `start` succeeded stops the
+ *    session, an abort included — a cancel that leaked the torrent would be
+ *    worse than no cancel at all, because the user believes they stopped it.
  *
- * `wanted` is data, not an effect, which is why it is a parameter rather than
- * another member of `PlayEffects`: it is the Continue-watching row's own `next`,
- * passed straight through to `streamOutcome`. Every other caller — a search
- * result, a queue row — has no such row and passes nothing. (Named `wanted`
- * rather than `next` only because the polling loop below already has a `next`.)
+ * Everything in `PlayOptions` is DATA rather than an effect, which is why it is
+ * a parameter and not more members of `PlayEffects`. See that interface.
  */
 export async function runPlay(
   row: DashRow,
   fx: PlayEffects,
-  wanted?: EpisodeRef | null,
+  opts: PlayOptions = {},
 ): Promise<void> {
-  let start = await fx.start(row, false);
+  const { wanted, providerLabel, signal } = opts;
+
+  // Every exit from here down goes through one of these two, so the waiting line
+  // cannot be left up by a path someone forgot about.
+  const done = (): void => fx.progress(null);
+  const cancel = (sessionId: string | null): void => {
+    if (sessionId) fx.stop(sessionId);
+    done();
+    fx.notice(CANCELLED_NOTICE);
+  };
+
+  if (signal?.aborted) {
+    cancel(null);
+    return;
+  }
+
+  // Every `await fx.start(...)` is followed by this, and it has to come BEFORE
+  // the confirm/failed branches below. An aborted POST throws inside the effect,
+  // which reports it as `failed` — indistinguishable from a dead server. Left to
+  // fall through, a cancel would exit with no "Stream cancelled." at all AND
+  // fire `onUnresolved`, whose Continue-watching binding launches a fallback
+  // search: pressing Cancel would start a search.
+  //
+  // Stops the session when one came back regardless, since an abort that landed
+  // just after the POST succeeded still owes it a stop.
+  const abortedAfterStart = (result: StartResult): boolean => {
+    if (!signal?.aborted) return false;
+    cancel(result.kind === "started" ? result.sessionId : null);
+    return true;
+  };
+
+  let start = await fx.start(row, false, signal);
+  if (abortedAfterStart(start)) return;
 
   if (start.kind === "confirm") {
     if (!fx.confirm(confirmFallbackMessage(start.reason, row.name))) {
+      done();
       fx.notice("Playback cancelled — nothing was streamed.");
       return;
     }
-    start = await fx.start(row, true);
+    start = await fx.start(row, true, signal);
+    if (abortedAfterStart(start)) return;
     // A second 409 means the server didn't accept the confirmation. Do not loop
     // asking: one prompt per click.
     if (start.kind === "confirm") {
+      done();
       fx.notice("Couldn't start that stream.");
       return;
     }
   }
   if (start.kind !== "started") {
+    done();
     if (start.kind === "failed") fx.onUnresolved?.();
     return;
   }
@@ -499,24 +608,39 @@ export async function runPlay(
   let session = start.session;
   const began = fx.now();
   for (;;) {
-    const decision = pollDecision(session, fx.now() - began, row.name);
+    const decision = pollDecision(session, fx.now() - began, row.name, providerLabel);
     if (decision.kind === "settled") break;
     if (decision.kind === "timeout") {
+      done();
       fx.notice(decision.message);
       fx.stop(sessionId);
       return;
     }
-    fx.notice(decision.label);
-    await fx.sleep(decision.delayMs);
-    const next = await fx.poll(sessionId);
+    fx.progress(decision.label);
+    await fx.sleep(decision.delayMs, signal);
+    if (signal?.aborted) {
+      cancel(sessionId);
+      return;
+    }
+    const next = await fx.poll(sessionId, signal);
     if (!next) {
+      // An aborted fetch also lands here, and must not be reported as a
+      // transport failure: "Lost track of that stream" tells a user who just
+      // pressed Cancel that something went wrong.
+      if (signal?.aborted) {
+        cancel(sessionId);
+        return;
+      }
       // The session is gone or unreadable. Not stopped here: a DELETE we can't
       // read the answer to adds nothing, and the id may not exist at all.
+      done();
       fx.notice("Lost track of that stream — try again.");
       return;
     }
     session = next;
   }
+
+  done();
 
   const outcome = streamOutcome(session, wanted);
   if (outcome.kind === "error") {

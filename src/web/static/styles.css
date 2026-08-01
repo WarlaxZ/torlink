@@ -366,9 +366,47 @@ button:hover {
 }
 
 /* The stream file picker. Overrides .card's row layout — it is a heading above
-   a list, not a form — in the same way .fallback does on the player page. */
-.picker {
+   a list, not a form — in the same way .fallback does on the player page.
+
+   SCOPED TO [open], and that is load-bearing rather than tidy: a bare
+   `.picker { display: block }` overrides the UA's own
+   `dialog:not([open]) { display: none }` and leaves the closed picker sitting
+   visible at the top of the page for good. */
+.picker[open] {
   display: block;
+}
+
+/* And the closed case stated explicitly, because scoping the rule above is not
+   on its own enough: this element is also a `.card`, which sets
+   `display: flex` — and THAT overrides the UA's `dialog:not([open])` rule just
+   as surely. Measured, not theorised: the closed dialog rendered 72px tall at
+   the top of the page until this rule existed. Written against the element
+   rather than against `.card` so it holds however the class list changes. */
+.picker:not([open]) {
+  display: none;
+}
+
+/* A dialog carries a UA border, padding and `margin: auto`; .card supplies the
+   first two, and the third has to be restored — `.card`'s own
+   `margin-bottom: 1.5rem` beats the UA's `auto` on that one edge, which leaves
+   the vertical centring lopsided: measured at 392px above and 24px below in a
+   639px viewport, i.e. sitting near the bottom rather than in the middle.
+
+   max-height keeps a forty-episode pack scrollable INSIDE the dialog rather than
+   taller than the viewport — which would put Cancel off screen, the very problem
+   this whole change exists to fix. */
+.picker {
+  margin: auto;
+  border: 1px solid var(--line);
+  max-height: min(80vh, 40rem);
+  max-width: min(46rem, calc(100vw - 2rem));
+  overflow-y: auto;
+}
+
+/* Dim rather than opaque: the list behind is context — which release this is a
+   pack of — not something to hide. */
+.picker::backdrop {
+  background: rgb(0 0 0 / 55%);
 }
 
 .picker-title {
@@ -1368,4 +1406,50 @@ select:focus-visible {
   display: block;
   font-size: 0.75rem;
   color: var(--dim);
+}
+
+/* The resolving-stream pill. Fixed bottom left; .to-top is bottom right at
+   z-index 4, and sharing a corner would overlap them.
+
+   Deliberately not a .card, even though it looks like one: this element is
+   `hidden` between resolves, and the global [hidden] rule at the top of this
+   file exists precisely because .card's `display: flex` used to defeat it. Its
+   own layout keeps it out of that argument entirely. */
+.prepare {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(30rem, calc(100vw - 7rem));
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--raised);
+  font-size: 0.75rem;
+}
+
+.prepare-line {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+  /* The elapsed seconds and the percent both tick; without this the whole line
+     jitters sideways once a second. */
+  font-variant-numeric: tabular-nums;
+}
+
+.prepare button {
+  flex-shrink: 0;
+}
+
+/* On a phone the pill and .to-top would sit side by side in 375px. Full width
+   above it instead. */
+@media (max-width: 30rem) {
+  .prepare {
+    left: 1rem;
+    right: 1rem;
+    bottom: 3.5rem;
+    max-width: none;
+  }
 }

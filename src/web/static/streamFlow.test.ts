@@ -263,18 +263,56 @@ describe("pollDecision", () => {
     }
   });
 
-  it("shows the percent the session reports, so it doesn't look hung", () => {
-    const d = pollDecision(session({ state: "resolving", progress: 42 }), 0, "A Release");
+  it("names the provider and the percent for a debrid resolve", () => {
+    const d = pollDecision(
+      session({ state: "resolving", backend: "debrid", progress: 42 }),
+      12_000,
+      "Harrowgate.S03.1080p.WEB-DL",
+      "Real-Debrid",
+    );
     expect(d.kind).toBe("poll");
     if (d.kind !== "poll") return;
-    expect(d.label).toContain("42%");
-    expect(d.label).toContain("A Release");
+    expect(d.label).toBe("Caching on Real-Debrid… 42% · 12s");
     expect(d.delayMs).toBe(POLL_MS);
+  });
+
+  it("names the release, not a percent, while finding peers in a swarm", () => {
+    const d = pollDecision(
+      session({ state: "resolving", backend: "torrent", progress: 42 }),
+      3_000,
+      "Kestrel.2010.1080p.BluRay.x264",
+    );
+    expect(d.kind).toBe("poll");
+    if (d.kind !== "poll") return;
+    expect(d.label).toBe("Finding peers… Kestrel.2010.1080p.BluRay.x264 · 3s");
+  });
+
+  // The elapsed seconds are what tell a user that a resolve sitting at one
+  // percent for minutes is working rather than hung. Deleting them is the
+  // mutation this guards.
+  it("counts the seconds up, so a stalled percent still shows movement", () => {
+    const at = (ms: number): string => {
+      const d = pollDecision(
+        session({ state: "resolving", backend: "debrid", progress: 7 }),
+        ms,
+        "n",
+        "RD",
+      );
+      return d.kind === "poll" ? d.label : "";
+    };
+    expect(at(0)).toContain("· 0s");
+    expect(at(1_000)).toContain("· 1s");
+    expect(at(65_400)).toContain("· 65s");
   });
 
   it("clamps a nonsense percent rather than rendering it", () => {
     const at = (progress: number): string => {
-      const d = pollDecision(session({ state: "resolving", progress }), 0, "n");
+      const d = pollDecision(
+        session({ state: "resolving", backend: "debrid", progress }),
+        0,
+        "n",
+        "RD",
+      );
       return d.kind === "poll" ? d.label : "";
     };
     expect(at(140)).toContain("100%");
@@ -295,13 +333,17 @@ describe("pollDecision", () => {
     expect(d.message).toContain("A Release");
   });
 
-  it("clips a very long name for the notice", () => {
+  // Asserts the TRUNCATED name is present, not merely that some "…" is: every
+  // line prepareLine produces contains an ellipsis of its own ("Finding peers…"),
+  // so `toContain("…")` would pass while the name went unclipped. That is the
+  // vacuous-assertion trap CLAUDE.md records.
+  it("clips a very long name for the waiting line", () => {
     const long = "x".repeat(300);
-    const d = pollDecision(session({ state: "resolving" }), 0, long);
+    const d = pollDecision(session({ state: "resolving", backend: "torrent" }), 0, long);
     expect(d.kind).toBe("poll");
     if (d.kind !== "poll") return;
     expect(d.label).not.toContain(long);
-    expect(d.label).toContain("…");
+    expect(d.label).toContain(`${"x".repeat(79)}…`);
   });
 });
 
@@ -459,6 +501,8 @@ function harness(over: Partial<PlayEffects> = {}) {
       preselect: number | null;
     }[],
     polls: 0,
+    progress: [] as (string | null)[],
+    slept: [] as { ms: number; aborts: boolean }[],
   };
   let clock = 0;
   const fx: PlayEffects = {
@@ -476,10 +520,14 @@ function harness(over: Partial<PlayEffects> = {}) {
       return false;
     },
     notice: (message) => calls.notices.push(message),
+    progress: (line) => calls.progress.push(line),
     choose: (sessionId, capability, _name, files, preselect) =>
       calls.chosen.push({ sessionId, capability, files, preselect }),
     open: (path) => calls.opened.push(path),
-    sleep: async (ms) => {
+    // Records whether it was handed the signal: a sleep that ignores one makes a
+    // cancel wait out the remaining POLL_MS before anything happens.
+    sleep: async (ms, signal) => {
+      calls.slept.push({ ms, aborts: signal !== undefined });
       clock += ms;
     },
     now: () => clock,
@@ -572,23 +620,29 @@ describe("runPlay", () => {
   // MUTATION GUARD #5. Real-Debrid caching reports a percent for minutes; a loop
   // that stopped at the first tick would strand a session that was about to be
   // ready and leave the user watching a frozen number.
+  // `backend: "debrid"` throughout, because a percent is only a thing a debrid
+  // resolve HAS: a swarm reports no cache progress, so its line names the release
+  // and counts seconds instead. Asserting "55%" against a torrent session would
+  // be asserting something the UI is right not to say.
   it("keeps polling while the session is resolving, and shows the percent", async () => {
     const states: PublicStreamSession[] = [
-      session({ state: "resolving", progress: 10 }),
-      session({ state: "resolving", progress: 55 }),
+      session({ state: "resolving", backend: "debrid", progress: 10 }),
+      session({ state: "resolving", backend: "debrid", progress: 55 }),
       session({ state: "ready", files: [file("movie.mp4", 0)] }),
     ];
     let i = 0;
     const { fx, calls } = harness({
-      start: async () => started({ state: "resolving", progress: 0 }),
+      start: async () => started({ state: "resolving", backend: "debrid", progress: 0 }),
       poll: async () => {
         calls.polls++;
         return states[i++] ?? null;
       },
     });
-    await runPlay(row(), fx);
+    await runPlay(row(), fx, { providerLabel: "Real-Debrid" });
     expect(calls.polls).toBe(3);
-    expect(calls.notices.some((n) => n.includes("55%"))).toBe(true);
+    // On the progress channel, not the notice line: the percent re-fires every
+    // second and would stamp over any real message the user needed to read.
+    expect(calls.progress.some((n) => n?.includes("55%"))).toBe(true);
     expect(calls.opened).toEqual(["/play/s1/0?k=cap&n=movie.mp4"]);
   });
 
@@ -635,7 +689,7 @@ describe("runPlay", () => {
           files: [file("Harrowgate.S03E04.mkv", 0), file("Harrowgate.S03E05.mkv", 1)],
         }),
     });
-    await runPlay(row(), fx, { season: 3, episode: 5 });
+    await runPlay(row(), fx, { wanted: { season: 3, episode: 5 } });
     expect(calls.chosen[0]!.preselect).toBe(1);
   });
 
@@ -735,6 +789,175 @@ describe("runPlay", () => {
     it("is optional — runPlay does not require it", async () => {
       const { fx } = harness();
       await expect(runPlay(row(), fx)).resolves.toBeUndefined();
+    });
+  });
+
+  describe("cancelling", () => {
+    // A resolve can run for ten minutes. Before this there was no way out of one
+    // but reloading the page, which orphaned the session either way.
+    it("does not start anything at all when already aborted", async () => {
+      const ac = new AbortController();
+      ac.abort();
+      const { fx, calls } = harness({
+        start: async () => started({ files: [file("movie.mp4", 0)] }),
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.starts).toEqual([]);
+      expect(calls.opened).toEqual([]);
+      expect(calls.notices).toEqual(["Stream cancelled."]);
+    });
+
+    // THE RACE THAT MATTERS. An abort landing after the POST succeeded but
+    // before the first poll must still DELETE the session — otherwise
+    // cancelling at the worst possible moment leaks the exact resource that
+    // cancelling exists to release, and the torrent runs until the idle reaper.
+    it("stops the session when the abort lands after it was started", async () => {
+      const ac = new AbortController();
+      const { fx, calls } = harness({
+        start: async () => {
+          ac.abort();
+          return started({ state: "resolving", progress: 0 });
+        },
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.stopped).toEqual(["s1"]);
+      expect(calls.notices).toContain("Stream cancelled.");
+      expect(calls.polls).toBe(0);
+      expect(calls.opened).toEqual([]);
+    });
+
+    it("stops polling and releases the session when cancelled mid-resolve", async () => {
+      const ac = new AbortController();
+      let polls = 0;
+      const { fx, calls } = harness({
+        start: async () => started({ state: "resolving", progress: 10 }),
+        poll: async () => {
+          polls++;
+          if (polls === 2) ac.abort();
+          return session({ state: "resolving", progress: 10 + polls });
+        },
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(polls).toBe(2);
+      expect(calls.stopped).toEqual(["s1"]);
+      expect(calls.notices).toContain("Stream cancelled.");
+    });
+
+    // An aborted POST comes back as `failed` — the fetch threw and the caller
+    // cannot tell a cancel from a dead server. Checked BEFORE the failed branch,
+    // or a cancel exits with no "Stream cancelled." and fires onUnresolved, whose
+    // Continue-watching binding launches a fallback SEARCH. Pressing Cancel would
+    // start a search.
+    it("reports a cancel during the initial POST as a cancel, and fires no fallback", async () => {
+      const ac = new AbortController();
+      let fallbacks = 0;
+      const { fx, calls } = harness({
+        start: async () => {
+          ac.abort();
+          return { kind: "failed" };
+        },
+        onUnresolved: () => fallbacks++,
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.notices).toEqual(["Stream cancelled."]);
+      expect(fallbacks).toBe(0);
+      expect(calls.stopped).toEqual([]);
+    });
+
+    // Same rule on the second POST, the one after a human accepted the
+    // torrent-confirm prompt.
+    it("reports a cancel during the confirmed retry as a cancel", async () => {
+      const ac = new AbortController();
+      let fallbacks = 0;
+      const { fx, calls } = harness({
+        start: async (_row, confirmed) => {
+          if (!confirmed) return { kind: "confirm", reason: "no premium" };
+          ac.abort();
+          return { kind: "failed" };
+        },
+        confirm: () => true,
+        onUnresolved: () => fallbacks++,
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.notices).toEqual(["Stream cancelled."]);
+      expect(fallbacks).toBe(0);
+    });
+
+    it("hands the signal to start, poll and sleep, so an in-flight fetch dies too", async () => {
+      const ac = new AbortController();
+      const seen: { start?: boolean; poll?: boolean } = {};
+      let polls = 0;
+      const { fx, calls } = harness({
+        start: async (_row, _confirmed, signal) => {
+          seen.start = signal === ac.signal;
+          return started({ state: "resolving", progress: 0 });
+        },
+        poll: async (_id, signal) => {
+          seen.poll = signal === ac.signal;
+          polls++;
+          return polls === 1
+            ? session({ state: "resolving" })
+            : session({ files: [file("movie.mp4", 0)] });
+        },
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(seen.start).toBe(true);
+      expect(seen.poll).toBe(true);
+      expect(calls.slept.every((s) => s.aborts)).toBe(true);
+    });
+
+    // An aborted fetch reads as an unreadable session, which has its own,
+    // wrong, message: "Lost track of that stream — try again." tells a user who
+    // just pressed Cancel that something went wrong.
+    it("reports a cancel as a cancel, not as a lost session", async () => {
+      const ac = new AbortController();
+      const { fx, calls } = harness({
+        start: async () => started({ state: "resolving", progress: 10 }),
+        poll: async () => {
+          ac.abort();
+          return null;
+        },
+      });
+      await runPlay(row(), fx, { signal: ac.signal });
+      expect(calls.notices).toContain("Stream cancelled.");
+      expect(calls.notices).not.toContain("Lost track of that stream — try again.");
+      expect(calls.stopped).toEqual(["s1"]);
+    });
+  });
+
+  describe("progress", () => {
+    it("reports the waiting line on its own channel, not as a notice", async () => {
+      let polls = 0;
+      const { fx, calls } = harness({
+        start: async () => started({ state: "resolving", backend: "debrid", progress: 40 }),
+        poll: async () => {
+          polls++;
+          return polls === 1
+            ? session({ state: "resolving", backend: "debrid", progress: 60 })
+            : session({ files: [file("movie.mp4", 0)] });
+        },
+      });
+      await runPlay(row(), fx, { providerLabel: "Real-Debrid" });
+      expect(calls.progress[0]).toBe("Caching on Real-Debrid… 40% · 0s");
+      expect(calls.notices).toEqual([]);
+    });
+
+    // The pill must come down however the flow ends, or it sits over the page
+    // for good. Asserted for a success, a failure and a cancel.
+    it("clears the waiting line however the flow ends", async () => {
+      const ok = harness({ start: async () => started({ files: [file("movie.mp4", 0)] }) });
+      await runPlay(row(), ok.fx);
+      expect(ok.calls.progress.at(-1)).toBeNull();
+
+      const bad = harness({ start: async () => started({ state: "error", error: "no peers" }) });
+      await runPlay(row(), bad.fx);
+      expect(bad.calls.progress.at(-1)).toBeNull();
+
+      const ac = new AbortController();
+      ac.abort();
+      const off = harness();
+      await runPlay(row(), off.fx, { signal: ac.signal });
+      expect(off.calls.progress.at(-1)).toBeNull();
     });
   });
 });

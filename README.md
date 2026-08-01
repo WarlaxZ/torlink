@@ -280,7 +280,11 @@ the active stream; press **`x`** to stop.
 
 In the browser, torlnk resolves the torrent — through the active debrid provider if you have one
 connected, otherwise straight from the swarm — picks the video file (or asks, if there are several), and
-opens a player page. Before it builds a player at all it asks the server what the file actually *is* —
+opens a player page. While it resolves, the button you pressed says so and a line in the corner of the
+window counts up — `Caching on Real-Debrid… 42% · 12s`, the same words the terminal uses — because a
+torrent your provider has never seen genuinely takes minutes. That line carries a **Cancel** that stops
+the session, the browser's answer to the terminal's `esc`. When there are several files to choose from,
+the question opens over the page rather than at the top of it, so it finds you wherever you had scrolled. Before it builds a player at all it asks the server what the file actually *is* —
 container and codecs, read with `ffprobe` where you have it and from the release name where you don't. So
 what happens next is decided up front, and you find out immediately rather than watching a black rectangle
 give up after twelve seconds:

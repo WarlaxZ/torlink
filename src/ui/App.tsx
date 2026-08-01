@@ -69,6 +69,7 @@ import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
 import { openFolder } from "../util/openFolder";
 import { openUrl } from "../util/openUrl";
+import { prepareLine } from "../util/prepareLine";
 import { cleanText, formatBytes, truncate } from "../util/format";
 import { isCategory, parseSection } from "./store";
 import {
@@ -2560,13 +2561,11 @@ export function App({
         {preparing ? (
           <Box>
             <Spinner
-              label={
-                preparing.source === "torrent"
-                  ? `Finding peers… ${preparing.label} · ${prepElapsed}s  (esc cancels)`
-                  : preparing.phase === "caching"
-                    ? `Caching on ${preparing.providerLabel ?? "debrid"}… ${preparing.pct}% · ${prepElapsed}s  (esc cancels)`
-                    : `Fetching link… ${prepElapsed}s  (esc cancels)`
-              }
+              // The line itself is shared with the browser
+              // (src/util/prepareLine.ts) so the two front ends cannot drift on
+              // what a waiting user reads. The key hint is appended here and
+              // only here: the browser has a Cancel button in its place.
+              label={`${prepareLine({ ...preparing, elapsedSec: prepElapsed })}  (esc cancels)`}
             />
           </Box>
         ) : null}

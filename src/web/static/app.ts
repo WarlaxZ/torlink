@@ -14,6 +14,8 @@ import {
   type DashRow,
   type StatusPayload,
 } from "./dashboard";
+import { abortableSleep } from "./abortableSleep";
+import { controlState, isBusy, type FlowState } from "./streamBusy";
 import {
   fileLabel,
   isPlayable,
@@ -39,6 +41,7 @@ import {
   dashRowForPlay,
   debridAddedNotice,
   debridAddLabel,
+  debridProviderLabel,
   emptyView,
   defaultExpandedKeys,
   groupCountLabel,
@@ -207,11 +210,17 @@ const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
 const conn = el<HTMLSpanElement>("conn");
-const picker = el<HTMLDivElement>("picker");
+const picker = el<HTMLDialogElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
 const pickerFiles = el<HTMLUListElement>("picker-files");
 const pickerCancel = el<HTMLButtonElement>("picker-cancel");
 const pickerSort = el<HTMLButtonElement>("picker-sort");
+
+// The resolving-stream pill. Named `prepareBox` rather than `prepare` so it
+// cannot be confused with `prepareLine`, the shared helper that writes into it.
+const prepareBox = el<HTMLDivElement>("prepare");
+const prepareText = el<HTMLSpanElement>("prepare-line");
+const prepareCancel = el<HTMLButtonElement>("prepare-cancel");
 
 const prefsBlock = el<HTMLDetailsElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
@@ -343,6 +352,76 @@ function showNotice(message: string): void {
   }, NOTICE_MS);
 }
 
+// The waiting line, or null to take it down. This is runPlay's `progress` effect
+// — separate from `notice` because this one persists for the length of a resolve
+// (minutes) and carries a Cancel, while a notice hides itself after seconds.
+//
+// The line itself is prepareLine's (src/util/prepareLine.ts, via pollDecision):
+// nothing here decides what a waiting user reads.
+function showPrepare(line: string | null): void {
+  if (line === null) {
+    prepareBox.hidden = true;
+    prepareText.textContent = "";
+    return;
+  }
+  prepareText.textContent = line;
+  prepareBox.hidden = false;
+}
+
+// Stamps a Play control with the identity `flow` will match it against, and the
+// word it says when idle.
+//
+// A SEPARATE ATTRIBUTE FROM tagControl's `data-row-key`, and that is not
+// duplication. `data-row-key` is resultFocus's identity — for a search result it
+// is the GROUP key (one row per title, several releases nested inside), not the
+// info hash `play()` is handed. Matching busy state on it would mark the wrong
+// control the moment a title has more than one release.
+//
+// `data-idle-label` is stamped because the paint overwrites `textContent`: once a
+// button reads "preparing…", the word it should return to is no longer anywhere
+// in the DOM to read back.
+function tagPlayKey(button: HTMLButtonElement, key: string, idleLabel: string): void {
+  button.dataset.playKey = key;
+  button.dataset.idleLabel = idleLabel;
+}
+
+// Repaints every Play control on the page from `flow`.
+//
+// DERIVED ON EVERY RENDER, never set once on click: the queue's rows are rebuilt
+// four times a second by the SSE tick, so a `disabled` set in a click handler is
+// gone by the next frame. That is the bug this pass exists to close — the button
+// that was pressed looked untouched, so it got pressed again.
+//
+// Which control looks how is controlState's decision (streamBusy.ts), not one
+// made here: all this does is assign the three values it hands back.
+function paintPlayBusy(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-play-key]")) {
+    const state = controlState(
+      flow,
+      button.dataset.playKey ?? "",
+      // The stamped label, falling back to whatever the button currently says —
+      // which is only wrong for a control that was somehow never tagged, and is
+      // still better than blanking it.
+      button.dataset.idleLabel ?? button.textContent ?? "play",
+    );
+    button.disabled = state.disabled;
+    button.textContent = state.label;
+    // A boolean attribute, so it is removed rather than set to "false" — the same
+    // thing this file already does with aria-current on the picker's next row.
+    if (state.busy) button.setAttribute("aria-busy", "true");
+    else button.removeAttribute("aria-busy");
+  }
+}
+
+prepareCancel.addEventListener("click", () => {
+  // Feedback on the press itself. Aborting kills an in-flight fetch, but there
+  // is still a round trip before the pill comes down, and a Cancel that looks
+  // inert for a second gets pressed again — which is the habit this whole change
+  // is about. Re-enabled by play()'s next call, not here.
+  prepareCancel.disabled = true;
+  prepareAbort?.abort();
+});
+
 // Every action the row buttons can take. Downloads and seeds expose different
 // sets; `delete` also removes the files, which is why it is offered only where
 // the TUI offers it.
@@ -470,6 +549,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.className = "play";
     playButton.textContent = "play";
     tagControl(playButton, row.id, "play");
+    tagPlayKey(playButton, row.id, "play");
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
@@ -504,6 +584,10 @@ function render(): void {
     focusBefore,
     rows.map((r) => r.id),
   );
+  // The buttons that were just rebuilt know nothing about a play in flight. This
+  // list is replaced four times a second, so this is the call that makes a busy
+  // state survive longer than 250ms.
+  paintPlayBusy();
   // The queue tab carries its own count so a search that added something shows
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
@@ -554,11 +638,21 @@ async function control(id: string, action: string): Promise<void> {
 // Everything below to the next banner is the Play flow. The decisions live in
 // streamFlow.ts; what is here is fetch, timers and DOM.
 
-// Rows with a Play already in flight. Starting a session takes a round trip and
-// then up to minutes of polling, and the row's buttons are rebuilt four times a
-// second by the SSE tick — so without this a second tap starts a second session
-// (a second swarm, a second Real-Debrid job) for the same torrent.
-const playing = new Set<string>();
+// What the one in-flight play or pick is, if any. ONE, not a set: the terminal
+// allows one prepare or pick at a time (src/ui/App.tsx's
+// `if (preparing || streamFiles || activeStream) return`) and the browser's
+// per-row set let two rows resolve at once, each polling a session for up to ten
+// minutes, sharing one progress line that reported whichever wrote last.
+//
+// Every Play button on the page is repainted from this (paintPlayBusy), so the
+// rule is visible rather than enforced by a silent early return — a lit button
+// that does nothing when pressed is what taught people to press it repeatedly.
+const flow: FlowState = { prepare: null, picking: null };
+
+// Cancels the in-flight prepare. Held here so the pill's Cancel button can reach
+// it; runPlay threads the signal into its fetches and its sleep, and stops the
+// session on the way out.
+let prepareAbort: AbortController | null = null;
 
 // The session the picker is currently offering. Held so Cancel can stop it: the
 // session is live by then, with a torrent attached, and closing the picker
@@ -576,9 +670,17 @@ let pickerSession: string | null = null;
 let pickerMode: StreamFileSort = "name";
 let drawPicker: (() => void) | null = null;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+// runPlay's `sleep` effect. The abort handling is in abortableSleep.ts rather
+// than here because it has two failure modes reading cannot catch — never
+// resolving, and leaving its listener attached — and nothing in app.ts is
+// reachable by a test.
+const sleep = abortableSleep;
 
-async function startSession(row: DashRow, confirmed: boolean): Promise<StartResult> {
+async function startSession(
+  row: DashRow,
+  confirmed: boolean,
+  signal?: AbortSignal,
+): Promise<StartResult> {
   let res: Response;
   try {
     res = await fetch("/api/stream", {
@@ -593,8 +695,17 @@ async function startSession(row: DashRow, confirmed: boolean): Promise<StartResu
         name: row.name,
         ...(confirmed ? { confirm: true } : {}),
       }),
+      // So Cancel kills the request rather than waiting it out. Resolving a
+      // torrent can hold this POST open for a while.
+      signal,
     });
   } catch {
+    // AN ABORT LANDS HERE TOO, and it is not a dead server. Saying so would
+    // blame the backend for something the user just asked for, and — worse —
+    // setConn("lost") repaints the whole header as disconnected. runPlay checks
+    // `signal.aborted` immediately after this returns and reports the cancel
+    // itself, so this stays silent and lets it.
+    if (signal?.aborted) return { kind: "failed" };
     showNotice("Play failed — the server is not responding.");
     setConn("lost");
     return { kind: "failed" };
@@ -636,10 +747,17 @@ async function startSession(row: DashRow, confirmed: boolean): Promise<StartResu
   };
 }
 
-async function pollSession(sessionId: string): Promise<PublicStreamSession | null> {
+// Null on anything unreadable, an abort included — runPlay's `if (!next)` branch
+// checks `signal.aborted` before reporting a lost session, so a cancel mid-poll
+// is not mistaken for one.
+async function pollSession(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<PublicStreamSession | null> {
   try {
     const res = await fetch(`/api/stream/${encodeURIComponent(sessionId)}`, {
       headers: authHeaders(),
+      signal,
     });
     if (!res.ok) return null;
     const body = (await res.json()) as unknown;
@@ -673,25 +791,29 @@ function openPlayer(path: string): void {
   location.assign(path);
 }
 
+// Closes the picker WITHOUT stopping its session — the caller is handing that
+// session to the player. Clearing `pickerSession` before `close()` is what tells
+// the `close` listener below to leave it alone, so the two ways out of a picker
+// (chose a file / walked away) stay distinguishable with no extra flag. The rest
+// of the teardown lives in that listener, because Escape reaches it and does not
+// reach here.
 function hidePicker(): void {
   pickerSession = null;
-  drawPicker = null;
-  picker.hidden = true;
-  pickerFiles.replaceChildren();
+  if (picker.open) picker.close();
 }
 
 // Same createElement/textContent rule as renderRow, and for a stronger reason:
 // these strings are filenames from inside a stranger's torrent.
 //
 // `infoHash` is a PARAMETER, not a module-level variable read when a file is
-// chosen. The picker is an inline card, not a modal (index.html's `.picker` is
-// `display: block`), so the results list stays clickable while it is open —
-// clicking play on a different row opens a second picker for a different
-// torrent. A module-level "current picker hash" would be overwritten by that
-// second play(), and choosing a file from the FIRST picker would then record
-// its filename as watched against the SECOND torrent's favourite. Closing over
-// the hash at the call site (see play()) makes that impossible: each picker's
-// callbacks carry the hash they were opened with, for good.
+// chosen, and it stays one. The hazard it was written against — a second play()
+// opening a picker for a different torrent while this one is open, so that
+// choosing a file from the FIRST records its filename as watched against the
+// SECOND torrent's favourite — is now unreachable twice over: the picker is a
+// modal, and isBusy refuses a second play while one is in flight at all (the
+// terminal's own one-at-a-time rule, src/ui/App.tsx). Closing over the hash at
+// the call site costs nothing and remains the correct shape, so the belt stays on
+// with the braces.
 //
 // `preselect` is streamOutcome's decision (streamFlow.ts), never one made here:
 // which file is the next episode is shared with the TUI's picker, and app.ts is
@@ -710,6 +832,12 @@ function showPicker(
   files: PublicStreamFile[],
   preselect: number | null,
 ): void {
+  // A session already on offer here is one nobody is going to answer now, and it
+  // has a torrent attached. Releasing it fixes a leak that predates the modal:
+  // the old code overwrote `pickerSession` and left the previous session running
+  // until the idle reaper. Guarded on inequality so a redraw of the same session
+  // can never stop the session it is redrawing.
+  if (pickerSession !== null && pickerSession !== sessionId) stopSession(pickerSession);
   pickerSession = sessionId;
   pickerTitle.textContent = `Which file from “${shortName(name)}”?`;
 
@@ -768,7 +896,9 @@ function showPicker(
     }
   };
 
-  picker.hidden = false;
+  // showModal(), not show(): the backdrop and the focus trap are the point. It
+  // throws if the dialog is already open, which a second choose() can do.
+  if (!picker.open) picker.showModal();
   // Only a re-sort has a file to keep; opening the picker follows the preselect.
   drawPicker = () => draw(focusedPickerFile(files));
   draw();
@@ -785,9 +915,21 @@ function focusedPickerFile(files: PublicStreamFile[]): number | null {
   return found >= 0 ? found : null;
 }
 
-pickerCancel.addEventListener("click", () => {
+pickerCancel.addEventListener("click", () => picker.close());
+
+// EVERY way out of the picker lands here — the Cancel button, Escape, and
+// hidePicker(). Escape is the reason this is a `close` listener rather than more
+// work in the click handler: a <dialog> closes on Escape natively, bypassing any
+// button handler, and the session it was offering has a torrent attached. Left
+// running, it would sit there until the idle reaper collected it.
+//
+// `pickerSession` being null means a file was chosen and the session now belongs
+// to the player (hidePicker cleared it first, on purpose) — nothing to release.
+picker.addEventListener("close", () => {
   const sessionId = pickerSession;
-  hidePicker();
+  pickerSession = null;
+  drawPicker = null;
+  pickerFiles.replaceChildren();
   if (sessionId) stopSession(sessionId);
 });
 
@@ -825,27 +967,64 @@ async function play(
   onUnresolved?: () => void,
   next?: EpisodeRef | null,
 ): Promise<void> {
-  if (playing.has(row.id)) return;
-  playing.add(row.id);
+  // One at a time, and the buttons say so (paintPlayBusy), so this early return
+  // is now a backstop rather than the whole mechanism.
+  if (isBusy(flow)) return;
   const wanted = wantedEpisodeFor(row.name, savedState.continueWatching, next);
+  const ac = new AbortController();
+  prepareAbort = ac;
+  prepareCancel.disabled = false;
+  flow.prepare = { key: row.id, title: row.name };
+  // Read BEFORE the paint: paintPlayBusy is about to disable this control, and
+  // disabling the focused element drops focus to <body> — where captureRowFocus
+  // finds nothing, so focusTargetAfterRender has nothing to restore and the list
+  // stays unreachable by keyboard for the whole prepare. That is the exact
+  // failure resultFocus.ts was written for.
+  const pressedWasFocused = document.activeElement instanceof HTMLElement &&
+    document.activeElement.dataset["playKey"] === row.id;
+  paintPlayBusy();
+  // Focus follows the user's next action, which is now Cancel — the browser's
+  // stand-in for the terminal's `esc`. Only when they were driving from the
+  // keyboard: a mouse user has no focus ring to lose and would be surprised to
+  // find Enter now cancelling their stream.
+  if (pressedWasFocused) prepareCancel.focus();
   try {
-    await runPlay(row, {
-      start: startSession,
-      poll: pollSession,
-      stop: stopSession,
-      confirm: (message) => confirm(message),
-      notice: showNotice,
-      // Closes over THIS row's hash, not a module-level variable — see
-      // showPicker's comment for why that distinction is load-bearing.
-      choose: (sessionId, capability, name, files, preselect) =>
-        showPicker(row.id, sessionId, capability, name, files, preselect),
-      open: (path) => openPlayer(path),
-      sleep,
-      now: () => Date.now(),
-      onUnresolved,
-    }, wanted);
+    await runPlay(
+      row,
+      {
+        start: startSession,
+        poll: pollSession,
+        stop: stopSession,
+        confirm: (message) => confirm(message),
+        notice: showNotice,
+        progress: showPrepare,
+        // Closes over THIS row's hash, not a module-level variable — see
+        // showPicker's comment for why that distinction is load-bearing.
+        choose: (sessionId, capability, name, files, preselect) =>
+          showPicker(row.id, sessionId, capability, name, files, preselect),
+        open: (path) => openPlayer(path),
+        sleep,
+        now: () => Date.now(),
+        onUnresolved,
+      },
+      {
+        wanted,
+        // The provider's display name for the waiting line, from the same
+        // DEBRID_LABELS table the add button reads (searchModel.ts) — not a
+        // second one written here.
+        providerLabel: sources?.debridProvider
+          ? debridProviderLabel(sources.debridProvider)
+          : null,
+        signal: ac.signal,
+      },
+    );
   } finally {
-    playing.delete(row.id);
+    prepareAbort = null;
+    flow.prepare = null;
+    // runPlay takes the pill down itself on every exit; this is belt and braces
+    // for a throw, which would skip it.
+    showPrepare(null);
+    paintPlayBusy();
   }
 }
 
@@ -1267,6 +1446,12 @@ const pickController = createPickController<PublicSearchResult>({
 // the controller.
 function renderPickPhase(state: PickState): void {
   const phase = state.phase;
+  // The one-click Play's search is a flow too, and while it runs no other Play
+  // button should look pressable — the same rule as a prepare. Only "searching"
+  // counts: by "playing" the controller has handed off to play(), which owns
+  // `flow.prepare` from that point on.
+  flow.picking = phase.kind === "searching" ? phase.title : null;
+  paintPlayBusy();
   if (phase.kind === "searching") showNotice(pickSearchingLine(phase.title));
   else if (phase.kind === "playing") showNotice(phase.note);
   else if (phase.kind === "none") showNotice(pickNoneLine(phase.title));
@@ -1652,6 +1837,10 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   playButton.className = "play";
   playButton.textContent = "play";
   tagControl(playButton, rowKey, "play");
+  // `result.infoHash`, NOT `rowKey`: rowKey is the group key (this row may nest
+  // several releases of one title), while play() is handed rowForPlay(result),
+  // whose id is the hash. See tagPlayKey for why the two identities are separate.
+  tagPlayKey(playButton, result.infoHash, "play");
   playButton.addEventListener("click", () => void play(rowForPlay(result)));
   actions.append(playButton);
 
@@ -2106,6 +2295,8 @@ function renderResults(): void {
   );
   applyRovingTabIndex(rowKeys, selectedRowKey);
   restoreRowFocus(resultsList, focusBefore, rowKeys);
+  // Freshly built rows, so freshly built Play buttons: re-apply the flow.
+  paintPlayBusy();
 
   const status = searchStatus(searchView, shown.length);
   searchStatusLine.textContent = status.text;
@@ -2680,8 +2871,19 @@ function paintReccPlay(
   playButton.type = "button";
   playButton.className = "play recc-play";
   playButton.textContent = "Play";
-  playButton.addEventListener("click", () => pickController.start(item.title, { kind: "film" }));
+  // The TITLE, not a hash: this button goes through pickController, which is off
+  // to find a release for a film that has no torrent picked yet.
+  tagPlayKey(playButton, item.title, "Play");
+  playButton.addEventListener("click", () => {
+    // One flow at a time, exactly as play() does. This button had NO guard of any
+    // kind before — pickController is not covered by play()'s.
+    if (isBusy(flow)) return;
+    pickController.start(item.title, { kind: "film" });
+  });
   actions.prepend(playButton);
+  // A recc card repaints on its own (paintReccPlay is called per render), so the
+  // freshly built button needs the current flow applied to it.
+  paintPlayBusy();
 }
 
 /** Post one rating to reccd and, for the three that are verdicts, drop the pick. */
@@ -2825,6 +3027,7 @@ function renderPick(item: PublicRecommendation, filter: ReccType): HTMLLIElement
 function renderRecc(state: ReccState): void {
   const items = reccItems(state);
   reccList.replaceChildren(...items.map((item) => renderPick(item, state.filters.type)));
+  paintPlayBusy();
 
   const status = reccStatus(state);
   reccStatusLine.textContent = status.text;
@@ -3039,6 +3242,9 @@ function renderLibraryRow(f: PublicFavourite): HTMLLIElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  // `f.id` is the info hash dashRowForPlay builds the row's id from, so this is
+  // the same key `flow.prepare` will hold.
+  tagPlayKey(playButton, f.id, "play");
   playButton.addEventListener("click", () => void play(dashRowForPlay(f.id, f.name)));
   actions.append(playButton);
 
@@ -3080,6 +3286,11 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   playButton.type = "button";
   playButton.className = "play";
   playButton.textContent = "play";
+  // The INFO HASH, not the title: playContinueWatching resumes the remembered
+  // torrent via dashRowForPlay(item.infoHash, …), so that is the key flow holds.
+  // The "Play next" button below is the one keyed by title — it goes looking for
+  // a fresh release instead.
+  tagPlayKey(playButton, item.infoHash, "play");
   playButton.addEventListener("click", () => void playContinueWatching(item));
   actions.append(playButton);
 
@@ -3105,12 +3316,18 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
     playNext.type = "button";
     playNext.className = "play";
     playNext.textContent = "Play next";
+    // Keyed by TITLE, unlike the resume button above: this one goes through
+    // pickController to find a fresh release for the next episode.
+    tagPlayKey(playNext, item.title, "Play next");
     // onNone falls back to the same "remembered torrent" resume the plain
     // play button above uses — a fresh pick found nothing, not a reason to
     // strand the row with no action at all.
-    playNext.addEventListener("click", () =>
-      pickController.start(item.title, intent, () => void playContinueWatching(item)),
-    );
+    playNext.addEventListener("click", () => {
+      // As with the For You card: pickController is not covered by play()'s
+      // guard, so this button had none at all before.
+      if (isBusy(flow)) return;
+      pickController.start(item.title, intent, () => void playContinueWatching(item));
+    });
     actions.prepend(playNext);
   }
 
@@ -3128,6 +3345,8 @@ function renderSaved(): void {
   continueRows.replaceChildren(...savedState.continueWatching.map(renderContinueRow));
   savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
   libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+  // Continue-watching and library rows both carry Play buttons.
+  paintPlayBusy();
 
   const cw = continueWatchingStatus(savedState);
   continueStatusLine.textContent = cw.text;

@@ -60,24 +60,51 @@
 
     <p id="notice" class="notice" hidden></p>
 
-    <main id="app" hidden>
-      <!-- The stream file picker. Shown only when a session resolves to more
-           than one playable file; every child below the heading is built by
-           app.js with createElement, because the filenames come out of a
-           torrent. It sits above both panes because Play is offered on a search
-           result and on a queue row, and it is replaced wholesale by neither
-           list's re-render (the queue's happens four times a second). -->
-      <div id="picker" class="card picker" hidden>
-        <p id="picker-title" class="picker-title"></p>
-        <ul id="picker-files" class="picker-files"></ul>
-        <div class="picker-actions">
-          <!-- The terminal picker's "s" key, as a button: title order or
-               largest-first. Its label is set by app.js from the current mode. -->
-          <button id="picker-sort" type="button"></button>
-          <button id="picker-cancel" type="button">Cancel</button>
-        </div>
-      </div>
+    <!-- The stream file picker. Shown only when a session resolves to more than
+         one playable file; every child below the heading is built by app.js with
+         createElement, because the filenames come out of a torrent.
 
+         A MODAL <dialog>, and OUTSIDE <main id="app">, both deliberately:
+
+         - Modal because it used to be an inline card at the top of the document.
+           Press play on a season pack 500px down a browse and the question
+           appeared off screen, with nothing where the user was looking to say
+           anything had happened at all. showModal() centres it in the viewport,
+           takes focus, and closes on Escape.
+         - Outside #app because #app carries `hidden` until the page loads, and a
+           <dialog> inside a display:none subtree does not render at all. Its old
+           position was justified by sitting above both panes so that neither
+           list's re-render could replace it (the queue's happens four times a
+           second); a top-level sibling keeps that property and adds nothing to
+           it. -->
+    <dialog id="picker" class="card picker">
+      <p id="picker-title" class="picker-title"></p>
+      <ul id="picker-files" class="picker-files"></ul>
+      <div class="picker-actions">
+        <!-- The terminal picker's "s" key, as a button: title order or
+             largest-first. Its label is set by app.js from the current mode. -->
+        <button id="picker-sort" type="button"></button>
+        <button id="picker-cancel" type="button">Cancel</button>
+      </div>
+    </dialog>
+
+    <!-- The waiting line for a resolving stream, anchored to the viewport.
+         Resolving a torrent Real-Debrid has never seen genuinely takes minutes,
+         and the only progress report used to be #notice — a paragraph above
+         <main> that scrolls away, so a user 500px down a browse saw nothing at
+         all and pressed play again. Bottom LEFT because .to-top already owns
+         bottom right.
+
+         aria-live is OFF on purpose. The line changes every second (the elapsed
+         count moves even when the percent does not), so a live region would talk
+         over a screen-reader user continuously for minutes. #notice keeps the
+         milestones worth announcing: started, cancelled, failed. -->
+    <div id="prepare" class="prepare" role="status" aria-live="off" hidden>
+      <span id="prepare-line" class="prepare-line"></span>
+      <button id="prepare-cancel" type="button">Cancel</button>
+    </div>
+
+    <main id="app" hidden>
       <!-- ---- search ------------------------------------------------------ -->
       <section id="pane-search">
         <form id="search" class="card">
