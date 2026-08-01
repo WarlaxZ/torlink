@@ -106,13 +106,21 @@ because the server builds the body and `parseRelease` — which it needs — alr
 `playlistTitle(filename)`:
 
 1. Strip the directory prefix and the extension.
-2. Find a season/episode tag (`S04E05`, including multi-episode `S04E05E06`). With one:
-   take the text after it, strip leading separators, cut it at the first `(` or `[` that has
-   at least three characters of text before it, and collapse whitespace. A non-empty remainder
-   gives `S04E05 · Beware the Jabberwock, My Son`; an empty one gives bare `S04E05`.
-3. Without a tag: replace `.` and `_` with spaces, apply the same bracket cut, collapse
-   whitespace — so `Bonus_Gag_Reel_1.mkv` reads as `Bonus Gag Reel 1`.
-4. If nothing survives, fall back to the sanitised basename, and failing that `"stream"`. The
+2. Find a season/episode tag (`S04E05`, including multi-episode `S04E05E06`). With one, the
+   title is the show's name (from `parseRelease`, when it found one) plus the tag —
+   `Harrowgate S03E01`.
+3. An episode *name* is appended as ` · <name>` only when the filename used the
+   spaced-dash convention Sonarr and Plex write (` - ` / ` – ` / ` — ` after the tag), taking
+   the text up to the next ` (` or ` [`. So
+   `Kepler (2019) - S02E04 - Ashfall Rising (1080p BluRay x265 GROUP).mkv` becomes
+   `Kepler S02E04 · Ashfall Rising`, while the dot-delimited
+   `Harrowgate.S03E01.1080p.WEB-DL.mkv` stops at `Harrowgate S03E01` rather than appending
+   `1080p WEB-DL`. The separator is what distinguishes an episode name from release junk;
+   guessing at dot-delimited text would put `1080p WEB DL` in front of the user as a title.
+4. Without a tag: `parseRelease`'s title and year — `Kestrel.2010.1080p.BluRay.x264.mkv` →
+   `Kestrel 2010`. Where it parses nothing, the basename with `.` and `_` replaced by spaces, so
+   `Bonus_Gag_Reel_1.mkv` reads as `Bonus Gag Reel 1`.
+5. If nothing survives, fall back to the sanitised basename, and failing that `"stream"`. The
    function never returns an empty string, because an `#EXTINF:-1,` with nothing after the
    comma is worse than a URL.
 
@@ -142,8 +150,14 @@ export function restPlaylist<T extends SizedFile & { index: number }>(
   the picker and the episode list already use.
 - When the current file parses to **both** a season and an episode: `kind: "season"`, and the
   entries are the current file plus every later candidate whose parsed season equals it *and*
-  which names an episode of its own. That excludes extras by construction, however they are
-  named, which is the case that is only accidentally right today.
+  which names an episode of its own. That drops the extras this case is about — verified
+  against `parseRelease`, `Harrowgate.S03/Bonus_Gag_Reel_1.mkv` yields a season but no episode,
+  so it is excluded, where today it is included.
+- **It does not drop an extra that poses as an episode.** `Harrowgate.S03E02.Deleted.Scenes.mkv`
+  parses as S03E02 and stays in, next to the real E02. Deduplicating by episode number would
+  remove it — and would also remove `S03E02.Part2` next to `S03E02.Part1`, which is losing half
+  an episode to tidy up a duplicate. Including one extra is the cheaper mistake, so there is no
+  dedupe, and a test records the choice.
 - Otherwise — a bonus feature, a film, an unparseable name: `kind: "everything"`, and the
   entries are today's behaviour, the sorted slice from the current file onward.
 - An index naming no candidate yields `{ kind: "everything", indexes: [index] }`, matching what
@@ -173,8 +187,8 @@ Every item below is a test written before the change it covers.
 
 | Test | What it pins |
 | --- | --- |
-| `src/util/playlistTitle.test.ts` | `Kepler.S02E04.1080p.WEB-DL` → `S02E04`; a Sonarr-shaped name with an episode title → `S02E04 · <title>`; `Harrowgate.S03.1080p.WEB-DL` (season, no episode) → the cleaned basename; `Kestrel.2010.1080p.BluRay.x264` → `Kestrel 2010`; a bonus-style `Bonus_Gag_Reel_1` → `Bonus Gag Reel 1`; a filename carrying `\r\n`, a leading `#`, and a control character → all stripped; a 300-character name → capped; a name that sanitises to nothing → `stream` |
-| `src/util/restPlaylist.test.ts` | from an episode, later episodes of the same season only, extras excluded even when named `S03E02 Deleted Scene`; from an extra, `kind: "everything"` and the sorted slice; from a season pack (season, no episode) → `everything`; from a film → a single index; an out-of-range index → `[index]`; the last episode of a season → one index, so no button |
+| `src/util/playlistTitle.test.ts` | `Kepler.S02E04.1080p.WEB-DL.mkv` → `Kepler S02E04`, with no `1080p` in it; a Sonarr-shaped name → `Kepler S02E04 · Ashfall Rising`; `Harrowgate.S03.1080p.WEB-DL.mkv` (season, no episode) → `Harrowgate`; `Kestrel.2010.1080p.BluRay.x264.mkv` → `Kestrel 2010`; a bonus-style `Harrowgate.S03/Bonus_Gag_Reel_1.mkv` → `Bonus Gag Reel 1`, with no directory in it; a filename carrying `\r\n`, a leading `#`, and a control character → all stripped; a 300-character name → capped at 120; a name that sanitises to nothing → `stream` |
+| `src/util/restPlaylist.test.ts` | from an episode, later episodes of the same season only, with a bonus file that names a season but no episode excluded; a second season excluded; from an extra, `kind: "everything"` and the sorted slice; from a season pack (season, no episode) → `everything`; from a film → a single index; an out-of-range index → `[index]`; the last episode of a season → one index, so no button; an extra named `S03E02.Deleted.Scenes` IS included, recording the no-dedupe choice |
 | `src/web/stream.test.ts` | the playlist body starts `#EXTM3U` and carries one `#EXTINF:-1,<title>` per URL; a filename containing a newline cannot add a line to the body (count the URLs); `Content-Length` matches the new body; **every entry names the request's `Host`, for a non-video file** — the regression guard for the report above; `?rest=1` from an episode lists that season only |
 | `src/web/static/upNext.test.ts` | the label for each `kind`; absent when one entry |
 | `src/web/static/playerModel.test.ts` | `vlcLinks(url, "macos")` is `[]`; `ios` and `android` unchanged; `detectPlatform` still returns `macos` for a Mac UA; `interruptedNotice` names no button that desktop lacks |
