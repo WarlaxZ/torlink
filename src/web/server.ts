@@ -39,7 +39,7 @@ import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
-import { loadConfig } from "../config/config";
+import { loadConfig, resolveCastAdvertiseHost } from "../config/config";
 import type { Runtime } from "../daemon/runtime";
 
 export const DEFAULT_WEB_PORT = 9162;
@@ -310,7 +310,13 @@ export async function startWebServer(
     // claim by a client: a user browsing `http://localhost:9161` would otherwise
     // hand the device a URL pointing at the device itself. `host` is what this
     // server actually bound, which is a fact about what is reachable.
-    castOriginImpl: () => castOrigin(host, boundPort, os.networkInterfaces()),
+    castOriginImpl: async () => {
+      // Config per call, never a snapshot: `serve --web` is a separate process
+      // from any TUI where the user may have just fixed this very setting, and a
+      // held copy would keep handing a television an address that does not work.
+      const cfg = await (options.webDeps?.loadConfigImpl ?? loadConfig)();
+      return castOrigin(host, boundPort, os.networkInterfaces(), resolveCastAdvertiseHost(cfg));
+    },
     // The same answer the player page's `.info` gets, from the same function, so
     // a browser and a television cannot disagree about one file.
     castSourceImpl: async (session, index) => mediaSourceFor(await buildStreamDeps(), session, index),

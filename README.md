@@ -246,7 +246,7 @@ anything other than loopback requires a token.
   muxed *inside* the file are named on the fallback card so you know they're there — pulling one out
   has the same ffmpeg problem.
 - **No settings page, but there is a settings control.** Tokens, sources, limits, folders and the
-  [cast device address](#casting-to-a-tv) are still TUI-only — the browser has no page for them, and
+  [cast device and advertised-host addresses](#casting-to-a-tv) are still TUI-only — the browser has no page for them, and
   that includes reccd's own URL and bearer token; the
   browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the
   **For You** tab), never its address or token. It also includes claiming your
@@ -363,6 +363,46 @@ direction and less fussy in another:
 Discovery uses mDNS, which does not cross a Docker bridge or a VLAN — so if you run torlnk in a container
 and the list comes back empty, that's why. The device list lets you type an address (`192.168.0.40`, or
 `host:port`) and remembers it, so a device mDNS can't reach still casts.
+
+##### Casting from WSL, or from a bridged container
+
+If torlnk runs somewhere the television can't reach it *back*, casting needs one more thing. WSL2 in its
+default mode is the case that bites: inside the VM, torlnk's own address is a `172.x` one that nothing on
+your LAN can route to, so it hands the TV a URL that goes nowhere and the TV reports it as a file it
+couldn't play — which blames the file for a network problem.
+
+The clean fix, if your Windows is new enough (Windows 11 22H2+, `wsl --version` reporting WSL 2.0 or
+later), is to put this in `%UserProfile%\.wslconfig` and run `wsl --shutdown`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+That makes WSL share the Windows host's network instead of hiding behind it, which fixes discovery *and*
+reachability — mDNS starts working too, which nothing below can do for you.
+
+Where mirrored mode isn't available, forward the port on the Windows side and then tell torlnk what
+address to advertise, because it has no way to work that out from inside the VM:
+
+```powershell
+netsh interface portproxy add v4tov4 listenport=9162 listenaddress=0.0.0.0 `
+  connectport=9162 connectaddress=<the WSL eth0 address>
+New-NetFirewallRule -DisplayName "torlnk" -Direction Inbound -LocalPort 9162 -Protocol TCP -Action Allow
+```
+
+Then tell torlnk what to advertise. Both cast settings take an environment variable, because the setups
+that need them are deployed into rather than configured on — a `.bashrc` or a compose file's
+`environment:` is where they naturally live, and neither has a TUI to open:
+
+```bash
+TORLINK_CAST_HOST=192.168.0.10        # your Windows machine's LAN address, or host:port
+TORLINK_CAST_DEVICE=192.168.0.40      # the TV, since mDNS won't cross the NAT either
+```
+
+Both are also plain config fields (`castAdvertiseHost` and `castDevice`), and the device one is what the
+terminal's device list writes when you type an address into it. The same applies to Docker without
+`--network host`.
 
 Two limits worth knowing. Casting needs the television to fetch the file *from this machine*, so a cast
 started in the terminal brings the browser UI up on your LAN address with a token if it isn't already

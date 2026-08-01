@@ -19,6 +19,7 @@ import {
 import {
   loadConfig,
   resolveActiveDebrid,
+  resolveCastDevice,
   qualityPrefsFrom,
   resolveAdultContent,
   resolveOmdbApiKey,
@@ -166,7 +167,7 @@ export interface WebDeps {
    * browsing `http://localhost:9161` would otherwise hand a television a URL
    * pointing at the television.
    */
-  castOriginImpl?: () => string | null;
+  castOriginImpl?: () => Promise<string | null>;
   /**
    * What one file is and the best source for it — `mediaSourceFor`
    * (./stream.ts), the same answer the player page's `.info` gets.
@@ -1723,18 +1724,17 @@ function toPublicCastDevice(device: CastDevice): PublicCastDevice {
 async function castDevices(deps: WebDeps): Promise<CastDevice[]> {
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const found = await (deps.discoverCastImpl ?? (() => discover()))();
-  // Typed rather than trusted: `loadConfig` spreads the parsed JSON, so a
-  // hand-edited `castDevice: 8009` would arrive here as a number.
-  const manual = parseManualDevice(
-    typeof config.castDevice === "string" ? config.castDevice : undefined,
-  );
+  // Via the resolver, so `TORLINK_CAST_DEVICE` works for a deployment with no TUI
+  // to open — and because it trims, which matters when `loadConfig` spreads the
+  // parsed JSON and a hand-edited value arrives as anything at all.
+  const manual = parseManualDevice(resolveCastDevice(config));
   if (!manual || found.some((d) => d.host === manual.host && d.port === manual.port)) return found;
   return [...found, manual];
 }
 
 async function castDevicesRoute(deps: WebDeps): Promise<WebResponse> {
   const devices = await castDevices(deps);
-  const origin = (deps.castOriginImpl ?? (() => null))();
+  const origin = await (deps.castOriginImpl ?? (() => Promise.resolve(null)))();
   // Two independent reasons casting cannot happen, and the file's own blockers
   // are a third the client already knows from `.info`. Naming which one is the
   // difference between "the network" and "this file" for the person looking at a
@@ -1799,7 +1799,7 @@ async function startCast(deps: WebDeps, bodyText: string): Promise<WebResponse> 
   // some other id would have been found.
   if (!device) return { status: 404, json: { error: "unknown device" } };
 
-  const origin = (deps.castOriginImpl ?? (() => null))();
+  const origin = await (deps.castOriginImpl ?? (() => Promise.resolve(null)))();
   if (origin === null) return { status: 409, json: { error: NO_ORIGIN } };
 
   const source = await (deps.castSourceImpl ??

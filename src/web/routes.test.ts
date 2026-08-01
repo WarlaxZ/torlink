@@ -3484,7 +3484,7 @@ describe("the cast routes", () => {
   function castDeps(over: Partial<WebDeps> = {}): WebDeps {
     return deps({
       discoverCastImpl: async () => [DISCOVERED],
-      castOriginImpl: () => LAN,
+      castOriginImpl: async () => LAN,
       castSourceImpl: async () => ({ facts: facts(), hls: null }),
       ...over,
     });
@@ -3542,7 +3542,7 @@ describe("the cast routes", () => {
     });
 
     it("says why casting is unavailable when this machine has no reachable address", async () => {
-      const res = await get(castDeps({ castOriginImpl: () => null }));
+      const res = await get(castDeps({ castOriginImpl: async () => null }));
       expect(res.json).toMatchObject({ castable: false });
       expect((res.json as CastDevicesResponse).reason).toMatch(/could reach/i);
     });
@@ -3578,6 +3578,22 @@ describe("the cast routes", () => {
       // The played-file write needs both, and neither is on the wire.
       expect(arg.infoHash).toBe("0".repeat(40));
       expect(arg.filename).toBe("Kestrel.2010.1080p.BluRay.x264.mp4");
+    });
+
+    it("casts the origin the server advertises, wherever that came from", async () => {
+      // The WSL / bridged-Docker case, end to end: `castOriginImpl` resolves the
+      // configured advertised host, and the URL the television is handed is built
+      // from that rather than from any interface this process can see.
+      const { runtime: rt, casts, sid, capability } = castRuntime();
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      await post(
+        castDeps({ runtime: rt, castOriginImpl: async () => "http://192.168.0.10:8080" }),
+        "/api/cast/start",
+        { deviceId: "abc", sid, index: 0 },
+      );
+      expect(start.mock.calls[0]![0].media.url).toBe(
+        `http://192.168.0.10:8080/stream/${sid}/0?k=${capability}`,
+      );
     });
 
     it("casts an HLS manifest with the HLS content type when the file itself is blocked", async () => {
@@ -3681,7 +3697,7 @@ describe("the cast routes", () => {
 
     it("409s when this machine has no address a device could fetch from", async () => {
       const { runtime: rt, sid } = castRuntime();
-      const res = await post(castDeps({ runtime: rt, castOriginImpl: () => null }), "/api/cast/start", {
+      const res = await post(castDeps({ runtime: rt, castOriginImpl: async () => null }), "/api/cast/start", {
         deviceId: "abc",
         sid,
         index: 0,

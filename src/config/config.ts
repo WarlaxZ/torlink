@@ -132,6 +132,22 @@ export interface Config {
    * UI is a client of this config and reads the resulting device list.
    */
   castDevice?: string;
+  /**
+   * The host a Chromecast should fetch media from, when it is not this machine's
+   * own address — a host, or `host:port`.
+   *
+   * For a torlnk that a television cannot reach at the address torlnk sees on
+   * itself. WSL2 in its default NAT mode is the case: inside the VM `eth0` is a
+   * `172.x` address that is unroutable from the LAN, so a cast fails on the TV as
+   * "couldn't play this file", blaming the file for a network problem. Set this to
+   * the Windows host's LAN address (with the forwarded port, if it differs) and
+   * casting works. Bridged Docker is the same shape.
+   *
+   * Better still, where it is available: WSL2's `networkingMode=mirrored`, which
+   * removes the problem rather than working around it — mDNS discovery starts
+   * working too, which this setting cannot fix.
+   */
+  castAdvertiseHost?: string;
 }
 
 export const defaultConfig: Config = {
@@ -282,6 +298,28 @@ export function resolveReccConfig(config: Config): ReccClientConfig {
   const url = process.env[RECC_URL_ENV]?.trim() || config.reccUrl?.trim() || undefined;
   const token = process.env[RECC_TOKEN_ENV]?.trim() || config.reccToken?.trim() || undefined;
   return { reccUrl: url, reccToken: token };
+}
+
+const CAST_ADVERTISE_ENV = "TORLINK_CAST_HOST";
+const CAST_DEVICE_ENV = "TORLINK_CAST_DEVICE";
+
+/**
+ * The host a Chromecast should fetch media from, or undefined to work it out.
+ *
+ * Env wins over config, matching every other resolve* helper — and it matters
+ * more here than most: the setups that need this are the ones torlnk is *deployed*
+ * into rather than configured on. A WSL user's `.bashrc` and a compose file's
+ * `environment:` are where this naturally lives, and neither has a TUI to open.
+ */
+export function resolveCastAdvertiseHost(config: Config): string | undefined {
+  const env = process.env[CAST_ADVERTISE_ENV]?.trim();
+  return env || config.castAdvertiseHost?.trim() || undefined;
+}
+
+/** The configured Chromecast address, if any. Env wins, for the reason above. */
+export function resolveCastDevice(config: Config): string | undefined {
+  const env = process.env[CAST_DEVICE_ENV]?.trim();
+  return env || config.castDevice?.trim() || undefined;
 }
 
 const OMDB_KEY_ENV = "TORLINK_OMDB_KEY";
