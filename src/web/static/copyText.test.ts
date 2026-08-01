@@ -126,8 +126,14 @@ describe("copyNotice", () => {
    */
   it("names what was copied and where it went", () => {
     expect(copyNotice("copied", "Magnet")).toBe("Magnet copied.");
-    expect(copyNotice("manual", "Magnet", "the message below")).toContain("the message below");
-    expect(copyNotice("manual", "Magnet", "the message below")).not.toContain("the field");
+    const revealed = copyNotice("manual", "Magnet", "below — select it and copy");
+    expect(revealed).toContain("below — select it and copy");
+    expect(revealed).not.toContain("the field");
+    // The default's "already selected" is TRUE of the player's field, which it
+    // calls select() on, and false of text sitting in the alert. Claiming a
+    // selection that is not there sends someone to press cmd-C on whatever they
+    // had before.
+    expect(revealed).not.toContain("already selected");
   });
 
   it("still defaults to the player page's wording", () => {

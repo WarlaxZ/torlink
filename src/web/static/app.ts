@@ -2140,7 +2140,7 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
       // Refused. The alert is this page's equivalent of the player's read-only
       // field: it persists, and its line is selectable text — so putting the
       // magnet in it means the button still gets the user what they came for.
-      showError(`${copyNotice(res, "Magnet", "the message below")}\n${magnet}`);
+      showError(`${copyNotice(res, "Magnet", "below — select it and copy")}\n${magnet}`);
     });
   });
   actions.append(copyButton);
