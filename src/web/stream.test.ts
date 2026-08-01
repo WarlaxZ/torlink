@@ -20,6 +20,20 @@ import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 import type { Runtime } from "../daemon/runtime";
 
+/**
+ * The URL lines of a playlist body — everything that is not a directive.
+ *
+ * The body carries `#EXTM3U` and an `#EXTINF` per entry now, so a test that wants
+ * the addresses has to say so. Assertions about what must NOT be in the file (a
+ * Real-Debrid token, a forwarded host, an injected line) stay on the WHOLE body,
+ * because a leak into a title is just as much a leak.
+ */
+const urlsIn = (body: string): string[] =>
+  body
+    .trim()
+    .split("\n")
+    .filter((line) => !line.startsWith("#"));
+
 // The bytes the fake WebTorrent server serves. Big enough that a range request
 // is a real slice of it and that a client can abandon one mid-flight.
 const MEDIA = Buffer.from(
@@ -1300,11 +1314,11 @@ describe("GET /stream/:sid/:idx.files", () => {
    * per line and plays the rest of the season unattended.
    */
   describe("?rest=1", () => {
-    it("lists this file and every later one, in display order", async () => {
+    it("lists the rest of the season, in display order", async () => {
       const { base, capability, id } = await packSession();
       const res = await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`);
       expect(res.status).toBe(200);
-      const lines = (await res.text()).trim().split("\n");
+      const lines = urlsIn(await res.text());
       // Session index 1 is E01, which sorts first — so all three, in E01, E02,
       // E03 order, which is session indexes 1, 3, 0.
       expect(lines).toEqual([
@@ -1318,7 +1332,7 @@ describe("GET /stream/:sid/:idx.files", () => {
       const { base, capability, id } = await packSession();
       // Session index 0 is E03, which sorts last.
       const text = await (await fetch(`${base}/stream/${id}/0.m3u?rest=1&k=${capability}`)).text();
-      expect(text.trim().split("\n")).toHaveLength(1);
+      expect(urlsIn(text)).toHaveLength(1);
     });
 
     it("skips the non-video files the picker skips", async () => {
@@ -1328,19 +1342,75 @@ describe("GET /stream/:sid/:idx.files", () => {
       expect(text).not.toContain(`/stream/${id}/2?`);
     });
 
-    it("still contains no filename at all", async () => {
+    /**
+     * Titles are IN the body now, so the old "no filename anywhere" rule is gone
+     * — but the rule it protected is not. A filename comes from whoever made the
+     * torrent, and this file is parsed line by line by another application, so a
+     * name must never be able to ADD a line.
+     */
+    it("cannot be given an extra entry by a filename", async () => {
+      const { base, capability, id } = await packSession({
+        files: [
+          {
+            url: "https://cdn.example/1",
+            filename: "Harrowgate.S03E01\r\nhttp://attacker.example/x\n.mkv",
+            bytes: 100,
+          },
+        ],
+      });
+      const text = await (await fetch(`${base}/stream/${id}/0.m3u?rest=1&k=${capability}`)).text();
+      expect(urlsIn(text)).toEqual([
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/0?k=${capability}`,
+      ]);
+      expect(text).not.toContain("attacker.example");
+    });
+
+    it("puts a title on every entry, and a URL under each", async () => {
       const { base, capability, id } = await packSession();
       const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=1&k=${capability}`)).text();
-      // The whole point of the plain-URL body: another application parses this
-      // file, and nothing in it comes from a release name.
-      expect(text).not.toContain("Harrowgate");
-      expect(text).not.toContain("#EXTINF");
+      const lines = text.trim().split("\n");
+      expect(lines[0]).toBe("#EXTM3U");
+      expect(lines.filter((l) => l.startsWith("#EXTINF:-1,"))).toHaveLength(urlsIn(text).length);
+      expect(text).toContain("#EXTINF:-1,Harrowgate S03E01");
+      expect(text).toContain("#EXTINF:-1,Harrowgate S03E02");
+    });
+
+    /**
+     * An extra names no episode, so it is not part of the season and must not be
+     * swept into its playlist. This is the report that prompted the change: "rest
+     * of season" handed over the gag reels too.
+     *
+     * The extra is named `Harrowgate.Trailer.mkv` DELIBERATELY, because it sorts
+     * after the episode. A `Harrowgate.S03/Bonus…` name sorts *before* every
+     * episode, so a playlist starting at E01 would never have reached it and this
+     * test would pass with or without the filter.
+     */
+    it("leaves an extra out of a season", async () => {
+      const { base, capability, id } = await packSession({
+        files: [
+          {
+            url: "https://cdn.example/1",
+            filename: "Harrowgate.S03E01.1080p.WEB-DL.mkv",
+            bytes: 100,
+          },
+          {
+            url: "https://cdn.example/trailer",
+            filename: "Harrowgate.Trailer.mkv",
+            bytes: 50,
+          },
+        ],
+      });
+      const text = await (await fetch(`${base}/stream/${id}/0.m3u?rest=1&k=${capability}`)).text();
+      expect(urlsIn(text)).toEqual([
+        `http://127.0.0.1:${new URL(base).port}/stream/${id}/0?k=${capability}`,
+      ]);
+      expect(text).not.toContain("Trailer");
     });
 
     it("is unchanged without the parameter", async () => {
       const { base, capability, id } = await packSession();
       const text = await (await fetch(`${base}/stream/${id}/1.m3u?k=${capability}`)).text();
-      expect(text.trim().split("\n")).toHaveLength(1);
+      expect(urlsIn(text)).toHaveLength(1);
     });
 
     /**
@@ -1350,7 +1420,7 @@ describe("GET /stream/:sid/:idx.files", () => {
     it("treats rest=0 as off", async () => {
       const { base, capability, id } = await packSession();
       const text = await (await fetch(`${base}/stream/${id}/1.m3u?rest=0&k=${capability}`)).text();
-      expect(text.trim().split("\n")).toHaveLength(1);
+      expect(urlsIn(text)).toHaveLength(1);
     });
   });
 });
@@ -1463,7 +1533,12 @@ describe("GET /stream/:sid/:idx.m3u", () => {
       'attachment; filename="Copper.Kettle.Run.m3u"',
     );
     expect(res.headers["cache-control"]).toBe("no-store");
-    const lines = res.body.trim().split("\n");
+    // The header and one titled entry, so a player names the row rather than
+    // showing the URL. Content-Length must still describe what was written.
+    expect(res.body.startsWith("#EXTM3U\n")).toBe(true);
+    expect(res.body).toContain("#EXTINF:-1,Copper Kettle Run");
+    expect(Number(res.headers["content-length"])).toBe(Buffer.byteLength(res.body));
+    const lines = urlsIn(res.body);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(`http://127.0.0.1:${port}/stream/${id}/0?k=${capability}`);
     // Absolute, and playable on its own: a relative URL is meaningless once the
@@ -1476,7 +1551,7 @@ describe("GET /stream/:sid/:idx.m3u", () => {
   it("is fetchable end to end — the URL inside it serves the bytes", async () => {
     const { port, capability, id } = await ready();
     const playlist = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`);
-    const res = await fetch(playlist.body.trim());
+    const res = await fetch(urlsIn(playlist.body)[0]!);
     expect(res.status).toBe(200);
     expect(Buffer.from(await res.arrayBuffer()).equals(MEDIA)).toBe(true);
   });
@@ -1518,7 +1593,34 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     const res = await rawGet(port, `/stream/${id}/0.m3u?k=${capability}`, {
       Host: "nas.lan:9162",
     });
-    expect(res.body.trim()).toBe(`http://nas.lan:9162/stream/${id}/0?k=${capability}`);
+    expect(urlsIn(res.body)).toEqual([`http://nas.lan:9162/stream/${id}/0?k=${capability}`]);
+  });
+
+  /**
+   * REGRESSION GUARD for a report of a playlist naming 127.0.0.1. It turned out
+   * to be a second server on another port — the entries have always come from
+   * the request's own Host — but the report was specifically about a NON-VIDEO
+   * file (a gag reel in a season pack), which takes the `streamCandidates`
+   * fallback path. This pins that no future refactor gives such a file an origin
+   * of its own.
+   */
+  it("names the request's own host for a non-video file too", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession([
+      { url: `${upstream.base}/webtorrent/hash/disc.bin`, filename: "disc.bin", bytes: 9 },
+      { url: `${upstream.base}/webtorrent/hash/extras.bin`, filename: "extras.bin", bytes: 8 },
+    ]);
+    await start(reg, { token: "server-token" });
+    const res = await rawGet(handle!.port, `/stream/${id}/0.m3u?rest=1&k=${capability}`, {
+      Host: "nas.lan:9162",
+    });
+    expect(res.status).toBe(200);
+    const urls = urlsIn(res.body);
+    expect(urls).toHaveLength(2);
+    for (const url of urls) {
+      expect(url.startsWith("http://nas.lan:9162/stream/")).toBe(true);
+    }
+    expect(res.body).not.toContain("127.0.0.1");
   });
 
   /**
@@ -1532,7 +1634,7 @@ describe("GET /stream/:sid/:idx.m3u", () => {
       "X-Forwarded-Host": "evil.example",
       "X-Forwarded-Proto": "https",
     });
-    expect(res.body.trim()).toBe(`http://nas.lan:9162/stream/${id}/0?k=${capability}`);
+    expect(urlsIn(res.body)).toEqual([`http://nas.lan:9162/stream/${id}/0?k=${capability}`]);
     expect(res.body).not.toContain("evil.example");
   });
 
@@ -1543,7 +1645,7 @@ describe("GET /stream/:sid/:idx.m3u", () => {
       "X-Forwarded-Host": "torlnk.example",
       "X-Forwarded-Proto": "https",
     });
-    expect(res.body.trim()).toBe(`https://torlnk.example/stream/${id}/0?k=${capability}`);
+    expect(urlsIn(res.body)).toEqual([`https://torlnk.example/stream/${id}/0?k=${capability}`]);
   });
 
   it("400s rather than guessing when the Host is unusable", async () => {
@@ -1580,9 +1682,9 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     await start(reg);
     const res = await rawGet(handle!.port, "/stream/sid-rd/0.m3u?k=cap-rd");
     expect(res.status).toBe(200);
-    expect(res.body.trim()).toBe(
+    expect(urlsIn(res.body)).toEqual([
       `http://127.0.0.1:${handle!.port}/stream/sid-rd/0?k=cap-rd`,
-    );
+    ]);
     expect(res.body).not.toContain("SECRETTOKEN123");
     expect(res.body).not.toContain("real-debrid.example");
   });

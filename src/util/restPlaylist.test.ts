@@ -7,8 +7,14 @@ function file(index: number, filename: string, bytes = 1024 ** 3): IndexedFile {
 
 /**
  * A season pack shaped like the one that prompted this: episodes named out of
- * order, a bonus feature that names the season but no episode, and a `.nfo` the
- * picker already drops.
+ * order, extras that name no episode, and a `.nfo` the picker already drops.
+ *
+ * TWO extras, and the difference between them is what makes these tests mean
+ * anything. `Bonus_Gag_Reel_1` sorts BEFORE the episodes (`S03/` beats `S03E01`
+ * under numeric collation), so a playlist starting at an episode would never
+ * reach it however the filter behaved — an assertion about it alone would pass
+ * without this module existing. `Harrowgate.Trailer.mkv` sorts AFTER all three
+ * episodes, so only the season filter keeps it out.
  */
 const PACK: IndexedFile[] = [
   file(0, "Harrowgate.S03E03.1080p.WEB-DL.mkv"),
@@ -16,6 +22,7 @@ const PACK: IndexedFile[] = [
   file(2, "Harrowgate.S03/readme.nfo"),
   file(3, "Harrowgate.S03E02.1080p.WEB-DL.mkv"),
   file(4, "Harrowgate.S03/Bonus_Gag_Reel_1.mkv"),
+  file(5, "Harrowgate.Trailer.mkv"),
 ];
 
 describe("restPlaylist", () => {
@@ -25,10 +32,16 @@ describe("restPlaylist", () => {
 
   /**
    * THE BUG. Started from an episode, the old rule was "every later file in name
-   * order", which swept the bonus feature into the season playlist.
+   * order", which swept the extras into the season playlist.
+   *
+   * Index 5 is the trailer, which sorts AFTER all three episodes — so this fails
+   * under the old rule rather than passing by accident of the ordering. Index 4
+   * is asserted too, but only the trailer proves the filter runs.
    */
-  it("leaves out a bonus feature that names no episode", () => {
-    expect(restPlaylist(PACK, 1).indexes).not.toContain(4);
+  it("leaves out an extra that names no episode", () => {
+    const { indexes } = restPlaylist(PACK, 1);
+    expect(indexes).not.toContain(5);
+    expect(indexes).not.toContain(4);
   });
 
   it("leaves out the non-video files the picker leaves out", () => {
@@ -48,6 +61,8 @@ describe("restPlaylist", () => {
     const out = restPlaylist(PACK, 4);
     expect(out.kind).toBe("everything");
     expect(out.indexes[0]).toBe(4);
+    // It sorts first, so "everything from here" really is everything playable.
+    expect(out.indexes).toEqual([4, 1, 3, 0, 5]);
   });
 
   it("stops at the season boundary in a multi-season pack", () => {
