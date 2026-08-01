@@ -1,5 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { pickStreamFile, detectPlayer, streamCandidates, attemptAutoPlay, detectAndPlay, type StreamFile } from "./player";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { pickStreamFile, detectPlayer, streamCandidates, attemptAutoPlay, detectAndPlay, launchPlayer, type StreamFile } from "./player";
+
+let spawnCalls: Array<{ cmd: string; argv: string[] }> = [];
+
+vi.mock("node:child_process", () => {
+  return {
+    spawn: vi.fn((cmd: string, argv: string[]) => {
+      spawnCalls.push({ cmd, argv });
+      const mockProc = {
+        on: vi.fn((event: string, callback: () => void) => {
+          // Simulate immediate error for direct spawn (triggers macOS fallback if applicable)
+          if (event === "error") {
+            callback();
+          }
+          return mockProc;
+        }),
+        unref: vi.fn(() => mockProc),
+      };
+      return mockProc;
+    }),
+  };
+});
 
 function f(filename: string, bytes: number): StreamFile {
   return { url: `https://dl/${filename}`, filename, bytes };
@@ -206,5 +227,51 @@ describe("attemptAutoPlay", () => {
       launch: async () => false,
     });
     expect(out).toEqual({ played: false, configuredFailed: false });
+  });
+});
+
+describe("launchPlayer argv construction", () => {
+  beforeEach(() => {
+    spawnCalls = [];
+  });
+
+  it("passes only URL to mpv when no subtitle is provided", async () => {
+    await launchPlayer("mpv", "http://stream.test/file.mkv");
+    expect(spawnCalls).toContainEqual({
+      cmd: "mpv",
+      argv: ["http://stream.test/file.mkv"],
+    });
+  });
+
+  it("passes subtitle flag before URL to mpv when subtitle is provided", async () => {
+    const subUrl = "http://box.test:9161/stream/abc/1.vtt";
+    await launchPlayer("mpv", "http://stream.test/file.mkv", subUrl);
+    expect(spawnCalls).toContainEqual({
+      cmd: "mpv",
+      argv: [`--sub-file=${subUrl}`, "http://stream.test/file.mkv"],
+    });
+  });
+
+  it("uses open -a with URL only when no subtitle on macOS", async () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const url = "http://stream.test/file.mkv";
+    // First spawn fails so fallback to open -a is used
+    await launchPlayer("VLC", url);
+    expect(spawnCalls).toContainEqual({
+      cmd: "open",
+      argv: ["-a", "VLC", url],
+    });
+  });
+
+  it("uses open -a with --args separator when subtitle is provided on macOS", async () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const url = "http://stream.test/file.mkv";
+    const subUrl = "http://box.test:9161/stream/abc/1.vtt";
+    // First spawn fails so fallback to open -a is used
+    await launchPlayer("VLC", url, subUrl);
+    expect(spawnCalls).toContainEqual({
+      cmd: "open",
+      argv: ["-a", "VLC", url, "--args", "--input-slave=" + subUrl],
+    });
   });
 });
