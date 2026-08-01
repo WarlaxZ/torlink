@@ -6,9 +6,12 @@
 // Bundled for the browser, so it must import nothing from node:* and nothing in
 // the repo outside this directory.
 import {
+  failureLine,
   formatBytes,
   formatRate,
+  hasFailed,
   mergeRows,
+  rowActions,
   rowsFromStatus,
   shortName,
   type DashRow,
@@ -455,11 +458,9 @@ prepareCancel.addEventListener("click", () => {
   prepareAbort?.abort();
 });
 
-// Every action the row buttons can take. Downloads and seeds expose different
-// sets; `delete` also removes the files, which is why it is offered only where
-// the TUI offers it.
-const DOWNLOAD_ACTIONS = ["pause", "resume", "remove"] as const;
-const SEED_ACTIONS = ["stop-seed", "delete"] as const;
+// Which actions a row offers is `rowActions` in dashboard.ts — a decision, and
+// tested there. It used to be two constants here, and the download one was a
+// fixed ["pause","resume","remove"] that put `pause` on a failed torrent.
 
 // Gate the irreversible actions. pause, resume and stop-seed are all undone by
 // the button next to them, so they fire immediately; remove discards a torrent
@@ -559,8 +560,13 @@ function renderRow(row: DashRow): HTMLLIElement {
   name.title = row.name;
 
   const meta = document.createElement("span");
-  meta.className = "row-meta";
-  meta.textContent = metaLine(row);
+  // A dead torrent's counters describe nothing: `0 peers · —` reads as a
+  // rendering bug rather than as a state. The reason it failed is the only part
+  // of the row anyone can act on, so it takes the line. failureLine is null for
+  // every row that has not failed.
+  const failure = failureLine(row);
+  meta.className = failure ? "row-meta error" : "row-meta";
+  meta.textContent = failure ?? metaLine(row);
   head.append(name, meta);
 
   const bar = document.createElement("div");
@@ -569,6 +575,11 @@ function renderRow(row: DashRow): HTMLLIElement {
   // percent is already clamped to 0..100 by dashboard.ts, so this cannot smuggle
   // anything into the style attribute.
   fill.style.width = `${row.percent}%`;
+  // A torrent that dies at 99% drew 99% of an accent-coloured bar, which is the
+  // strongest signal on the row saying "nearly done" while the weakest — a dim
+  // grey word — said "failed". The bar is the thing people read at a glance, so
+  // it is the thing that has to be honest.
+  if (hasFailed(row)) fill.classList.add("is-failed");
   bar.append(fill);
 
   const actions = document.createElement("div");
@@ -586,8 +597,7 @@ function renderRow(row: DashRow): HTMLLIElement {
     playButton.addEventListener("click", () => void play(row));
     actions.append(playButton);
   }
-  const available: readonly string[] = row.kind === "seed" ? SEED_ACTIONS : DOWNLOAD_ACTIONS;
-  for (const action of available) {
+  for (const action of rowActions(row)) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = action;
@@ -625,6 +635,14 @@ function render(): void {
   // it without switching panes — otherwise "did that work?" needs a click.
   queueCount.textContent = rows.length > 0 ? String(rows.length) : "";
   queueCount.hidden = rows.length === 0;
+  // And it says whether anything in there is broken. Without this the badge
+  // reads "2" whether both downloads are running or both are dead, so a user on
+  // any other pane has no reason to look — which is exactly when a failure sits
+  // unnoticed for an evening. The count still reads as a count; only its colour
+  // changes, and the title says why for anyone who cannot see the colour.
+  const failures = rows.filter(hasFailed).length;
+  queueCount.classList.toggle("badge-error", failures > 0);
+  queueCount.title = failures > 0 ? `${failures} failed` : "";
 }
 
 // The server's error envelope. Read defensively: a proxy or a crash can return
@@ -3560,6 +3578,16 @@ function openApp(payload: StatusPayload): void {
   // "favourite" and the first click removes it.
   void loadSaved();
   queryInput.focus();
+  // `?prefs=1` — the player page's "Avoid this next time", from the card that
+  // says a release cannot play here. A ONE-SHOT INTENT, not view state, so it is
+  // read straight off `location` rather than through RouteState: the next
+  // `syncUrl` rebuilds the query from the route and drops it, which is exactly
+  // right. Reloading the page should not keep reopening a disclosure.
+  if (new URLSearchParams(location.search).get("prefs") === "1") {
+    prefsBlock.open = true;
+    prefsBlock.scrollIntoView({ block: "nearest" });
+    syncUrl();
+  }
   // The search the URL asked for — last, and only when there is one.
   //
   // This is what makes coming back from the player work: the player page is a

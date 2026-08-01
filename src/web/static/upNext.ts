@@ -117,6 +117,34 @@ export function breadcrumbFor(name: string): Breadcrumb {
   return href ? { label: parsed.title, href: `/${href}` } : HOME;
 }
 
+/**
+ * The links out of the "needs a real player" card.
+ *
+ * This card is the end of the most common journey through the browser UI, and
+ * it was a cul-de-sac: it named a problem, offered three ways to hand the file
+ * to another application, and gave no way to avoid landing here again. Both
+ * routes below are about NOT being here.
+ *
+ * - "Find a playable release" re-runs the search for the same title. Most shows
+ *   are uploaded several times and an x264 copy is usually one of them, so the
+ *   fix is very often two clicks away and there was nothing pointing at it.
+ * - "Avoid this next time" opens the dashboard's playback preferences, which
+ *   exist precisely to stop a release like this being picked — and which this
+ *   screen never mentioned.
+ *
+ * Empty when the filename parses to nothing, because "search for nothing" is
+ * not a route out. `?prefs=1` is a one-shot intent, not view state: app.ts
+ * opens the disclosure and the next `replaceState` drops the parameter.
+ */
+export function escapeRoutes(filename: string): Breadcrumb[] {
+  const crumb = breadcrumbFor(filename);
+  if (crumb.href === HOME.href) return [{ label: "Avoid this next time", href: "/?prefs=1" }];
+  return [
+    { label: `Find a playable ${crumb.label}`, href: crumb.href },
+    { label: "Avoid this next time", href: "/?prefs=1" },
+  ];
+}
+
 /** The season a file's own name commits to, or null. Season packs name none. */
 function seasonOf(filename: string): number | null {
   const parsed = parseRelease(filename);

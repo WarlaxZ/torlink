@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumbFor, upNextView } from "./upNext";
+import { breadcrumbFor, escapeRoutes, upNextView } from "./upNext";
 import type { PublicStreamFile, StreamFilesResponse } from "../wire";
 
 const SID = "sid-1";
@@ -253,5 +253,36 @@ describe("upNextView — the breadcrumb", () => {
       files: [file(0, "Tin.Rivers.2024.2160p.mkv")],
     };
     expect(upNextView(two, SID, 0, CAP).breadcrumb?.href).toBe("/?q=Tin+Rivers&group=Movies");
+  });
+});
+
+/**
+ * The card these links live on is the end of the most common journey through
+ * the app, and it used to be a cul-de-sac: it named a problem, offered three
+ * ways to hand the file to another application, and no way to avoid landing
+ * there again.
+ */
+describe("escapeRoutes", () => {
+  it("offers a search for the same title and a way to stop it recurring", () => {
+    expect(escapeRoutes("Harrowgate.S03E02.1080p.WEB-DL.mkv")).toEqual([
+      { label: "Find a playable Harrowgate", href: "/?q=Harrowgate&group=TV" },
+      { label: "Avoid this next time", href: "/?prefs=1" },
+    ]);
+  });
+
+  it("sends a film to the Movies tab", () => {
+    expect(escapeRoutes("Kestrel.2010.1080p.BluRay.x264.mkv")[0]).toEqual({
+      label: "Find a playable Kestrel",
+      href: "/?q=Kestrel&group=Movies",
+    });
+  });
+
+  /**
+   * "Search for nothing" is not a route out, so an unparseable name drops that
+   * link rather than offering a broken one. The preferences link survives —
+   * it does not depend on knowing what the file is.
+   */
+  it("drops the search when the filename parses to nothing", () => {
+    expect(escapeRoutes("")).toEqual([{ label: "Avoid this next time", href: "/?prefs=1" }]);
   });
 });

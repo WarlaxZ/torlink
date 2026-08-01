@@ -154,6 +154,28 @@ describe("handleApi", () => {
     expect(res.body).toMatchObject({ ok: true, action: "pause" });
     expect(pause).toHaveBeenCalledWith(HASH);
   });
+
+  /**
+   * `retry` exposes `queue.retry`, which the TUI has reached since it shipped
+   * (the `f` key on the queue pane) and no HTTP caller could. Without it a
+   * failed download offers a browser `pause` and `resume` — one meaningless,
+   * the other a no-op, since `resume` only un-pauses and a failed item is not
+   * paused — so the queue's dead rows had no recovery at all.
+   */
+  it("retries a known download on POST /control", async () => {
+    const retry = vi.fn();
+    runtime.queue = { has: (id: string) => id === HASH, retry } as unknown as Runtime["queue"];
+    const res = await handleApi(runtime, null, "POST", "/control", undefined, `{"id":"${HASH}","action":"retry"}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "retry" });
+    expect(retry).toHaveBeenCalledWith(HASH);
+  });
+
+  it("404s a retry for an unknown torrent rather than silently doing nothing", async () => {
+    runtime.queue = { has: () => false, retry: vi.fn() } as unknown as Runtime["queue"];
+    const res = await handleApi(runtime, null, "POST", "/control", undefined, `{"id":"${HASH}","action":"retry"}`);
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("parseControl", () => {

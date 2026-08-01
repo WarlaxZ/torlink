@@ -351,6 +351,13 @@ button:hover {
   background: var(--accent);
 }
 
+/* A torrent that dies at 99% drew 99% of an accent bar — the strongest signal on
+   the row saying "nearly done" while a dim grey word said "failed". The bar is
+   what gets read at a glance, so the bar is what has to be honest. */
+.bar > span.is-failed {
+  background: var(--error);
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -526,6 +533,14 @@ button:hover {
 .badge {
   margin-left: 0.35rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* Something in the queue has failed. Colour only — the number still reads as a
+   number, and `title` carries the same fact for anyone who cannot see the
+   change. Worth the exception to the accent budget (see .tag-quality): this is
+   the one badge that has to pull someone away from another pane. */
+.badge-error {
+  color: var(--error);
 }
 
 /* Category tabs. A wrapped strip rather than a scroller: there are at most
@@ -1225,10 +1240,41 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The two ways out. Links rather than buttons, and below the explanation rather
+   than beside the .m3u controls: those hand this file to another application,
+   these are about not being on this screen again. Keeping them visually
+   separate is what stops "Find a playable release" reading as a fourth way to
+   play the file you already have. */
+.fallback-outs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.9rem 0 0;
+  font-size: 0.8rem;
+}
+
+.fallback-outs a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.fallback-outs a:hover {
+  text-decoration: underline;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+/* The one control that actually works on this platform — VLC on a phone, the
+   .m3u everywhere else (see primaryAction). Three co-equal buttons made the
+   user pick, and on iOS two of the three did nothing useful. Borrows `.play`'s
+   accent treatment rather than inventing a second "this one" language. */
+.actions .primary {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* The rest of the torrent. Borrows the picker's vocabulary deliberately — this

@@ -97,6 +97,7 @@ export function extractMagnet(bodyText: string): string | null {
 export const CONTROL_ACTIONS = [
   "pause", // pause an active/queued download
   "resume", // resume a paused download
+  "retry", // re-run a FAILED download (resume only un-pauses; it cannot)
   "start-seed", // (re)start seeding a finished torrent
   "stop-seed", // stop seeding but keep the files
   "remove", // forget the torrent, keep files on disk
@@ -147,6 +148,15 @@ export async function applyControl(
       if (!q.has(id)) return "not-found";
       q.resume(id);
       return "ok";
+    // Distinct from `resume`, not a synonym: `resume` un-pauses, and a failed
+    // item is not paused, so it was a no-op on exactly the rows that needed
+    // something to happen. `queue.retry` clears the error and re-runs the
+    // pipeline — re-resolving through the *currently active* debrid provider,
+    // which is why it cannot just be a client-side "pause then resume".
+    case "retry":
+      if (!q.has(id)) return "not-found";
+      q.retry(id);
+      return "ok";
     case "stop-seed":
       if (!q.getSeed(id)) return "not-found";
       q.stopSeeding(id);
@@ -188,6 +198,10 @@ export function statusPayload(runtime: Runtime): StatusPayload {
     progress: it.progress,
     peers: it.peers,
     speed: it.speed,
+    // Conditional rather than `error: it.error`, matching toPublicSession's
+    // rule: the wire type marks it optional, and a key whose value is undefined
+    // is dropped by JSON.stringify but present to any in-process consumer.
+    ...(it.error === undefined ? {} : { error: it.error }),
   }));
   const seeds = runtime.queue.getSeeds().map((s) => ({
     id: s.id,

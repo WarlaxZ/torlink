@@ -16,6 +16,7 @@ import {
   classifyFromName,
   extensionOf,
   type Blocker,
+  type MediaFacts,
 } from "../../util/playability";
 import type { StreamInfoResponse } from "../wire";
 
@@ -281,6 +282,23 @@ export function vlcLinks(absolute: string, platform: Platform): ExternalLink[] {
   return [];
 }
 
+/**
+ * Which control this platform should lead with.
+ *
+ * The three actions were co-equal, in a fixed order, on every device — and on a
+ * phone that order is wrong twice over. `Download .m3u` leads, but iOS and
+ * Android do not hand a downloaded playlist to a media player the way a desktop
+ * OS does; `Copy stream URL` follows, which is a riddle rather than an action.
+ * The one that works, `Open in VLC`, was last. Where a platform has a working
+ * scheme, that is the button to lead with.
+ *
+ * Desktop keeps `.m3u` first, which is the thing that genuinely works there —
+ * `vlcLinks` returns nothing at all on Windows and Linux.
+ */
+export function primaryAction(platform: Platform): "vlc" | "m3u" {
+  return platform === "ios" || platform === "android" ? "vlc" : "m3u";
+}
+
 /** Why the fallback card is showing. Drives the wording, nothing else. */
 export type FallbackReason =
   | "container"
@@ -290,22 +308,73 @@ export type FallbackReason =
   | "stall"
   | "no-link";
 
-export function fallbackMessage(reason: FallbackReason, filename: string): string {
+/** Display spellings for the codec ids `MediaFacts` normalises to. */
+const CODEC_NAMES: Record<string, string> = {
+  hevc: "HEVC",
+  av1: "AV1",
+  vp9: "VP9",
+  mpeg2: "MPEG-2",
+  h264: "H.264",
+  dts: "DTS",
+  truehd: "TrueHD",
+  eac3: "E-AC-3",
+  ac3: "AC-3",
+  flac: "FLAC",
+  aac: "AAC",
+  opus: "Opus",
+  mp3: "MP3",
+};
+
+/**
+ * How to refer to a codec the server reported, or null when it reported none.
+ *
+ * `source` is honoured rather than ignored: a `probe` result came from ffprobe
+ * and can be stated as fact, while a `name` result was inferred from a release
+ * name — and a release named x265 can carry something else. Saying "is HEVC"
+ * when we only guessed would make the card confidently wrong, which is worse
+ * than the vague prose it replaces.
+ */
+function codecPhrase(facts: MediaFacts | undefined, which: "video" | "audio"): string | null {
+  const id = which === "video" ? facts?.videoCodec : facts?.audioCodec;
+  if (!id) return null;
+  const label = CODEC_NAMES[id] ?? id.toUpperCase();
+  return facts?.source === "probe" ? `is ${label}` : `looks like ${label}`;
+}
+
+export function fallbackMessage(
+  reason: FallbackReason,
+  filename: string,
+  /**
+   * What the server said this file is, when the page got that far. Optional:
+   * `.info` can be unreachable, and the prose below still has to work without
+   * it — that is the message this page showed before the route existed.
+   */
+  facts?: MediaFacts,
+): string {
   const name = filename || "This file";
   if (reason === "no-link") {
     return "This link is incomplete — reopen the player from the dashboard.";
   }
   if (reason === "container") {
-    return `${name} is in a container browsers can't play (most releases are MKV with HEVC or DTS audio). Open it in a real player — the stream itself is fine.`;
+    const container = facts?.container ? facts.container.toUpperCase() : null;
+    return container
+      ? `${name} is ${container}, which browsers can't play. Open it in a real player — the stream itself is fine.`
+      : `${name} is in a container browsers can't play (most releases are MKV with HEVC or DTS audio). Open it in a real player — the stream itself is fine.`;
   }
   // The two below are only reachable now that the server reports real codecs:
   // before that, a container browsers accept was assumed playable and these
   // files failed at the decoder instead, twelve seconds later.
   if (reason === "video-codec") {
-    return `${name} is in a container browsers accept, but its video (HEVC or AV1) is something they can't decode. Open it in a real player — the stream itself is fine.`;
+    const codec = codecPhrase(facts, "video");
+    return codec
+      ? `${name}'s video ${codec}, which browsers can't decode. Open it in a real player — the stream itself is fine.`
+      : `${name} is in a container browsers accept, but its video (HEVC or AV1) is something they can't decode. Open it in a real player — the stream itself is fine.`;
   }
   if (reason === "audio-codec") {
-    return `${name} has audio browsers can't decode — usually DTS or TrueHD. Open it in a real player — the stream itself is fine.`;
+    const codec = codecPhrase(facts, "audio");
+    return codec
+      ? `${name}'s audio ${codec}, which browsers can't decode. Open it in a real player — the stream itself is fine.`
+      : `${name} has audio browsers can't decode — usually DTS or TrueHD. Open it in a real player — the stream itself is fine.`;
   }
   if (reason === "error") {
     return `${name} started but this browser can't decode it. Open it in a real player instead.`;

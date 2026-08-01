@@ -23,6 +23,41 @@ export interface DashRow {
   peers: number;
   rate: number;
   uploaded: number;
+  /** Why a failed download failed. Absent on every other row. */
+  error?: string;
+}
+
+/**
+ * Which actions a row offers.
+ *
+ * A DECISION, not a constant, and it used to be the constant
+ * `["pause","resume","remove"]` for every download whatever its state. That put
+ * `pause` and `resume` on a FAILED row — one meaningless, the other a no-op,
+ * since `resume` un-pauses and a failed item is not paused — so the rows most
+ * in need of an action were the only ones offering none that worked. `retry` is
+ * what the TUI's `f` key has always called.
+ */
+export function rowActions(row: DashRow): readonly string[] {
+  if (row.kind === "seed") return ["stop-seed", "delete"];
+  if (row.status === "failed") return ["retry", "remove"];
+  return ["pause", "resume", "remove"];
+}
+
+/** True when a row is a download that has given up. Drives its colour and its actions. */
+export function hasFailed(row: DashRow): boolean {
+  return row.kind === "download" && row.status === "failed";
+}
+
+/**
+ * The meta line, or the reason it failed when there is one.
+ *
+ * A dead torrent's peer count and transfer rate describe nothing — they are `0
+ * peers · —`, which reads as a rendering bug rather than as a state. The reason
+ * is the only part of that row anyone can act on, so it takes the line.
+ */
+export function failureLine(row: DashRow): string | null {
+  if (!hasFailed(row)) return null;
+  return row.error?.trim() ? row.error.trim() : "failed — no reason given";
 }
 
 /**
@@ -57,6 +92,7 @@ export function rowsFromStatus(payload: StatusPayload): DashRow[] {
     peers: d.peers ?? 0,
     rate: d.speed ?? 0,
     uploaded: 0,
+    ...(typeof d.error === "string" && d.error.trim() ? { error: d.error.trim() } : {}),
   }));
   const seeds = (payload.seeds ?? []).map<DashRow>((s) => ({
     id: s.id,
