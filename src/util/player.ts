@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
+import { subtitleArgs } from "./subtitleFlags";
 
 // The video-first heuristic lives in ./videoFiles because the web UI's browser
 // bundle needs it too and cannot import this module (node:child_process, and
@@ -214,10 +215,10 @@ export async function detectPlayer(deps: DetectDeps = {}): Promise<string | null
 // Spawn a player process directly (the player IS this process and keeps
 // running). Resolves false on a spawn error (e.g. ENOENT), else true shortly
 // after — we don't wait for the player to exit.
-function spawnPlayer(command: string, url: string): Promise<boolean> {
+function spawnPlayer(command: string, url: string, extra: string[] = []): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const proc = spawn(command, [url], { detached: true, stdio: "ignore", windowsHide: true });
+      const proc = spawn(command, [...extra, url], { detached: true, stdio: "ignore", windowsHide: true });
       let settled = false;
       const done = (ok: boolean): void => {
         if (settled) return;
@@ -237,10 +238,14 @@ function spawnPlayer(command: string, url: string): Promise<boolean> {
 // macOS: hand the URL to an app bundle via `open -a`. `open` returns promptly
 // (it just launches the app), so we can wait for its exit code: non-zero means
 // the app wasn't found.
-function openWithApp(app: string, url: string): Promise<boolean> {
+function openWithApp(app: string, url: string, extra: string[] = []): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const proc = spawn("open", ["-a", app, url], { stdio: "ignore", windowsHide: true });
+      // `open -a App url` passes the url as a document. Anything after --args
+      // goes to the application instead, so a flag has to sit there or `open`
+      // will treat it as its own and fail.
+      const argv = extra.length > 0 ? ["-a", app, url, "--args", ...extra] : ["-a", app, url];
+      const proc = spawn("open", argv, { stdio: "ignore", windowsHide: true });
       proc.on("error", () => resolve(false));
       proc.on("close", (code) => resolve(code === 0));
     } catch {
@@ -254,10 +259,19 @@ function openWithApp(app: string, url: string): Promise<boolean> {
  * PATH or an absolute path); on macOS, if that can't be spawned, falls back to
  * `open -a <command>` so a bare app name like "VLC" or "IINA" still works.
  * Resolves false only when neither route launches anything.
+ *
+ * `subtitleUrl` side-loads a subtitle where the player is one we know the flag
+ * for (see ./subtitleFlags.ts). An unknown player launches exactly as before,
+ * with no flag — the caller is responsible for saying so.
  */
-export async function launchPlayer(command: string, url: string): Promise<boolean> {
-  if (await spawnPlayer(command, url)) return true;
-  if (process.platform === "darwin") return openWithApp(command, url);
+export async function launchPlayer(
+  command: string,
+  url: string,
+  subtitleUrl = "",
+): Promise<boolean> {
+  const extra = subtitleArgs(command, subtitleUrl);
+  if (await spawnPlayer(command, url, extra)) return true;
+  if (process.platform === "darwin") return openWithApp(command, url, extra);
   return false;
 }
 
