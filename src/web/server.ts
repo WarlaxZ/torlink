@@ -10,6 +10,7 @@
 // Default port 9162 sits next to the add API's 9161.
 
 import http from "node:http";
+import os from "node:os";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -25,9 +26,11 @@ import {
   handleStreamRequest,
   isPlayPath,
   isStreamPath,
+  mediaSourceFor,
   parsePlayPath,
   type StreamDeps,
 } from "./stream";
+import { castOrigin } from "./castOrigin";
 import { ProbeCache } from "../core/probeCache";
 import { HlsVerdictCache } from "../core/hlsVerdictCache";
 import { makeCheckHls, probeFetch } from "./hlsHealth";
@@ -246,10 +249,6 @@ export async function startWebServer(
     log("warning: no built web assets found (dist/web); run `npm run build`. API only.");
   }
 
-  // One deps object for every route, built once. `runtime` and `token` come
-  // last so an override cannot swap the queue or weaken the gate.
-  const routeDeps: WebDeps = { ...options.webDeps, runtime, token };
-
   // One probe cache for this process, so opening a player page twice does not
   // spawn ffprobe twice. Bounded, so it needs no teardown of its own.
   const probeCache = new ProbeCache();
@@ -267,6 +266,57 @@ export async function startWebServer(
   // (session, file), cached, so a reload costs nothing.
   const checkHls = makeCheckHls({ fetchImpl: probeFetch });
   const hlsVerdictCache = new HlsVerdictCache();
+
+  /**
+   * The stream route's deps, rebuilt per use rather than held.
+   *
+   * `proxyDebrid` is resolved fresh every time, not read once at boot: `serve
+   * --web` is a separate process from any TUI that might flip the flag, so a held
+   * snapshot would silently serve a stale value. An explicit
+   * `options.streamDeps.proxyDebrid` (a test, driving the branch without a real
+   * debrid provider) still wins over the config read.
+   *
+   * A function rather than an inline literal because the cast routes need the
+   * same deps to answer the same source question — see `castSourceImpl` below.
+   */
+  const buildStreamDeps = async (): Promise<StreamDeps> => ({
+    resolveHls,
+    checkHls,
+    // Spread after the defaults so a test can override them, and before the
+    // fields below so it cannot override those.
+    ...options.streamDeps,
+    sessions: runtime.sessions,
+    log,
+    trustProxy: options.trustProxy === true,
+    probeCache,
+    hlsVerdictCache,
+    proxyDebrid:
+      options.streamDeps?.proxyDebrid ??
+      (await (options.webDeps?.loadConfigImpl ?? loadConfig)()).proxyDebridStreams === true,
+  });
+
+  // Set once the socket is bound, because `port: 0` means the requested port is
+  // not the real one — the same reason the log line below reads it back from the
+  // server. A cast before the server is listening is impossible, so the null
+  // window is not reachable from a request.
+  let boundPort = port;
+
+  // One deps object for every route, built once. `runtime` and `token` come last
+  // so an override cannot swap the queue or weaken the gate; the two cast seams
+  // sit before the spread so a test can replace them.
+  const routeDeps: WebDeps = {
+    // The origin a television fetches from. NOT the request's `Host`, which is a
+    // claim by a client: a user browsing `http://localhost:9161` would otherwise
+    // hand the device a URL pointing at the device itself. `host` is what this
+    // server actually bound, which is a fact about what is reachable.
+    castOriginImpl: () => castOrigin(host, boundPort, os.networkInterfaces()),
+    // The same answer the player page's `.info` gets, from the same function, so
+    // a browser and a television cannot disagree about one file.
+    castSourceImpl: async (session, index) => mediaSourceFor(await buildStreamDeps(), session, index),
+    ...options.webDeps,
+    runtime,
+    token,
+  };
 
   // Live SSE responses, so close() can end them. Without this, http's close()
   // waits for every connection to end and an event stream never does.
@@ -439,26 +489,7 @@ export async function startWebServer(
       // send an Authorization header. Only the path is logged: the query string
       // carries that capability, and a Real-Debrid Location is a credential.
       if (isStreamPath(urlPath)) {
-        // Resolved fresh per request, not read once at boot: `serve --web` is a
-        // separate process from any TUI that might flip the flag, so a held
-        // snapshot here would silently serve a stale value. An explicit
-        // `options.streamDeps.proxyDebrid` (a test, driving the branch without a
-        // real debrid provider) still wins over the config read.
-        const streamDeps: StreamDeps = {
-          resolveHls,
-          checkHls,
-          // Spread after the default so a test can override it, and before the
-          // fields below so it cannot override those.
-          ...options.streamDeps,
-          sessions: runtime.sessions,
-          log,
-          trustProxy: options.trustProxy === true,
-          probeCache,
-          hlsVerdictCache,
-          proxyDebrid:
-            options.streamDeps?.proxyDebrid ??
-            (await (options.webDeps?.loadConfigImpl ?? loadConfig)()).proxyDebridStreams === true,
-        };
+        const streamDeps = await buildStreamDeps();
         const wrote = await handleStreamRequest(
           streamDeps,
           req,
@@ -588,6 +619,8 @@ export async function startWebServer(
   // `port: 0` asks the OS to pick, so the caller can only learn the real port
   // from here. A string address means a unix socket, which this never binds.
   const bound = address && typeof address === "object" ? address.port : port;
+  // What `castOriginImpl` names, now that it is known.
+  boundPort = bound;
   // The bind, not a URL. This server knows where it is listening; it does not
   // know what a browser should type — a wildcard bind has no single answer, and
   // printing `http://0.0.0.0:9161` here is what sent users to a dead address.

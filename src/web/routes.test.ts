@@ -19,6 +19,10 @@ import { DownloadQueue } from "../download/queue";
 import { defaultConfig, type Config, type FavouriteItem } from "../config/config";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
 import { CastSessionRegistry } from "../core/cast/session";
+import { CastError } from "../core/cast/connection";
+import type { CastDevice } from "../core/cast/discover";
+import type { MediaFacts } from "../util/playability";
+import type { StreamFile } from "../util/player";
 import { SOURCES } from "../sources/registry";
 import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
@@ -27,6 +31,7 @@ import type { ReccEvent } from "../recc/client";
 import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 import type {
+  CastDevicesResponse,
   LibraryResponse,
   PreferencesResponse,
   PublicSearchSnapshot,
@@ -3421,5 +3426,330 @@ describe("GET /api/sources reccConfigured", () => {
     const body = JSON.stringify(res.json);
     expect(body).not.toContain("zzq-secret-9317");
     expect(body).not.toContain("recc.internal");
+  });
+});
+
+// ---- casting ----------------------------------------------------------------
+//
+// `castSourceImpl` is injected in every test here rather than reaching through
+// the stream deps: the real one is `mediaSourceFor` (src/web/stream.ts), which
+// spawns ffprobe and calls a debrid API. The route's own job is picking the URL,
+// the content type and the refusal, and that is what these pin.
+describe("the cast routes", () => {
+  const DISCOVERED: CastDevice = {
+    id: "abc",
+    name: "Living Room TV",
+    model: "Chromecast",
+    host: "10.0.0.5",
+    port: 8009,
+  };
+  const LAN = "http://192.168.0.98:9161";
+
+  const facts = (over: Partial<MediaFacts> = {}): MediaFacts => ({
+    container: "mp4",
+    videoCodec: "h264",
+    audioCodec: "aac",
+    source: "name",
+    subtitles: [],
+    ...over,
+  });
+
+  /** A runtime holding one ready, adopted session over `files`. */
+  function castRuntime(
+    files: StreamFile[] = [
+      { url: "https://cdn.example/1", filename: "Kestrel.2010.1080p.BluRay.x264.mp4", bytes: 9 },
+    ],
+  ) {
+    const sessions = new StreamSessionRegistry({
+      idFactory: () => "sid-cast",
+      capabilityFactory: () => "cap-cast",
+    });
+    const casts = new CastSessionRegistry({ markPlayed: async () => {} });
+    const rt: Runtime = {
+      queue: new DownloadQueue(),
+      downloadDir: "/tmp/dl",
+      sessions,
+      casts,
+    };
+    sessions.adopt({
+      infoHash: "0".repeat(40),
+      name: "Kestrel.2010.1080p.BluRay.x264-GROUP",
+      backend: "debrid",
+      provider: "realdebrid",
+      files,
+    });
+    return { runtime: rt, casts, sid: "sid-cast", capability: "cap-cast" };
+  }
+
+  function castDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      discoverCastImpl: async () => [DISCOVERED],
+      castOriginImpl: () => LAN,
+      castSourceImpl: async () => ({ facts: facts(), hls: null }),
+      ...over,
+    });
+  }
+
+  const get = (d: WebDeps): Promise<WebResponse> =>
+    handleWebApi(d, "GET", "/api/cast/devices", new URLSearchParams(), AUTH, "");
+  const post = (d: WebDeps, path: string, body: unknown): Promise<WebResponse> =>
+    handleWebApi(d, "POST", path, new URLSearchParams(), AUTH, JSON.stringify(body));
+
+  describe("GET /api/cast/devices", () => {
+    it("lists discovered devices without their addresses", async () => {
+      const res = await get(castDeps());
+      expect(res.status).toBe(200);
+      // No host and no port: the browser picks by id, and publishing the LAN
+      // topology of the user's house to any tab buys nothing.
+      expect(res.json).toEqual({
+        devices: [{ id: "abc", name: "Living Room TV", model: "Chromecast" }],
+        castable: true,
+        reason: null,
+      });
+    });
+
+    it("includes the configured address whether discovery saw anything or not", async () => {
+      const res = await get(
+        castDeps({
+          discoverCastImpl: async () => [],
+          loadConfigImpl: async () => ({ ...defaultConfig, castDevice: "192.168.0.40" }),
+        }),
+      );
+      expect((res.json as CastDevicesResponse).devices).toEqual([
+        { id: "manual:192.168.0.40:8009", name: "192.168.0.40", model: "" },
+      ]);
+      expect((res.json as CastDevicesResponse).castable).toBe(true);
+    });
+
+    it("does not list the configured address twice when discovery found it too", async () => {
+      const res = await get(
+        castDeps({
+          discoverCastImpl: async () => [{ ...DISCOVERED, host: "192.168.0.40" }],
+          loadConfigImpl: async () => ({ ...defaultConfig, castDevice: "192.168.0.40" }),
+        }),
+      );
+      // One row, not two: a user who typed an address that mDNS also finds
+      // should not have to guess which of two identical rows is the real device.
+      expect((res.json as CastDevicesResponse).devices).toEqual([
+        { id: "abc", name: "Living Room TV", model: "Chromecast" },
+      ]);
+    });
+
+    it("says why casting is unavailable when nothing answered", async () => {
+      const res = await get(castDeps({ discoverCastImpl: async () => [] }));
+      expect(res.json).toMatchObject({ devices: [], castable: false });
+      expect((res.json as CastDevicesResponse).reason).toMatch(/No Chromecast found/);
+    });
+
+    it("says why casting is unavailable when this machine has no reachable address", async () => {
+      const res = await get(castDeps({ castOriginImpl: () => null }));
+      expect(res.json).toMatchObject({ castable: false });
+      expect((res.json as CastDevicesResponse).reason).toMatch(/could reach/i);
+    });
+
+    it("needs the token", async () => {
+      const res = await handleWebApi(
+        castDeps({ token: "secret" }),
+        "GET",
+        "/api/cast/devices",
+        new URLSearchParams(),
+        undefined,
+        "",
+      );
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("POST /api/cast/start", () => {
+    it("casts the stream handle built from the LAN origin, not from Host", async () => {
+      const { runtime: rt, casts, sid, capability } = castRuntime();
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      const res = await post(castDeps({ runtime: rt }), "/api/cast/start", {
+        deviceId: "abc",
+        sid,
+        index: 0,
+      });
+      expect(res.status).toBe(200);
+      const arg = start.mock.calls[0]![0];
+      expect(arg.media.url).toBe(`${LAN}/stream/${sid}/0?k=${capability}`);
+      expect(arg.media.contentType).toBe("video/mp4");
+      expect(arg.media.title).toBe("Kestrel 2010");
+      expect(arg.device).toEqual(DISCOVERED);
+      // The played-file write needs both, and neither is on the wire.
+      expect(arg.infoHash).toBe("0".repeat(40));
+      expect(arg.filename).toBe("Kestrel.2010.1080p.BluRay.x264.mp4");
+    });
+
+    it("casts an HLS manifest with the HLS content type when the file itself is blocked", async () => {
+      // The debrid provider's transcode: the only rung above direct play today.
+      const { runtime: rt, casts, sid } = castRuntime([
+        { url: "https://cdn.example/1", filename: "Kepler.S02E04.1080p.WEB-DL.mkv", bytes: 9 },
+      ]);
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      const res = await post(
+        castDeps({
+          runtime: rt,
+          castSourceImpl: async () => ({
+            facts: facts({ container: "mkv" }),
+            hls: "https://provider.example/m.m3u8",
+          }),
+        }),
+        "/api/cast/start",
+        { deviceId: "abc", sid, index: 0 },
+      );
+      expect(res.status).toBe(200);
+      const arg = start.mock.calls[0]![0];
+      expect(arg.media.contentType).toBe("application/vnd.apple.mpegurl");
+      expect(arg.media.url).toBe("https://provider.example/m.m3u8");
+    });
+
+    it("refuses a file no Chromecast can play, naming the reason", async () => {
+      const { runtime: rt, casts, sid } = castRuntime([
+        { url: "https://cdn.example/1", filename: "Kepler.S02E04.1080p.WEB-DL.mkv", bytes: 9 },
+      ]);
+      const start = vi.spyOn(casts, "start");
+      const res = await post(
+        castDeps({
+          runtime: rt,
+          castSourceImpl: async () => ({ facts: facts({ container: "mkv" }), hls: null }),
+        }),
+        "/api/cast/start",
+        { deviceId: "abc", sid, index: 0 },
+      );
+      // 409, not 200 with a message: nothing was started.
+      expect(res.status).toBe(409);
+      expect((res.json as { error: string }).error).toMatch(/can't play this one/);
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it("casts an mp4 carrying AC3, which the browser refuses and the device does not", async () => {
+      const { runtime: rt, casts, sid } = castRuntime();
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      const res = await post(
+        castDeps({
+          runtime: rt,
+          castSourceImpl: async () => ({ facts: facts({ audioCodec: "ac3" }), hls: null }),
+        }),
+        "/api/cast/start",
+        { deviceId: "abc", sid, index: 0 },
+      );
+      expect(res.status).toBe(200);
+      expect(start).toHaveBeenCalledOnce();
+    });
+
+    it("passes the chosen subtitle as a vtt handle on the same origin", async () => {
+      const { runtime: rt, casts, sid, capability } = castRuntime([
+        { url: "https://cdn.example/1", filename: "Kepler.S02E04.1080p.WEB-DL.mp4", bytes: 9 },
+        { url: "https://cdn.example/2", filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", bytes: 4 },
+      ]);
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      await post(castDeps({ runtime: rt }), "/api/cast/start", {
+        deviceId: "abc",
+        sid,
+        index: 0,
+        subtitleIndex: 1,
+      });
+      const arg = start.mock.calls[0]![0];
+      expect(arg.media.subtitleUrl).toBe(`${LAN}/stream/${sid}/1.vtt?k=${capability}`);
+      expect(arg.media.subtitleLabel).toBe("English");
+    });
+
+    it("ignores a subtitle index that is not a subtitle, rather than casting a video as a track", async () => {
+      const { runtime: rt, casts, sid } = castRuntime();
+      const start = vi.spyOn(casts, "start").mockResolvedValue({} as never);
+      await post(castDeps({ runtime: rt }), "/api/cast/start", {
+        deviceId: "abc",
+        sid,
+        index: 0,
+        subtitleIndex: 0,
+      });
+      expect(start.mock.calls[0]![0].media.subtitleUrl).toBeUndefined();
+    });
+
+    it("404s an unknown session, an out-of-range index, and an unknown device", async () => {
+      const { runtime: rt, sid } = castRuntime();
+      const d = castDeps({ runtime: rt });
+      expect((await post(d, "/api/cast/start", { deviceId: "abc", sid: "nope", index: 0 })).status).toBe(404);
+      expect((await post(d, "/api/cast/start", { deviceId: "abc", sid, index: 9 })).status).toBe(404);
+      expect((await post(d, "/api/cast/start", { deviceId: "nope", sid, index: 0 })).status).toBe(404);
+    });
+
+    it("409s when this machine has no address a device could fetch from", async () => {
+      const { runtime: rt, sid } = castRuntime();
+      const res = await post(castDeps({ runtime: rt, castOriginImpl: () => null }), "/api/cast/start", {
+        deviceId: "abc",
+        sid,
+        index: 0,
+      });
+      expect(res.status).toBe(409);
+      expect((res.json as { error: string }).error).toMatch(/could reach/i);
+    });
+
+    it("400s a body missing a field, rather than casting something undefined", async () => {
+      const { runtime: rt, sid } = castRuntime();
+      const d = castDeps({ runtime: rt });
+      expect((await post(d, "/api/cast/start", {})).status).toBe(400);
+      expect((await post(d, "/api/cast/start", { deviceId: "abc", sid })).status).toBe(400);
+      expect(
+        (await handleWebApi(d, "POST", "/api/cast/start", new URLSearchParams(), AUTH, "not json"))
+          .status,
+      ).toBe(400);
+    });
+
+    it("reports a device that refused with its own message, not a 500", async () => {
+      const { runtime: rt, casts, sid } = castRuntime();
+      vi.spyOn(casts, "start").mockRejectedValue(new CastError("Living Room TV didn't answer — it may be off."));
+      const res = await post(castDeps({ runtime: rt }), "/api/cast/start", {
+        deviceId: "abc",
+        sid,
+        index: 0,
+      });
+      expect(res.status).toBe(502);
+      expect((res.json as { error: string }).error).toBe("Living Room TV didn't answer — it may be off.");
+    });
+  });
+
+  describe("POST /api/cast/command", () => {
+    it("pauses, plays and stops the active cast", async () => {
+      const { runtime: rt, casts } = castRuntime();
+      const pause = vi.spyOn(casts, "pause").mockResolvedValue(undefined);
+      const play = vi.spyOn(casts, "play").mockResolvedValue(undefined);
+      const stop = vi.spyOn(casts, "stop").mockResolvedValue(undefined);
+      const d = castDeps({ runtime: rt });
+      expect((await post(d, "/api/cast/command", { action: "pause" })).status).toBe(200);
+      expect((await post(d, "/api/cast/command", { action: "play" })).status).toBe(200);
+      expect((await post(d, "/api/cast/command", { action: "stop" })).status).toBe(200);
+      expect(pause).toHaveBeenCalledOnce();
+      expect(play).toHaveBeenCalledOnce();
+      expect(stop).toHaveBeenCalledOnce();
+    });
+
+    it("is a clean 409 when nothing is casting, not a crash", async () => {
+      const { runtime: rt } = castRuntime();
+      const res = await post(castDeps({ runtime: rt }), "/api/cast/command", { action: "pause" });
+      expect(res.status).toBe(409);
+    });
+
+    it("400s an action it does not know", async () => {
+      const { runtime: rt } = castRuntime();
+      const res = await post(castDeps({ runtime: rt }), "/api/cast/command", { action: "seek" });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("GET /api/cast/status", () => {
+    it("reports nothing casting, so a page that polls has one shape to read", async () => {
+      const { runtime: rt } = castRuntime();
+      const res = await handleWebApi(
+        castDeps({ runtime: rt }),
+        "GET",
+        "/api/cast/status",
+        new URLSearchParams(),
+        AUTH,
+        "",
+      );
+      expect(res.status).toBe(200);
+      expect(res.json).toEqual({ casting: null, notice: null });
+    });
   });
 });
