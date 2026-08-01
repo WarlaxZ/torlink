@@ -34,6 +34,7 @@ import {
 import { mountHls } from "./hlsMount";
 import { upNextView, type EpisodeRow } from "./upNext";
 import { authHeadersFor, readStoredToken } from "./token";
+import { backTarget, readReturn } from "./returnTo";
 import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -473,25 +474,26 @@ function link(text: string, href: string): HTMLAnchorElement {
 }
 
 /**
- * Back means "the page I came from", when there is one.
+ * Back means "the page I came from", when this tab knows where that was.
  *
- * The `href` in the markup is the fallback and stays working: a bookmarked
- * player URL, or one opened in a new tab, has no history entry to return to, and
- * `history.back()` there would either do nothing or leave the site. The referrer
- * check is what distinguishes the two — same-origin means the dashboard sent us
- * here, and the dashboard now keeps its query in its own URL, so going back one
- * entry restores the search rather than reloading an empty one.
+ * `backTarget` (returnTo.ts) decides; this is the two DOM effects of its two
+ * answers. Note what it is NOT keyed on: `document.referrer` is always empty
+ * here, because `player.html` sets `no-referrer` so this page's `?k=` never
+ * leaks into a Referer — a back link built on the referrer would silently never
+ * fire, which is exactly what happened on the first attempt.
+ *
+ * The href is also rewritten up front rather than only on click, so that
+ * middle-click, "open in new tab" and the status bar all agree with what a
+ * plain click does.
  */
-backLink.addEventListener("click", (event) => {
-  let sameOrigin = false;
-  try {
-    sameOrigin = document.referrer !== "" && new URL(document.referrer).origin === location.origin;
-  } catch {
-    sameOrigin = false; // a malformed referrer is not a page we can go back to
-  }
-  if (!sameOrigin || history.length <= 1) return; // let the href do its job
-  event.preventDefault();
-  history.back();
-});
+const back = backTarget(readReturn(), history.length, backLink.getAttribute("href") ?? "/");
+if (back.kind === "href") {
+  backLink.href = back.href;
+} else {
+  backLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    history.back();
+  });
+}
 
 void render();

@@ -186,6 +186,7 @@ import {
 import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
 import { authHeadersFor, readStoredToken, storeToken } from "./token";
 import { routeFromSearch, urlForRoute, type RouteState } from "./route";
+import { rememberReturn } from "./returnTo";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -766,14 +767,22 @@ function stopSession(sessionId: string): void {
 // Navigate this tab, rather than window.open(): by the time a session is ready
 // the click that started it is seconds or minutes old, so the popup has lost its
 // user activation and every browser blocks it — and on a phone there is nowhere
-// useful for a second tab to go anyway. The player page carries a "back to
-// queue" link.
+// useful for a second tab to go anyway. The player page carries a link back
+// here.
+//
+// THE NOTE IS WHY THAT LINK WORKS. The player page cannot tell where it came
+// from: it sets `no-referrer` deliberately, because its URL carries a stream
+// capability in `?k=` and a Referer would hand that to anything it links at. So
+// this side writes down where it is going *from*, into sessionStorage, which is
+// per tab — and this is the same tab, because of the `location.assign` below.
+// See returnTo.ts.
 //
 // The session is deliberately NOT stopped here. It is what the player is about
 // to fetch. Nothing in this tab outlives the navigation, so a session whose
 // player tab is simply closed is cleaned up by the registry's idle reaping —
 // the player page cannot DELETE it itself, having a capability but no token.
 function openPlayer(path: string): void {
+  rememberReturn(`${location.pathname}${location.search}`);
   location.assign(path);
 }
 
