@@ -138,6 +138,12 @@ export function filesPath(target: PlayerTarget): string {
   return repPath(target, ".files");
 }
 
+/** The `.vtt` path for a sibling subtitle in the same session. */
+export function subtitlePath(target: PlayerTarget, index: number): string {
+  const base = `/stream/${encodeURIComponent(target.sid)}/${index}.vtt`;
+  return target.capability ? `${base}?k=${encodeURIComponent(target.capability)}` : base;
+}
+
 /**
  * Where the bytes for this file should come from.
  *
