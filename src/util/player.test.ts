@@ -160,7 +160,7 @@ describe("streamCandidates", () => {
 
 describe("detectAndPlay", () => {
   it("returns the detected player when it launches", async () => {
-    const player = await detectAndPlay("http://x", {
+    const player = await detectAndPlay("http://x", "", {
       detect: async () => "mpv",
       launch: async () => true,
     });
@@ -168,7 +168,7 @@ describe("detectAndPlay", () => {
   });
 
   it("returns null when detection finds nothing", async () => {
-    const player = await detectAndPlay("http://x", {
+    const player = await detectAndPlay("http://x", "", {
       detect: async () => null,
       launch: async () => true,
     });
@@ -176,7 +176,7 @@ describe("detectAndPlay", () => {
   });
 
   it("returns null when the detected player fails to launch", async () => {
-    const player = await detectAndPlay("http://x", {
+    const player = await detectAndPlay("http://x", "", {
       detect: async () => "mpv",
       launch: async () => false,
     });
@@ -185,8 +185,40 @@ describe("detectAndPlay", () => {
 });
 
 describe("attemptAutoPlay", () => {
+  it("passes the subtitle url through attemptAutoPlay to the launcher", () => {
+    // The path nearly every user takes: a configured player. Wiring only the
+    // after-the-prompt launch would leave the feature dead for all of them.
+    const seen: { command: string; url: string; sub?: string }[] = [];
+    return attemptAutoPlay(
+      "mpv",
+      "http://up.test/v.mkv",
+      "http://up.test/v.eng.srt",
+      {
+        launch: (command, url, sub) => {
+          seen.push({ command, url, sub });
+          return Promise.resolve(true);
+        },
+      },
+    ).then(() => {
+      expect(seen).toEqual([
+        { command: "mpv", url: "http://up.test/v.mkv", sub: "http://up.test/v.eng.srt" },
+      ]);
+    });
+  });
+
+  it("passes an empty subtitle url when there is none", async () => {
+    let seen = "unset";
+    await attemptAutoPlay("mpv", "http://up.test/v.mkv", "", {
+      launch: (_c, _u, sub) => {
+        seen = sub ?? "undefined";
+        return Promise.resolve(true);
+      },
+    });
+    expect(seen).toBe("");
+  });
+
   it("launches the configured player and reports played", async () => {
-    const out = await attemptAutoPlay("vlc.exe", "http://x", {
+    const out = await attemptAutoPlay("vlc.exe", "http://x", "", {
       launch: async (cmd) => cmd === "vlc.exe",
     });
     expect(out).toEqual({ played: true, player: "vlc.exe", configuredFailed: false });
@@ -194,7 +226,7 @@ describe("attemptAutoPlay", () => {
 
   it("flags a configured player that fails to launch and does NOT auto-detect", async () => {
     let detected = false;
-    const out = await attemptAutoPlay("vlc.exe", "http://x", {
+    const out = await attemptAutoPlay("vlc.exe", "http://x", "", {
       launch: async () => false,
       detect: async () => {
         detected = true;
@@ -206,7 +238,7 @@ describe("attemptAutoPlay", () => {
   });
 
   it("auto-detects and launches when nothing is configured", async () => {
-    const out = await attemptAutoPlay("", "http://x", {
+    const out = await attemptAutoPlay("", "http://x", "", {
       detect: async () => "mpv",
       launch: async () => true,
     });
@@ -214,7 +246,7 @@ describe("attemptAutoPlay", () => {
   });
 
   it("reports not-played (configuredFailed false) when detection finds nothing", async () => {
-    const out = await attemptAutoPlay("", "http://x", {
+    const out = await attemptAutoPlay("", "http://x", "", {
       detect: async () => null,
       launch: async () => true,
     });
@@ -222,7 +254,7 @@ describe("attemptAutoPlay", () => {
   });
 
   it("reports not-played when the detected player fails to launch", async () => {
-    const out = await attemptAutoPlay("", "http://x", {
+    const out = await attemptAutoPlay("", "http://x", "", {
       detect: async () => "mpv",
       launch: async () => false,
     });

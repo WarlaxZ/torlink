@@ -32,6 +32,8 @@ import { expandHome, normalizeDownloadDir } from "../config/folder";
 import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
 import { getDebridProvider, DEBRID_PROVIDER_IDS } from "../integrations/debrid";
 import { attemptAutoPlay, detectAndPlay, launchPlayer, streamCandidates } from "../util/player";
+import { preferredSubtitle, subtitlesFor } from "../util/subtitleFiles";
+import { subtitleArgs } from "../util/subtitleFlags";
 import type { ResolvedFile } from "../integrations/debrid/realdebrid";
 import { streamTorrent, type TorrentStreamSession } from "../integrations/torrentStream";
 import { postEvent, claimReccAccount } from "../recc/client";
@@ -321,6 +323,9 @@ export function App({
     name?: string;
     onPlayed?: () => void;
     configured?: string;
+    // Carried here (rather than recomputed at the fallback prompt) because that
+    // scope has no file list to recompute it from — see setMediaPlayer.
+    subtitleUrl?: string;
   } | null>(null);
   // Which media-player prompt is showing: the auto-detect/edit choice (after a
   // configured player failed) or the plain command entry.
@@ -348,6 +353,10 @@ export function App({
   // worse than no marker.
   const cachedRequestId = useRef(0);
   const [streamFiles, setStreamFiles] = useState<ResolvedFile[] | null>(null);
+  // The session's UNFILTERED file list — streamFiles has already been through
+  // streamCandidates, which drops exactly the .srt files the subtitle matcher
+  // needs. Kept alongside streamFiles, reset on the same two paths.
+  const [streamAllFiles, setStreamAllFiles] = useState<ResolvedFile[] | null>(null);
   // Episodes streamed from the current picker session (marked ✓, cleared when
   // the picker opens/closes). Union with the favourite's persisted watched list.
   const [streamedFiles, setStreamedFiles] = useState<Set<string>>(new Set());
@@ -1363,14 +1372,19 @@ export function App({
   // Try to play a resolved stream URL: use the configured/detected player, else
   // copy the link to the clipboard and prompt for a player command.
   const playStream = useCallback(
-    async (url: string, name?: string, onPlayed?: () => void) => {
+    async (url: string, name?: string, onPlayed?: () => void, subtitleUrl = "") => {
       if (!config) return;
       const configured = resolveMediaPlayer(config);
-      const outcome = await attemptAutoPlay(configured, url);
+      const outcome = await attemptAutoPlay(configured, url, subtitleUrl);
       if (outcome.played) {
         const copied = await writeClipboard(url);
+        // A subtitle matched but the launched player is one subtitleArgs does not
+        // know a flag for (a wrapper script, say): say so rather than staying
+        // silent about a subtitle that never actually loaded.
+        const attached = subtitleUrl !== "" && subtitleArgs(outcome.player ?? "", subtitleUrl).length > 0;
+        const subNote = subtitleUrl !== "" && !attached ? " · subtitle not loaded" : "";
         setNotice(
-          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${outcome.player}${copied ? " · link copied" : ""}`,
+          `${ICON.done} Streaming ${name ? `${truncate(cleanText(name), 28)} ` : ""}in ${outcome.player}${copied ? " · link copied" : ""}${subNote}`,
         );
         onPlayed?.();
         void postEvent(
@@ -1381,12 +1395,15 @@ export function App({
       }
       // Couldn't play automatically: stash context, copy the link, and open the
       // right prompt — a configured player that failed to launch gets the
-      // auto-detect/edit choice; otherwise the plain command entry.
+      // auto-detect/edit choice; otherwise the plain command entry. The
+      // subtitle URL is carried on pendingStream so it survives to
+      // setMediaPlayer's launch, whose scope has no file list to recompute it.
       setPendingStream({
         url,
         name,
         onPlayed,
         configured: outcome.configuredFailed ? configured : undefined,
+        subtitleUrl,
       });
       await writeClipboard(url);
       setPlayerPromptMode(outcome.configuredFailed ? "choice" : "edit");
@@ -1397,10 +1414,11 @@ export function App({
 
   // Hand a resolved file to the player path and clear any picker/preparing UI.
   const finishStream = useCallback(
-    (file: ResolvedFile, name?: string, onPlayed?: () => void) => {
+    (file: ResolvedFile, name?: string, onPlayed?: () => void, subtitleUrl = "") => {
       setStreamFiles(null);
+      setStreamAllFiles(null);
       setPreparing(null);
-      void playStream(file.url, name ?? file.filename, onPlayed);
+      void playStream(file.url, name ?? file.filename, onPlayed, subtitleUrl);
     },
     [playStream],
   );
@@ -1410,13 +1428,19 @@ export function App({
   // persists watched progress when the current torrent is favourited.
   const playFromPicker = useCallback(
     (file: ResolvedFile) => {
+      const preferred = preferredSubtitle(subtitlesFor(file, streamAllFiles ?? []));
       // Mark streamed/watched ONLY once a player actually launches (the
       // onPlayed callback), so a failed stream never gets a ✓.
-      void playStream(file.url, file.filename, () => {
-        if (streamSource) markPlayed(streamSource.id, file.filename);
-      });
+      void playStream(
+        file.url,
+        file.filename,
+        () => {
+          if (streamSource) markPlayed(streamSource.id, file.filename);
+        },
+        preferred?.url ?? "",
+      );
     },
-    [playStream, streamSource, markPlayed],
+    [playStream, streamSource, markPlayed, streamAllFiles],
   );
 
   const cancelPreparing = useCallback(() => {
@@ -1461,7 +1485,12 @@ export function App({
   // is decided once. `recorded` is the stream-history row this play just wrote,
   // whose `nextEpisode` is the same suggestion the Continue-watching pane shows.
   const openStreamPicker = useCallback(
-    (candidates: ResolvedFile[], input: DownloadInput, recorded: StreamHistoryItem | null) => {
+    (
+      candidates: ResolvedFile[],
+      input: DownloadInput,
+      recorded: StreamHistoryItem | null,
+      allFiles: ResolvedFile[],
+    ) => {
       setStreamedFiles(new Set());
       setStreamSource(input);
       // KEYED BY INFOHASH, not just cleared on read. `openStreamPicker` runs
@@ -1479,6 +1508,7 @@ export function App({
         }),
       );
       setStreamFiles(candidates);
+      setStreamAllFiles(allFiles);
     },
     [config],
   );
@@ -1526,10 +1556,14 @@ export function App({
           );
           const recorded = await recordStreamHistory(input);
           if (candidates.length > 1) {
-            openStreamPicker(candidates, input, recorded);
+            openStreamPicker(candidates, input, recorded, session.files);
           } else {
-            void playStream(candidates[0]!.url, input.name, () =>
-              markPlayed(input.id, candidates[0]!.filename),
+            const preferred = preferredSubtitle(subtitlesFor(candidates[0]!, session.files));
+            void playStream(
+              candidates[0]!.url,
+              input.name,
+              () => markPlayed(input.id, candidates[0]!.filename),
+              preferred?.url ?? "",
             );
           }
         } catch (e) {
@@ -1676,11 +1710,15 @@ export function App({
           const recorded = await recordStreamHistory(input);
           if (candidates.length > 1) {
             setPreparing(null);
-            openStreamPicker(candidates, input, recorded);
+            openStreamPicker(candidates, input, recorded, files);
             return;
           }
-          finishStream(candidates[0]!, input.name, () =>
-            markPlayed(input.id, candidates[0]!.filename),
+          const preferred = preferredSubtitle(subtitlesFor(candidates[0]!, files));
+          finishStream(
+            candidates[0]!,
+            input.name,
+            () => markPlayed(input.id, candidates[0]!.filename),
+            preferred?.url ?? "",
           );
         } catch (e) {
           prepareAbort.current = null;
@@ -1841,7 +1879,7 @@ export function App({
           setNotice(`Media player set: ${cmd}`);
           return;
         }
-        const ok = await launchPlayer(cmd, ctx.url);
+        const ok = await launchPlayer(cmd, ctx.url, ctx.subtitleUrl ?? "");
         if (ok) {
           setNotice(`${ICON.done} Streaming in ${cmd}`);
           ctx.onPlayed?.();
@@ -1864,7 +1902,7 @@ export function App({
       return;
     }
     void (async () => {
-      const player = await detectAndPlay(ctx.url);
+      const player = await detectAndPlay(ctx.url, ctx.subtitleUrl ?? "");
       if (player) {
         setConfig({ ...config, mediaPlayer: player });
         setNotice(`${ICON.done} Streaming in ${player}`);
@@ -2764,6 +2802,7 @@ export function App({
               width={Math.max(24, Math.min(cols - 4, 72))}
               maxRows={Math.max(3, bodyH - 4)}
               files={streamFiles}
+              allFiles={streamAllFiles ?? streamFiles}
               watched={
                 streamSource
                   ? [...watchedFor(config?.favourites ?? [], streamSource.id), ...streamedFiles]
@@ -2787,6 +2826,7 @@ export function App({
               onSelect={playFromPicker}
               onCancel={() => {
                 setStreamFiles(null);
+                setStreamAllFiles(null);
                 setStreamedFiles(new Set());
                 setStreamSource(null);
                 setStreamPreselect(null);
