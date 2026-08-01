@@ -18,6 +18,7 @@ import {
 import { DownloadQueue } from "../download/queue";
 import { defaultConfig, type Config, type FavouriteItem } from "../config/config";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import { SOURCES } from "../sources/registry";
 import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
@@ -35,11 +36,17 @@ import type {
 } from "./wire";
 import type { Runtime } from "../daemon/runtime";
 
-function runtime(sessions = new StreamSessionRegistry()): Runtime {
+function runtime(
+  sessions = new StreamSessionRegistry(),
+  // markPlayed stubbed by default: the real one writes the developer's own
+  // config.json and stream history, exactly the seam `saveConfigImpl` exists for.
+  casts = new CastSessionRegistry({ markPlayed: async () => {} }),
+): Runtime {
   return {
     queue: new DownloadQueue(),
     downloadDir: "/tmp/dl",
     sessions,
+    casts,
   };
 }
 
@@ -1890,7 +1897,7 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
       runtime: {
         queue: { has: () => false, add, addDebrid } as unknown as Runtime["queue"],
         downloadDir: "/tmp/dl",
-        sessions: new StreamSessionRegistry(),
+        sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
       },
       add,
       addDebrid,

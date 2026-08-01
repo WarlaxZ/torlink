@@ -11,6 +11,7 @@ import {
 } from "./watch";
 import type { Runtime } from "./runtime";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 
 const HASH = "abcdef0123456789abcdef0123456789abcdef01";
 const MAGNET = `magnet:?xt=urn:btih:${HASH}&dn=Example`;
@@ -51,7 +52,7 @@ describe("processFile", () => {
     runtime = {
       queue: { has: () => false, add } as unknown as Runtime["queue"],
       downloadDir,
-      sessions: new StreamSessionRegistry(),
+      sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
     };
   });
   afterEach(async () => {

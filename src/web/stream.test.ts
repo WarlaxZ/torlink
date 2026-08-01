@@ -18,6 +18,7 @@ import {
 } from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 import type { Runtime } from "../daemon/runtime";
@@ -207,7 +208,12 @@ afterEach(async () => {
 });
 
 function runtimeWith(sessions: StreamSessionRegistry): Runtime {
-  return { queue: new DownloadQueue(), downloadDir: "/tmp/dl", sessions };
+  return {
+    queue: new DownloadQueue(),
+    downloadDir: "/tmp/dl",
+    sessions,
+    casts: new CastSessionRegistry(),
+  };
 }
 
 async function start(

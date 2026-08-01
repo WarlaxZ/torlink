@@ -151,6 +151,7 @@ import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
 import { vpnRouteIsSafe } from "../util/vpn";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import { displayHosts, webUrl, withoutToken } from "../web/links";
 import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
 import type { Runtime } from "../daemon/runtime";
@@ -263,6 +264,11 @@ export function App({
   // sessions the previous render's server handed out).
   const sessionsRef = useRef<StreamSessionRegistry | null>(null);
   if (!sessionsRef.current) sessionsRef.current = new StreamSessionRegistry();
+  // A ref for the same reason: a cast outlives any one render, and the web
+  // server mounted below is handed this exact instance so a cast started in the
+  // terminal is the one a browser on this process sees.
+  const castsRef = useRef<CastSessionRegistry | null>(null);
+  if (!castsRef.current) castsRef.current = new CastSessionRegistry();
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
@@ -586,6 +592,7 @@ export function App({
         return downloadDirRef.current;
       },
       sessions,
+      casts: castsRef.current!,
     };
     // One reading of the token for the whole mount: the server is given it and
     // the displayed link embeds it, and those two must agree — a link carrying a
