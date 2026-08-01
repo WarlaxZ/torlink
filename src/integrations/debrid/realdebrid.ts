@@ -452,7 +452,7 @@ export async function resolveMagnet(
   }
 
   let links: string[] = [];
-  let selectedPaths: string[] | undefined;
+  let selectedPaths: (string | undefined)[] | undefined;
   let lastProgress = -1;
   let stalledMs = 0;
   for (;;) {
@@ -462,7 +462,11 @@ export async function resolveMagnet(
     onProgress?.(progress);
     if (info.status === DONE_STATUS) {
       links = info.links ?? [];
-      selectedPaths = info.files?.filter((f) => Boolean(f.selected)).map((f) => f.path ?? "");
+      // `f.path ?? ""` would emit an empty string, which is not nullish and so
+      // defeats `matchPath`'s documented fallback to `filename` (subtitleFiles.ts)
+      // — an RD file with no path would carry `path: ""` onto the wire instead
+      // of falling back. Map absent to `undefined`, not `""`.
+      selectedPaths = info.files?.filter((f) => Boolean(f.selected)).map((f) => f.path);
       break;
     }
     if (ERROR_STATUSES.has(info.status)) {

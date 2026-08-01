@@ -171,6 +171,18 @@ describe("subtitlesFor", () => {
     expect(subtitlesFor(video, [video, orphan])).toEqual([]);
   });
 
+  it("treats an empty path the same as an absent one, falling back to filename", () => {
+    // A producer (Real-Debrid) that has no path for a file should mean "no
+    // folder information" — the same as `path` being undefined — not `path: ""`
+    // treated as a real (empty) path that defeats the filename fallback. Rule 1
+    // (basename prefix) would not fire here — the filenames share no prefix —
+    // so this only passes if matchPath actually falls back to `filename` for
+    // an empty `path`, letting rule 2 read the SxxExx token off it.
+    const video = f("Kepler.S02E04.1080p.WEB-DL.mkv");
+    const mine = fp("2_English.S02E04.srt", "");
+    expect(subtitlesFor(video, [video, mine])).toEqual([mine]);
+  });
+
   it("returns nothing when the torrent has no subtitles at all", () => {
     // The season pack that prompted this feature: ten episodes, nothing else.
     const video = f("Harrowgate.S03.1080p.WEB-DL.mkv");

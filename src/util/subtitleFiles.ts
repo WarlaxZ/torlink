@@ -29,9 +29,11 @@ export interface PathedFile extends NamedFile {
 // What subtitlesFor actually reads to find an SxxExx token: the path when the
 // producer supplied one, the (basename) filename otherwise. Never silently
 // invents a path — an absent one means "no folder information", not "assume
-// the flat layout applies".
+// the flat layout applies". `||`, not `??`: an empty string is not a path
+// either (a producer with nothing to report should mean "absent", the same as
+// undefined), so it must fall back to filename too, not be used as-is.
 function matchPath(f: PathedFile): string {
-  return f.path ?? f.filename;
+  return f.path || f.filename;
 }
 
 const SUBTITLE_EXTS = new Set(["srt", "vtt", "ass", "ssa", "sub"]);
