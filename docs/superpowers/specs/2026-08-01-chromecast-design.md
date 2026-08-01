@@ -29,8 +29,8 @@ front ends are clients of one implementation rather than two.
 ## Scope
 
 **In scope.** Discovering Chromecast devices; casting one file to one of them from either front
-end; pause, resume, stop, and a live position; the subtitle the user already picked; and
-remembering the resume point, so a cast play lands in Continue watching like any other.
+end; pause, resume, stop, and a live position on screen; the subtitle the user already picked;
+and marking the file played, so a cast lands in Continue watching exactly as a local play does.
 
 **Out of scope, deliberately.** Seeking and volume from torlink — the TV's own remote and the
 Google Home app do those, and each control added here is another failure mode over a flaky LAN
@@ -38,6 +38,24 @@ socket. Casting to anything that is not a Chromecast (AirPlay, DLNA). Multi-devi
 Queueing a season onto the device. Video-level transcoding, for exactly the reason the
 hard-containers design gives: HEVC and AV1 need a full re-encode, which needs per-platform
 hardware acceleration, which is its own project.
+
+**Two things this design does not build on, because they do not exist in the tree.** Both were
+checked rather than assumed, and each removes something an earlier draft of this document
+promised:
+
+- **There is no persisted time position anywhere in torlink.** `StreamHistoryItem`
+  (`src/core/streamHistory.ts:24`) carries a season and an episode and no seconds, and neither
+  front end tracks `currentTime` for resume — `recordPlayedFile` advances progress at *episode*
+  granularity. So the position a cast reports is **displayed and not stored**, and casting marks
+  the file played through the same hook a local play uses. A real resume point is a feature for
+  both front ends and both players, and it is not this one.
+- **The source ladder's local-`ffmpeg` rung was never implemented.** `src/util/ffmpegBin.ts`
+  exists but its only consumer is `findFfprobe` in `src/core/probe.ts`; nothing spawns a
+  transcode. The rungs that exist are direct play and the debrid provider's HLS
+  (`chooseSource`, `src/web/static/playerModel.ts:169`). Casting therefore covers exactly what
+  the browser covers: **an MKV on the debrid backend casts via the provider's transcode; an MKV
+  from a torrent cannot cast**, and says so. It starts working the day rung 3 lands, with no
+  change here, because casting asks the same ladder.
 
 ## Where the code lives
 
@@ -102,16 +120,20 @@ socket rather than a story about a television.
 
 The `LOAD` request must name a `contentType` the default receiver recognises, and it differs per
 rung: `video/mp4` or `video/webm` for direct play, `application/vnd.apple.mpegurl` with
-`streamType: "BUFFERED"` for either HLS rung. Getting it wrong is a `LOAD_FAILED` rather than a
-guess, so the mapping is a pure function beside the profile it belongs to and has its own test.
+`streamType: "BUFFERED"` for the provider HLS rung. Getting it wrong is a `LOAD_FAILED` rather
+than a guess, so the mapping is a pure function beside the profile it belongs to and has its own
+test.
 
 ### `session.ts`
 
 `CastSessionRegistry` holds at most one active cast per process: the device, what is playing, and
-the last `MEDIA_STATUS`. Position updates feed the existing `streamHistory` resume-point writer,
-so a cast play is remembered exactly like a local one — and, specifically, the last known
-position is still written when the socket drops, because a failure that loses the resume point is
-the shape of bug this repo has already recorded against the web player.
+the last `MEDIA_STATUS`. The position in that status is state, not a store — it drives the line
+on screen and nothing writes it to disk, because there is nowhere to write it to (see Scope).
+
+What *is* persisted is the same thing a local play persists: on a successful `LOAD`, the file is
+marked played through `markWatched` and `recordPlayedFile`, so a cast advances Continue watching
+like anything else. On `LOAD`, not on cast start — a device that refuses the file must not earn
+a ✓, which is the rule `playFromPicker`'s `onPlayed` callback already follows in the TUI.
 
 ## Chromecast is a second capability profile, not a second list
 
@@ -135,11 +157,12 @@ Two calls in that table are deliberate and each has a cost:
   user gets is the same one the browser gives, for the same honest reason.
 - **AC3 and E-AC3 are allowed**, which is passthrough and therefore depends on the television or
   receiver on the other side of the HDMI cable. Where that link cannot take it the result is
-  silent video, which is a bad failure. It is still the right call: every Chromecast generation
-  lists AC-3 and E-AC-3, the alternative burns CPU on a local transcode for every AC3 file, and
-  where `ffmpeg` is absent the alternative *refuses a file that would have played*. Silence is
-  recoverable in one keypress; a refusal is not recoverable at all. A test pins the choice so it
-  cannot be reversed by accident.
+  silent video, which is a bad failure. It is still the right call, and more clearly so now that
+  there is no local transcode to fall back to: every Chromecast generation lists AC-3 and E-AC-3,
+  and blocking them would simply *refuse a file that would almost certainly have played* — on the
+  torrent backend it would refuse it outright, with no rung underneath. Silence is recoverable in
+  one keypress; a refusal is not recoverable at all. A test pins the choice so it cannot be
+  reversed by accident.
 
 This is also what makes a small feature possible on the other side: a file the browser refuses
 but the device accepts — an MP4 carrying AC3 — currently ends at the "this one needs a real
@@ -150,14 +173,14 @@ profiles rather than one list.
 
 The cast target is always `/stream/<sid>/<idx>?k=…` on torlink's own web server, chosen by the
 same source ladder the browser player walks — direct play, then the provider's HLS transcode,
-then local `ffmpeg` HLS, then an honest refusal — with `CHROMECAST` in place of `BROWSER`.
-Consequences:
+then an honest refusal — with `CHROMECAST` in place of `BROWSER`. Consequences:
 
 - The browser's cast button reuses the stream session the page already has.
 - The TUI's cast ensures the in-process web server is up, opens a session, and casts the same
   URL. It announces that ("Started the web UI on … so the TV can reach the file") rather than
   starting a server behind the user's back.
-- MKV casts, by the rung that already exists. HEVC says why it cannot.
+- An MKV on the debrid backend casts, by the provider's transcode. An MKV from a torrent does
+  not, and says which of the two it is. HEVC says why it cannot, on either backend.
 - There is one auth story: the `?k=` token, which the device carries in the query string.
 
 **The origin comes from `displayHosts(...).lan`, never from the request's `Host` header.** A user
@@ -171,8 +194,14 @@ test that pins the LAN address even when `Host` says `localhost`.
 `src/integrations/torrentStream.ts:73` binds the WebTorrent HTTP server to `localhost` on an
 ephemeral port, so a Chromecast cannot fetch from it. The alternative to routing through the web
 server would be binding that one to `0.0.0.0`, which exposes the file to everything on the
-network with no auth at all, and which has none of the HLS rungs — so MKV would cast from the
-browser and not from the terminal. Rejected on both counts.
+network with no auth at all, and which has no ladder above it at all — so a debrid MKV would cast
+from the browser and not from the terminal. Rejected on both counts.
+
+A second reason, which is the one that makes this cheap: the TUI holds resolved files and never
+registers them with `Runtime.sessions` (nothing in `src/ui/App.tsx` calls into the registry it
+constructs at line 265). Casting needs a session id either way, so `StreamSessionRegistry` gains
+an `adopt` method for already-resolved files — one small, tested addition instead of a second
+resolve.
 
 ## Subtitles
 
@@ -260,8 +289,8 @@ about a cast it cannot see.
 | TLS connect refused or timed out | `<name> didn't answer — it may be off.` The device stays in the list |
 | Receiver refuses `LAUNCH` | `<name> wouldn't start the player.` |
 | `LOAD_FAILED` / `LOAD_CANCELLED` | `<name> couldn't play this file.` — with the receiver's own reason where it gives one |
-| Socket drops mid-play | one reconnect attempt, then `Lost the connection to <name>.`, and the last known position is written to history regardless |
-| `ffmpeg` absent and the file needs rung 3 | the existing missing-ffmpeg message, unchanged |
+| Socket drops mid-play | one reconnect attempt, then `Lost the connection to <name>.` — and the ✓ already written on `LOAD` stays, because the file was played |
+| The file has a blocker and no rung above it | `A Chromecast can't play this one — <reason>.` The button is disabled with that reason rather than absent, so it is clear the device is the limit and not the network |
 
 ## Testing
 
@@ -272,7 +301,8 @@ Every row is a test written before the change it covers.
 | `src/core/cast/protocol.test.ts` | a `CastMessage` round-trips; a frame whose length prefix arrives split across two chunks yields exactly one message; two messages in one chunk yield two; a frame claiming an absurd length is rejected rather than buffered |
 | `src/core/cast/discover.test.ts` | canned SRV/A/TXT records → devices with name and model; a response missing SRV is dropped; duplicates from two interfaces collapse by `id`; the configured manual entry appears with no discovery at all; the timeout resolves with what arrived rather than throwing |
 | `src/core/cast/connection.test.ts` | against a fake socket: heartbeat cadence; `LAUNCH` precedes `LOAD`; each failure row above; one reconnect then give up |
-| `src/core/cast/session.test.ts` | a second start replaces the first; `MEDIA_STATUS` positions reach `streamHistory`; a dropped socket still writes the last position |
+| `src/core/cast/session.test.ts` | a second start replaces the first; a successful `LOAD` marks the file played exactly once; a `LOAD_FAILED` marks nothing; `MEDIA_STATUS` positions reach the status the front ends read and are never written to disk |
+| `src/core/streamSession.test.ts` | `adopt` yields a `ready` session with a fresh id and capability, without calling either resolve impl; stopping an adopted session does not touch a backend it does not own |
 | `src/util/playability.test.ts` | **the browser profile's verdicts are exactly what they are today** — the regression guard for touching a shared module — then MKV blocked for Chromecast, AC3 and E-AC3 allowed (the recorded trade-off), HEVC and DTS blocked |
 | `src/web/static/castModel.test.ts` | every button state and disabled reason; the status line's formatting including a stream with no known duration; the fallback card offers casting only where the Chromecast profile has no blockers |
 | `src/web/routes.test.ts` | the three routes and their authorisation; the cast URL is built from the LAN address even when `Host` is `localhost`; `POST /api/cast/command` with nothing casting is a clean refusal, not a crash |
@@ -288,9 +318,9 @@ thing that proves `castModel.ts` pulled no `node:*` into the browser bundle.
 
 ## Documentation
 
-- `README.md`: casting joins the streaming section, naming the MKV path (it transcodes) and the
-  HEVC refusal (it does not), and the fact that discovery needs mDNS with the configured-address
-  fallback for Docker and VLANs.
+- `README.md`: casting joins the streaming section, naming what a Chromecast will and will not
+  take — an MKV casts on the debrid backend and not from a torrent, HEVC casts on neither — and
+  the fact that discovery needs mDNS, with the configured-address fallback for Docker and VLANs.
 - The web UI's limitations list: re-read to confirm the "needs a real player" wording is still
   true now that the fallback card can cast. Casting itself is not a limitation and adds no entry.
 - `package.json` gains one runtime dependency, `multicast-dns`, taking the list from ten to
