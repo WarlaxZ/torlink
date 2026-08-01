@@ -1370,8 +1370,9 @@ function renderTabs(): void {
       button.type = "button";
       button.className = "tab";
       button.textContent = group;
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-selected", String(group === searchView.group));
+      // aria-pressed, matching #views: this is a toggle button, not a tab. See
+      // the comment on #tabs in index.html for why the tablist role went.
+      button.setAttribute("aria-pressed", String(group === searchView.group));
       button.addEventListener("click", () => {
         const plan = tabClickPlan(searchView, group, queryInput.value);
         if (plan.action === "ignore") return;

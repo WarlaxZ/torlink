@@ -3,7 +3,9 @@
    The palette mirrors the TUI's so the two surfaces read as one tool. */
 
 :root {
-  color-scheme: dark light;
+  /* `dark light` with a hardcoded dark palette: a light-preference OS gets dark
+     form controls and scrollbars to match the page, which is the point. */
+  color-scheme: dark;
   --bg: #12131a;
   --fg: #e6e6ea;
   --dim: #8b8d9b;
@@ -12,11 +14,55 @@
   --error: #f7768e;
   --sunken: #0c0d13;
   --raised: #1b1d29;
+  /* The only two durations in the file, and both are short on purpose. This is
+     a tool: motion here exists to make a state change legible — which button is
+     under the cursor, that a row just arrived — never to be looked at. Anything
+     an operator waits for twice is too long. */
+  --tap: 90ms;
+  --settle: 160ms;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ---- motion -------------------------------------------------------------- *
+
+   There was none: 1500 lines of CSS with no transition, no animation and no
+   keyframes, so every hover, every selection and every appearing panel was
+   instantaneous. That is not restraint, it is a missing layer — an interface
+   that never acknowledges a pointer feels unresponsive even when it is fast.
+
+   Applied by PROPERTY, not by `all` on `*`: `transition: all` would animate
+   layout on the results list as it rebuilds 23 times during a search, which
+   would be both ugly and expensive. Only colour, border and background move —
+   nothing that triggers layout.
+
+   THE REDUCED-MOTION BLOCK IS NOT OPTIONAL. `scrollTo` in app.ts already
+   honours the preference; adding motion without extending the same courtesy
+   would be a regression for anyone who set it. */
+button,
+select,
+input,
+a,
+summary,
+.tag,
+.badge {
+  transition:
+    color var(--tap) ease-out,
+    border-color var(--tap) ease-out,
+    background-color var(--tap) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* The `hidden` attribute is only `display: none` in the user-agent stylesheet,
@@ -245,6 +291,23 @@ input {
   font: inherit;
 }
 
+/* Chrome's UA placeholder is rgb(117,117,117), which against --sunken measures
+   4.21:1 — the one real contrast failure on the page, and it was there only
+   because ::placeholder was never styled. --dim clears 4.5:1 on every surface
+   this app puts an input on. */
+::placeholder {
+  color: var(--dim);
+  opacity: 1; /* Firefox dims placeholders by default; --dim is already the dim. */
+}
+
+/* `a` and `summary` are in here now. They were not, so a plain anchor — the
+   player's back link, its breadcrumb, the two escape routes on the fallback
+   card — fell to Chrome's UA ring, which is the LIGHT-mode blue rgb(0,95,204).
+   Against this page that measures 3.09:1: it clears WCAG 1.4.11 by nine
+   hundredths, and it is a different colour from every other focused control on
+   the site. */
+a:focus-visible,
+summary:focus-visible,
 input:focus-visible,
 button:focus-visible {
   outline: 1px solid var(--accent);
@@ -428,12 +491,15 @@ button:hover {
   background: rgb(0 0 0 / 55%);
 }
 
+/* NO text-transform HERE. This line renders a release name, and identifying the
+   file is the dialog's entire job — uppercasing it mangles the one string whose
+   exactness is the point, and filenames are case-sensitive on every filesystem
+   this app writes to. The label keeps its small dim treatment without it. */
 .picker-title {
   margin: 0 0 0.6rem;
   font-size: 0.75rem;
   color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   overflow-wrap: anywhere;
 }
 
@@ -561,7 +627,9 @@ button:hover {
   color: var(--dim);
 }
 
-.tab[aria-selected="true"] {
+/* aria-pressed, matching .view-tab — these are toggle buttons, not tabs. See
+   the comment on #tabs in index.html. */
+.tab[aria-pressed="true"] {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -1200,11 +1268,17 @@ select:focus-visible {
 
 /* reccd's "because you liked …". Dim and small: it explains the pick, it is not
    the pick. Clamped to two lines so one verbose reason cannot make its card
-   twice the height of its neighbours and tear the grid. */
+   twice the height of its neighbours and tear the grid.
+
+   It was `var(--accent)`, directly under that first sentence — so the
+   explanation was the brightest text on the card, brighter than the title of
+   the thing being recommended, and it spent the accent budget that
+   `.tag-quality` is deliberately denied. The comment was right and the code was
+   wrong; this is the code catching up. */
 .recc-reason {
   margin: 0.3rem 0 0;
   font-size: 0.7rem;
-  color: var(--accent);
+  color: var(--dim);
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;

@@ -183,7 +183,19 @@
                category is absent from the response when it is off), so a
                hardcoded tab here could show a category the server will not
                search. -->
-          <div id="tabs" class="tabs" role="tablist"></div>
+          <!--
+            A GROUP OF TOGGLE BUTTONS, not role="tablist" — which is what this
+            was, with `aria-selected` on seven children, `aria-controls` on none
+            of them, and no role="tabpanel" anywhere in the document. A tablist
+            with no panels promises a screen-reader user a structure that is not
+            there, and the arrow-key navigation the pattern implies was never
+            implemented either (all seven sat in the tab order).
+
+            The honest description is the one #views already uses: these are
+            buttons that re-run the search against a different set of sources.
+            Nothing here reveals a pre-rendered panel. app.ts sets aria-pressed.
+          -->
+          <div id="tabs" class="tabs" role="group" aria-label="Category"></div>
 
           <div class="controls">
             <label class="control" for="sort">
