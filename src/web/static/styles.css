@@ -1371,6 +1371,14 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* The embedded-subtitle line under a fallback card. Dimmer than the
+   explanation above it: it is a useful aside, not the reason for the card. */
+.fallback-subs {
+  margin: 0.6rem 0 0;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
 /* The two ways out. Links rather than buttons, and below the explanation rather
    than beside the .m3u controls: those hand this file to another application,
    these are about not being on this screen again. Keeping them visually
