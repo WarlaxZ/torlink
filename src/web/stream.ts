@@ -22,7 +22,13 @@ import https from "node:https";
 import { isAuthorized } from "../daemon/auth";
 import { streamHandle, toPublicSession } from "./routes";
 import { probeUrl } from "../core/probe";
-import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../util/playability";
+import {
+  CHROMECAST_PROFILE,
+  blockersFor,
+  classifyFromName,
+  extensionOf,
+  type MediaFacts,
+} from "../util/playability";
 import type { ProbeCache } from "../core/probeCache";
 import type { HlsVerdictCache } from "../core/hlsVerdictCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
@@ -519,6 +525,7 @@ export async function handleStreamRequest(
     const body: StreamInfoResponse = {
       facts,
       blockers: blockersFor(facts),
+      castBlockers: blockersFor(facts, CHROMECAST_PROFILE),
       hls,
       subtitles: {
         embedded: facts.subtitles,
@@ -582,6 +589,13 @@ export async function handleStreamRequest(
       // Same reason as the playlist: the URL that produced this carries a
       // capability for a session that will be reaped.
       "Cache-Control": "no-store",
+      // A Chromecast's receiver runs on an HTTPS origin of Google's and fetches
+      // sidecar tracks cross-origin; without this it drops the track SILENTLY,
+      // which reads to the user as "casting ignores subtitles". ONLY this
+      // representation gets it — the media handle must not, and a test pins that.
+      // It is safe here because `?k=` has already authorised the request: the
+      // header widens who may READ the response, not who may make it.
+      "Access-Control-Allow-Origin": "*",
     });
     if (method !== "HEAD") res.end(payload);
     else res.end();

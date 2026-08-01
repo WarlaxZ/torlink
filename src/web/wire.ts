@@ -155,6 +155,16 @@ export interface StreamInfoResponse {
   facts: MediaFacts;
   /** Empty means the browser should be able to play this file as it is. */
   blockers: Blocker[];
+  /**
+   * Empty means a Chromecast should be able to play this file as it is.
+   *
+   * Separate from `blockers` because the two decoders genuinely differ: a
+   * Chromecast passes AC3 and E-AC3 through to the television, which no browser
+   * will decode. See `CHROMECAST_PROFILE` (src/util/playability.ts) for the
+   * trade-off that allows — silence on a TV whose HDMI link cannot take
+   * passthrough — and for why HEVC stays blocked on both.
+   */
+  castBlockers: Blocker[];
   /** A provider HLS manifest the browser can play directly, or null. */
   hls: string | null;
   /**
