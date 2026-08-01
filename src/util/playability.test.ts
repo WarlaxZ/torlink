@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "./playability";
+import {
+  BROWSER_PROFILE,
+  CHROMECAST_PROFILE,
+  blockersFor,
+  castContentType,
+  classifyFromName,
+  extensionOf,
+  type MediaFacts,
+} from "./playability";
 
 const facts = (over: Partial<MediaFacts> = {}): MediaFacts => ({
   container: "mp4",
@@ -104,5 +112,75 @@ describe("blockersFor", () => {
     // pessimistically here would send files to the card that play fine today;
     // the runtime error/stall detection is what covers being wrong.
     expect(blockersFor(facts({ videoCodec: "", audioCodec: "" }))).toEqual([]);
+  });
+
+  // THE REGRESSION GUARD for adding profiles to a module the web player depends
+  // on: the no-argument form must answer exactly what it answered before they
+  // existed. Every case above is already that guard; this one pins that naming
+  // the browser profile explicitly is the same thing.
+  it("defaults to the browser profile", () => {
+    expect(blockersFor(facts({ audioCodec: "ac3" }))).toEqual(
+      blockersFor(facts({ audioCodec: "ac3" }), BROWSER_PROFILE),
+    );
+    expect(blockersFor(facts({ audioCodec: "ac3" }))).toEqual(["audio"]);
+  });
+});
+
+describe("blockersFor with the Chromecast profile", () => {
+  it("blocks matroska for a Chromecast too — the device demuxes no more of it than a browser", () => {
+    expect(blockersFor(facts({ container: "mkv" }), CHROMECAST_PROFILE)).toEqual(["container"]);
+  });
+
+  it("allows ac3 and eac3, which the browser refuses", () => {
+    // The recorded trade-off: this is HDMI passthrough, so a television that
+    // cannot take it plays silently. Blocking would instead REFUSE a file that
+    // would almost certainly have played, and on the torrent backend there is
+    // no transcode rung underneath to fall back to. Silence is recoverable in
+    // one keypress; a refusal is not recoverable at all.
+    expect(blockersFor(facts({ audioCodec: "ac3" }), CHROMECAST_PROFILE)).toEqual([]);
+    expect(blockersFor(facts({ audioCodec: "eac3" }), CHROMECAST_PROFILE)).toEqual([]);
+  });
+
+  it("still blocks dts and truehd", () => {
+    expect(blockersFor(facts({ audioCodec: "dts" }), CHROMECAST_PROFILE)).toEqual(["audio"]);
+    expect(blockersFor(facts({ audioCodec: "truehd" }), CHROMECAST_PROFILE)).toEqual(["audio"]);
+  });
+
+  it("blocks hevc, because a model name is a guess and there is no video transcode", () => {
+    expect(blockersFor(facts({ videoCodec: "hevc" }), CHROMECAST_PROFILE)).toEqual(["video"]);
+    expect(blockersFor(facts({ videoCodec: "av1" }), CHROMECAST_PROFILE)).toEqual(["video"]);
+  });
+
+  it("is the pair that lets the browser's fallback card offer to cast", () => {
+    // An mp4 carrying AC3: the browser refuses the audio, a Chromecast takes it.
+    // This is the whole point of having two profiles rather than one list.
+    const f = classifyFromName("Kestrel.2010.1080p.BluRay.x264.AC3.mp4");
+    expect(blockersFor(f)).toEqual(["audio"]);
+    expect(blockersFor(f, CHROMECAST_PROFILE)).toEqual([]);
+  });
+
+  it("agrees with the browser about an mkv, which neither can demux", () => {
+    const f = classifyFromName("Kepler.S02E04.1080p.WEB-DL.mkv");
+    expect(blockersFor(f)).toEqual(["container"]);
+    expect(blockersFor(f, CHROMECAST_PROFILE)).toEqual(["container"]);
+  });
+});
+
+describe("castContentType", () => {
+  it("names the container for a direct play", () => {
+    expect(castContentType("mp4", false)).toBe("video/mp4");
+    expect(castContentType("m4v", false)).toBe("video/mp4");
+    expect(castContentType("webm", false)).toBe("video/webm");
+  });
+
+  it("names HLS whenever the source is a manifest, whatever the file's own container", () => {
+    expect(castContentType("mkv", true)).toBe("application/vnd.apple.mpegurl");
+    expect(castContentType("mp4", true)).toBe("application/vnd.apple.mpegurl");
+  });
+
+  it("falls back to video/mp4 for a container it does not know, rather than an empty type", () => {
+    // An empty contentType is a LOAD_FAILED with no reason. mp4 is the honest
+    // guess: it is what a direct-play rung will have been chosen for.
+    expect(castContentType("", false)).toBe("video/mp4");
   });
 });

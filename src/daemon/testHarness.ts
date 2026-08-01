@@ -16,6 +16,7 @@
 import net from "node:net";
 import { vi } from "vitest";
 import type { Runtime } from "./runtime";
+import { CastSessionRegistry } from "../core/cast/session";
 
 export interface Fake {
   runtime: Runtime;
@@ -36,6 +37,7 @@ export function fakeRuntime(downloadDir: string): Fake {
     } as unknown as Runtime["queue"],
     downloadDir,
     sessions: { stopAll } as unknown as Runtime["sessions"],
+    casts: new CastSessionRegistry(),
   };
   return { runtime, suspend, stopAll };
 }

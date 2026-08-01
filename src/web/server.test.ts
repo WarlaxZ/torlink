@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { startWebServer, writeWebResponse, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import { SOURCES } from "../sources/registry";
 import { defaultConfig, type Config } from "../config/config";
 import type { TorrentResult } from "../sources/types";
@@ -16,7 +17,7 @@ function runtime(): Runtime {
   return {
     queue: new DownloadQueue(),
     downloadDir: "/tmp/dl",
-    sessions: new StreamSessionRegistry(),
+    sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
   };
 }
 

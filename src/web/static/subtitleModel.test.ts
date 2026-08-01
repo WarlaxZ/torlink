@@ -15,6 +15,7 @@ const target: PlayerTarget = { sid: "abc", index: 0, capability: "cap", filename
 const info = (over: Partial<StreamInfoResponse>): StreamInfoResponse => ({
   facts: { container: "mkv", videoCodec: "h264", audioCodec: "aac", source: "probe", subtitles: [] },
   blockers: [],
+  castBlockers: [],
   hls: null,
   subtitles: { embedded: [], files: [] },
   ...over,

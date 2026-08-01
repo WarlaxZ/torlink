@@ -20,6 +20,7 @@ import type { Config } from "../config/config";
 import type { Runtime } from "../daemon/runtime";
 import type { WebServerHandle } from "../web/server";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 
 const DOWNLOAD_DIR = "/tmp/torlink-web-test";
 const TAB = "\t";
@@ -186,6 +187,9 @@ describe("App --web mount", () => {
       expect(options.port).toBe(19001);
       expect(runtime.queue).toBeInstanceOf(FakeQueue);
       expect(runtime.sessions).toBeInstanceOf(StreamSessionRegistry);
+      // The cast registry is handed over the same way and for the same reason: a
+      // cast started in the terminal is the one a browser on this process sees.
+      expect(runtime.casts).toBeInstanceOf(CastSessionRegistry);
       expect(runtime.downloadDir).toBe(DOWNLOAD_DIR);
 
       // The injected log is the whole point: it must reach the file logger.

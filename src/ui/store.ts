@@ -9,6 +9,21 @@ import type { Sort } from "./sort";
 import type { StreamHistoryItem } from "../core/streamHistory";
 import type { PickIntent } from "../util/releasePick";
 
+/**
+ * The cast row's data, flattened from `ActiveCast` (src/core/cast/session.ts).
+ *
+ * Flattened rather than the core type itself so the store carries no live object
+ * — `Store` is state the TUI re-renders from, and a registry instance in it would
+ * invite a component to reach past the props it was given.
+ */
+export interface CastRowStatus {
+  deviceName: string;
+  title: string;
+  state: "loading" | "playing" | "paused" | "idle";
+  positionSec: number;
+  durationSec: number | null;
+}
+
 export type View = "splash" | "browser";
 
 export type Category = "all" | "games" | "movies" | "tv" | "anime" | "music" | "books" | "porn";
@@ -190,6 +205,11 @@ export interface Store {
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.
   streamActive: boolean;
+  // What is playing on a Chromecast right now, or null. Display only: nothing in
+  // torlink persists a playback position, so this drives the cast row and is
+  // never written down. Per-process, like the registry behind it — a cast started
+  // in a separate `serve --web` is not visible here.
+  castStatus: CastRowStatus | null;
   // The validated debrid account (whichever provider is active), or null when
   // unknown/not connected.
   debridStatus: DebridStatus | null;

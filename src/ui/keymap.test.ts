@@ -183,6 +183,23 @@ describe("grouping keys", () => {
     expect(search?.hints.some((h) => h.keys === "space")).toBe(true);
   });
 
+  it("advertises the cast key in the help sheet", () => {
+    const search = HELP_GROUPS.find((g) => g.title === "Search");
+    expect(search?.hints.some((h) => h.keys === "c" && /cast/i.test(h.label))).toBe(true);
+  });
+
+  it("does NOT advertise the cast key in the results footer, because it is not bound there", () => {
+    // `c` belongs to the stream file picker, which draws its own hint row (see
+    // StreamFilePrompt). Advertising it here would promise something the next
+    // keypress in the results list will not do — the same reason this file is
+    // careful about `x` meaning Remove or Stop stream depending on state.
+    for (const debrid of [undefined, "Real-Debrid"]) {
+      expect(footerHints("content", "all", null, null, debrid).some((h) => h.keys === "c")).toBe(
+        false,
+      );
+    }
+  });
+
   it("keeps the grouping hint inside the truncated footer width", () => {
     // The results row is 115 columns bare and 131 with a debrid provider, so
     // Footer.tsx truncates it at 80. A hint the user cannot see is not a hint —

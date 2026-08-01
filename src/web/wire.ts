@@ -155,6 +155,16 @@ export interface StreamInfoResponse {
   facts: MediaFacts;
   /** Empty means the browser should be able to play this file as it is. */
   blockers: Blocker[];
+  /**
+   * Empty means a Chromecast should be able to play this file as it is.
+   *
+   * Separate from `blockers` because the two decoders genuinely differ: a
+   * Chromecast passes AC3 and E-AC3 through to the television, which no browser
+   * will decode. See `CHROMECAST_PROFILE` (src/util/playability.ts) for the
+   * trade-off that allows — silence on a TV whose HDMI link cannot take
+   * passthrough — and for why HEVC stays blocked on both.
+   */
+  castBlockers: Blocker[];
   /** A provider HLS manifest the browser can play directly, or null. */
   hls: string | null;
   /**
@@ -879,4 +889,53 @@ export interface CachedRequest {
 /** Lowercase hex info hashes the provider has cached. A subset of the request. */
 export interface CachedResponse {
   cached: string[];
+}
+
+/**
+ * One Chromecast, as the browser sees it.
+ *
+ * NOTE WHAT IS OMITTED: `host` and `port`. The page picks a device by `id` and
+ * the server holds the address, because a page has no use for it and publishing
+ * the LAN topology of the user's house to any tab buys nothing.
+ */
+export interface PublicCastDevice {
+  id: string;
+  name: string;
+  /** e.g. "Chromecast". Empty when the device did not say. */
+  model: string;
+}
+
+/**
+ * `GET /api/cast/devices` — what can be cast to, and why not when nothing can.
+ *
+ * `castable` is not just "the list is non-empty": casting also needs an address
+ * on this machine that a device could fetch from, which a loopback-bound server
+ * does not have. `reason` is null while discovery has not finished, which is what
+ * lets the button say "Finding devices…" rather than "none found".
+ */
+export interface CastDevicesResponse {
+  devices: PublicCastDevice[];
+  castable: boolean;
+  reason: string | null;
+}
+
+/**
+ * `GET /api/cast/status`, and the `cast` SSE event — the same shape, so a page
+ * has one parser for both.
+ *
+ * `positionSec` is state, not a store: nothing in torlink persists a playback
+ * position (`StreamHistoryItem` tracks a season and an episode), so this drives
+ * the line on screen and is never written to disk.
+ */
+export interface CastStatusResponse {
+  casting: null | {
+    deviceName: string;
+    title: string;
+    state: "loading" | "playing" | "paused" | "idle";
+    positionSec: number;
+    /** Null when the device has not said — a manifest it is still reading. */
+    durationSec: number | null;
+  };
+  /** A cast that ended badly, handed over exactly once. */
+  notice: string | null;
 }

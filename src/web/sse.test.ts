@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HEARTBEAT_MS, sseFrame, subscribeToQueue } from "./sse";
+import { HEARTBEAT_MS, sseFrame, subscribeToCasts, subscribeToQueue } from "./sse";
 import { DownloadQueue } from "../download/queue";
 
 describe("sseFrame", () => {
@@ -398,6 +398,127 @@ describe("subscribeToQueue", () => {
       queue.emit("update");
 
       expect(timeouts()).toBe(before);
+    } finally {
+      stop();
+    }
+  });
+});
+
+describe("subscribeToCasts", () => {
+  /** The one method sse.ts needs, so it imports nothing from src/core/cast. */
+  function fakeCasts() {
+    const listeners = new Set<() => void>();
+    return {
+      onChange(cb: () => void): () => void {
+        listeners.add(cb);
+        return () => void listeners.delete(cb);
+      },
+      changed(): void {
+        for (const cb of [...listeners]) cb();
+      },
+      count(): number {
+        return listeners.size;
+      },
+    };
+  }
+
+  function frames(written: string[]): string[] {
+    return written.join("").split("\n\n").filter(Boolean);
+  }
+
+  it("sends the current cast state at once, so a page arriving mid-cast is not blank", () => {
+    const written: string[] = [];
+    const casts = fakeCasts();
+    const stop = subscribeToQueue(
+      new DownloadQueue(),
+      (c) => written.push(c),
+      () => ({ downloads: [], seeds: [] }),
+      subscribeToCasts(casts, () => ({ casting: null, notice: null })),
+    );
+    try {
+      const cast = frames(written).filter((f) => f.startsWith("event: cast"));
+      expect(cast).toHaveLength(1);
+      expect(cast[0]).toContain('"casting":null');
+    } finally {
+      stop();
+    }
+  });
+
+  it("sends a frame whenever the cast changes", () => {
+    const written: string[] = [];
+    const casts = fakeCasts();
+    let state: unknown = { casting: null, notice: null };
+    const stop = subscribeToQueue(
+      new DownloadQueue(),
+      (c) => written.push(c),
+      () => ({ downloads: [], seeds: [] }),
+      subscribeToCasts(casts, () => state),
+    );
+    try {
+      state = {
+        casting: {
+          deviceName: "Living Room TV",
+          title: "Kepler S02E04",
+          state: "playing",
+          positionSec: 12,
+          durationSec: 600,
+        },
+        notice: null,
+      };
+      casts.changed();
+      const cast = frames(written).filter((f) => f.startsWith("event: cast"));
+      expect(cast).toHaveLength(2);
+      expect(cast[1]).toContain("Living Room TV");
+    } finally {
+      stop();
+    }
+  });
+
+  it("shares the queue's channel, so a browser needs one EventSource", () => {
+    const written: string[] = [];
+    const casts = fakeCasts();
+    const stop = subscribeToQueue(
+      new DownloadQueue(),
+      (c) => written.push(c),
+      () => ({ downloads: [], seeds: [] }),
+      subscribeToCasts(casts, () => ({ casting: null, notice: null })),
+    );
+    try {
+      expect(frames(written).some((f) => f.startsWith("event: status"))).toBe(true);
+      expect(frames(written).some((f) => f.startsWith("event: cast"))).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
+  it("unsubscribes from the registry when the connection ends", () => {
+    const written: string[] = [];
+    const casts = fakeCasts();
+    const stop = subscribeToQueue(
+      new DownloadQueue(),
+      (c) => written.push(c),
+      () => ({ downloads: [], seeds: [] }),
+      subscribeToCasts(casts, () => ({ casting: null, notice: null })),
+    );
+    expect(casts.count()).toBe(1);
+    stop();
+    // A listener per dead client on a process that runs for weeks is the leak
+    // every producer in this module is careful about.
+    expect(casts.count()).toBe(0);
+    const before = written.length;
+    casts.changed();
+    expect(written.length).toBe(before);
+  });
+
+  it("is optional: the queue stream works with no cast producer attached", () => {
+    const written: string[] = [];
+    const stop = subscribeToQueue(new DownloadQueue(), (c) => written.push(c), () => ({
+      downloads: [],
+      seeds: [],
+    }));
+    try {
+      expect(frames(written).some((f) => f.startsWith("event: status"))).toBe(true);
+      expect(frames(written).some((f) => f.startsWith("event: cast"))).toBe(false);
     } finally {
       stop();
     }

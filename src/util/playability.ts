@@ -57,16 +57,54 @@ export function extensionOf(filename: string): string {
   return m ? m[1]!.toLowerCase() : "";
 }
 
-// Containers every browser that matters demuxes. Short on purpose: mkv is not
-// one of them in any shipping browser, and mkv is what most of the scene ships.
-const SAFE_CONTAINERS = new Set(["mp4", "m4v", "webm"]);
+/**
+ * What one decoder will take.
+ *
+ * Two exist: a browser and a Chromecast. They are the same question asked of
+ * different hardware, so they live in one module — a second list somewhere else
+ * is the copy-then-drift bug this codebase has recorded four times.
+ */
+export interface PlaybackProfile {
+  containers: ReadonlySet<string>;
+  video: ReadonlySet<string>;
+  audio: ReadonlySet<string>;
+}
 
-// Codecs a browser will decode from one of those containers. Conservative:
-// ac3/eac3 are Safari-only, and av1 is absent on older hardware, so neither is
-// listed. Being wrong in this direction costs a fallback card; being wrong in
-// the other costs a black rectangle.
-const SAFE_VIDEO = new Set(["h264", "vp8", "vp9"]);
-const SAFE_AUDIO = new Set(["aac", "mp3", "opus", "vorbis", "flac"]);
+/**
+ * A browser. Unchanged from what this module always answered.
+ *
+ * Containers short on purpose: mkv is not one of them in any shipping browser,
+ * and mkv is what most of the scene ships. Codecs conservative: ac3/eac3 are
+ * Safari-only, and av1 is absent on older hardware, so neither is listed. Being
+ * wrong in this direction costs a fallback card; being wrong in the other costs
+ * a black rectangle.
+ */
+export const BROWSER_PROFILE: PlaybackProfile = {
+  containers: new Set(["mp4", "m4v", "webm"]),
+  video: new Set(["h264", "vp8", "vp9"]),
+  audio: new Set(["aac", "mp3", "opus", "vorbis", "flac"]),
+};
+
+/**
+ * A Chromecast, which differs from a browser in exactly one direction.
+ *
+ * Containers and video are identical: the device demuxes no Matroska, and HEVC
+ * stays out even though an Ultra or a Google TV device decodes it — the `md` TXT
+ * key names a model, a model name is a guess about both the device's decoder and
+ * the television behind it, and there is no video transcode to fall back to.
+ *
+ * Audio gains ac3 and eac3, which is passthrough and therefore depends on the
+ * HDMI link. Where that link cannot take it the result is silent video, which is
+ * bad — and still better than the alternative, which REFUSES a file that would
+ * almost certainly have played, with no transcode rung underneath it on the
+ * torrent backend. Silence is one keypress from recoverable; a refusal is not
+ * recoverable at all.
+ */
+export const CHROMECAST_PROFILE: PlaybackProfile = {
+  containers: new Set(["mp4", "m4v", "webm"]),
+  video: new Set(["h264", "vp8", "vp9"]),
+  audio: new Set(["aac", "mp3", "opus", "vorbis", "flac", "ac3", "eac3"]),
+};
 
 /**
  * Map the release parser's vocabulary onto the names above.
@@ -141,18 +179,37 @@ export function classifyFromName(filename: string, releaseName?: string): MediaF
 }
 
 /**
- * Every reason a browser will refuse this file.
+ * Every reason `profile`'s decoder will refuse this file.
  *
  * An unknown *container* blocks — that is the existing behaviour and it is
  * right, because showing a card is honest and takes one tap to work around
  * where a black rectangle looks like the app is broken. An unknown *codec* does
  * not block: most release names say nothing about audio, and blocking there
  * would send files to the card that play fine.
+ *
+ * The profile is optional and defaults to the browser so that every existing
+ * call site keeps its exact previous answer; the tests pin that.
  */
-export function blockersFor(facts: MediaFacts): Blocker[] {
+export function blockersFor(
+  facts: MediaFacts,
+  profile: PlaybackProfile = BROWSER_PROFILE,
+): Blocker[] {
   const blockers: Blocker[] = [];
-  if (!SAFE_CONTAINERS.has(facts.container)) blockers.push("container");
-  if (facts.videoCodec && !SAFE_VIDEO.has(facts.videoCodec)) blockers.push("video");
-  if (facts.audioCodec && !SAFE_AUDIO.has(facts.audioCodec)) blockers.push("audio");
+  if (!profile.containers.has(facts.container)) blockers.push("container");
+  if (facts.videoCodec && !profile.video.has(facts.videoCodec)) blockers.push("video");
+  if (facts.audioCodec && !profile.audio.has(facts.audioCodec)) blockers.push("audio");
   return blockers;
+}
+
+/**
+ * The `contentType` a cast `LOAD` must name.
+ *
+ * Getting it wrong is a LOAD_FAILED rather than a guess the receiver recovers
+ * from, so this is a function with tests rather than a ternary at the call site.
+ * An HLS manifest is HLS whatever the file inside it was.
+ */
+export function castContentType(container: string, hls: boolean): string {
+  if (hls) return "application/vnd.apple.mpegurl";
+  if (container === "webm") return "video/webm";
+  return "video/mp4";
 }

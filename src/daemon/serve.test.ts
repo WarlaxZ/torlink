@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { handleApi, isAuthorized, extractMagnet, parseControl, applyControl, statusPayload } from "./serve";
 import type { Runtime } from "./runtime";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import { DownloadQueue, type DebridDeps } from "../download/queue";
 import { rowsFromStatus } from "../web/static/dashboard";
 
@@ -58,7 +59,7 @@ describe("handleApi", () => {
         getSeeds: () => [],
       } as unknown as Runtime["queue"],
       downloadDir: dir,
-      sessions: new StreamSessionRegistry(),
+      sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
     };
   });
   afterEach(async () => {
@@ -200,7 +201,7 @@ describe("parseControl", () => {
 
 describe("applyControl", () => {
   const mkRuntime = (queue: Partial<Record<string, unknown>>): Runtime =>
-    ({ queue: queue as unknown as Runtime["queue"], downloadDir: "/tmp", sessions: new StreamSessionRegistry() });
+    ({ queue: queue as unknown as Runtime["queue"], downloadDir: "/tmp", sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry() });
 
   it("resumes a paused download", async () => {
     const resume = vi.fn();
@@ -287,7 +288,7 @@ describe("statusPayload over a real DownloadQueue", () => {
       const payload = statusPayload({
         queue,
         downloadDir: dir,
-        sessions: new StreamSessionRegistry(),
+        sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
       });
       const rows = rowsFromStatus(payload);
 

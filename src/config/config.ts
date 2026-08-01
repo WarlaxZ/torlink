@@ -123,6 +123,15 @@ export interface Config {
   seedMinutes?: number;
   // Fail-closed P2P guard: this interface must exist and own the default route.
   vpnInterface?: string;
+  /**
+   * A Chromecast to offer alongside the ones mDNS finds — a host, or `host:port`.
+   *
+   * It exists because mDNS does not cross a Docker bridge or a VLAN, and torlink
+   * is run behind both: without it, casting on those networks is dead behind a
+   * message that reads like a bug. TUI-only, like every other setting — the web
+   * UI is a client of this config and reads the resulting device list.
+   */
+  castDevice?: string;
 }
 
 export const defaultConfig: Config = {

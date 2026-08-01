@@ -4,6 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { addInput, policySummary, startRuntime, type Runtime } from "./runtime";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import { TorrentEngine } from "../download/engine";
 import { saveConfig } from "../config/config";
 import { saveQueue, saveSeeds } from "../download/persist";
@@ -21,7 +22,7 @@ function fakeRuntime(dir: string, has = false): { runtime: Runtime; add: ReturnT
   const runtime = {
     queue: { has: () => has, add } as unknown as Runtime["queue"],
     downloadDir: dir,
-    sessions: new StreamSessionRegistry(),
+    sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
   };
   return { runtime, add };
 }
@@ -101,7 +102,7 @@ describe("addInput", () => {
     const runtime = {
       queue: { has: () => false, add, addDebrid } as unknown as Runtime["queue"],
       downloadDir: dir,
-      sessions: new StreamSessionRegistry(),
+      sessions: new StreamSessionRegistry(), casts: new CastSessionRegistry(),
     };
     expect(await addInput(runtime, HASH, { name: "Kestrel", debridToken: "rd-tok" })).toBe("added");
     // Not awaited: addDebrid's promise resolves when the whole download does,

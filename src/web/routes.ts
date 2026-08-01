@@ -3,6 +3,9 @@ import { isAuthorized } from "../daemon/auth";
 import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
+import { discover, parseManualDevice, type CastDevice } from "../core/cast/discover";
+import { CastError } from "../core/cast/connection";
+import type { MediaSource } from "./stream";
 import {
   historyItemFor,
   loadStreamHistory,
@@ -62,9 +65,22 @@ import { hintForGroup, parseRelease } from "../util/release";
 import { shouldQuery, SUGGEST_LIMIT } from "../util/titleSuggest";
 import { streamCandidates } from "../util/videoFiles";
 import { toggleSavedSearches } from "../util/savedSearchList";
+import {
+  CHROMECAST_PROFILE,
+  blockersFor,
+  castContentType,
+  classifyFromName,
+  extensionOf,
+} from "../util/playability";
+import { isBrowserRenderable, subtitleLanguage } from "../util/subtitleFiles";
+import { playlistTitle } from "../util/playlistTitle";
+import { castBlockerClause } from "../util/castStatus";
 import type {
   AddResponse,
   CachedResponse,
+  CastDevicesResponse,
+  CastStatusResponse,
+  PublicCastDevice,
   ContinueWatchingResponse,
   LibraryResponse,
   PreferencesResponse,
@@ -133,6 +149,33 @@ export interface WebDeps {
    * timed out.
    */
   debridStatusImpl?: (provider: DebridProviderId, token: string) => Promise<DebridStatus | null>;
+  /**
+   * How Chromecasts are found. Defaults to a real mDNS query, which is two
+   * seconds of listening on a multicast socket — injected so a test never opens
+   * one, and so a test can produce the "nothing answered" branch without
+   * depending on what is switched on in the room.
+   */
+  discoverCastImpl?: () => Promise<CastDevice[]>;
+  /**
+   * The origin a Chromecast must fetch media from, or null when this machine has
+   * none it could reach.
+   *
+   * A dependency rather than a call to `castOrigin` here because only the server
+   * knows what it actually bound (see `startWebServer`), and because it must NOT
+   * be derived from the request: `Host` is a claim by a client, and a user
+   * browsing `http://localhost:9161` would otherwise hand a television a URL
+   * pointing at the television.
+   */
+  castOriginImpl?: () => string | null;
+  /**
+   * What one file is and the best source for it — `mediaSourceFor`
+   * (./stream.ts), the same answer the player page's `.info` gets.
+   *
+   * Injected because the real one spawns ffprobe and may call a debrid API, and
+   * because the fields it needs (the probe cache, the HLS resolver) live in
+   * `StreamDeps` rather than here; `startWebServer` closes over both.
+   */
+  castSourceImpl?: (session: StreamSession, index: number) => Promise<MediaSource>;
   /**
    * How one source is queried during `/api/search`. Passed straight through to
    * `runSearch`, so the default (`cachedSearch`) and every behaviour around it —
@@ -1656,6 +1699,193 @@ async function checkCached(deps: WebDeps, bodyText: string): Promise<WebResponse
   return { status: 200, json: out };
 }
 
+// ---- casting ----------------------------------------------------------------
+//
+// Three routes and a status read. What is NOT here is the protocol, the discovery
+// or the session bookkeeping: those are `src/core/cast/`, front-end-agnostic, and
+// the TUI drives the same registry through the same methods. These routes only
+// turn an HTTP request into one of those calls, and pick the URL a device fetches.
+
+const NO_DEVICES = "No Chromecast found on this network.";
+const NO_ORIGIN = "This machine has no network address a Chromecast could reach it on.";
+
+/** What a device may be told about this file, as the browser sees a device. */
+function toPublicCastDevice(device: CastDevice): PublicCastDevice {
+  return { id: device.id, name: device.name, model: device.model };
+}
+
+/**
+ * Every device that could be cast to: what answered, plus the configured address.
+ *
+ * The configured one goes last and only when discovery did not already report the
+ * same host, so a user who typed an address that mDNS also finds sees one row.
+ */
+async function castDevices(deps: WebDeps): Promise<CastDevice[]> {
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const found = await (deps.discoverCastImpl ?? (() => discover()))();
+  // Typed rather than trusted: `loadConfig` spreads the parsed JSON, so a
+  // hand-edited `castDevice: 8009` would arrive here as a number.
+  const manual = parseManualDevice(
+    typeof config.castDevice === "string" ? config.castDevice : undefined,
+  );
+  if (!manual || found.some((d) => d.host === manual.host && d.port === manual.port)) return found;
+  return [...found, manual];
+}
+
+async function castDevicesRoute(deps: WebDeps): Promise<WebResponse> {
+  const devices = await castDevices(deps);
+  const origin = (deps.castOriginImpl ?? (() => null))();
+  // Two independent reasons casting cannot happen, and the file's own blockers
+  // are a third the client already knows from `.info`. Naming which one is the
+  // difference between "the network" and "this file" for the person looking at a
+  // disabled button.
+  const reason = devices.length === 0 ? NO_DEVICES : origin === null ? NO_ORIGIN : null;
+  const out: CastDevicesResponse = {
+    devices: devices.map(toPublicCastDevice),
+    castable: reason === null,
+    reason,
+  };
+  return { status: 200, json: out };
+}
+
+/** The status shape, shared by the route and the SSE event so a page has one parser. */
+export function castStatusOf(casts: Runtime["casts"]): CastStatusResponse {
+  const active = casts.active();
+  return {
+    casting: active
+      ? {
+          deviceName: active.device.name,
+          title: active.title,
+          state: active.status.state,
+          positionSec: active.status.positionSec,
+          durationSec: active.status.durationSec,
+        }
+      : null,
+    notice: casts.takeNotice(),
+  };
+}
+
+interface StartCastBody {
+  deviceId?: unknown;
+  sid?: unknown;
+  index?: unknown;
+  subtitleIndex?: unknown;
+}
+
+async function startCast(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  let body: StartCastBody;
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { status: 400, json: { error: "invalid json body" } };
+    }
+    body = parsed as StartCastBody;
+  } catch {
+    return { status: 400, json: { error: "invalid json body" } };
+  }
+  const deviceId = typeof body.deviceId === "string" ? body.deviceId : "";
+  const sid = typeof body.sid === "string" ? body.sid : "";
+  const index = typeof body.index === "number" ? body.index : NaN;
+  if (!deviceId || !sid || !Number.isInteger(index)) {
+    return { status: 400, json: { error: "missing deviceId, sid or index" } };
+  }
+
+  const session = deps.runtime.sessions.get(sid);
+  if (!session) return { status: 404, json: { error: "unknown session" } };
+  const file = session.files[index];
+  if (!file) return { status: 404, json: { error: "unknown file" } };
+  const device = (await castDevices(deps)).find((d) => d.id === deviceId);
+  // 404 for a device that is not in the list, and it says nothing about whether
+  // some other id would have been found.
+  if (!device) return { status: 404, json: { error: "unknown device" } };
+
+  const origin = (deps.castOriginImpl ?? (() => null))();
+  if (origin === null) return { status: 409, json: { error: NO_ORIGIN } };
+
+  const source = await (deps.castSourceImpl ??
+    (() => Promise.resolve({ facts: classifyFromName(file.filename, session.name), hls: null })))(
+    session,
+    index,
+  );
+  const blockers = blockersFor(source.facts, CHROMECAST_PROFILE);
+  // The ladder, with the Chromecast profile in place of the browser's: direct
+  // play, then the provider's transcode, then an honest refusal. There is no
+  // local-ffmpeg rung in this tree — `src/util/ffmpegBin.ts` is used only for
+  // ffprobe — so a blocked file with no manifest cannot be cast, and says so.
+  if (blockers.length > 0 && !source.hls) {
+    return { status: 409, json: { error: `A Chromecast can't play this one — ${castBlockerClause(blockers)}.` } };
+  }
+  const useHls = blockers.length > 0 && source.hls !== null;
+  const url = useHls
+    ? source.hls!
+    : `${origin}/stream/${sid}/${index}?k=${encodeURIComponent(session.capability)}`;
+
+  // The subtitle handle, only when the index names something `<track>`-shaped —
+  // the same guard the `.vtt` representation applies. Casting a video as a text
+  // track would be a LOAD the device silently ignores.
+  const subtitleFile =
+    typeof body.subtitleIndex === "number" ? session.files[body.subtitleIndex] : undefined;
+  const subtitle =
+    subtitleFile && isBrowserRenderable(subtitleFile.filename)
+      ? {
+          subtitleUrl: `${origin}/stream/${sid}/${String(body.subtitleIndex)}.vtt?k=${encodeURIComponent(session.capability)}`,
+          subtitleLabel: subtitleLanguage(subtitleFile.filename).label,
+        }
+      : {};
+
+  try {
+    await deps.runtime.casts.start({
+      device,
+      sid,
+      index,
+      infoHash: session.infoHash,
+      filename: file.filename,
+      title: playlistTitle(file.filename),
+      media: {
+        url,
+        contentType: castContentType(extensionOf(file.filename), useHls),
+        title: playlistTitle(file.filename),
+        ...subtitle,
+      },
+    });
+  } catch (e) {
+    // A CastError's message is already fit for the screen — that is what the type
+    // means. 502, because the failure is upstream of us: the device refused, or
+    // never answered.
+    const message = e instanceof CastError ? e.message : "Could not cast to that device.";
+    return { status: 502, json: { error: message } };
+  }
+  return { status: 200, json: castStatusOf(deps.runtime.casts) };
+}
+
+async function castCommand(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  let action = "";
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = (parsed as { action?: unknown }).action;
+      if (typeof value === "string") action = value;
+    }
+  } catch {
+    return { status: 400, json: { error: "invalid json body" } };
+  }
+  if (action !== "play" && action !== "pause" && action !== "stop") {
+    return { status: 400, json: { error: "unknown action" } };
+  }
+  try {
+    if (action === "play") await deps.runtime.casts.play();
+    else if (action === "pause") await deps.runtime.casts.pause();
+    else await deps.runtime.casts.stop();
+  } catch (e) {
+    // Nothing casting is a 409 and not a 500: the client asked for something
+    // reasonable against state that has moved on, which is ordinary when a cast
+    // ended on the device itself.
+    const message = e instanceof Error ? e.message : "Nothing is casting.";
+    return { status: 409, json: { error: message } };
+  }
+  return { status: 200, json: castStatusOf(deps.runtime.casts) };
+}
+
 /** True when `handleWebApi` owns this path; false means it is a static asset. */
 export function isApiPath(urlPath: string): boolean {
   return urlPath.startsWith("/api/") || LEGACY_API_PATHS.has(urlPath);
@@ -1778,6 +2008,25 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === STREAM_BASE) {
     return startStream(deps, bodyText);
+  }
+
+  // Casting. Past the same token gate, and it needs it for the same reason: none
+  // of these delegates to handleApi, and `start` spends the user's debrid account
+  // and puts their stream on a screen in their house.
+  if (method === "GET" && urlPath === "/api/cast/devices") {
+    return castDevicesRoute(deps);
+  }
+
+  if (method === "GET" && urlPath === "/api/cast/status") {
+    return { status: 200, json: castStatusOf(deps.runtime.casts) };
+  }
+
+  if (method === "POST" && urlPath === "/api/cast/start") {
+    return startCast(deps, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/cast/command") {
+    return castCommand(deps, bodyText);
   }
 
   const sid = streamSessionId(urlPath);

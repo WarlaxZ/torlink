@@ -153,3 +153,46 @@ describe("StreamFilePrompt", () => {
     expect(lastFrame()).not.toContain("CC");
   });
 });
+
+describe("StreamFilePrompt — casting", () => {
+  it("casts the highlighted file on c, without also playing it locally", async () => {
+    const onCast = vi.fn();
+    const onSelect = vi.fn();
+    const { stdin } = render(
+      <StreamFilePrompt
+        width={80}
+        files={files}
+        onSelect={onSelect}
+        onCast={onCast}
+        onCancel={() => {}}
+      />,
+    );
+    stdin.write("c");
+    await flush();
+    expect(onCast).toHaveBeenCalledOnce();
+    // Casting instead of playing, never as well as: two copies of the same film
+    // starting at once is the worst thing this key could do.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("advertises the key only when a cast handler was given", () => {
+    const withCast = render(
+      <StreamFilePrompt width={80} files={files} onSelect={() => {}} onCast={() => {}} onCancel={() => {}} />,
+    );
+    expect(withCast.lastFrame()).toMatch(/cast/i);
+    const without = render(
+      <StreamFilePrompt width={80} files={files} onSelect={() => {}} onCancel={() => {}} />,
+    );
+    expect(without.lastFrame()).not.toMatch(/cast/i);
+  });
+
+  it("ignores c when no cast handler was given, rather than swallowing the key", async () => {
+    const onSelect = vi.fn();
+    const { stdin } = render(
+      <StreamFilePrompt width={80} files={files} onSelect={onSelect} onCancel={() => {}} />,
+    );
+    stdin.write("c");
+    await flush();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

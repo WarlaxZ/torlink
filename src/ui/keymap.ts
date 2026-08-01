@@ -65,6 +65,10 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "shift+d", label: "Download to a chosen folder" },
       { keys: "r", label: "Download via debrid (Real-Debrid / TorBox)" },
       { keys: "v", label: "Stream" },
+      // Bound in the stream file picker, which draws its own hint row — so it is
+      // advertised here and deliberately NOT in `footerHints`, where it would
+      // promise something the results list will not do.
+      { keys: "c", label: "Cast to a TV (Chromecast) — in the stream file picker" },
       { keys: "b", label: "Favourite a video (detail view / stream picker)" },
       { keys: "y", label: "Copy magnet" },
       { keys: "m", label: "Paste magnet" },

@@ -38,6 +38,12 @@
       <p id="file-name" class="file-name"></p>
       <div id="stage" class="stage"></div>
       <div id="actions" class="actions"></div>
+      <!-- Casting: a hand-off like the buttons above, so it sits beside them.
+           Its own container rather than a child of #actions because that row is
+           rebuilt per file with replaceChildren, which would drop a live cast's
+           controls the moment anything else re-rendered. Empty (and so invisible)
+           until the device list answers — see castButtonView's "hidden". -->
+      <div id="cast" class="actions cast"></div>
       <p id="notice" class="notice" hidden></p>
       <!-- The rest of the torrent: what is up next, and everything else in it.
            Empty for a single-file session, so a film looks exactly as it did. -->

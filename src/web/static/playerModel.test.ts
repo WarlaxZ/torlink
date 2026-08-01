@@ -154,6 +154,7 @@ describe("chooseSource", () => {
   const info = (over: Partial<StreamInfoResponse> = {}): StreamInfoResponse => ({
     facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const, subtitles: [] },
     blockers: [],
+    castBlockers: [],
     hls: null,
     subtitles: { embedded: [], files: [] },
     ...over,

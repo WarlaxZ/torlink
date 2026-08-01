@@ -48,6 +48,14 @@ interface StreamFilePromptProps {
    * nothing can produce one.
    */
   preselect?: number;
+  /**
+   * Cast the highlighted file to a Chromecast (the `c` key).
+   *
+   * Optional, and the key is inert without it: the caller only passes it where
+   * casting can actually work, and a key that silently does nothing is the
+   * failure this codebase keeps refusing (see `vlcLinks` on macOS).
+   */
+  onCast?: (file: StreamFile) => void;
   // Toggle the current torrent as a favourite (the `b` key).
   onFavourite?: () => void;
   // Whether the current torrent is already favourited (drives the star glyph).
@@ -61,6 +69,7 @@ export function StreamFilePrompt({
   files,
   allFiles,
   onSelect,
+  onCast,
   onCancel,
   maxRows = 8,
   watched = [],
@@ -92,6 +101,14 @@ export function StreamFilePrompt({
     }
     if (input === "b" || input === "B") {
       onFavourite?.();
+      return;
+    }
+    if (input === "c" || input === "C") {
+      // Instead of playing, never as well as: two copies of the same film
+      // starting half a minute apart is the worst thing this key could do. The
+      // picker stays open, as it does after a local play.
+      const file = sorted[clamped];
+      if (file) onCast?.(file);
       return;
     }
     if (input === "s" || input === "S") {
@@ -164,19 +181,33 @@ export function StreamFilePrompt({
           );
         })}
       </Panel>
+      {/* One row, and it has to FIT: at the old eleven-column separator this was
+          94 columns with five hints, so Ink wrapped it mid-word ("↑ mov" over
+          "strea") long before casting was added. Three columns keeps six hints
+          inside 80. */}
       <Box marginTop={1}>
         <Text color={COLOR.alt}>↑↓</Text>
         <Text dimColor> move</Text>
-        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        <Text dimColor>{` ${ICON.dot} `}</Text>
         <Text color={COLOR.alt}>↵</Text>
         <Text dimColor> stream</Text>
-        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        <Text dimColor>{` ${ICON.dot} `}</Text>
         <Text color={COLOR.alt}>s</Text>
         <Text dimColor>{` sort: ${sortMode}`}</Text>
-        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        <Text dimColor>{` ${ICON.dot} `}</Text>
         <Text color={COLOR.alt}>b</Text>
         <Text dimColor>{` ${favourited ? "★" : "☆"} favourite`}</Text>
-        <Text dimColor>{`     ${ICON.dot}     `}</Text>
+        {/* Advertised only where it is bound. A hint for a key that does nothing
+            is worse than no hint — the rule this codebase applied to VLC on
+            macOS and to `x` in the list panes. */}
+        {onCast ? (
+          <>
+            <Text dimColor>{` ${ICON.dot} `}</Text>
+            <Text color={COLOR.alt}>c</Text>
+            <Text dimColor> cast</Text>
+          </>
+        ) : null}
+        <Text dimColor>{` ${ICON.dot} `}</Text>
         <Text color={COLOR.alt}>esc</Text>
         <Text dimColor> cancel</Text>
       </Box>

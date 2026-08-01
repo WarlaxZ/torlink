@@ -22,7 +22,13 @@ import https from "node:https";
 import { isAuthorized } from "../daemon/auth";
 import { streamHandle, toPublicSession } from "./routes";
 import { probeUrl } from "../core/probe";
-import { blockersFor, classifyFromName, extensionOf, type MediaFacts } from "../util/playability";
+import {
+  CHROMECAST_PROFILE,
+  blockersFor,
+  classifyFromName,
+  extensionOf,
+  type MediaFacts,
+} from "../util/playability";
 import type { ProbeCache } from "../core/probeCache";
 import type { HlsVerdictCache } from "../core/hlsVerdictCache";
 import type { StreamSession, StreamSessionRegistry } from "../core/streamSession";
@@ -356,6 +362,103 @@ function backendProtocols(session: StreamSession): readonly string[] {
 }
 
 /**
+ * What one file in a session actually is, and the best source available for it.
+ *
+ * Extracted from the `.info` branch when casting needed the same answer. It must
+ * stay one implementation: two would be the copy-then-drift bug this codebase
+ * has recorded four times, and this particular pair would drift into the browser
+ * and a television disagreeing about the same file.
+ *
+ * `facts` are the *decoder-agnostic* truth about the media. Which blockers they
+ * imply is the caller's question, because a browser and a Chromecast answer it
+ * differently (`blockersFor`, `src/util/playability.ts`).
+ */
+export interface MediaSource {
+  facts: MediaFacts;
+  /** A provider HLS manifest, verified usable, or null. */
+  hls: string | null;
+}
+
+export async function mediaSourceFor(
+  deps: StreamDeps,
+  session: StreamSession,
+  index: number,
+): Promise<MediaSource> {
+  const file = session.files[index]!;
+  const container = extensionOf(file.filename);
+  let facts = deps.probeCache?.get(session.id, index);
+  if (!facts) {
+    // Only probe a file we would otherwise refuse.
+    //
+    // A probe is a spawn plus a network round trip against a CDN or a
+    // half-downloaded torrent, and it is bounded at 15s. Paying that on every
+    // player page load — including for the mp4 that was going to play
+    // instantly — to catch the uncommon mp4-carrying-HEVC would make the common
+    // path markedly slower in order to serve the rare one. So the name decides
+    // first, and the probe runs only when the name says this needs more than
+    // direct play, where the accurate answer is what picks the rung.
+    //
+    // The cost of this order: an mp4 whose HEVC the name does not mention still
+    // gets optimism, a decode error and the fallback card — the same as before
+    // this route existed, and one tap from working. That is the trade.
+    //
+    // The BROWSER profile decides whether to probe, deliberately, even though a
+    // cast asks about a Chromecast: probing is a cost, the browser profile is the
+    // stricter of the two, and a file it would refuse is exactly the set worth
+    // spending a probe on. A file only the Chromecast profile refuses (HEVC in an
+    // mp4 that the name declares) is already named by `classifyFromName`.
+    //
+    // `session.name` is the release the file came from. A debrid provider often
+    // renames the file itself ("1.mkv"), so the release name is the richer codec
+    // signal and the server is the only place that has both.
+    const fromName = classifyFromName(file.filename, session.name);
+    if (blockersFor(fromName).length === 0) {
+      facts = fromName;
+    } else {
+      const probe = deps.probeImpl ?? ((url: string, c: string) => probeUrl(url, c));
+      // A probe failure is not an error: classifyFromName is always available.
+      facts = (await probe(file.url, container)) ?? fromName;
+    }
+    deps.probeCache?.set(session.id, index, facts);
+  }
+  // Rung 2 is the provider's own manifest, which the client fetches from the
+  // provider directly. That is the whole point of it — and the exact thing
+  // relaying exists to stop, so the two features have to agree: while relaying,
+  // no URL handed to a player may point at the provider. Offering it anyway
+  // would route the containers a browser cannot demux — the ones most likely to
+  // be a big remux — around the relay the user asked for, and show the provider
+  // the viewer's address. The ladder falls to a direct play through this handle
+  // instead.
+  const resolved =
+    deps.resolveHls && deps.proxyDebrid !== true ? await deps.resolveHls(session, index) : null;
+  // A manifest existing is not the same as a manifest working. Measured against
+  // Real-Debrid: for 1080p HEVC its transcoder runs at 0.65x realtime and serves
+  // the segments it has not finished as complete 200s with a Content-Length
+  // matching a truncated body — so the client cannot tell, and playback freezes a
+  // few seconds in with no error event to react to. See `hlsHealth.ts` for the
+  // measurements.
+  //
+  // So the rung is offered only when a segment past the transcoder's opening
+  // burst comes back whole. The check is skipped entirely when nothing injected
+  // one, which keeps a caller that has not wired it on the previous behaviour
+  // rather than silently dropping every manifest.
+  let hls = resolved;
+  if (resolved !== null && deps.checkHls) {
+    const remembered = deps.hlsVerdictCache?.get(session.id, index);
+    const usable = remembered ?? (await deps.checkHls(resolved));
+    deps.hlsVerdictCache?.set(session.id, index, usable);
+    if (!usable) {
+      // The verdict, never the URL: a transcode manifest is an unguessable URL
+      // minted for one file, i.e. a capability, and belongs in a log line no more
+      // than an unrestricted link does.
+      deps.log("stream: provider transcode is not keeping up; not offering HLS");
+      hls = null;
+    }
+  }
+  return { facts, hls };
+}
+
+/**
  * Serve one stream request. Writes the response itself — this route owns its
  * socket, unlike everything in `routes.ts`.
  *
@@ -450,75 +553,11 @@ export async function handleStreamRequest(
   // backend split — because the answer is about the media, not about which
   // backend happens to be serving it.
   if (rep === "info") {
-    const container = extensionOf(file.filename);
-    let facts = deps.probeCache?.get(parsed.sid, parsed.index);
-    if (!facts) {
-      // Only probe a file we would otherwise refuse.
-      //
-      // A probe is a spawn plus a network round trip against a CDN or a
-      // half-downloaded torrent, and it is bounded at 15s. Paying that on every
-      // player page load — including for the mp4 that was going to play
-      // instantly — to catch the uncommon mp4-carrying-HEVC would make the
-      // common path markedly slower in order to serve the rare one. So the name
-      // decides first, and the probe runs only when the name says this needs
-      // more than direct play, where the accurate answer is what picks the rung.
-      //
-      // The cost of this order: an mp4 whose HEVC the name does not mention
-      // still gets optimism, a decode error and the fallback card — the same as
-      // before this route existed, and one tap from working. That is the trade.
-      //
-      // `session.name` is the release the file came from. A debrid provider
-      // often renames the file itself ("1.mkv"), so the release name is the
-      // richer codec signal and the server is the only place that has both.
-      const fromName = classifyFromName(file.filename, session.name);
-      if (blockersFor(fromName).length === 0) {
-        facts = fromName;
-      } else {
-        const probe = deps.probeImpl ?? ((url: string, c: string) => probeUrl(url, c));
-        // A probe failure is not an error: classifyFromName is always available.
-        facts = (await probe(file.url, container)) ?? fromName;
-      }
-      deps.probeCache?.set(parsed.sid, parsed.index, facts);
-    }
-    // Rung 2 is the provider's own manifest, which the browser fetches from the
-    // provider directly. That is the whole point of it — and the exact thing
-    // relaying exists to stop, so the two features have to agree: while
-    // relaying, no URL handed to the player may point at the provider. Offering
-    // it anyway would route the containers a browser cannot demux — the ones
-    // most likely to be a big remux — around the relay the user asked for, and
-    // show the provider the viewer's address. The ladder falls to a direct play
-    // through this handle instead.
-    const resolved =
-      deps.resolveHls && deps.proxyDebrid !== true
-        ? await deps.resolveHls(session, parsed.index)
-        : null;
-    // A manifest existing is not the same as a manifest working. Measured
-    // against Real-Debrid: for 1080p HEVC its transcoder runs at 0.65x realtime
-    // and serves the segments it has not finished as complete 200s with a
-    // Content-Length matching a truncated body — so the browser cannot tell, and
-    // playback freezes a few seconds in with no error event to react to. See
-    // `hlsHealth.ts` for the measurements.
-    //
-    // So the rung is offered only when a segment past the transcoder's opening
-    // burst comes back whole. The check is skipped entirely when nothing injected
-    // one, which keeps a caller that has not wired it on the previous behaviour
-    // rather than silently dropping every manifest.
-    let hls = resolved;
-    if (resolved !== null && deps.checkHls) {
-      const remembered = deps.hlsVerdictCache?.get(parsed.sid, parsed.index);
-      const usable = remembered ?? (await deps.checkHls(resolved));
-      deps.hlsVerdictCache?.set(parsed.sid, parsed.index, usable);
-      if (!usable) {
-        // The verdict, never the URL: a transcode manifest is an unguessable URL
-        // minted for one file, i.e. a capability, and belongs in a log line no
-        // more than an unrestricted link does.
-        deps.log("stream: provider transcode is not keeping up; not offering HLS");
-        hls = null;
-      }
-    }
+    const { facts, hls } = await mediaSourceFor(deps, session, parsed.index);
     const body: StreamInfoResponse = {
       facts,
       blockers: blockersFor(facts),
+      castBlockers: blockersFor(facts, CHROMECAST_PROFILE),
       hls,
       subtitles: {
         embedded: facts.subtitles,
@@ -582,6 +621,13 @@ export async function handleStreamRequest(
       // Same reason as the playlist: the URL that produced this carries a
       // capability for a session that will be reaped.
       "Cache-Control": "no-store",
+      // A Chromecast's receiver runs on an HTTPS origin of Google's and fetches
+      // sidecar tracks cross-origin; without this it drops the track SILENTLY,
+      // which reads to the user as "casting ignores subtitles". ONLY this
+      // representation gets it — the media handle must not, and a test pins that.
+      // It is safe here because `?k=` has already authorised the request: the
+      // header widens who may READ the response, not who may make it.
+      "Access-Control-Allow-Origin": "*",
     });
     if (method !== "HEAD") res.end(payload);
     else res.end();

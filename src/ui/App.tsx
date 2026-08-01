@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout, useStdin } from "ink";
 import { promises as fs } from "node:fs";
 import os from "node:os";
+import { randomBytes } from "node:crypto";
 import {
   loadConfig,
   saveConfig,
@@ -73,10 +74,12 @@ import { openFolder } from "../util/openFolder";
 import { openUrl } from "../util/openUrl";
 import { prepareLine } from "../util/prepareLine";
 import { cleanText, formatBytes, truncate } from "../util/format";
+import { castClock } from "../util/castStatus";
 import { isCategory, parseSection } from "./store";
 import {
   StoreContext,
   type CaptureMode,
+  type CastRowStatus,
   type DownloadFocus,
   type Region,
   type Section,
@@ -112,6 +115,7 @@ import { TokenPrompt } from "./components/TokenPrompt";
 import { ConfirmPrompt } from "./components/ConfirmPrompt";
 import { StreamPlayerPrompt } from "./components/StreamPlayerPrompt";
 import { StreamFilePrompt } from "./components/StreamFilePrompt";
+import { CastPrompt } from "./components/CastPrompt";
 import { SourcesPrompt } from "./components/SourcesPrompt";
 import { QualityPrompt } from "./components/QualityPrompt";
 import { DnsPrompt } from "./components/DnsPrompt";
@@ -151,6 +155,8 @@ import { clearRutrackerCache } from "../sources/rutracker";
 import { clearCacheByPrefix } from "../sources/cache";
 import { vpnRouteIsSafe } from "../util/vpn";
 import { StreamSessionRegistry } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
+import { parseManualDevice, type CastDevice } from "../core/cast/discover";
 import { displayHosts, webUrl, withoutToken } from "../web/links";
 import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
 import type { Runtime } from "../daemon/runtime";
@@ -263,6 +269,60 @@ export function App({
   // sessions the previous render's server handed out).
   const sessionsRef = useRef<StreamSessionRegistry | null>(null);
   if (!sessionsRef.current) sessionsRef.current = new StreamSessionRegistry();
+  // A ref for the same reason: a cast outlives any one render, and the web
+  // server mounted below is handed this exact instance so a cast started in the
+  // terminal is the one a browser on this process sees.
+  const castsRef = useRef<CastSessionRegistry | null>(null);
+  if (!castsRef.current) castsRef.current = new CastSessionRegistry();
+  // Mirrored into React state, because the registry is a plain object and a
+  // component cannot re-render from one. Kept in step by the subscription below.
+  const [castStatus, setCastStatus] = useState<CastRowStatus | null>(null);
+  // The device list, while the prompt is open. `finding` covers the two seconds
+  // discovery spends listening on a multicast socket.
+  const [castPrompt, setCastPrompt] = useState<
+    { file: ResolvedFile; devices: CastDevice[]; finding: boolean } | null
+  >(null);
+  /**
+   * Set when a cast needed the web UI and started it.
+   *
+   * Casting requires an origin the TELEVISION can fetch from, and the TUI's own
+   * stream server binds `localhost` on an ephemeral port
+   * (src/integrations/torrentStream.ts). The web server is the only LAN-reachable,
+   * token-authenticated origin torlink has, so a cast brings it up — bound to a
+   * wildcard, with a generated token, because `startWebServer` rightly refuses a
+   * non-loopback bind without one. That is a real change to what this machine
+   * exposes, so it is announced rather than done quietly.
+   */
+  const [castWeb, setCastWeb] = useState(false);
+  // What the web server actually bound, for the cast routes to reach over
+  // loopback. A ref rather than state: nothing renders from it.
+  const webBoundRef = useRef<{ port: number; token: string | undefined } | null>(null);
+  // One subscription for the life of the app, so the cast row follows a device
+  // that was paused or stopped from the television's own remote — and so a lost
+  // connection reaches the screen rather than leaving a row that claims to be
+  // playing. The registry hands its notice over exactly once, which is why it is
+  // read here and not polled anywhere else in this process.
+  useEffect(() => {
+    const casts = castsRef.current!;
+    const sync = (): void => {
+      const active = casts.active();
+      setCastStatus(
+        active
+          ? {
+              deviceName: active.device.name,
+              title: active.title,
+              state: active.status.state,
+              positionSec: active.status.positionSec,
+              durationSec: active.status.durationSec,
+            }
+          : null,
+      );
+      const notice = casts.takeNotice();
+      if (notice) setNotice(notice);
+    };
+    sync();
+    return casts.onChange(sync);
+  }, []);
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
@@ -569,9 +629,16 @@ export function App({
   // down a listening socket and rebind it, which can fail EADDRINUSE against the
   // copy of itself that has not finished closing.
   useEffect(() => {
-    if (!web || !queue) return;
+    // `castWeb` is the second way in: a cast needs a LAN-reachable origin, and
+    // this is the only server torlink has that is one. It can only ever flip from
+    // false while no server is mounted (see `ensureCastWeb`), so it cannot tear
+    // down and rebind a socket that is already serving.
+    if ((!web && !castWeb) || !queue) return;
     const sessions = sessionsRef.current!;
-    const host = webHost?.trim() || "127.0.0.1";
+    // A cast needs an address a television can route to, so a wildcard rather
+    // than loopback — and therefore a token, which startWebServer requires for
+    // any non-loopback bind. An explicit --web-host still wins.
+    const host = webHost?.trim() || (castWeb ? "0.0.0.0" : "127.0.0.1");
     let handle: WebServerHandle | null = null;
     // Teardown can happen while listen() is still in flight, in which case the
     // cleanup below has no handle to close yet — so it sets this instead and the
@@ -586,13 +653,14 @@ export function App({
         return downloadDirRef.current;
       },
       sessions,
+      casts: castsRef.current!,
     };
     // One reading of the token for the whole mount: the server is given it and
     // the displayed link embeds it, and those two must agree — a link carrying a
     // token the server does not enforce (or vice versa) is a dashboard that
     // won't open. Empty and whitespace-only both mean "no token", matching
     // web/server.ts's own check.
-    const token = webToken?.trim() || undefined;
+    const token = webToken?.trim() || (castWeb ? randomBytes(16).toString("base64url") : undefined);
     void (async () => {
       try {
         const started = await startWebServerImpl(runtime, {
@@ -623,7 +691,17 @@ export function App({
         // line is (web/links.ts): both land in terminal scrollback, which
         // `torlnk attach` keeps alive in a tmux session. `webStatus` holds the
         // real link, so shift+w still opens something that works.
-        setNotice(`${ICON.done} Web UI on ${withoutToken(url)}`);
+        // What the cast routes reach over loopback. The bound port, never the
+        // requested one, for the reason the line above reads it back.
+        webBoundRef.current = { port: started.port, token };
+        setNotice(
+          castWeb && !web
+            ? // Unmissable on purpose: pressing `c` has just put a
+              // token-protected dashboard on this machine's LAN address, which is
+              // more than "the web UI started".
+              `${ICON.done} Casting needs the TV to reach this machine, so the web UI is now on ${withoutToken(url)} (token required)`
+            : `${ICON.done} Web UI on ${withoutToken(url)}`,
+        );
         setWebStatus({ url });
       } catch (e) {
         // Every failure mode lands here, including startWebServer's refusal to
@@ -644,7 +722,7 @@ export function App({
       cancelled = true;
       void handle?.close();
     };
-  }, [web, queue, webPort, webHost, webToken, startWebServerImpl]);
+  }, [web, castWeb, queue, webPort, webHost, webToken, startWebServerImpl]);
 
   // `--port 8080` without `--web` parses fine and does nothing. Say so rather
   // than silently accepting a flag the user believes turned something on.
@@ -1441,6 +1519,178 @@ export function App({
       );
     },
     [playStream, streamSource, markPlayed, streamAllFiles],
+  );
+
+  // ---- casting -------------------------------------------------------------
+  //
+  // The terminal drives casting through its OWN web server's routes, over
+  // loopback. That looks indirect and is deliberate: those routes already hold
+  // the source ladder, the LAN origin rule, the refusal messages and the
+  // played-file write, and calling them is what keeps the terminal and the
+  // browser from growing two implementations of one decision — the
+  // copy-then-drift bug this codebase has recorded four times. The registry
+  // itself is shared in-process, so what the terminal casts, a browser on this
+  // process sees.
+
+  /**
+   * Make sure there is a web server a television can fetch from, and answer with
+   * how to reach it over loopback.
+   *
+   * Null when it could not be started, having already said why.
+   */
+  const ensureCastWeb = useCallback(async (): Promise<{ port: number; token?: string } | null> => {
+    const bound = webBoundRef.current;
+    if (bound) return { port: bound.port, ...(bound.token ? { token: bound.token } : {}) };
+    setCastWeb(true);
+    // Poll for the mount rather than threading a promise out of the effect: the
+    // effect owns the socket's lifetime, and a second owner is how a server
+    // outlives the component that started it. Ten seconds is far longer than a
+    // bind takes and short enough to give up in front of a user.
+    for (let i = 0; i < 100; i += 1) {
+      await new Promise((r) => setTimeout(r, 100));
+      const now = webBoundRef.current;
+      if (now) return { port: now.port, ...(now.token ? { token: now.token } : {}) };
+    }
+    setNotice("Could not start the web UI, so there is nothing for the TV to fetch from.");
+    return null;
+  }, []);
+
+  /** Call one of this process's own cast routes. */
+  const castApi = useCallback(
+    async (
+      where: { port: number; token?: string },
+      path: string,
+      body?: unknown,
+    ): Promise<{ ok: boolean; json: Record<string, unknown> }> => {
+      const res = await fetch(`http://127.0.0.1:${String(where.port)}${path}`, {
+        ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(where.token ? { Authorization: `Bearer ${where.token}` } : {}),
+        },
+      });
+      const json = (await res.json()) as Record<string, unknown>;
+      return { ok: res.ok, json };
+    },
+    [],
+  );
+
+  /**
+   * `c` in the file picker: find the devices, then offer them.
+   *
+   * The session is adopted BEFORE the prompt opens, so choosing a device is one
+   * request rather than two — and adopted rather than re-resolved, because these
+   * files have already been paid for once (a debrid resolve is the user's
+   * account, a torrent is their bandwidth).
+   */
+  const castFromPicker = useCallback(
+    (file: ResolvedFile) => {
+      if (!streamSource) return;
+      setCastPrompt({ file, devices: [], finding: true });
+      void (async () => {
+        const where = await ensureCastWeb();
+        if (!where) {
+          setCastPrompt(null);
+          return;
+        }
+        try {
+          const { json } = await castApi(where, "/api/cast/devices");
+          const devices = (json.devices ?? []) as CastDevice[];
+          setCastPrompt((current) => (current ? { ...current, devices, finding: false } : null));
+        } catch {
+          setCastPrompt((current) => (current ? { ...current, finding: false } : null));
+        }
+      })();
+    },
+    [streamSource, ensureCastWeb, castApi],
+  );
+
+  /** Cast the picked file to `deviceId`, having adopted a session for it. */
+  const castTo = useCallback(
+    (deviceId: string) => {
+      const picked = castPrompt?.file;
+      const input = streamSource;
+      const all = streamAllFiles;
+      setCastPrompt(null);
+      if (!picked || !input || !all) return;
+      void (async () => {
+        const where = webBoundRef.current;
+        if (!where) return;
+        const index = all.findIndex((f) => f.url === picked.url);
+        if (index < 0) return;
+        const session = sessionsRef.current!.adopt({
+          infoHash: input.id,
+          name: input.name,
+          // Every file, not just the video candidates: the subtitle the cast
+          // carries is addressed by its index in this same list.
+          files: all,
+          backend: activeStream ? "torrent" : "debrid",
+          ...(activeStream || !config
+            ? {}
+            : { provider: resolveActiveDebrid(config)?.provider }),
+        });
+        const subtitle = preferredSubtitle(subtitlesFor(picked, all));
+        const subtitleIndex = subtitle ? all.findIndex((f) => f.url === subtitle.url) : -1;
+        try {
+          const { ok, json } = await castApi(
+            { port: where.port, ...(where.token ? { token: where.token } : {}) },
+            "/api/cast/start",
+            {
+              deviceId,
+              sid: session.id,
+              index,
+              ...(subtitleIndex >= 0 ? { subtitleIndex } : {}),
+            },
+          );
+          // The route's message is already written to be read by a person — that
+          // is what a CastError means — so it is shown as it stands.
+          if (!ok) setNotice(String(json.error ?? "Could not cast that."));
+        } catch (e) {
+          setNotice(`Could not cast: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      })();
+    },
+    [castPrompt, streamSource, streamAllFiles, activeStream, config, castApi],
+  );
+
+  /** Save a typed address, then cast to it. Read-modify-write, never a snapshot. */
+  const castToAddress = useCallback(
+    (address: string) => {
+      void (async () => {
+        try {
+          const current = await loadConfig();
+          await saveConfig({ ...current, castDevice: address });
+          setConfig({ ...current, castDevice: address });
+        } catch {
+          // A setting that could not be saved must not stop this cast: the
+          // address is still usable for it, it just will not be remembered.
+        }
+        const manual = parseManualDevice(address);
+        if (manual) castTo(manual.id);
+      })();
+    },
+    [castTo, setConfig],
+  );
+
+  /** `p` and `x` on the cast row. Same routes the browser's buttons call. */
+  const castCommand = useCallback(
+    (action: "play" | "pause" | "stop") => {
+      const where = webBoundRef.current;
+      if (!where) return;
+      void (async () => {
+        try {
+          const { ok, json } = await castApi(
+            { port: where.port, ...(where.token ? { token: where.token } : {}) },
+            "/api/cast/command",
+            { action },
+          );
+          if (!ok) setNotice(String(json.error ?? "That did not work."));
+        } catch {
+          // The socket to our own server. Nothing useful to say.
+        }
+      })();
+    },
+    [castApi],
   );
 
   const cancelPreparing = useCallback(() => {
@@ -2296,6 +2546,7 @@ export function App({
       omdbApiKey: resolveOmdbApiKey(config),
       adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
+    castStatus,
       debridStatus,
       cachedHashes,
       refreshCachedHashes,
@@ -2359,6 +2610,7 @@ export function App({
     importChooser,
     importingTrakt,
     activeStream,
+    castStatus,
     captureMode,
     downloadFocus,
     seedFocus,
@@ -2416,6 +2668,19 @@ export function App({
       if (preparing) {
         if (key.escape) cancelPreparing();
         return; // swallow other keys while preparing
+      }
+      // The cast row's two keys, ahead of the stream's own `x`. A cast and a
+      // local stream can both be live — casting does not stop the torrent
+      // feeding it — and while a television is playing, "stop" means the thing
+      // on the television. Stopping the cast leaves the stream running, which is
+      // what makes pressing `x` twice do the two obvious things in order.
+      if (castStatus && (input === "x" || input === "X")) {
+        castCommand("stop");
+        return;
+      }
+      if (castStatus && (input === "p" || input === "P")) {
+        castCommand(castStatus.state === "paused" ? "play" : "pause");
+        return;
       }
       if (activeStream && (input === "x" || input === "X")) {
         stopStream();
@@ -2796,6 +3061,40 @@ export function App({
           </Box>
         ) : null}
 
+        {castPrompt ? (
+          <Box marginTop={1}>
+            <CastPrompt
+              width={Math.max(24, Math.min(cols - 4, 72))}
+              devices={castPrompt.devices}
+              finding={castPrompt.finding}
+              {...(config?.castDevice ? { configured: config.castDevice } : {})}
+              onSelect={(device) => castTo(device.id)}
+              onAddress={castToAddress}
+              onCancel={() => setCastPrompt(null)}
+            />
+          </Box>
+        ) : null}
+
+        {castStatus ? (
+          <Box marginTop={1} flexDirection="column">
+            <Box>
+              <Text color={COLOR.accent}>{`${ICON.pointer} `}</Text>
+              <Text>{`Casting to ${castStatus.deviceName}`}</Text>
+              <Text dimColor>{`  ${truncate(cleanText(castStatus.title), 40)}`}</Text>
+            </Box>
+            <Box>
+              <Text dimColor>{`  ${castClock(castStatus)}`}</Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text color={COLOR.alt}>p</Text>
+              <Text dimColor>{castStatus.state === "paused" ? " resume" : " pause"}</Text>
+              <Text dimColor>{` ${ICON.dot} `}</Text>
+              <Text color={COLOR.alt}>x</Text>
+              <Text dimColor> stop casting</Text>
+            </Box>
+          </Box>
+        ) : null}
+
         {streamFiles ? (
           <Box marginTop={1}>
             <StreamFilePrompt
@@ -2824,6 +3123,7 @@ export function App({
                   : undefined
               }
               onSelect={playFromPicker}
+              {...(streamSource ? { onCast: castFromPicker } : {})}
               onCancel={() => {
                 setStreamFiles(null);
                 setStreamAllFiles(null);

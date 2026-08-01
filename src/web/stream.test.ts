@@ -18,6 +18,7 @@ import {
 } from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
+import { CastSessionRegistry } from "../core/cast/session";
 import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 import type { Runtime } from "../daemon/runtime";
@@ -207,7 +208,12 @@ afterEach(async () => {
 });
 
 function runtimeWith(sessions: StreamSessionRegistry): Runtime {
-  return { queue: new DownloadQueue(), downloadDir: "/tmp/dl", sessions };
+  return {
+    queue: new DownloadQueue(),
+    downloadDir: "/tmp/dl",
+    sessions,
+    casts: new CastSessionRegistry(),
+  };
 }
 
 async function start(
@@ -991,6 +997,29 @@ describe("GET /stream/:sid/:idx.info", () => {
     expect(body.facts.videoCodec).toBe("h264");
     expect(body.blockers).toEqual(["container"]);
     expect(body.hls).toBeNull();
+  });
+
+  it("reports cast blockers beside the browser's, because the two decoders differ", async () => {
+    // An mp4 carrying AC3: the browser refuses the audio, a Chromecast passes it
+    // through to the television. This is the pair that lets the fallback card
+    // offer to cast, and the reason there are two profiles rather than one list.
+    const { base, capability, id } = await infoSession({
+      files: [{ url: CDN, filename: "Kestrel.2010.1080p.BluRay.x264.AC3.mp4", bytes: 123 }],
+      name: "Kestrel.2010.1080p.BluRay.x264.AC3-GROUP",
+      streamDeps: { probeImpl: async () => null },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.blockers).toEqual(["audio"]);
+    expect(body.castBlockers).toEqual([]);
+  });
+
+  it("agrees with the browser about an mkv, which neither can demux", async () => {
+    const { base, capability, id } = await infoSession({
+      streamDeps: { probeImpl: async () => null },
+    });
+    const body = await (await fetch(`${base}/stream/${id}/0.info?k=${capability}`)).json();
+    expect(body.blockers).toEqual(["container"]);
+    expect(body.castBlockers).toEqual(["container"]);
   });
 
   it("prefers the probe when there is one", async () => {
@@ -1779,6 +1808,32 @@ describe("the .vtt representation", () => {
     expect(res.headers["content-type"]).toBe("text/vtt; charset=utf-8");
     expect(res.body).toMatch(/^WEBVTT/);
     expect(res.body).toContain("00:00:01.000 --> 00:00:02.000");
+  });
+
+  it("serves it with CORS, because a Chromecast fetches tracks cross-origin", async () => {
+    // Without this the device drops the track SILENTLY, which reads to the user
+    // as "casting ignores subtitles". Safe here because `?k=` already authorised
+    // the request: the header widens who may READ the response, not who may ask.
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { body: "1\n00:00:01,000 --> 00:00:02,000\nHello\n" },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
+
+  it("does NOT put CORS on the media itself", async () => {
+    // The media is a range-proxied video or a redirect to a debrid link. Nothing
+    // cross-origin reads it, and widening it would let any page on the LAN read
+    // the user's stream once it had guessed a handle.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0?k=${cap}`);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
   it("refuses an index that is not a subtitle file", async () => {
