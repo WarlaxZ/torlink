@@ -8,17 +8,20 @@ import { startWebServer, type WebServerHandle } from "./server";
 import {
   isPlayPath,
   isStreamPath,
+  MAX_SUBTITLE_BYTES,
   parsePlayPath,
   parseStreamPath,
   playlistFilename,
   requestOrigin,
   splitRepresentation,
+  SUBTITLE_FETCH_TIMEOUT_MS,
 } from "./stream";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry, type StreamSessionDeps } from "../core/streamSession";
 import type { TorrentStreamSession } from "../integrations/torrentStream";
 import type { StreamFile } from "../util/player";
 import type { Runtime } from "../daemon/runtime";
+import type { MediaFacts } from "../util/playability";
 
 /**
  * The URL lines of a playlist body — everything that is not a directive.
@@ -121,6 +124,15 @@ async function startUpstream(): Promise<Upstream> {
         });
         res.end(MEDIA);
       }, 30);
+      return;
+    }
+
+    // Accepts the connection and then says NOTHING — not even headers. This is
+    // the WebTorrent-piece-not-arrived-yet case verbatim: the server is waiting
+    // on data it does not have yet, so unlike `/slow` (which at least streams,
+    // and would eventually trip a byte cap) this can only ever be freed by a
+    // timeout or a client disconnect.
+    if (req.url?.startsWith("/never")) {
       return;
     }
 
@@ -989,6 +1001,7 @@ describe("GET /stream/:sid/:idx.info", () => {
           videoCodec: "hevc",
           audioCodec: "dts",
           source: "probe" as const,
+          subtitles: [],
         }),
       },
     });
@@ -1005,7 +1018,13 @@ describe("GET /stream/:sid/:idx.info", () => {
       streamDeps: {
         probeImpl: async () => {
           probes += 1;
-          return { container: "mkv", videoCodec: "h264", audioCodec: "aac", source: "probe" as const };
+          return {
+            container: "mkv",
+            videoCodec: "h264",
+            audioCodec: "aac",
+            source: "probe" as const,
+            subtitles: [],
+          };
         },
       },
     });
@@ -1695,6 +1714,367 @@ describe("GET /stream/:sid/:idx.m3u", () => {
     const all = logs.join("\n");
     expect(all).toContain(`GET /stream/${id}/0.m3u -> 200`);
     expect(all).not.toContain(capability);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The .vtt subtitle representation, the .m3u playlist (which no longer gains
+// an input-slave line for a matched subtitle — see the describe block below),
+// and the .info subtitle report.
+//
+// `readySession`/`request` are local adaptations of the shape the design brief
+// sketched, built on the helpers this file already has (`torrentSession`,
+// `registry`, `start`, `rawGet`): a real `StreamSessionRegistry` and a real
+// `http.Server`, with `fetchSubtitle` and `probeImpl` injected as `StreamDeps`
+// so no network call is ever made for a placeholder `http://up.test/...` URL.
+//
+// `fetchSubtitle`'s fake reproduces the real default's received-bytes
+// contract — returning null once the body would exceed `MAX_SUBTITLE_BYTES` —
+// rather than exercising the real `node:http` path, which is covered by the
+// WebTorrent-proxy tests' pattern already; there is no upstream server for
+// `up.test` to be a real endpoint here.
+async function readySession(
+  files: StreamFile[],
+  opts: { body?: string; fail?: boolean; probe?: MediaFacts } = {},
+): Promise<{ deps: string; sid: string; cap: string }> {
+  const streamDeps: NonNullable<Parameters<typeof startWebServer>[1]>["streamDeps"] = {
+    fetchSubtitle: async () => {
+      if (opts.fail) return null;
+      if (opts.body === undefined) return null;
+      const bytes = new TextEncoder().encode(opts.body);
+      if (bytes.length > MAX_SUBTITLE_BYTES) return null;
+      return bytes;
+    },
+    // Never null → skip probing an unreachable host: without this, a `.info`
+    // request with no `probe` override would fall through to the real
+    // `probeUrl`, which would try to actually reach `up.test`.
+    probeImpl: async () => opts.probe ?? null,
+  };
+  const { reg, id, capability } = await torrentSession(files, "cap-vtt", "sid-vtt");
+  // Tokened so a non-loopback Host (used by the .m3u host tests) is accepted.
+  const base = await start(reg, { streamDeps, token: "server-token" });
+  return { deps: base, sid: id, cap: capability };
+}
+
+function request(
+  deps: string,
+  path: string,
+  opts: { host?: string } = {},
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+  const port = Number(new URL(deps).port);
+  return rawGet(port, path, opts.host ? { Host: opts.host } : {});
+}
+
+describe("the .vtt representation", () => {
+  it("serves a matched subtitle as WebVTT", async () => {
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { body: "1\n00:00:01,000 --> 00:00:02,000\nHello\n" },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("text/vtt; charset=utf-8");
+    expect(res.body).toMatch(/^WEBVTT/);
+    expect(res.body).toContain("00:00:01.000 --> 00:00:02.000");
+  });
+
+  it("refuses an index that is not a subtitle file", async () => {
+    // THE GUARD THIS ROUTE NEEDS MOST. Without it, .vtt is a general-purpose
+    // "pull this whole file into memory and call it text" route aimed at a
+    // 12 GB video.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 9e9 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.vtt?k=${cap}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses an .ass sibling too, even though it is a subtitle file", async () => {
+    // The route's OWN guard, not just its two callers'. `isSubtitleFilename`
+    // would accept this and hand back "WEBVTT" glued to raw ASS markup — valid
+    // as neither format. The two callers (the .m3u's `renderable` filter and
+    // `subtitleTracks`) already keep this from being reached today; this test
+    // pins the route itself so that stays true if a future caller forgets.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("requires the capability, like every other representation", async () => {
+    const { deps, sid } = await readySession([
+      { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt`);
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses a subtitle larger than the cap", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 9e8 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(413);
+  });
+
+  it("stops reading a body that exceeds the cap even when file.bytes lied", async () => {
+    // file.bytes is what upstream CLAIMED. This is what it actually sent.
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { body: "x".repeat(MAX_SUBTITLE_BYTES + 1) },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(502);
+  });
+
+  it("answers 502 when the upstream subtitle fetch fails", async () => {
+    const { deps, sid, cap } = await readySession(
+      [
+        { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },
+        { filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt", url: "http://up.test/s", bytes: 40 },
+      ],
+      { fail: true },
+    );
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(502);
+  });
+
+  /**
+   * The test above proves the ROUTE's contract ("fetchSubtitle returned null
+   * -> 502"), but the fake fetchSubtitle re-implements the cap itself — it
+   * would still pass if the REAL `defaultFetchSubtitle` buffered the whole
+   * body with `Buffer.concat` and checked the size only after `end`, which is
+   * an unbounded-memory remote DoS. This test runs the real implementation
+   * against a real socket and proves two things a fake cannot: that a body
+   * which never legitimately ends (the `/slow` branch drips forever) is cut
+   * off rather than buffered, and that the upstream connection is actually
+   * torn down — via the same live-socket-count signal the WebTorrent proxy's
+   * own abandonment test uses — rather than merely abandoned mid-read.
+   */
+  it(
+    "stops reading a body that exceeds the cap over a real socket, and closes it",
+    async () => {
+      upstream = await startUpstream();
+      const { reg, id, capability } = await torrentSession(
+        [
+          {
+            filename: "Kestrel.2010.1080p.BluRay.x264.mkv",
+            url: `${upstream.base}/webtorrent/hash/one.mp4`,
+            bytes: MEDIA.length,
+          },
+          // Claimed size is tiny — the claimed-size cap (413) must not be what
+          // stops this request, or the test would prove nothing about the
+          // received-bytes path.
+          {
+            filename: "Kestrel.2010.1080p.BluRay.x264.eng.srt",
+            url: `${upstream.base}/slow`,
+            bytes: 40,
+          },
+        ],
+        "cap-slow-vtt",
+        "sid-slow-vtt",
+      );
+      // No fetchSubtitle override: this is the real defaultFetchSubtitle.
+      const base = await start(reg);
+      const res = await fetch(`${base}/stream/${id}/1.vtt?k=${capability}`);
+      expect(res.status).toBe(502);
+      // Not merely abandoned: the upstream socket is actually gone. `/slow`
+      // drips 4 KiB every 5ms forever and only clears its interval and drops
+      // out of `open` once its response closes, so this can only pass if the
+      // cap destroyed the connection rather than reading it to a "completion"
+      // that never comes.
+      await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 10000 });
+    },
+    15000,
+  );
+
+  /**
+   * The hang this exists to prevent: a sibling `.srt` whose pieces have not
+   * arrived yet. `/never` accepts the connection and then sends nothing at
+   * all — no headers, no body, no error — so without a bound
+   * `defaultFetchSubtitle`'s promise (and its socket) would live for the rest
+   * of the process. `/slow` would not prove this: it streams bytes, so it
+   * would eventually trip `MAX_SUBTITLE_BYTES` on its own and the test would
+   * pass even with the timeout deleted. Runs against the real implementation
+   * and a real socket, and the test's own timeout is kept well above
+   * `SUBTITLE_FETCH_TIMEOUT_MS` so a regression (the bound silently removed)
+   * fails the assertion instead of hanging the suite.
+   */
+  it(
+    "gives up on a subtitle upstream that never answers, and closes the socket",
+    async () => {
+      upstream = await startUpstream();
+      const { reg, id, capability } = await torrentSession(
+        [
+          {
+            filename: "Kepler.S02E04.1080p.WEB-DL.mkv",
+            url: `${upstream.base}/webtorrent/hash/one.mp4`,
+            bytes: MEDIA.length,
+          },
+          {
+            filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt",
+            url: `${upstream.base}/never`,
+            bytes: 40,
+          },
+        ],
+        "cap-hang-vtt",
+        "sid-hang-vtt",
+      );
+      const base = await start(reg);
+      const res = await fetch(`${base}/stream/${id}/1.vtt?k=${capability}`);
+      expect(res.status).toBe(502);
+      await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 5000 });
+    },
+    SUBTITLE_FETCH_TIMEOUT_MS + 10000,
+  );
+
+  /**
+   * The client-disconnect teardown, matching the WebTorrent proxy's own
+   * abandonment test in shape: a client that goes away before this route ever
+   * answers must not leave the upstream socket (and the timeout timer) alive
+   * for the rest of the process.
+   */
+  it("destroys the upstream subtitle fetch when the client disconnects first", async () => {
+    upstream = await startUpstream();
+    const { reg, id, capability } = await torrentSession(
+      [
+        {
+          filename: "Kepler.S02E04.1080p.WEB-DL.mkv",
+          url: `${upstream.base}/webtorrent/hash/one.mp4`,
+          bytes: MEDIA.length,
+        },
+        {
+          filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt",
+          url: `${upstream.base}/slow`,
+          bytes: 40,
+        },
+      ],
+      "cap-abort-vtt",
+      "sid-abort-vtt",
+    );
+    const base = await start(reg);
+
+    const ac = new AbortController();
+    const pending = fetch(`${base}/stream/${id}/1.vtt?k=${capability}`, { signal: ac.signal });
+    await vi.waitFor(() => expect(upstream!.open.size).toBe(1), { timeout: 3000 });
+
+    ac.abort();
+    await expect(pending).rejects.toThrow();
+    await vi.waitFor(() => expect(upstream!.open.size).toBe(0), { timeout: 3000 });
+  });
+});
+
+describe("the .m3u with a matched subtitle", () => {
+  // There is no input-slave (or any other) line added here any more. Measured
+  // against a real VLC 3.0.11: `#EXTVLCOPT:input-slave=<url>` is on VLC's
+  // unsafe-option list and is refused inside a `.m3u` ("unsafe option
+  // \"input-slave\" has been ignored for security reasons") — the line never
+  // did anything. So a matched subtitle changes nothing about the playlist
+  // body; all these cases are byte-identical to the no-match case.
+
+  /**
+   * The playlist for one video, with whatever extra files are alongside it.
+   *
+   * Asserted DIFFERENTIALLY — "same as the playlist without the subtitle" —
+   * rather than against a hardcoded body. The exact bytes are the playlist
+   * route's business and have already changed once (a bare URL became an
+   * `#EXTM3U` with an `#EXTINF` title); pinning them here made these tests fail
+   * for a reason that had nothing to do with subtitles. What this describe block
+   * is actually for is narrower and does not change: a matched subtitle must not
+   * alter the playlist at all.
+   */
+  const playlistFor = async (extra: { filename: string; url: string; bytes: number }[]) => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+      ...extra,
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    // The session id is random per call, so normalise it out before comparing
+    // two playlists — otherwise every comparison fails on the id alone.
+    return res.body.split(sid).join("<sid>").split(cap).join("<cap>");
+  };
+
+  it("is unchanged when a renderable subtitle matches", async () => {
+    const withSub = await playlistFor([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
+    ]);
+    expect(withSub).toBe(await playlistFor([]));
+  });
+
+  it("is unchanged when only a non-renderable subtitle matches", async () => {
+    const withAss = await playlistFor([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s", bytes: 40 },
+    ]);
+    expect(withAss).toBe(await playlistFor([]));
+  });
+
+  it("is unchanged when both a renderable and a non-renderable subtitle match", async () => {
+    const withBoth = await playlistFor([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    expect(withBoth).toBe(await playlistFor([]));
+  });
+
+  it("puts no SUBTITLE-supplied text in the playlist body", async () => {
+    // The video's own name does reach the body, as a `#EXTINF` title that
+    // `playlistTitle` has stripped of CR, LF and control characters — that is
+    // the playlist route's own guarantee and it has its own tests. This one is
+    // about the subtitle: a matched subtitle contributes nothing to the body,
+    // so a crafted subtitle filename cannot add a line to a file another
+    // application parses however it is written.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: 'Kepler.S02E04\n#EXTVLCOPT:evil="x".eng.srt', url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).not.toContain("evil");
+    expect(res.body).not.toContain("EXTVLCOPT");
+    // #EXTM3U, one #EXTINF, one URL — the subtitle added no fourth line.
+    expect(res.body.split("\n").filter(Boolean)).toHaveLength(3);
+  });
+});
+
+describe("the .info subtitle report", () => {
+  it("lists matched sibling files with language and renderability", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.spa.ass", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.info?k=${cap}`);
+    const body = JSON.parse(res.body);
+    expect(body.subtitles.files).toEqual([
+      { index: 1, filename: "Kepler.S02E04.eng.srt", language: "en", label: "English", renderable: true },
+      { index: 2, filename: "Kepler.S02E04.spa.ass", language: "es", label: "Spanish", renderable: false },
+    ]);
+  });
+
+  it("reports embedded tracks from the probe", async () => {
+    const { deps, sid, cap } = await readySession(
+      [{ filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 }],
+      {
+        probe: {
+          container: "mkv",
+          videoCodec: "hevc",
+          audioCodec: "eac3",
+          source: "probe",
+          subtitles: [{ language: "eng", label: "" }],
+        },
+      },
+    );
+    const res = await request(deps, `/stream/${sid}/0.info?k=${cap}`);
+    expect(JSON.parse(res.body).subtitles.embedded).toEqual([{ language: "eng", label: "" }]);
   });
 });
 

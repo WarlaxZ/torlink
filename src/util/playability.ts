@@ -7,6 +7,22 @@
 // Nothing here imports node:*. It is reachable from the browser bundle.
 import { parseRelease } from "./release";
 
+/**
+ * One subtitle track muxed inside the file, as ffprobe reports it.
+ *
+ * Reported, never extracted: pulling one out would mean spawning ffmpeg, which
+ * this project does not do in production, and it would only help files the
+ * browser can already play. What this buys is the ability to TELL the user the
+ * tracks are there — the failure that prompted it was a season pack whose three
+ * embedded tracks were invisible in both front ends.
+ */
+export interface EmbeddedSubtitle {
+  /** ffprobe's own language tag ("eng", "spa"), or "" when untagged. */
+  language: string;
+  /** The stream's title tag ("SDH", "Forced"), or "". */
+  label: string;
+}
+
 /** What we know about one file's container and codecs, and how we know it. */
 export interface MediaFacts {
   /** Lowercase container: "mkv", "mp4", "webm". Empty when unknown. */
@@ -25,6 +41,11 @@ export interface MediaFacts {
    * deciding whether to spend money (CPU, bandwidth) on the answer.
    */
   source: "probe" | "name";
+  /**
+   * Subtitle tracks muxed into the file. Always empty from `classifyFromName`:
+   * a release name cannot know what is inside the container.
+   */
+  subtitles: EmbeddedSubtitle[];
 }
 
 /** Why a browser will refuse this file. Empty means it should play. */
@@ -115,6 +136,7 @@ export function classifyFromName(filename: string, releaseName?: string): MediaF
     videoCodec: normaliseVideoCodec(parsed?.codec),
     audioCodec: normaliseAudioCodec(parsed?.audioList),
     source: "name",
+    subtitles: [],
   };
 }
 

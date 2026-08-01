@@ -232,9 +232,19 @@ anything other than loopback requires a token.
 - **Two keyboard shortcuts, not the terminal's hundred-odd.** `/` focuses the search box from anywhere
   and the arrow keys walk the results. There is no `?` overlay — the browser is buttons, and the
   shortcuts worth having on a surface you mostly touch are few.
-- **No subtitles, no scrubber.** [Continue watching](#continue-watching) does play the next episode
+- **No scrubber.** [Continue watching](#continue-watching) does play the next episode
   automatically when a row names one — it just can't resume *where* you left off, because nothing here
   reads back from mpv, iina, vlc, or a browser tab; none of them report a position.
+- **Subtitles, partly.** A `.srt` or `.vtt` shipped alongside the video is matched to it and shown in
+  the browser's own subtitle menu, and offered next to "Download .m3u" as a "Download subtitle" link
+  for anyone who'd rather open it themselves. When torlink itself launches the player, mpv and iina
+  take that same file side-loaded automatically; VLC doesn't — there's no VLC 3 command-line flag that
+  side-loads a subtitle from a URL (the obvious ones either misfile it as an audio track or resolve it
+  as a local path), so a VLC user gets the download link instead of a broken automatic attempt. ASS and
+  SSA are matched too, but the browser doesn't offer them anywhere — no track, no download link —
+  because there's no way to show one without re-encoding it, and torlink doesn't run ffmpeg. Tracks
+  muxed *inside* the file are named on the fallback card so you know they're there — pulling one out
+  has the same ffmpeg problem.
 - **No settings page, but there is a settings control.** Tokens, sources, limits and folders are still
   TUI-only — the browser has no page for them, and that includes reccd's own URL and bearer token; the
   browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the

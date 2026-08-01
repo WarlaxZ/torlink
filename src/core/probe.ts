@@ -33,7 +33,7 @@ export function ffprobeArgs(url: string): string[] {
     "-print_format",
     "json",
     "-show_entries",
-    "format=format_name:stream=codec_type,codec_name",
+    "format=format_name:stream=codec_type,codec_name:stream_tags=language,title",
     "-analyzeduration",
     ANALYZE_US,
     "-probesize",
@@ -45,6 +45,7 @@ export function ffprobeArgs(url: string): string[] {
 interface ProbeStream {
   codec_type?: string;
   codec_name?: string;
+  tags?: { language?: string; title?: string };
 }
 
 // Worst-first, matching normaliseAudioCodec's ordering in ../util/playability.ts
@@ -92,6 +93,12 @@ export function parseFfprobe(stdout: string, container: string): MediaFacts | nu
     .map((s) => (s.codec_name ?? "").toLowerCase())
     .filter(Boolean);
   const videoCodec = video.toLowerCase();
+  // Subtitle streams, kept. An earlier version discarded them here, which made
+  // a file with three muxed tracks indistinguishable from one with none.
+  // Attachments (fonts, cover art) are still dropped — they are not tracks.
+  const subtitles = streams
+    .filter((s) => s.codec_type === "subtitle")
+    .map((s) => ({ language: s.tags?.language ?? "", label: s.tags?.title ?? "" }));
   return {
     container,
     // avc1 is the mp4 sample-entry name for the same thing h264 is; the rest of
@@ -99,6 +106,7 @@ export function parseFfprobe(stdout: string, container: string): MediaFacts | nu
     videoCodec: videoCodec === "avc1" ? "h264" : videoCodec,
     audioCodec: worstAudio(audio),
     source: "probe",
+    subtitles,
   };
 }
 

@@ -417,6 +417,12 @@ export async function resolveMagnet(
       url: await requestDownloadLink(token, id, fileId, opts),
       filename: file.name ?? file.short_name ?? `file-${fileId}`,
       bytes: file.size ?? 0,
+      // `file.name` is TorBox's path-like field ("Subs/Kepler.S02E04/2_English.srt"),
+      // distinct from `short_name` (a basename). `filename` above keeps its own
+      // meaning — watched-list key, picker label — so this is additive, for the
+      // subtitle matcher's folder-layout rule only. Undefined when TorBox gave no
+      // `name` at all, same as `filename`'s own fallback.
+      path: file.name,
     });
   }
   return out;

@@ -125,4 +125,31 @@ describe("StreamFilePrompt", () => {
     );
     expect(lastFrame() ?? "").toContain("1/3");
   });
+
+  it("marks a file that has a matching subtitle", () => {
+    const files = [
+      { url: "http://up.test/0", filename: "Kepler.S02E04.1080p.WEB-DL.mkv", bytes: 900 },
+      { url: "http://up.test/1", filename: "Kepler.S02E05.1080p.WEB-DL.mkv", bytes: 900 },
+    ];
+    const { lastFrame } = render(
+      <StreamFilePrompt
+        width={80}
+        files={files}
+        allFiles={[...files, { url: "http://up.test/2", filename: "Kepler.S02E04.eng.srt", bytes: 40 }]}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const [e04, e05] = lastFrame()!.split("\n").filter((l) => l.includes("Kepler"));
+    expect(e04).toContain("CC");
+    expect(e05).not.toContain("CC");
+  });
+
+  it("marks nothing when the torrent has no subtitle files", () => {
+    const files = [{ url: "http://up.test/0", filename: "Harrowgate.S03.1080p.WEB-DL.mkv", bytes: 900 }];
+    const { lastFrame } = render(
+      <StreamFilePrompt width={80} files={files} allFiles={files} onSelect={() => {}} onCancel={() => {}} />,
+    );
+    expect(lastFrame()).not.toContain("CC");
+  });
 });

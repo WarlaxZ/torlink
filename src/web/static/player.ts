@@ -38,6 +38,13 @@ import { mountHls } from "./hlsMount";
 import { breadcrumbFor, escapeRoutes, upNextView, type EpisodeRow } from "./upNext";
 import { authHeadersFor, readStoredToken } from "./token";
 import { backTarget, readReturn } from "./returnTo";
+import {
+  createTrackFailureTracker,
+  embeddedNotice,
+  subtitleDownload,
+  subtitleTracks,
+  type TrackSpec,
+} from "./subtitleModel";
 import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -139,7 +146,12 @@ function linkButton(label: string, href: string): HTMLAnchorElement {
  * `<video>` is removed rather than hidden, so nothing keeps buffering a file
  * that is not going to play and no black rectangle is left behind it.
  */
-function showFallback(reason: FallbackReason, filename: string, facts?: MediaFacts): void {
+function showFallback(
+  reason: FallbackReason,
+  filename: string,
+  facts?: MediaFacts,
+  info: StreamInfoResponse | null = null,
+): void {
   const card = document.createElement("div");
   card.className = "card fallback";
 
@@ -155,6 +167,18 @@ function showFallback(reason: FallbackReason, filename: string, facts?: MediaFac
   body.textContent = fallbackMessage(reason, filename, facts);
 
   card.append(title, body);
+
+  // The subtitles the file carries, when it has any. A card that says "open
+  // this elsewhere" and then does not mention the three subtitle tracks inside
+  // is the exact gap this feature exists to close. It sits above the escape
+  // routes below because it is about THIS file — the links are about leaving it.
+  const subs = embeddedNotice(info);
+  if (subs) {
+    const line = document.createElement("p");
+    line.className = "fallback-subs";
+    line.textContent = subs;
+    card.append(line);
+  }
 
   // TWO WAYS OUT, because this card is the end of the most common journey
   // through the app and it used to be a cul-de-sac that blamed the browser.
@@ -187,6 +211,39 @@ function createVideo(): HTMLVideoElement {
   // all — without pulling the whole file through the proxy behind it.
   video.preload = "metadata";
   return video;
+}
+
+/**
+ * Attach subtitle tracks to a `<video>`.
+ *
+ * `label` comes from a filename, i.e. from whoever made the torrent, so it is
+ * set as a property and never as markup — the same rule as everything else in
+ * this file.
+ *
+ * A `<track>` that fails to load — the sibling `.vtt` route 502s, or the
+ * session was reaped — otherwise just stays in the menu and shows nothing
+ * when picked, which is the same silent-freeze shape as the mid-playback
+ * stall this file already has an answer for. `error` is bound per element and
+ * routed through a fresh `createTrackFailureTracker()` (one per mount, so a
+ * page navigation starts clean); the tracker decides WHETHER a given failure
+ * is worth a notice and WHAT it says, and this function only asks it and
+ * forwards a non-null answer to `showNotice`.
+ */
+function addTracks(video: HTMLVideoElement, specs: TrackSpec[]): void {
+  const tracker = createTrackFailureTracker();
+  for (const spec of specs) {
+    const track = document.createElement("track");
+    track.kind = "subtitles";
+    track.src = spec.src;
+    track.srclang = spec.srclang;
+    track.label = spec.label;
+    track.default = spec.default;
+    track.addEventListener("error", () => {
+      const message = tracker.report(spec);
+      if (message !== null) showNotice(message, { persist: true });
+    });
+    video.append(track);
+  }
 }
 
 /**
@@ -301,10 +358,11 @@ function tryPlay(video: HTMLVideoElement): void {
   void video.play().catch(() => {});
 }
 
-function mountVideo(target: PlayerTarget, src: string): void {
+function mountVideo(target: PlayerTarget, src: string, tracks: TrackSpec[]): void {
   const video = createVideo();
   video.src = src;
   watch(video, target);
+  addTracks(video, tracks);
   stage.replaceChildren(video);
   tryPlay(video);
 }
@@ -389,14 +447,20 @@ async function render(): Promise<void> {
   // browser refuses is now known up front rather than discovered by a decode
   // error that, for mkv in Chrome, never even fires.
   const info = await fetchInfo(target);
+  const tracks = subtitleTracks(info, target);
+  const download = subtitleDownload(info, target);
+  if (download) {
+    actions.appendChild(linkButton(download.label, download.href));
+  }
   const chosen = chooseSource(info, target.filename);
   if (chosen.rung === "card") {
-    showFallback(chosen.reason ?? "container", target.filename, info?.facts);
+    showFallback(chosen.reason ?? "container", target.filename, info?.facts, info);
     return;
   }
   if (chosen.rung === "provider-hls" && info?.hls) {
     const video = createVideo();
     const settle = watch(video, target);
+    addTracks(video, tracks);
     stage.replaceChildren(video);
     // The manifest is on the provider's own host, so no capability is appended:
     // it is already a capability, being an unguessable URL minted for this file.
@@ -404,7 +468,7 @@ async function render(): Promise<void> {
     tryPlay(video);
     return;
   }
-  mountVideo(target, stream);
+  mountVideo(target, stream, tracks);
 }
 
 /**

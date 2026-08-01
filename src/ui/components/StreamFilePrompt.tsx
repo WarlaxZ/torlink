@@ -4,6 +4,7 @@ import { Panel } from "./Panel";
 import { COLOR, GUTTER, ICON } from "../theme";
 import { formatBytes, cleanText, truncate } from "../../util/format";
 import type { StreamFile } from "../../util/player";
+import { subtitlesFor } from "../../util/subtitleFiles";
 // The ordering rule itself, which used to be a `sortFiles` local to this file.
 // It moved down to src/util when the browser's picker needed it: a season pack
 // listed E01…E10 here and in torrent order there is the copy-then-drift bug this
@@ -13,6 +14,15 @@ import { nextSort, sortStreamFiles, type StreamFileSort } from "../../util/strea
 interface StreamFilePromptProps {
   width: number;
   files: StreamFile[];
+  /**
+   * Every file in the torrent, not just the video candidates in `files`.
+   *
+   * The subtitle matcher needs the unfiltered list: `files` has already been
+   * through `streamCandidates`, which drops exactly the .srt files this is
+   * looking for. Defaults to `files`, so a caller that has not been updated
+   * simply shows no markers rather than crashing.
+   */
+  allFiles?: StreamFile[];
   onSelect: (file: StreamFile) => void;
   onCancel: () => void;
   // Max rows the file list body may occupy. The caller sizes this from the
@@ -49,6 +59,7 @@ interface StreamFilePromptProps {
 export function StreamFilePrompt({
   width,
   files,
+  allFiles,
   onSelect,
   onCancel,
   maxRows = 8,
@@ -69,6 +80,10 @@ export function StreamFilePrompt({
     : 0;
   const clamped = Math.min(cursor ?? opening, Math.max(0, sorted.length - 1));
   const watchedSet = useMemo(() => new Set(watched), [watched]);
+  const withSubs = useMemo(() => {
+    const pool = allFiles ?? files;
+    return new Set(files.filter((f) => subtitlesFor(f, pool).length > 0).map((f) => f.url));
+  }, [files, allFiles]);
 
   useInput((input, key) => {
     if (key.escape) {
@@ -141,6 +156,7 @@ export function StreamFilePrompt({
               <Box width={2} flexShrink={0} marginLeft={1}>
                 <Text dimColor>{watchedSet.has(file.filename) ? ICON.done : ""}</Text>
               </Box>
+              {withSubs.has(file.url) ? <Text dimColor> CC</Text> : null}
               <Box flexShrink={0} marginLeft={1} justifyContent="flex-end">
                 <Text dimColor>{file.bytes > 0 ? formatBytes(file.bytes) : "-"}</Text>
               </Box>

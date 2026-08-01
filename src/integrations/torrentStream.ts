@@ -57,6 +57,7 @@ function toStreamFiles(
       url: `http://${host}:${port}/webtorrent/${torrent.infoHash}/${encodeURI(rel)}`,
       filename: f.name,
       bytes: f.length,
+      path: rel,
     };
   });
 }

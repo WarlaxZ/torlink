@@ -269,11 +269,49 @@ describe("TorBox resolveMagnet", () => {
         url: "https://cdn.torbox.app/dl/kestrel.mkv",
         filename: "Kestrel.2010.1080p.BluRay.x264.mkv",
         bytes: 8_000_000_000,
+        path: "Kestrel.2010.1080p.BluRay.x264.mkv",
       },
     ]);
     const create = calls.find((c) => c.url.includes("createtorrent"))!;
     expect(create.method).toBe("POST");
     expect(create.body).toContain(encodeURIComponent(MAGNET).slice(0, 20));
+  });
+
+  it("carries the full path in `path` while `filename` stays a basename, for the Subs/ layout", async () => {
+    // `file.name` is TorBox's path-like field; `short_name` is the basename.
+    // The subtitle matcher's SxxExx-across-folders rule (subtitlesFor, rule 2)
+    // needs the folder, so `path` must keep it even though `filename` — the
+    // watched-list key and picker label — stays a bare name.
+    const calls: Call[] = [];
+    const fetchImpl = router(
+      {
+        [CREATE]: jsonRes(200, { success: true, data: { torrent_id: 4242, hash: HASH } }),
+        [MYLIST]: jsonRes(
+          200,
+          {
+            success: true,
+            data: torrent({
+              files: [
+                { id: 0, name: "Kepler.S02E04.1080p.WEB-DL.mkv", short_name: "Kepler.S02E04.1080p.WEB-DL.mkv", size: 1 },
+                {
+                  id: 1,
+                  name: "Subs/Kepler.S02E04/2_English.srt",
+                  short_name: "2_English.srt",
+                  size: 2,
+                },
+              ],
+            }),
+          },
+        ),
+        [REQUESTDL]: jsonRes(200, { success: true, data: "https://cdn.torbox.app/dl/x" }),
+      },
+      calls,
+    );
+    const files = await resolveMagnet(TOKEN, MAGNET, { fetchImpl, sleepImpl: noSleep });
+    expect(files[1]).toMatchObject({
+      filename: "Subs/Kepler.S02E04/2_English.srt",
+      path: "Subs/Kepler.S02E04/2_English.srt",
+    });
   });
 
   it("converts TorBox's 0-1 progress into the 0-100 every caller assumes", async () => {

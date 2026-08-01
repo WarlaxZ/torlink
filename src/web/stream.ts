@@ -29,7 +29,7 @@ import type { StreamSession, StreamSessionRegistry } from "../core/streamSession
 import { streamCandidates } from "../util/videoFiles";
 import { playlistTitle } from "../util/playlistTitle";
 import { restPlaylist } from "../util/restPlaylist";
-import type { StreamFilesResponse, StreamInfoResponse } from "./wire";
+import type { StreamFilesResponse, StreamInfoResponse, SubtitleFile } from "./wire";
 import {
   HTTP_AND_HTTPS,
   HTTP_ONLY,
@@ -37,6 +37,12 @@ import {
   resolveRedirect,
   type ProxyRefusal,
 } from "./proxyTarget";
+import {
+  isBrowserRenderable,
+  subtitleLanguage,
+  subtitlesFor,
+} from "../util/subtitleFiles";
+import { decodeSubtitle, srtToVtt } from "../util/srtToVtt";
 
 /** Diagnostics sink. Same contract as the server's: injected, never `console`. */
 export type StreamLog = (message: string) => void;
@@ -89,6 +95,20 @@ export interface StreamDeps {
    * config, it is handed what it needs.
    */
   proxyDebrid?: boolean;
+  /**
+   * Read a whole subtitle file from upstream, or null on any failure.
+   *
+   * Separate from the proxy because this one buffers rather than streams — a
+   * subtitle has to be converted before a byte of it can be sent. Injectable so
+   * the `.vtt` route is testable without a network; the default implementation
+   * goes through the same `resolveProxyTarget` allowlist the proxy does, which
+   * is the point of it being here rather than a bare `fetch`.
+   */
+  fetchSubtitle?: (
+    url: string,
+    allowed: readonly string[],
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array | null>;
 }
 // Note there is deliberately NO injectable HTTP client here. A fake `request`
 // cannot show that a Range header survived a socket, that a 206 came back with
@@ -139,25 +159,27 @@ export function parseStreamPath(urlPath: string): { sid: string; index: number }
 const PLAYLIST_SUFFIX = ".m3u";
 const INFO_SUFFIX = ".info";
 const FILES_SUFFIX = ".files";
+const SUBTITLE_SUFFIX = ".vtt";
 
 /** Which representation of the stream handle a path is asking for. */
-export type StreamRep = "media" | "playlist" | "info" | "files";
+export type StreamRep = "media" | "playlist" | "info" | "files" | "subtitle";
 
 /**
- * Split a trailing `.m3u`, `.info` or `.files` off a stream path.
+ * Split a trailing `.m3u`, `.info`, `.files` or `.vtt` off a stream path.
  *
  * All are *representations* of the handle, not second resources, so none is a
  * second route: stripping the suffix here means the session lookup, the
  * capability check, the readiness check and the bounds check below are literally
- * the same code for all four. A `.m3u` that skipped the capability would hand
+ * the same code for all five. A `.m3u` that skipped the capability would hand
  * out a playable URL to anyone who guessed a session id, a `.info` that skipped
- * it would hand out a filename and codec list, and a `.files` that skipped it
- * would hand out every filename in the torrent; the only durable way to stop
- * all three is for there to be one guard, not four.
+ * it would hand out a filename and codec list, a `.files` that skipped it would
+ * hand out every filename in the torrent, and a `.vtt` that skipped it would
+ * hand out a subtitle from someone else's session; the only durable way to stop
+ * all four is for there to be one guard, not four.
  *
  * Matched with `endsWith` on an exact lowercase suffix, so `.m3u8`, `.INFO`,
- * `.information` and `.profiles` are all just filenames — a near-miss must fall
- * through to the media branch rather than be helpfully interpreted.
+ * `.information`, `.profiles` and `.VTT` are all just filenames — a near-miss
+ * must fall through to the media branch rather than be helpfully interpreted.
  */
 export function splitRepresentation(urlPath: string): { path: string; rep: StreamRep } {
   if (urlPath.endsWith(PLAYLIST_SUFFIX)) {
@@ -168,6 +190,9 @@ export function splitRepresentation(urlPath: string): { path: string; rep: Strea
   }
   if (urlPath.endsWith(FILES_SUFFIX)) {
     return { path: urlPath.slice(0, -FILES_SUFFIX.length), rep: "files" };
+  }
+  if (urlPath.endsWith(SUBTITLE_SUFFIX)) {
+    return { path: urlPath.slice(0, -SUBTITLE_SUFFIX.length), rep: "subtitle" };
   }
   return { path: urlPath, rep: "media" };
 }
@@ -281,6 +306,54 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown): voi
 // needs to seek: everything else (Date, Connection, whatever the backend adds)
 // is this proxy's business, not the client's.
 const PASS_THROUGH = ["content-type", "content-length", "content-range", "accept-ranges"] as const;
+
+/**
+ * The most a subtitle may be. A two-hour SRT is tens of kilobytes; four MiB is
+ * far past any real one. This route reads the whole body into memory to convert
+ * it, so without a cap a caller could aim it at a video file — the extension
+ * check below is the first guard against that and this is the second.
+ */
+export const MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * How long `defaultFetchSubtitle` waits for upstream before giving up. A sibling
+ * `.srt`/`.vtt` on WebTorrent can be a piece that has not arrived yet, in which
+ * case the connection is opened and simply never answers — without a bound the
+ * promise (and its socket) would live for the rest of the process. Generous
+ * relative to `MAX_SUBTITLE_BYTES`: a subtitle is at most a few MiB, so anything
+ * still incomplete after this long is stalled, not slow.
+ */
+export const SUBTITLE_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * The sibling subtitle files for one video, as the wire type.
+ *
+ * Server-side because only the server holds the whole file list with its
+ * indexes — `toPublicSession` exposes them, but the `.info` response is where
+ * the player page reads them from, and doing it here means the browser never
+ * has to re-run the matcher.
+ */
+function subtitleFilesFor(session: StreamSession, index: number): SubtitleFile[] {
+  const video = session.files[index];
+  if (!video) return [];
+  const withIndex = session.files.map((f, i) => ({ ...f, index: i }));
+  return subtitlesFor(withIndex[index]!, withIndex).map((s) => {
+    const { code, label } = subtitleLanguage(s.filename);
+    return {
+      index: s.index,
+      filename: s.filename,
+      language: code,
+      label,
+      renderable: isBrowserRenderable(s.filename),
+    };
+  });
+}
+
+// The same split the media branch makes: a debrid link is https, a WebTorrent
+// file is served from this machine over http.
+function backendProtocols(session: StreamSession): readonly string[] {
+  return session.backend === "debrid" ? HTTP_AND_HTTPS : HTTP_ONLY;
+}
 
 /**
  * Serve one stream request. Writes the response itself — this route owns its
@@ -443,11 +516,75 @@ export async function handleStreamRequest(
         hls = null;
       }
     }
-    const body: StreamInfoResponse = { facts, blockers: blockersFor(facts), hls };
+    const body: StreamInfoResponse = {
+      facts,
+      blockers: blockersFor(facts),
+      hls,
+      subtitles: {
+        embedded: facts.subtitles,
+        files: subtitleFilesFor(session, parsed.index),
+      },
+    };
     // Note what is NOT in that body: `file.url`. That is a debrid unrestricted
     // link, i.e. a credential against the user's account. The page plays through
     // this handle and never learns where the bytes come from.
     writeJson(res, 200, body);
+    return 200;
+  }
+
+  // The `.vtt`: a sibling subtitle file, converted for a <track>.
+  //
+  // Two guards this representation needs that the others do not. The extension
+  // check keeps it from being a general-purpose "read a whole file into memory
+  // and call it text" route aimed at a 12 GB video, and the size cap is the
+  // second line of that same defence.
+  //
+  // `isBrowserRenderable`, not `isSubtitleFilename`: this route always runs the
+  // source through `srtToVtt` and answers `text/vtt`, so it must only ever
+  // accept something that conversion can honestly produce. `isSubtitleFilename`
+  // also passes `.ass`/`.ssa`/`.sub`, which would come back as `WEBVTT` followed
+  // by raw ASS markup — neither valid WebVTT nor valid ASS. The two callers
+  // (`subtitleFilesFor`'s `.m3u` filter above and `subtitleTracks` in
+  // `subtitleModel.ts`) already filter to renderable files before reaching here;
+  // this guard is what makes that belt-and-braces rather than the only defence.
+  if (rep === "subtitle") {
+    if (!isBrowserRenderable(file.filename)) {
+      writeJson(res, 404, { error: "not a subtitle" });
+      return 404;
+    }
+    if (file.bytes > MAX_SUBTITLE_BYTES) {
+      writeJson(res, 413, { error: "subtitle too large" });
+      return 413;
+    }
+    const fetchSubtitle = deps.fetchSubtitle ?? defaultFetchSubtitle;
+    // This route buffers before it can answer at all, so — unlike proxyUpstream,
+    // which has already written headers by the time a client goes away — there
+    // is nothing yet to distinguish "our own end" from "abandoned": any close
+    // this early is the client leaving, so it always aborts the fetch. The
+    // listener is removed the moment the fetch settles, so a close after that
+    // (the normal end of a completed request) finds nothing to abort.
+    const controller = new AbortController();
+    const onClientClose = (): void => controller.abort();
+    res.on("close", onClientClose);
+    const fetched = await fetchSubtitle(file.url, backendProtocols(session), controller.signal);
+    res.off("close", onClientClose);
+    if (!fetched) {
+      // Same status and the same silence about the URL as proxyUpstream: an
+      // unrestricted link is a credential against the user's account.
+      deps.log("stream: could not fetch subtitle upstream");
+      writeJson(res, 502, { error: "bad upstream" });
+      return 502;
+    }
+    const payload = Buffer.from(srtToVtt(decodeSubtitle(fetched)), "utf8");
+    res.writeHead(200, {
+      "Content-Type": "text/vtt; charset=utf-8",
+      "Content-Length": String(payload.length),
+      // Same reason as the playlist: the URL that produced this carries a
+      // capability for a session that will be reaped.
+      "Cache-Control": "no-store",
+    });
+    if (method !== "HEAD") res.end(payload);
+    else res.end();
     return 200;
   }
 
@@ -475,6 +612,15 @@ export async function handleStreamRequest(
     // session, so nothing a client put in the URL is reflected into the body.
     // The capability is re-encoded from the value that just passed the auth
     // check — omit it and the playlist is a 401 in whatever player opens it.
+    // NOTE, so nobody re-adds it: there is deliberately no
+    // #EXTVLCOPT:input-slave line here for a matched subtitle. Measured
+    // against a real VLC 3.0.11 — `input-slave` is on VLC's unsafe-option
+    // list and is refused outright inside a `.m3u` ("unsafe option
+    // \"input-slave\" has been ignored for security reasons"), precisely so a
+    // downloaded playlist cannot make the player open arbitrary resources.
+    // VLC users get a separate subtitle download link on the player page
+    // instead; `subtitleArgs` in src/util/subtitleFlags.ts gives VLC no flag
+    // for the same reason.
     const handleUrl = (index: number): string =>
       `${origin}${streamHandle(parsed.sid, index)}?k=${encodeURIComponent(k!)}`;
 
@@ -733,6 +879,114 @@ function proxyUpstream(
     res.on("close", () => {
       if (!res.writableEnded) current?.destroy();
     });
+
+    send(first.url, MAX_PROXY_HOPS);
+  });
+}
+
+/**
+ * The default `StreamDeps.fetchSubtitle`: read a whole subtitle body from
+ * upstream through the same allowlist and redirect handling `proxyUpstream`
+ * uses, buffered rather than piped because the bytes must be fully in hand
+ * before `srtToVtt` can run.
+ *
+ * Enforces `MAX_SUBTITLE_BYTES` against what upstream actually SENDS, not just
+ * what it claimed — the response is destroyed the moment the buffered total
+ * would exceed the cap, which is the second half of that guard (`file.bytes` in
+ * the caller is the first, and it is only what upstream claimed).
+ *
+ * Two teardowns, matching `proxyUpstream`'s shape rather than inventing a
+ * second one: a `SUBTITLE_FETCH_TIMEOUT_MS` timer for the case webtorrent just
+ * never answers (a sibling `.srt` whose pieces have not arrived yet holds the
+ * connection open indefinitely), and `signal` for the caller's own
+ * client-disconnect teardown. Either one destroys the in-flight request and
+ * resolves null, exactly like any other upstream failure.
+ */
+function defaultFetchSubtitle(
+  target: string,
+  allowedProtocols: readonly string[],
+  signal?: AbortSignal,
+): Promise<Uint8Array | null> {
+  const first = resolveProxyTarget(target, allowedProtocols, MAX_PROXY_HOPS);
+  if (!first.ok) return Promise.resolve(null);
+
+  return new Promise<Uint8Array | null>((resolve) => {
+    let settled = false;
+    let current: http.ClientRequest | null = null;
+    const done = (value: Uint8Array | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = (): void => {
+      current?.destroy();
+      done(null);
+    };
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      current?.destroy();
+      done(null);
+    }, SUBTITLE_FETCH_TIMEOUT_MS);
+    signal?.addEventListener("abort", onAbort);
+
+    const send = (url: URL, hopsRemaining: number): void => {
+      const transport = url.protocol === "https:" ? https : http;
+      const upstream = transport.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port,
+          path: `${url.pathname}${url.search}`,
+          method: "GET",
+          agent: false,
+        },
+        (up) => {
+          const status = up.statusCode ?? 502;
+          const location = up.headers.location;
+          if (status >= 300 && status < 400 && typeof location === "string") {
+            up.resume();
+            up.on("error", () => {});
+            const next = resolveRedirect(location, url, allowedProtocols, hopsRemaining - 1);
+            if (!next.ok) {
+              done(null);
+              return;
+            }
+            send(next.url, hopsRemaining - 1);
+            return;
+          }
+          if (status < 200 || status >= 300) {
+            up.resume();
+            done(null);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          let total = 0;
+          up.on("data", (chunk: Buffer) => {
+            total += chunk.length;
+            if (total > MAX_SUBTITLE_BYTES) {
+              // What upstream actually sent, not what it claimed in
+              // Content-Length. The caller has already checked `file.bytes`;
+              // this is the check against the body itself.
+              up.destroy();
+              done(null);
+              return;
+            }
+            chunks.push(chunk);
+          });
+          up.on("end", () => {
+            if (!settled) done(new Uint8Array(Buffer.concat(chunks)));
+          });
+          up.on("error", () => done(null));
+        },
+      );
+      current = upstream;
+      upstream.on("error", () => {
+        if (upstream !== current) return;
+        done(null);
+      });
+      upstream.end();
+    };
 
     send(first.url, MAX_PROXY_HOPS);
   });

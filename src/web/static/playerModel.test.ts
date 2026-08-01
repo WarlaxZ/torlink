@@ -152,9 +152,10 @@ describe("filesPath", () => {
 
 describe("chooseSource", () => {
   const info = (over: Partial<StreamInfoResponse> = {}): StreamInfoResponse => ({
-    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const },
+    facts: { container: "mp4", videoCodec: "h264", audioCodec: "aac", source: "probe" as const, subtitles: [] },
     blockers: [],
     hls: null,
+    subtitles: { embedded: [], files: [] },
     ...over,
   });
 
@@ -187,7 +188,7 @@ describe("chooseSource", () => {
     expect(
       chooseSource(
         info({
-          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" as const },
+          facts: { container: "mp4", videoCodec: "hevc", audioCodec: "aac", source: "probe" as const, subtitles: [] },
           blockers: ["video"],
         }),
         "Tin.Rivers.2024.2160p.mp4",
@@ -337,7 +338,7 @@ describe("fallbackMessage", () => {
    * and one they can only accept.
    */
   it("names the codec the server actually found", () => {
-    const facts = { container: "mkv", videoCodec: "hevc", audioCodec: "dts", source: "probe" as const };
+    const facts = { container: "mkv", videoCodec: "hevc", audioCodec: "dts", source: "probe" as const, subtitles: [] };
     expect(fallbackMessage("video-codec", "a.mkv", facts)).toContain("HEVC");
     expect(fallbackMessage("video-codec", "a.mkv", facts)).not.toContain("or AV1");
     expect(fallbackMessage("audio-codec", "a.mkv", facts)).toContain("DTS");
@@ -351,12 +352,12 @@ describe("fallbackMessage", () => {
    * so the card must not state it as fact the way a probe result is stated.
    */
   it("hedges a codec that was only inferred from the release name", () => {
-    const guessed = { container: "mkv", videoCodec: "hevc", audioCodec: "", source: "name" as const };
+    const guessed = { container: "mkv", videoCodec: "hevc", audioCodec: "", source: "name" as const, subtitles: [] };
     expect(fallbackMessage("video-codec", "a.mkv", guessed)).toContain("looks like");
   });
 
   it("falls back to the old prose when the server told us nothing", () => {
-    const unknown = { container: "", videoCodec: "", audioCodec: "", source: "name" as const };
+    const unknown = { container: "", videoCodec: "", audioCodec: "", source: "name" as const, subtitles: [] };
     expect(fallbackMessage("video-codec", "a.mkv", unknown)).toContain("HEVC or AV1");
     expect(fallbackMessage("video-codec", "a.mkv")).toContain("HEVC or AV1");
   });
