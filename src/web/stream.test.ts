@@ -1982,59 +1982,66 @@ describe("the .m3u with a matched subtitle", () => {
   // did anything. So a matched subtitle changes nothing about the playlist
   // body; all these cases are byte-identical to the no-match case.
 
-  it("is byte-identical to the single-URL form even when a subtitle matches", async () => {
+  /**
+   * The playlist for one video, with whatever extra files are alongside it.
+   *
+   * Asserted DIFFERENTIALLY — "same as the playlist without the subtitle" —
+   * rather than against a hardcoded body. The exact bytes are the playlist
+   * route's business and have already changed once (a bare URL became an
+   * `#EXTM3U` with an `#EXTINF` title); pinning them here made these tests fail
+   * for a reason that had nothing to do with subtitles. What this describe block
+   * is actually for is narrower and does not change: a matched subtitle must not
+   * alter the playlist at all.
+   */
+  const playlistFor = async (extra: { filename: string; url: string; bytes: number }[]) => {
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+      ...extra,
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    // The session id is random per call, so normalise it out before comparing
+    // two playlists — otherwise every comparison fails on the id alone.
+    return res.body.split(sid).join("<sid>").split(cap).join("<cap>");
+  };
+
+  it("is unchanged when a renderable subtitle matches", async () => {
+    const withSub = await playlistFor([
       { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
     ]);
-    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
+    expect(withSub).toBe(await playlistFor([]));
   });
 
-  it("is byte-identical to the old single-URL form when nothing matches", async () => {
-    // Fail-soft, and the reason this is asserted on the exact bytes: every
-    // player in the world already parses today's playlist, and a feature that
-    // has nothing to add must add nothing.
-    const { deps, sid, cap } = await readySession([
-      { filename: "Harrowgate.S03.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+  it("is unchanged when only a non-renderable subtitle matches", async () => {
+    const withAss = await playlistFor([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s", bytes: 40 },
     ]);
-    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
+    expect(withAss).toBe(await playlistFor([]));
   });
 
-  it("puts no torrent-supplied text in the playlist body", async () => {
-    // The constraint the one-bare-URL form exists to guarantee. The URL is
-    // built from streamHandle and the capability, so a filename with a
-    // newline or a quote in it cannot reach a file another application parses.
+  it("is unchanged when both a renderable and a non-renderable subtitle match", async () => {
+    const withBoth = await playlistFor([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    expect(withBoth).toBe(await playlistFor([]));
+  });
+
+  it("puts no SUBTITLE-supplied text in the playlist body", async () => {
+    // The video's own name does reach the body, as a `#EXTINF` title that
+    // `playlistTitle` has stripped of CR, LF and control characters — that is
+    // the playlist route's own guarantee and it has its own tests. This one is
+    // about the subtitle: a matched subtitle contributes nothing to the body,
+    // so a crafted subtitle filename cannot add a line to a file another
+    // application parses however it is written.
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
       { filename: 'Kepler.S02E04\n#EXTVLCOPT:evil="x".eng.srt', url: "http://up.test/s", bytes: 40 },
     ]);
     const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
     expect(res.body).not.toContain("evil");
-    expect(res.body.split("\n").filter(Boolean)).toHaveLength(1);
-  });
-
-  it("is byte-identical when only a non-renderable subtitle matches", async () => {
-    // An .ass-only match used to still be treated as "no usable subtitle" by
-    // the input-slave logic; now there is no logic left to have an opinion —
-    // the body is the same either way.
-    const { deps, sid, cap } = await readySession([
-      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
-      { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s", bytes: 40 },
-    ]);
-    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
-  });
-
-  it("is byte-identical when both a renderable and non-renderable subtitle match", async () => {
-    const { deps, sid, cap } = await readySession([
-      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
-      { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s1", bytes: 40 },
-      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s2", bytes: 40 },
-    ]);
-    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
+    expect(res.body).not.toContain("EXTVLCOPT");
+    // #EXTM3U, one #EXTINF, one URL — the subtitle added no fourth line.
+    expect(res.body.split("\n").filter(Boolean)).toHaveLength(3);
   });
 });
 
