@@ -14,6 +14,7 @@ import os from "node:os";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
+  castStatusOf,
   handleWebApi,
   isApiPath,
   parseSearchParams,
@@ -21,7 +22,7 @@ import {
   type WebDeps,
   type WebResponse,
 } from "./routes";
-import { subscribeToQueue } from "./sse";
+import { subscribeToCasts, subscribeToQueue } from "./sse";
 import {
   handleStreamRequest,
   isPlayPath,
@@ -395,7 +396,15 @@ export async function startWebServer(
       return;
     }
     serveStream(req, res, (write) =>
-      subscribeToQueue(runtime.queue, write, () => statusPayload(runtime)),
+      subscribeToQueue(
+        runtime.queue,
+        write,
+        () => statusPayload(runtime),
+        // On the same channel, so one EventSource carries both. It is what lets a
+        // cast started from a laptop appear on a phone pointed at this server —
+        // within this process, which is the limit `Runtime.casts` documents.
+        subscribeToCasts(runtime.casts, () => castStatusOf(runtime.casts)),
+      ),
     );
     log(`GET /api/events -> 200 (stream, ${streams.size} open)`);
   };

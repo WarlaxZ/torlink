@@ -30,6 +30,12 @@ export function sseFrame(event: string, data: unknown): string {
 export type SseWrite = (chunk: string) => void;
 
 /**
+ * A second source of events on one channel. Given the open channel, it sends
+ * what it has and returns its own teardown, which the channel's `onClose` runs.
+ */
+export type SseProducer = (channel: SseChannel) => () => void;
+
+/**
  * One SSE connection's lifecycle, with no idea what it is streaming.
  *
  * Extracted from `subscribeToQueue` when `/api/search` needed the same three
@@ -119,13 +125,20 @@ export function subscribeToQueue(
   queue: DownloadQueue,
   write: SseWrite,
   snapshot: () => unknown,
+  attach?: SseProducer,
 ): () => void {
   let pending = false;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let detach: (() => void) | null = null;
 
   const channel = openSseChannel(write, () => {
     queue.off("update", onUpdate);
     if (flushTimer) clearTimeout(flushTimer);
+    // Whatever the second producer registered, removed on the same path and for
+    // the same reason: a listener per dead client on a process that runs for
+    // weeks is the leak this module is careful about throughout.
+    detach?.();
+    detach = null;
   });
 
   const flush = (): void => {
@@ -161,6 +174,44 @@ export function subscribeToQueue(
   // `alive`, but still a listener per dead client on a long-lived daemon.
   queue.on("update", onUpdate);
   channel.send("status", snapshot);
+  // After the queue's own first frame, so the two producers' opening frames
+  // arrive in a fixed order rather than one that depends on argument evaluation.
+  detach = attach?.(channel) ?? null;
 
   return channel.stop;
+}
+
+/**
+ * The one method the cast registry needs to expose here.
+ *
+ * Structural rather than an import of `CastSessionRegistry`, so this module
+ * keeps depending on nothing from `src/core/cast` — and so its tests can drive
+ * it without one.
+ */
+export interface CastChangeSource {
+  onChange(cb: () => void): () => void;
+}
+
+/**
+ * Push cast state onto an existing channel, as `cast` events.
+ *
+ * A producer rather than its own subscription, so a browser needs ONE
+ * `EventSource` for both the queue and the cast: two streams would mean two
+ * heartbeats, two teardowns and two chances to leak one.
+ *
+ * Unthrottled, unlike the queue's frames: a cast emits on a status from the
+ * device, which is roughly once a second, where a busy queue emits per progress
+ * tick per torrent.
+ */
+export function subscribeToCasts(casts: CastChangeSource, snapshot: () => unknown): SseProducer {
+  return (channel) => {
+    // Subscribed before the first send for the reason the queue is: a snapshot
+    // that throws must unwind with the listener registered and removable.
+    const off = casts.onChange(() => {
+      if (!channel.alive) return;
+      channel.send("cast", snapshot);
+    });
+    channel.send("cast", snapshot);
+    return off;
+  };
 }
