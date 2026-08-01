@@ -6,6 +6,7 @@
 // CLAUDE.md keeps out of the wiring file.
 import { subtitlePath, type PlayerTarget } from "./playerModel";
 import type { StreamInfoResponse } from "../wire";
+import { LANGUAGE_NAMES } from "../../util/subtitleFiles";
 
 /** One `<track>` the page should build. */
 export interface TrackSpec {
@@ -39,33 +40,6 @@ export function subtitleTracks(
     default: f === firstEnglish,
   }));
 }
-
-// ffprobe's tags are ISO 639-2; the page wants words. Only the languages worth
-// naming — anything else falls through to the count form below.
-const LANGUAGE_NAMES: Record<string, string> = {
-  eng: "English",
-  spa: "Spanish",
-  por: "Portuguese",
-  fre: "French",
-  fra: "French",
-  ger: "German",
-  deu: "German",
-  ita: "Italian",
-  dut: "Dutch",
-  nld: "Dutch",
-  pol: "Polish",
-  rus: "Russian",
-  jpn: "Japanese",
-  kor: "Korean",
-  chi: "Chinese",
-  zho: "Chinese",
-  ara: "Arabic",
-  swe: "Swedish",
-  dan: "Danish",
-  nor: "Norwegian",
-  fin: "Finnish",
-  tur: "Turkish",
-};
 
 /**
  * One line naming the subtitle tracks muxed inside this file, for the fallback

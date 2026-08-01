@@ -45,26 +45,54 @@ function basename(path: string): string {
 
 // Languages worth naming. Two- and three-letter codes plus the English name,
 // all mapping to one BCP-47 tag so <track srclang> is always well-formed.
-const LANGUAGES: { code: string; label: string; tokens: string[] }[] = [
-  { code: "en", label: "English", tokens: ["en", "eng", "english"] },
-  { code: "es", label: "Spanish", tokens: ["es", "spa", "esp", "spanish", "castellano", "latino"] },
-  { code: "pt", label: "Portuguese", tokens: ["pt", "por", "portuguese", "brazilian"] },
-  { code: "fr", label: "French", tokens: ["fr", "fre", "fra", "french"] },
-  { code: "de", label: "German", tokens: ["de", "ger", "deu", "german"] },
-  { code: "it", label: "Italian", tokens: ["it", "ita", "italian"] },
-  { code: "nl", label: "Dutch", tokens: ["nl", "dut", "nld", "dutch"] },
-  { code: "pl", label: "Polish", tokens: ["pl", "pol", "polish"] },
-  { code: "ru", label: "Russian", tokens: ["ru", "rus", "russian"] },
-  { code: "ja", label: "Japanese", tokens: ["ja", "jpn", "japanese"] },
-  { code: "ko", label: "Korean", tokens: ["ko", "kor", "korean"] },
-  { code: "zh", label: "Chinese", tokens: ["zh", "chi", "zho", "chinese"] },
-  { code: "ar", label: "Arabic", tokens: ["ar", "ara", "arabic"] },
-  { code: "sv", label: "Swedish", tokens: ["sv", "swe", "swedish"] },
-  { code: "da", label: "Danish", tokens: ["da", "dan", "danish"] },
-  { code: "no", label: "Norwegian", tokens: ["no", "nor", "norwegian"] },
-  { code: "fi", label: "Finnish", tokens: ["fi", "fin", "finnish"] },
-  { code: "tr", label: "Turkish", tokens: ["tr", "tur", "turkish"] },
+//
+// `iso3` is a separate, narrower list from `tokens`: `tokens` is every spelling
+// a release name uses (including non-ISO aliases like Spanish "esp"), because
+// `subtitleLanguage` below has to match filenames written by whoever uploaded
+// the torrent. `iso3` is only the language's real ISO 639-2 tag(s) — what
+// ffprobe actually emits — and is what `LANGUAGE_NAMES` below is built from.
+// Conflating the two would let a filename alias like "esp" masquerade as an
+// ffprobe tag it never produces.
+const LANGUAGES: { code: string; label: string; iso3: string[]; tokens: string[] }[] = [
+  { code: "en", label: "English", iso3: ["eng"], tokens: ["en", "eng", "english"] },
+  {
+    code: "es",
+    label: "Spanish",
+    iso3: ["spa"],
+    tokens: ["es", "spa", "esp", "spanish", "castellano", "latino"],
+  },
+  { code: "pt", label: "Portuguese", iso3: ["por"], tokens: ["pt", "por", "portuguese", "brazilian"] },
+  { code: "fr", label: "French", iso3: ["fre", "fra"], tokens: ["fr", "fre", "fra", "french"] },
+  { code: "de", label: "German", iso3: ["ger", "deu"], tokens: ["de", "ger", "deu", "german"] },
+  { code: "it", label: "Italian", iso3: ["ita"], tokens: ["it", "ita", "italian"] },
+  { code: "nl", label: "Dutch", iso3: ["dut", "nld"], tokens: ["nl", "dut", "nld", "dutch"] },
+  { code: "pl", label: "Polish", iso3: ["pol"], tokens: ["pl", "pol", "polish"] },
+  { code: "ru", label: "Russian", iso3: ["rus"], tokens: ["ru", "rus", "russian"] },
+  { code: "ja", label: "Japanese", iso3: ["jpn"], tokens: ["ja", "jpn", "japanese"] },
+  { code: "ko", label: "Korean", iso3: ["kor"], tokens: ["ko", "kor", "korean"] },
+  { code: "zh", label: "Chinese", iso3: ["chi", "zho"], tokens: ["zh", "chi", "zho", "chinese"] },
+  { code: "ar", label: "Arabic", iso3: ["ara"], tokens: ["ar", "ara", "arabic"] },
+  { code: "sv", label: "Swedish", iso3: ["swe"], tokens: ["sv", "swe", "swedish"] },
+  { code: "da", label: "Danish", iso3: ["dan"], tokens: ["da", "dan", "danish"] },
+  { code: "no", label: "Norwegian", iso3: ["nor"], tokens: ["no", "nor", "norwegian"] },
+  { code: "fi", label: "Finnish", iso3: ["fin"], tokens: ["fi", "fin", "finnish"] },
+  { code: "tr", label: "Turkish", iso3: ["tur"], tokens: ["tr", "tur", "turkish"] },
 ];
+
+/**
+ * ffprobe's tags are ISO 639-2, lowercase, three letters — this maps one to the
+ * display name the fallback card and the embedded-subtitle notice both use.
+ *
+ * Built off `LANGUAGES.iso3` rather than duplicated: this table and
+ * `subtitleLanguage` below used to be copied between `src/util` and
+ * `src/web/static` as two separately-maintained lists of the same 22
+ * languages, which is exactly the copy-then-drift shape this codebase has
+ * already recorded four bugs from (see CLAUDE.md). One table, two shapes of
+ * lookup, driven off the same data.
+ */
+export const LANGUAGE_NAMES: Record<string, string> = Object.fromEntries(
+  LANGUAGES.flatMap((l) => l.iso3.map((tag) => [tag, l.label] as const)),
+);
 
 // Split on every separator a release name uses, so a token match is delimited.
 // Without this, "Ashfall" contains "as" and "fa" and every file would look
