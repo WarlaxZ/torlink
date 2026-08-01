@@ -51,6 +51,52 @@ export function subtitleTracks(
  * render them — that would mean extracting with ffmpeg — but it can say they
  * are there, which is the difference between a dead end and an instruction.
  */
+/**
+ * What to say when a `<track>` the page offered fails to load — the sibling
+ * `.vtt` route answered 502, or the session was reaped between the menu being
+ * built and the user picking a language from it.
+ *
+ * Names the language rather than staying generic, because the whole point is
+ * to replace "I turned subtitles on and nothing happened" with an answer to
+ * *why*: the file itself, not the browser, is what's missing.
+ */
+export function subtitleErrorNotice(spec: TrackSpec): string {
+  const language = spec.label || "Subtitles";
+  return `${language} subtitles couldn't load — try another language or turn them off.`;
+}
+
+/**
+ * Decides which `<track>` load failures are worth a notice, so a file with
+ * nine or ten sibling subtitle files doesn't turn one bad session into a wall
+ * of the same message.
+ *
+ * A `<track>` is not fetched at all until it is enabled — the browser does not
+ * probe every menu entry up front — so an `error` event almost always means
+ * the user just selected that language and it failed *right now*. That is
+ * worth reporting: it is the one thing on screen they were waiting on.
+ *
+ * What it is not worth repeating is the SAME track failing twice (a retry, or
+ * more than one `error` event for one selection): once told, telling again
+ * adds nothing. Each report is remembered by `src`, which is unique per track,
+ * so switching to a different language after a failure still gets its own
+ * notice — that failure is new information — while re-selecting the one that
+ * already failed does not nag a second time.
+ */
+export interface TrackFailureTracker {
+  report(spec: TrackSpec): string | null;
+}
+
+export function createTrackFailureTracker(): TrackFailureTracker {
+  const reported = new Set<string>();
+  return {
+    report(spec: TrackSpec): string | null {
+      if (reported.has(spec.src)) return null;
+      reported.add(spec.src);
+      return subtitleErrorNotice(spec);
+    },
+  };
+}
+
 export function embeddedNotice(info: StreamInfoResponse | null): string {
   const tracks = info?.subtitles.embedded ?? [];
   if (tracks.length === 0) return "";

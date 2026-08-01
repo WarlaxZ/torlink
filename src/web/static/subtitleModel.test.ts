@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { embeddedNotice, subtitleTracks } from "./subtitleModel";
+import {
+  createTrackFailureTracker,
+  embeddedNotice,
+  subtitleErrorNotice,
+  subtitleTracks,
+  type TrackSpec,
+} from "./subtitleModel";
 import type { PlayerTarget } from "./playerModel";
 import type { StreamInfoResponse } from "../wire";
 
@@ -96,6 +102,62 @@ describe("subtitleTracks", () => {
       { ...target, capability: "a b&c" },
     );
     expect(tracks[0]?.src).toBe("/stream/abc/1.vtt?k=a%20b%26c");
+  });
+});
+
+describe("subtitleErrorNotice", () => {
+  it("names the language that failed", () => {
+    const spec: TrackSpec = { src: "/stream/abc/1.vtt?k=cap", srclang: "en", label: "English", default: true };
+    expect(subtitleErrorNotice(spec)).toBe(
+      "English subtitles couldn't load — try another language or turn them off.",
+    );
+  });
+
+  it("falls back to a generic word when the label is empty", () => {
+    const spec: TrackSpec = { src: "/stream/abc/1.vtt?k=cap", srclang: "", label: "", default: false };
+    expect(subtitleErrorNotice(spec)).toBe(
+      "Subtitles subtitles couldn't load — try another language or turn them off.",
+    );
+  });
+});
+
+describe("createTrackFailureTracker", () => {
+  // A torrent can carry nine or ten subtitle files. If every one of them
+  // failed, a straight one-notice-per-error wiring would produce nine or ten
+  // toasts — which is its own way of drowning the user in noise instead of
+  // silence. The tracker is what keeps that from reaching player.ts.
+  const spec = (src: string, label: string): TrackSpec => ({ src, srclang: "en", label, default: false });
+
+  it("reports the first failure of a track", () => {
+    const tracker = createTrackFailureTracker();
+    expect(tracker.report(spec("/stream/abc/1.vtt", "English"))).toBe(
+      "English subtitles couldn't load — try another language or turn them off.",
+    );
+  });
+
+  it("does not repeat a notice for the same track failing again", () => {
+    // A retried fetch, or more than one `error` event for one selection, is
+    // not new information — the user already has the answer.
+    const tracker = createTrackFailureTracker();
+    tracker.report(spec("/stream/abc/1.vtt", "English"));
+    expect(tracker.report(spec("/stream/abc/1.vtt", "English"))).toBeNull();
+  });
+
+  it("still reports a different track failing", () => {
+    // The user trying a second language after the first failed is a new
+    // action with a new answer, not spam.
+    const tracker = createTrackFailureTracker();
+    tracker.report(spec("/stream/abc/1.vtt", "English"));
+    expect(tracker.report(spec("/stream/abc/2.vtt", "Spanish"))).toBe(
+      "Spanish subtitles couldn't load — try another language or turn them off.",
+    );
+  });
+
+  it("does not report a track that never failed", () => {
+    const tracker = createTrackFailureTracker();
+    expect(tracker.report(spec("/stream/abc/1.vtt", "English"))).not.toBeNull();
+    // sanity: a fresh tracker starts with nothing reported
+    expect(createTrackFailureTracker().report(spec("/stream/abc/1.vtt", "English"))).not.toBeNull();
   });
 });
 

@@ -38,7 +38,12 @@ import { mountHls } from "./hlsMount";
 import { breadcrumbFor, escapeRoutes, upNextView, type EpisodeRow } from "./upNext";
 import { authHeadersFor, readStoredToken } from "./token";
 import { backTarget, readReturn } from "./returnTo";
-import { embeddedNotice, subtitleTracks, type TrackSpec } from "./subtitleModel";
+import {
+  createTrackFailureTracker,
+  embeddedNotice,
+  subtitleTracks,
+  type TrackSpec,
+} from "./subtitleModel";
 import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -213,8 +218,18 @@ function createVideo(): HTMLVideoElement {
  * `label` comes from a filename, i.e. from whoever made the torrent, so it is
  * set as a property and never as markup — the same rule as everything else in
  * this file.
+ *
+ * A `<track>` that fails to load — the sibling `.vtt` route 502s, or the
+ * session was reaped — otherwise just stays in the menu and shows nothing
+ * when picked, which is the same silent-freeze shape as the mid-playback
+ * stall this file already has an answer for. `error` is bound per element and
+ * routed through a fresh `createTrackFailureTracker()` (one per mount, so a
+ * page navigation starts clean); the tracker decides WHETHER a given failure
+ * is worth a notice and WHAT it says, and this function only asks it and
+ * forwards a non-null answer to `showNotice`.
  */
 function addTracks(video: HTMLVideoElement, specs: TrackSpec[]): void {
+  const tracker = createTrackFailureTracker();
   for (const spec of specs) {
     const track = document.createElement("track");
     track.kind = "subtitles";
@@ -222,6 +237,10 @@ function addTracks(video: HTMLVideoElement, specs: TrackSpec[]): void {
     track.srclang = spec.srclang;
     track.label = spec.label;
     track.default = spec.default;
+    track.addEventListener("error", () => {
+      const message = tracker.report(spec);
+      if (message !== null) showNotice(message, { persist: true });
+    });
     video.append(track);
   }
 }
