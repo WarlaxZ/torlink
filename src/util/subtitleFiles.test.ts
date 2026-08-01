@@ -123,6 +123,18 @@ describe("subtitlesFor", () => {
     expect(subtitlesFor(e04, [e04, e05, orphan])).toEqual([]);
   });
 
+  it("rule 3 does not fire for several NON-episodic videos either", () => {
+    // The case the rule-2 early return cannot cover, and the one that matters
+    // for a movie-pack torrent: two videos carrying no SxxExx token at all, so
+    // control actually reaches rule 3's `videos.length === 1` guard. Without
+    // this, that guard could be replaced by `return subs` and the suite would
+    // stay green.
+    const a = f("Kestrel.2010.1080p.BluRay.x264.mkv");
+    const b = f("Ashfall.1999.1080p.mkv");
+    const orphan = f("Subs/English.srt");
+    expect(subtitlesFor(a, [a, b, orphan])).toEqual([]);
+  });
+
   it("prefers rule 1 over rule 2 rather than merging them", () => {
     // A pack with both layouts: the exact-basename match is the confident one,
     // and returning both would put a duplicate language in the track menu.
@@ -133,7 +145,7 @@ describe("subtitlesFor", () => {
   });
 
   it("returns nothing when the torrent has no subtitles at all", () => {
-    // The Silo case that prompted this feature: ten mp4s, nothing else.
+    // The season pack that prompted this feature: ten episodes, nothing else.
     const video = f("Harrowgate.S03.1080p.WEB-DL.mkv");
     expect(subtitlesFor(video, [video])).toEqual([]);
   });
