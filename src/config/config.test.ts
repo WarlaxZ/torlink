@@ -11,6 +11,8 @@ import {
   resolveActiveDebrid,
   resolveDebridTokenFor,
   resolveTorBoxToken,
+  resolveCastAdvertiseHost,
+  resolveCastDevice,
   qualityPrefsFrom,
   sanitiseQualityPrefs,
 } from "./config";
@@ -212,6 +214,22 @@ describe("config castDevice", () => {
   });
 });
 
+describe("config castAdvertiseHost", () => {
+  it("round-trips the host a TV should fetch from", async () => {
+    await saveConfig({
+      downloadDir: "/tmp/dl",
+      trackers: [],
+      castAdvertiseHost: "192.168.0.10:8080",
+    });
+    expect((await loadConfig()).castAdvertiseHost).toBe("192.168.0.10:8080");
+  });
+
+  it("stays absent when nothing was set, so castOrigin keeps guessing", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [] });
+    expect((await loadConfig()).castAdvertiseHost).toBeUndefined();
+  });
+});
+
 describe("config favourites", () => {
   it("round-trips favourites with watched episodes", async () => {
     await saveConfig({
@@ -407,5 +425,43 @@ describe("qualityPrefsFrom", () => {
   it("carries the configured preference through", () => {
     expect(qualityPrefsFrom({ maxResolution: "720p", requireFeatures: ["dd"] } as Config))
       .toEqual({ maxResolution: "720p", require: ["dd"], exclude: [] });
+  });
+});
+
+describe("cast resolvers", () => {
+  // Env wins over config, matching every other resolve* helper. It matters more
+  // for these two than most: the setups that need them (WSL, a bridged container)
+  // are deployed into rather than configured on, and have no TUI to open.
+  afterEach(() => {
+    delete process.env.TORLINK_CAST_HOST;
+    delete process.env.TORLINK_CAST_DEVICE;
+  });
+
+  it("prefers the env var over the config file", () => {
+    process.env.TORLINK_CAST_HOST = "192.168.0.10:8080";
+    process.env.TORLINK_CAST_DEVICE = "192.168.0.40";
+    const cfg = { downloadDir: "/tmp", trackers: [], castAdvertiseHost: "wrong", castDevice: "wrong" };
+    expect(resolveCastAdvertiseHost(cfg)).toBe("192.168.0.10:8080");
+    expect(resolveCastDevice(cfg)).toBe("192.168.0.40");
+  });
+
+  it("falls back to the config file, trimmed", () => {
+    const cfg = {
+      downloadDir: "/tmp",
+      trackers: [],
+      castAdvertiseHost: "  192.168.0.10  ",
+      castDevice: "  192.168.0.40  ",
+    };
+    expect(resolveCastAdvertiseHost(cfg)).toBe("192.168.0.10");
+    expect(resolveCastDevice(cfg)).toBe("192.168.0.40");
+  });
+
+  it("is undefined when neither is set, and when both are blank", () => {
+    expect(resolveCastAdvertiseHost({ downloadDir: "/tmp", trackers: [] })).toBeUndefined();
+    expect(resolveCastDevice({ downloadDir: "/tmp", trackers: [] })).toBeUndefined();
+    process.env.TORLINK_CAST_HOST = "   ";
+    expect(
+      resolveCastAdvertiseHost({ downloadDir: "/tmp", trackers: [], castAdvertiseHost: "  " }),
+    ).toBeUndefined();
   });
 });
