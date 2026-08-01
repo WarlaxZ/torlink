@@ -73,7 +73,14 @@ export interface UpNextView {
 const HOME: Breadcrumb = { label: "torlnk", href: "/" };
 
 /**
- * Where the breadcrumb points.
+ * Where the breadcrumb points, for any name that describes this session.
+ *
+ * Exported separately from {@link upNextView} because the player page renders it
+ * TWICE: once from `?n=` before any request, so there is a way back even when
+ * every fetch below fails, and again from the session's release name once
+ * `.files` lands. The first of those is the one that matters — a session the
+ * registry has reaped leaves a page that can neither play nor list anything, and
+ * a breadcrumb that only appeared on success would be missing exactly then.
  *
  * A SEARCH, not a restored session: the session behind this player page is
  * ephemeral and its capability dies with it, so the honest destination is the
@@ -85,7 +92,7 @@ const HOME: Breadcrumb = { label: "torlnk", href: "/" };
  * "series" from a season or episode number, so a pack is a series and a bare
  * title with a year is a film — the same judgement every other surface makes.
  */
-function breadcrumbFor(name: string): Breadcrumb {
+export function breadcrumbFor(name: string): Breadcrumb {
   const parsed = parseRelease(name);
   if (!parsed) return HOME;
   const group = parsed.type === "series" ? "TV" : parsed.type === "movie" ? "Movies" : "";

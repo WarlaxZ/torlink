@@ -32,7 +32,7 @@ import {
   type PlayerTarget,
 } from "./playerModel";
 import { mountHls } from "./hlsMount";
-import { upNextView, type EpisodeRow } from "./upNext";
+import { breadcrumbFor, upNextView, type EpisodeRow } from "./upNext";
 import { authHeadersFor, readStoredToken } from "./token";
 import { backTarget, readReturn } from "./returnTo";
 import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
@@ -262,6 +262,11 @@ async function render(): Promise<void> {
   nameLabel.title = target.filename;
   document.title = target.filename ? `${target.filename} — torlnk` : "torlnk";
 
+  // From the URL, before any fetch — so there is a way back even if every
+  // request below fails. Upgraded to the session's release name if `.files`
+  // lands. Skipped for an unnamed link, where there is nothing to parse.
+  if (target.filename) renderBreadcrumb(target.filename);
+
   const stream = absoluteUrl(location.origin, streamPath(target));
   const playlist = absoluteUrl(location.origin, playlistPath(target));
 
@@ -428,11 +433,33 @@ function episodeRow(row: EpisodeRow): HTMLAnchorElement {
  * Hidden entirely for a single-file session, so a film looks exactly as it did
  * before this existed.
  */
+/**
+ * The way back to the show.
+ *
+ * Rendered from whatever name is available, and rendered EARLY. The first call
+ * uses `?n=`, the filename in the page's own URL, so the breadcrumb is on screen
+ * before any request has been made — and, crucially, still on screen when
+ * `.files` fails. That is the case where it matters most: a session the registry
+ * has reaped leaves a page that can neither play nor list anything, and the
+ * breadcrumb is then the only way out that does not involve the address bar. An
+ * earlier version rendered it inside `renderEpisodes`, which meant it vanished
+ * in exactly that situation.
+ *
+ * The second call, once `.files` lands, upgrades it to the session's release
+ * name — "Harrowgate.S03.1080p.WEB-DL" names the show more reliably than one
+ * episode's filename does, and for a file inside a folder it may be the only
+ * thing that names it at all.
+ */
+function renderBreadcrumb(name: string): void {
+  const crumb = breadcrumbFor(name);
+  breadcrumb.replaceChildren(link(crumb.label, crumb.href));
+  breadcrumb.hidden = false;
+}
+
 function renderEpisodes(body: StreamFilesResponse, target: PlayerTarget): void {
   const view = upNextView(body, target.sid, target.index, target.capability);
 
-  breadcrumb.replaceChildren(link(view.breadcrumb.label, view.breadcrumb.href));
-  breadcrumb.hidden = false;
+  renderBreadcrumb(body.name);
 
   if (view.rows.length === 0) {
     episodes.replaceChildren();

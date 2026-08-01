@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { upNextView } from "./upNext";
+import { breadcrumbFor, upNextView } from "./upNext";
 import type { PublicStreamFile, StreamFilesResponse } from "../wire";
 
 const SID = "sid-1";
@@ -176,6 +176,39 @@ describe("upNextView — the breadcrumb", () => {
     const crumb = upNextView(odd, SID, 0, CAP).breadcrumb;
     expect(crumb?.href).toBe("/");
     expect(crumb?.label).toBe("torlnk");
+  });
+
+  /**
+   * The player page renders the breadcrumb from `?n=` before it fetches
+   * anything, so that a session the registry has already reaped — which cannot
+   * play, cannot list its files, and cannot say why — still offers a way out.
+   * A breadcrumb that only worked off the `.files` response would be missing in
+   * exactly that case.
+   */
+  it("works from one episode's filename, not just the session name", () => {
+    expect(breadcrumbFor("Harrowgate.S03E02.1080p.WEB-DL.mkv")).toEqual({
+      label: "Harrowgate",
+      href: "/?q=Harrowgate&group=TV",
+    });
+    expect(breadcrumbFor("Kestrel.2010.1080p.BluRay.x264.mkv")).toEqual({
+      label: "Kestrel",
+      href: "/?q=Kestrel&group=Movies",
+    });
+  });
+
+  it("falls back to the dashboard for a filename that parses to nothing", () => {
+    expect(breadcrumbFor("").href).toBe("/");
+    expect(breadcrumbFor("   ").href).toBe("/");
+  });
+
+  /**
+   * A bare filename with no year and no episode still yields a search, on the
+   * All tab. It is a poor query, and it is deliberately not special-cased:
+   * "is this title meaningful?" has no rule that would not also throw away
+   * one-word titles like Kestrel and Ashfall.
+   */
+  it("searches for a bare name rather than giving up on it", () => {
+    expect(breadcrumbFor("video.mkv")).toEqual({ label: "video", href: "/?q=video" });
   });
 
   it("encodes a title that needs it", () => {
