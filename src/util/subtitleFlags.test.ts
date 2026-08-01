@@ -16,22 +16,24 @@ describe("subtitleArgs", () => {
     expect(subtitleArgs("iina", URL)).toEqual([`--mpv-sub-file=${URL}`]);
   });
 
-  it("uses --input-slave for VLC", () => {
-    expect(subtitleArgs("vlc", URL)).toEqual([`--input-slave=${URL}`]);
+  it("gives VLC no flag at all", () => {
+    // Measured against a real VLC 3.0.11: `--input-slave=<url>` loads the
+    // subtitle as an AUDIO track ("loading audio-es slave"), and
+    // `--sub-file=<url>` reaches the right track type but resolves the URL as
+    // a local path, producing garbage. There is no VLC 3 CLI flag that
+    // side-loads a subtitle from a URL, so passing one would silently
+    // misbehave — worse than passing nothing.
+    expect(subtitleArgs("vlc", URL)).toEqual([]);
   });
 
   it("recognises a player given as an absolute path", () => {
     // The configured command is often a full path on Windows and macOS.
-    expect(subtitleArgs("/Applications/VLC.app/Contents/MacOS/VLC", URL)).toEqual([
-      `--input-slave=${URL}`,
-    ]);
-    expect(subtitleArgs("C:\\Program Files\\VideoLAN\\VLC\\vlc.exe", URL)).toEqual([
-      `--input-slave=${URL}`,
-    ]);
+    expect(subtitleArgs("/Applications/VLC.app/Contents/MacOS/VLC", URL)).toEqual([]);
+    expect(subtitleArgs("C:\\Program Files\\VideoLAN\\VLC\\vlc.exe", URL)).toEqual([]);
   });
 
   it("recognises the macOS app-bundle names torlink launches with `open -a`", () => {
-    expect(subtitleArgs("VLC", URL)).toEqual([`--input-slave=${URL}`]);
+    expect(subtitleArgs("VLC", URL)).toEqual([]);
     expect(subtitleArgs("IINA", URL)).toEqual([`--mpv-sub-file=${URL}`]);
   });
 

@@ -295,7 +295,10 @@ describe("launchPlayer argv construction", () => {
     });
   });
 
-  it("uses open -a with --args separator when subtitle is provided on macOS", async () => {
+  it("launches VLC with the URL alone even when a subtitle is provided", async () => {
+    // VLC has no entry in subtitleFlags.ts: measured against a real VLC 3.0.11,
+    // there is no CLI flag that side-loads a subtitle from a URL, so
+    // `subtitleArgs` returns `[]` for it and no `--args` separator is added.
     vi.stubGlobal("process", { ...process, platform: "darwin" });
     const url = "http://stream.test/file.mkv";
     const subUrl = "http://box.test:9161/stream/abc/1.vtt";
@@ -303,7 +306,7 @@ describe("launchPlayer argv construction", () => {
     await launchPlayer("VLC", url, subUrl);
     expect(spawnCalls).toContainEqual({
       cmd: "open",
-      argv: ["-a", "VLC", url, "--args", "--input-slave=" + subUrl],
+      argv: ["-a", "VLC", url],
     });
   });
 });
