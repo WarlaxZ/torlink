@@ -44,3 +44,24 @@ export function castClock(status: {
     status.durationSec === null ? elapsed : `${elapsed} / ${formatCastTime(status.durationSec)}`;
   return status.state === "paused" ? `Paused · ${clock}` : clock;
 }
+
+/**
+ * Why a Chromecast is refusing this file, as a clause.
+ *
+ * A CLAUSE, not a sentence: both callers put "A Chromecast can't play this one —"
+ * in front of it. The server briefly had its own copy that said "a Chromecast
+ * won't demux this container", which read back from a real device as "A Chromecast
+ * can't play this one — a Chromecast won't demux this container". One
+ * implementation, so the subject is named exactly once.
+ *
+ * The container is named first because it is the blocker a user can recognise and
+ * act on ("it's an mkv"); a codec name is not.
+ */
+export function castBlockerClause(blockers: readonly string[]): string {
+  if (blockers.includes("container")) return "it won't demux this container";
+  if (blockers.includes("video")) return "it can't decode this video";
+  if (blockers.includes("audio")) return "it can't decode this audio";
+  // Never empty: a refusal with no reason is the thing this feature keeps
+  // refusing to ship.
+  return "this file isn't something it can play";
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { castClock, formatCastTime } from "./castStatus";
+import { castBlockerClause, castClock, formatCastTime } from "./castStatus";
 
 describe("formatCastTime", () => {
   it("is h:mm:ss, zero-padded past the hours", () => {
@@ -46,5 +46,26 @@ describe("castClock", () => {
     expect(castClock({ state: "loading", positionSec: 99, durationSec: 600 })).toBe(
       "Loading on the TV…",
     );
+  });
+});
+
+describe("castBlockerClause", () => {
+  it("names the container first, because it is the one a user can recognise", () => {
+    expect(castBlockerClause(["container", "audio"])).toBe("it won't demux this container");
+    expect(castBlockerClause(["video"])).toBe("it can't decode this video");
+    expect(castBlockerClause(["audio"])).toBe("it can't decode this audio");
+  });
+
+  it("never names the subject, because both callers already have", () => {
+    // THE BUG THIS PINS, seen on the wire from a real device: the server had its
+    // own copy of this text that began "a Chromecast…", so the refusal read
+    // "A Chromecast can't play this one — a Chromecast won't demux this container".
+    for (const blockers of [["container"], ["video"], ["audio"], []]) {
+      expect(castBlockerClause(blockers)).not.toMatch(/chromecast/i);
+    }
+  });
+
+  it("never returns an empty string, so a refusal always says why", () => {
+    expect(castBlockerClause([])).not.toBe("");
   });
 });

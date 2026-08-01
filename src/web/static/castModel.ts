@@ -1,5 +1,5 @@
 import type { Blocker } from "../../util/playability";
-import { castClock, formatCastTime } from "../../util/castStatus";
+import { castBlockerClause, castClock, formatCastTime } from "../../util/castStatus";
 import type { CastDevicesResponse, CastStatusResponse, StreamInfoResponse } from "../wire";
 
 /**
@@ -35,14 +35,15 @@ export interface CastButtonInput {
   hasHls: boolean;
 }
 
-/** The container is named first, because it is the blocker a user can recognise. */
+/**
+ * Why a Chromecast is refusing this file.
+ *
+ * Delegates to `src/util`, shared with the server's own refusal — the two said the
+ * same thing in different words until one of them read back from a real device as
+ * "A Chromecast can't play this one — a Chromecast won't demux this container".
+ */
 export function castBlockerReason(blockers: Blocker[]): string {
-  if (blockers.includes("container")) return "it won't demux this container";
-  if (blockers.includes("video")) return "it can't decode this video";
-  if (blockers.includes("audio")) return "it can't decode this audio";
-  // Never empty: a disabled button with no reason is the thing this whole
-  // feature is written to avoid.
-  return "this file isn't something it can play";
+  return castBlockerClause(blockers);
 }
 
 export function castButtonView(input: CastButtonInput): CastButtonView {

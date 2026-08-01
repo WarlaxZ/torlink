@@ -3618,7 +3618,12 @@ describe("the cast routes", () => {
       );
       // 409, not 200 with a message: nothing was started.
       expect(res.status).toBe(409);
-      expect((res.json as { error: string }).error).toMatch(/can't play this one/);
+      const message = (res.json as { error: string }).error;
+      expect(message).toBe("A Chromecast can't play this one — it won't demux this container.");
+      // Named once. The server briefly had its own copy of the clause that began
+      // "a Chromecast…", and the refusal read back from a real device as
+      // "A Chromecast can't play this one — a Chromecast won't demux this container".
+      expect(message.match(/chromecast/gi)).toHaveLength(1);
       expect(start).not.toHaveBeenCalled();
     });
 

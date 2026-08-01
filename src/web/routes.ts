@@ -71,10 +71,10 @@ import {
   castContentType,
   classifyFromName,
   extensionOf,
-  type Blocker,
 } from "../util/playability";
 import { isBrowserRenderable, subtitleLanguage } from "../util/subtitleFiles";
 import { playlistTitle } from "../util/playlistTitle";
+import { castBlockerClause } from "../util/castStatus";
 import type {
   AddResponse,
   CachedResponse,
@@ -1813,7 +1813,7 @@ async function startCast(deps: WebDeps, bodyText: string): Promise<WebResponse> 
   // local-ffmpeg rung in this tree — `src/util/ffmpegBin.ts` is used only for
   // ffprobe — so a blocked file with no manifest cannot be cast, and says so.
   if (blockers.length > 0 && !source.hls) {
-    return { status: 409, json: { error: `A Chromecast can't play this one — ${castRefusal(blockers)}.` } };
+    return { status: 409, json: { error: `A Chromecast can't play this one — ${castBlockerClause(blockers)}.` } };
   }
   const useHls = blockers.length > 0 && source.hls !== null;
   const url = useHls
@@ -1856,13 +1856,6 @@ async function startCast(deps: WebDeps, bodyText: string): Promise<WebResponse> 
     return { status: 502, json: { error: message } };
   }
   return { status: 200, json: castStatusOf(deps.runtime.casts) };
-}
-
-/** The container is named first, because it is the blocker a user can recognise. */
-function castRefusal(blockers: Blocker[]): string {
-  if (blockers.includes("container")) return "a Chromecast won't demux this container";
-  if (blockers.includes("video")) return "it can't decode this video codec";
-  return "it can't decode this audio";
 }
 
 async function castCommand(deps: WebDeps, bodyText: string): Promise<WebResponse> {

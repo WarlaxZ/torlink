@@ -27,6 +27,18 @@ export const RECEIVER_APP_ID = "CC1AD845";
  */
 export const HEARTBEAT_MS = 5_000;
 
+/**
+ * How often to ask the receiver where it is.
+ *
+ * IT HAS TO BE ASKED. A receiver pushes `MEDIA_STATUS` when the state CHANGES and
+ * not while it plays, so without this the position line sits at whatever the LOAD
+ * reported — measured against a real device, 0.3s for a film that had been running
+ * for thirty seconds, jumping to 47.1s the moment it was paused. Two seconds is
+ * fine for a clock that reads in seconds and is nothing on the wire: the reply is
+ * a small JSON object over a socket that is already open.
+ */
+export const STATUS_POLL_MS = 2_000;
+
 const SENDER_ID = "sender-torlink";
 const RECEIVER_ID = "receiver-0";
 const NS_CONNECTION = "urn:x-cast:com.google.cast.tp.connection";
@@ -144,8 +156,9 @@ export class CastConnection {
   private constructor(
     private readonly device: CastDevice,
     private readonly socket: CastSocket,
-    private readonly heartbeat: unknown,
-    private readonly clearHeartbeat: (handle: unknown) => void,
+    /** Every timer this connection started, so `close` and `fail` clear them all. */
+    private readonly timers: readonly unknown[],
+    private readonly clearTimer: (handle: unknown) => void,
   ) {}
 
   static async open(device: CastDevice, deps: ConnectionDeps = {}): Promise<CastConnection> {
@@ -161,8 +174,11 @@ export class CastConnection {
       throw new CastError(`${device.name} didn't answer — it may be off.`);
     }
     let conn: CastConnection | null = null;
-    const timer = setTimer(() => conn?.ping(), HEARTBEAT_MS);
-    conn = new CastConnection(device, socket, timer, clearTimer);
+    const timers = [
+      setTimer(() => conn?.ping(), HEARTBEAT_MS),
+      setTimer(() => conn?.pollStatus(), STATUS_POLL_MS),
+    ];
+    conn = new CastConnection(device, socket, timers, clearTimer);
     socket.onData((chunk) => conn!.receive(chunk));
     socket.onClose(() => conn!.fail(`Lost the connection to ${device.name}.`));
     conn.send(NS_CONNECTION, RECEIVER_ID, { type: "CONNECT" });
@@ -178,8 +194,12 @@ export class CastConnection {
   }
 
   close(): void {
-    this.clearHeartbeat(this.heartbeat);
+    this.stopTimers();
     this.socket.destroy();
+  }
+
+  private stopTimers(): void {
+    for (const timer of this.timers) this.clearTimer(timer);
   }
 
   async load(req: CastMediaRequest): Promise<void> {
@@ -287,6 +307,22 @@ export class CastConnection {
     this.send(NS_HEARTBEAT, RECEIVER_ID, { type: "PING" });
   }
 
+  /**
+   * Ask where the receiver is up to.
+   *
+   * Silent before a load: there is no media session to ask about, and a
+   * GET_STATUS without one answers with the receiver's volume rather than a
+   * position, which would overwrite a good status with an empty one.
+   */
+  private pollStatus(): void {
+    if (this.lost || this.mediaSessionId === null || !this.transportId) return;
+    this.send(NS_MEDIA, this.transportId, {
+      type: "GET_STATUS",
+      requestId: this.nextRequestId++,
+      mediaSessionId: this.mediaSessionId,
+    });
+  }
+
   private send(namespace: string, destinationId: string, payload: unknown): void {
     const message: CastMessage = {
       sourceId: SENDER_ID,
@@ -386,7 +422,7 @@ export class CastConnection {
   private fail(message: string): void {
     if (this.lost) return;
     this.lost = true;
-    this.clearHeartbeat(this.heartbeat);
+    this.stopTimers();
     for (const [id, waiting] of this.pending) {
       this.pending.delete(id);
       waiting.reject(new CastError(message));

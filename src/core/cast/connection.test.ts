@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { FrameReader, frameCastMessage, type CastMessage } from "./protocol";
-import { CastConnection, CastError, RECEIVER_APP_ID, type CastSocket } from "./connection";
+import {
+  CastConnection,
+  CastError,
+  HEARTBEAT_MS,
+  RECEIVER_APP_ID,
+  type CastSocket,
+} from "./connection";
 import type { CastDevice } from "./discover";
 
 const DEVICE: CastDevice = {
@@ -290,16 +296,19 @@ describe("status and commands", () => {
 describe("heartbeat and loss", () => {
   it("pings the receiver on the heartbeat interval", async () => {
     const fake = fakeSocket();
-    let tick: (() => void) | null = null;
+    // Two timers now — the heartbeat and the position poll — so every tick is
+    // captured rather than the last one registered.
+    const ticks: (() => void)[] = [];
     await CastConnection.open(DEVICE, {
       connect: async () => fake.socket,
-      setInterval: (cb) => {
-        tick = cb;
+      setInterval: (cb, ms) => {
+        if (ms === HEARTBEAT_MS) ticks.push(cb);
         return {};
       },
       clearInterval: () => {},
     });
-    tick!();
+    expect(ticks).toHaveLength(1);
+    ticks[0]!();
     expect(fake.typesSent()).toEqual(["CONNECT", "PING"]);
   });
 
@@ -329,17 +338,20 @@ describe("heartbeat and loss", () => {
     await expect(loading).rejects.toThrow(/Lost the connection to Living Room TV/);
   });
 
-  it("destroys the socket and stops the heartbeat on close", async () => {
+  it("destroys the socket and stops every timer on close", async () => {
     const fake = fakeSocket();
     const cleared = vi.fn();
+    let started = 0;
     const conn = await CastConnection.open(DEVICE, {
       connect: async () => fake.socket,
-      setInterval: () => ({ handle: 1 }),
+      setInterval: () => ({ handle: (started += 1) }),
       clearInterval: cleared,
     });
     conn.close();
     expect(fake.destroy).toHaveBeenCalledOnce();
-    expect(cleared).toHaveBeenCalledOnce();
+    // Every one, not just the heartbeat: a poll left running against a destroyed
+    // socket writes to nothing every two seconds, forever.
+    expect(cleared).toHaveBeenCalledTimes(started);
   });
 
   it("reports loss rather than throwing when a frame is malformed", async () => {
@@ -354,5 +366,64 @@ describe("heartbeat and loss", () => {
     header.writeUInt32BE(0xffffffff, 0);
     expect(() => fake.raw(header)).not.toThrow();
     expect(lost).toHaveBeenCalledOnce();
+  });
+});
+
+describe("position polling", () => {
+  it("asks the receiver for a status on a tick, so the position advances between state changes", async () => {
+    // THE BUG THIS EXISTS FOR, found against a real device: a receiver sends
+    // MEDIA_STATUS only when the state CHANGES, so a film played for thirty
+    // seconds still reported 0.3s. Pausing it produced 47.1s — the position was
+    // always right, it simply was not being asked for.
+    const fake = fakeSocket();
+    const ticks: (() => void)[] = [];
+    const conn = await CastConnection.open(DEVICE, {
+      connect: async () => fake.socket,
+      setInterval: (cb) => {
+        ticks.push(cb);
+        return {};
+      },
+      clearInterval: () => {},
+    });
+    const loading = conn.load({ url: "http://h/s", contentType: "video/mp4", title: "Kestrel 2010" });
+    fake.reply(RECEIVER_NS, launched(fake.requestId("LAUNCH")));
+    await vi.waitFor(() => expect(fake.typesSent()).toContain("LOAD"));
+    fake.reply(MEDIA_NS, mediaStatus(fake.requestId("LOAD")));
+    await loading;
+
+    for (const tick of ticks) tick();
+    const status = fake.payload("GET_STATUS");
+    expect(status.mediaSessionId).toBe(7);
+    expect(fake.message("GET_STATUS").destinationId).toBe("transport-1");
+  });
+
+  it("asks for nothing before anything is loaded", async () => {
+    const fake = fakeSocket();
+    const ticks: (() => void)[] = [];
+    await CastConnection.open(DEVICE, {
+      connect: async () => fake.socket,
+      setInterval: (cb) => {
+        ticks.push(cb);
+        return {};
+      },
+      clearInterval: () => {},
+    });
+    for (const tick of ticks) tick();
+    expect(fake.typesSent()).not.toContain("GET_STATUS");
+  });
+
+  it("clears every timer on close, not just the heartbeat", async () => {
+    const fake = fakeSocket();
+    const cleared: unknown[] = [];
+    let n = 0;
+    const conn = await CastConnection.open(DEVICE, {
+      connect: async () => fake.socket,
+      setInterval: () => ({ id: (n += 1) }),
+      clearInterval: (h) => cleared.push(h),
+    });
+    conn.close();
+    // One per timer this connection started. A poll left running against a
+    // destroyed socket is a write to nothing, every two seconds, forever.
+    expect(cleared).toHaveLength(n);
   });
 });
