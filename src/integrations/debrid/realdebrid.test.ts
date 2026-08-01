@@ -305,6 +305,81 @@ describe("resolveMagnet", () => {
     expect(progress.at(-1)).toBe(100);
   });
 
+  it("attaches `path` by zipping selected files with links, positionally", async () => {
+    // /unrestrict/link returns only a basename (`filename` above), never a
+    // path — so the subtitle matcher's folder-layout rule has nothing to read
+    // an SxxExx token from unless it comes from here. Confirmed against a live
+    // account: info.files.filter(selected) is the same length and order as
+    // `links`.
+    const fetchImpl = router((c) => {
+      if (c.method === "POST" && c.url.includes("/torrents/addMagnet")) {
+        return jsonRes(201, { id: "T1", uri: "rd://T1" });
+      }
+      if (c.method === "POST" && c.url.includes("/torrents/selectFiles/T1")) {
+        return emptyRes(204);
+      }
+      if (c.method === "GET" && c.url.includes("/torrents/info/T1")) {
+        return jsonRes(200, {
+          status: "downloaded",
+          progress: 100,
+          links: ["https://rd/link1", "https://rd/link2"],
+          files: [
+            { path: "/Kepler.S02E04.1080p.WEB-DL.mkv", selected: 1 },
+            { path: "/ignored-unselected.nfo", selected: 0 },
+            { path: "/Subs/Kepler.S02E04/2_English.srt", selected: 1 },
+          ],
+        });
+      }
+      if (c.method === "POST" && c.url.includes("/unrestrict/link")) {
+        const link = new URLSearchParams(c.body ?? "").get("link");
+        return link === "https://rd/link1"
+          ? jsonRes(200, { download: "https://dl/1", filename: "Kepler.S02E04.1080p.WEB-DL.mkv", filesize: 1 })
+          : jsonRes(200, { download: "https://dl/2", filename: "2_English.srt", filesize: 2 });
+      }
+      throw new Error(`unexpected call ${c.method} ${c.url}`);
+    });
+    const files = await resolveMagnet("tok", "magnet:?xt=urn:btih:abc", { fetchImpl, sleepImpl: noSleep });
+    expect(files).toEqual([
+      { url: "https://dl/1", filename: "Kepler.S02E04.1080p.WEB-DL.mkv", bytes: 1, path: "/Kepler.S02E04.1080p.WEB-DL.mkv" },
+      { url: "https://dl/2", filename: "2_English.srt", bytes: 2, path: "/Subs/Kepler.S02E04/2_English.srt" },
+    ]);
+  });
+
+  it("emits no `path` at all when selected-file count and link count disagree (guard)", async () => {
+    // A wrong path is worse than none — it would attach the wrong episode's
+    // subtitle. So a length mismatch (RD reporting something inconsistent, or
+    // this assumption turning out wrong for some account) must not zip at all.
+    const fetchImpl = router((c) => {
+      if (c.method === "POST" && c.url.includes("/torrents/addMagnet")) {
+        return jsonRes(201, { id: "T1", uri: "rd://T1" });
+      }
+      if (c.method === "POST" && c.url.includes("/torrents/selectFiles/T1")) {
+        return emptyRes(204);
+      }
+      if (c.method === "GET" && c.url.includes("/torrents/info/T1")) {
+        return jsonRes(200, {
+          status: "downloaded",
+          progress: 100,
+          links: ["https://rd/link1", "https://rd/link2"],
+          files: [{ path: "/only-one-selected.mkv", selected: 1 }],
+        });
+      }
+      if (c.method === "POST" && c.url.includes("/unrestrict/link")) {
+        const link = new URLSearchParams(c.body ?? "").get("link");
+        return link === "https://rd/link1"
+          ? jsonRes(200, { download: "https://dl/1", filename: "a.mkv", filesize: 1 })
+          : jsonRes(200, { download: "https://dl/2", filename: "b.srt", filesize: 2 });
+      }
+      throw new Error(`unexpected call ${c.method} ${c.url}`);
+    });
+    const files = await resolveMagnet("tok", "magnet:?xt=urn:btih:abc", { fetchImpl, sleepImpl: noSleep });
+    expect(files).toEqual([
+      { url: "https://dl/1", filename: "a.mkv", bytes: 1 },
+      { url: "https://dl/2", filename: "b.srt", bytes: 2 },
+    ]);
+    expect(files.every((f) => f.path === undefined)).toBe(true);
+  });
+
   it("selects all files and sends the magnet as a form body", async () => {
     const calls: Call[] = [];
     await resolveMagnet("tok", "magnet:?xt=urn:btih:abc", {

@@ -14,6 +14,26 @@
  */
 import { isVideoFilename, type NamedFile } from "./videoFiles";
 
+/**
+ * A `NamedFile` that may additionally carry the torrent-relative path
+ * (`StreamFile.path`, `src/util/player.ts`). `filename` is a basename in every
+ * producer, so rule 2 below — the `Subs/<episode>/x.srt` layout — has nothing
+ * to read an `SxxExx` token from unless the path is threaded through. Optional,
+ * because the web's `SubtitleFile` shape (`src/web/wire.ts`) has no need of it:
+ * matching happens server-side against `StreamFile`, which does carry it.
+ */
+export interface PathedFile extends NamedFile {
+  path?: string;
+}
+
+// What subtitlesFor actually reads to find an SxxExx token: the path when the
+// producer supplied one, the (basename) filename otherwise. Never silently
+// invents a path — an absent one means "no folder information", not "assume
+// the flat layout applies".
+function matchPath(f: PathedFile): string {
+  return f.path ?? f.filename;
+}
+
 const SUBTITLE_EXTS = new Set(["srt", "vtt", "ass", "ssa", "sub"]);
 
 // The two a <track> can carry, once srtToVtt has run. ass/ssa/sub need a real
@@ -145,14 +165,18 @@ function episodeToken(path: string): string | null {
  * carrying both layouts would otherwise show the same language twice.
  *
  * 1. The subtitle's basename starts with the video's basename.
- * 2. Both paths carry the same SxxExx token — the `Subs/` folder layout.
+ * 2. Both paths carry the same SxxExx token — the `Subs/` folder layout. Reads
+ *    `path` when present (see `PathedFile`) and falls back to `filename`,
+ *    which is a basename in every real producer and so will rarely carry an
+ *    SxxExx token itself for this rule — the fallback exists so a caller with
+ *    no path still gets an honest "no match" instead of a crash.
  * 3. The torrent holds exactly one video, so every subtitle in it is that
  *    video's.
  *
  * Fuzzy title matching was considered and rejected: it would occasionally
  * attach the wrong episode's subtitle, which is worse than attaching none.
  */
-export function subtitlesFor<T extends NamedFile>(video: T, files: readonly T[]): T[] {
+export function subtitlesFor<T extends PathedFile>(video: T, files: readonly T[]): T[] {
   const subs = files.filter((f) => f !== video && isSubtitleFilename(f.filename));
   if (subs.length === 0) return [];
 
@@ -160,9 +184,9 @@ export function subtitlesFor<T extends NamedFile>(video: T, files: readonly T[])
   const byPrefix = subs.filter((s) => basename(s.filename).toLowerCase().startsWith(videoBase));
   if (byPrefix.length > 0) return byPrefix;
 
-  const token = episodeToken(video.filename);
+  const token = episodeToken(matchPath(video));
   if (token) {
-    const byEpisode = subs.filter((s) => episodeToken(s.filename) === token);
+    const byEpisode = subs.filter((s) => episodeToken(matchPath(s)) === token);
     if (byEpisode.length > 0) return byEpisode;
     // A video that names an episode and found no subtitle naming the same one
     // stops here. Falling through to rule 3 would be impossible anyway (a pack

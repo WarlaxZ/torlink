@@ -40,11 +40,17 @@ export function isPremiumActive(user: RealDebridUser): boolean {
   return user.type === "premium" && (user.premium ?? 0) > 0;
 }
 
+// One entry per file Real-Debrid knows about the torrent, selected or not —
+// NOT one per `links` entry, and NOT necessarily in the same order `links`
+// arrives in for an arbitrary torrent. `resolveMagnet` below only trusts the
+// zip when `files.filter(selected)` and `links` are the same length; see the
+// comment there for why.
 export interface TorrentInfo {
   status: string;
   progress?: number;
   links?: string[];
   filename?: string;
+  files?: { path?: string; selected?: number }[];
 }
 
 export interface TorrentListItem {
@@ -446,6 +452,7 @@ export async function resolveMagnet(
   }
 
   let links: string[] = [];
+  let selectedPaths: string[] | undefined;
   let lastProgress = -1;
   let stalledMs = 0;
   for (;;) {
@@ -455,6 +462,7 @@ export async function resolveMagnet(
     onProgress?.(progress);
     if (info.status === DONE_STATUS) {
       links = info.links ?? [];
+      selectedPaths = info.files?.filter((f) => Boolean(f.selected)).map((f) => f.path ?? "");
       break;
     }
     if (ERROR_STATUSES.has(info.status)) {
@@ -489,6 +497,21 @@ export async function resolveMagnet(
     throwIfAborted(signal);
     files.push(await unrestrictLink(token, link, opts));
   }
+
+  // /unrestrict/link never returns a path — only a basename — so this is the
+  // only place a `Subs/` folder path can come from for Real-Debrid. Confirmed
+  // against a live account: `info.files.filter(selected)` is the same length
+  // and order as `links`. That is an assumption about an undocumented API, not
+  // a guarantee, so it is checked every time rather than trusted: a length
+  // mismatch means the zip would misalign, attaching one episode's subtitle
+  // path to a completely different episode's file, which is worse than
+  // attaching no path at all. So a mismatch emits nothing rather than a guess.
+  if (selectedPaths && selectedPaths.length === files.length) {
+    files.forEach((f, i) => {
+      f.path = selectedPaths![i];
+    });
+  }
+
   return files;
 }
 

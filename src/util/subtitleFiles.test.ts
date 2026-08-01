@@ -9,6 +9,14 @@ import {
 
 const f = (filename: string): { filename: string } => ({ filename });
 
+// `filename` is a basename only, as `StreamFile.filename` really is — `path`
+// carries the torrent-relative path the `Subs/` layout needs. Mirrors what a
+// real producer (torrentStream.ts, realdebrid.ts, torbox.ts) now emits.
+const fp = (filename: string, path: string): { filename: string; path: string } => ({
+  filename,
+  path,
+});
+
 describe("isSubtitleFilename", () => {
   it("accepts the five subtitle extensions", () => {
     for (const ext of ["srt", "vtt", "ass", "ssa", "sub"]) {
@@ -142,6 +150,25 @@ describe("subtitlesFor", () => {
     const exact = f("Kepler.S02E04.1080p.WEB-DL.eng.srt");
     const folder = f("Subs/Kepler.S02E04/2_English.srt");
     expect(subtitlesFor(video, [video, exact, folder])).toEqual([exact]);
+  });
+
+  it("rule 2 fires from `path` when `filename` is only a basename", () => {
+    // The real shape StreamFile.filename takes: a bare basename, the folder
+    // discarded. Without `path` carrying "Subs/Kepler.S02E04/...", rule 2 has
+    // nothing to read the SxxExx token from and this pack goes unsubtitled.
+    const video = f("Kepler.S02E04.1080p.WEB-DL.mkv");
+    const mine = fp("2_English.srt", "Subs/Kepler.S02E04/2_English.srt");
+    const theirs = fp("2_English.srt", "Subs/Kepler.S02E05/2_English.srt");
+    expect(subtitlesFor(video, [video, mine, theirs])).toEqual([mine]);
+  });
+
+  it("does NOT fire rule 2 from filename alone when `path` is absent", () => {
+    // The honest fallback: a basename-only subtitle carries no folder, so no
+    // SxxExx token is available anywhere, and the matcher must say "no match"
+    // rather than silently misfiring or guessing.
+    const video = f("Kepler.S02E04.1080p.WEB-DL.mkv");
+    const orphan = f("2_English.srt");
+    expect(subtitlesFor(video, [video, orphan])).toEqual([]);
   });
 
   it("returns nothing when the torrent has no subtitles at all", () => {

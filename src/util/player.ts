@@ -17,6 +17,15 @@ export interface StreamFile {
   filename: string;
   bytes: number;
   /**
+   * The torrent-relative path, when the producer has one ("Subs/Kepler.S02E04/2_English.srt").
+   * `filename` stays a basename everywhere — it is the persisted watched-list key,
+   * the picker's display string, and what `sortStreamFiles`/`playlistFilename` read
+   * — so this is additive, optional, and read only by the subtitle matcher's
+   * folder-layout rule (`subtitlesFor` in `./subtitleFiles`), which falls back to
+   * `filename` when a producer has none.
+   */
+  path?: string;
+  /**
    * The provider's own id for this file, when a debrid service resolved it.
    * Server-side only: it is the handle their transcode endpoint takes, and it is
    * deliberately absent from `PublicStreamFile` because the browser has no use
