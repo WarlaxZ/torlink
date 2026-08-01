@@ -1921,6 +1921,30 @@ describe("the .m3u with a matched subtitle", () => {
     const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
     expect(res.body).toContain(`/stream/${sid}/2.vtt?k=${cap}`);
   });
+
+  it("does not offer a non-renderable subtitle as the input-slave", async () => {
+    // The .vtt route always runs its source through srtToVtt, whatever the
+    // real format was. An .ass sibling run through that converter produces
+    // bytes that are valid neither as WebVTT nor as ASS, so VLC would get a
+    // subtitle file it can't use and silently show nothing. An .ass-only match
+    // must therefore behave exactly like no match: the plain single-URL form.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
+  });
+
+  it("prefers a renderable .srt over a matched .ass for the input-slave", async () => {
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s1", bytes: 40 },
+      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s2", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
+    expect(res.body).toContain(`/stream/${sid}/2.vtt?k=${cap}`);
+  });
 });
 
 describe("the .info subtitle report", () => {
