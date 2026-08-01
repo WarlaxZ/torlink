@@ -1781,6 +1781,20 @@ describe("the .vtt representation", () => {
     expect(res.status).toBe(404);
   });
 
+  it("refuses an .ass sibling too, even though it is a subtitle file", async () => {
+    // The route's OWN guard, not just its two callers'. `isSubtitleFilename`
+    // would accept this and hand back "WEBVTT" glued to raw ASS markup — valid
+    // as neither format. The two callers (the .m3u's `renderable` filter and
+    // `subtitleTracks`) already keep this from being reached today; this test
+    // pins the route itself so that stays true if a future caller forgets.
+    const { deps, sid, cap } = await readySession([
+      { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
+      { filename: "Kepler.S02E04.1080p.WEB-DL.eng.ass", url: "http://up.test/s", bytes: 40 },
+    ]);
+    const res = await request(deps, `/stream/${sid}/1.vtt?k=${cap}`);
+    expect(res.status).toBe(404);
+  });
+
   it("requires the capability, like every other representation", async () => {
     const { deps, sid } = await readySession([
       { filename: "Kestrel.2010.1080p.BluRay.x264.mkv", url: "http://up.test/v", bytes: 900 },

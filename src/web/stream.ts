@@ -39,7 +39,6 @@ import {
 } from "./proxyTarget";
 import {
   isBrowserRenderable,
-  isSubtitleFilename,
   preferredSubtitle,
   subtitleLanguage,
   subtitlesFor,
@@ -526,8 +525,17 @@ export async function handleStreamRequest(
   // check keeps it from being a general-purpose "read a whole file into memory
   // and call it text" route aimed at a 12 GB video, and the size cap is the
   // second line of that same defence.
+  //
+  // `isBrowserRenderable`, not `isSubtitleFilename`: this route always runs the
+  // source through `srtToVtt` and answers `text/vtt`, so it must only ever
+  // accept something that conversion can honestly produce. `isSubtitleFilename`
+  // also passes `.ass`/`.ssa`/`.sub`, which would come back as `WEBVTT` followed
+  // by raw ASS markup — neither valid WebVTT nor valid ASS. The two callers
+  // (`subtitleFilesFor`'s `.m3u` filter above and `subtitleTracks` in
+  // `subtitleModel.ts`) already filter to renderable files before reaching here;
+  // this guard is what makes that belt-and-braces rather than the only defence.
   if (rep === "subtitle") {
-    if (!isSubtitleFilename(file.filename)) {
+    if (!isBrowserRenderable(file.filename)) {
       writeJson(res, 404, { error: "not a subtitle" });
       return 404;
     }
