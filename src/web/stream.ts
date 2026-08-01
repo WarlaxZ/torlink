@@ -39,7 +39,6 @@ import {
 } from "./proxyTarget";
 import {
   isBrowserRenderable,
-  preferredSubtitle,
   subtitleLanguage,
   subtitlesFor,
 } from "../util/subtitleFiles";
@@ -613,6 +612,15 @@ export async function handleStreamRequest(
     // session, so nothing a client put in the URL is reflected into the body.
     // The capability is re-encoded from the value that just passed the auth
     // check — omit it and the playlist is a 401 in whatever player opens it.
+    // NOTE, so nobody re-adds it: there is deliberately no
+    // #EXTVLCOPT:input-slave line here for a matched subtitle. Measured
+    // against a real VLC 3.0.11 — `input-slave` is on VLC's unsafe-option
+    // list and is refused outright inside a `.m3u` ("unsafe option
+    // \"input-slave\" has been ignored for security reasons"), precisely so a
+    // downloaded playlist cannot make the player open arbitrary resources.
+    // VLC users get a separate subtitle download link on the player page
+    // instead; `subtitleArgs` in src/util/subtitleFlags.ts gives VLC no flag
+    // for the same reason.
     const handleUrl = (index: number): string =>
       `${origin}${streamHandle(parsed.sid, index)}?k=${encodeURIComponent(k!)}`;
 

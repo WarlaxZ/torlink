@@ -1718,8 +1718,9 @@ describe("GET /stream/:sid/:idx.m3u", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The .vtt subtitle representation, the .m3u input-slave line, and the .info
-// subtitle report.
+// The .vtt subtitle representation, the .m3u playlist (which no longer gains
+// an input-slave line for a matched subtitle — see the describe block below),
+// and the .info subtitle report.
 //
 // `readySession`/`request` are local adaptations of the shape the design brief
 // sketched, built on the helpers this file already has (`torrentSession`,
@@ -1974,17 +1975,20 @@ describe("the .vtt representation", () => {
 });
 
 describe("the .m3u with a matched subtitle", () => {
-  it("adds an input-slave line pointing at the .vtt handle", async () => {
+  // There is no input-slave (or any other) line added here any more. Measured
+  // against a real VLC 3.0.11: `#EXTVLCOPT:input-slave=<url>` is on VLC's
+  // unsafe-option list and is refused inside a `.m3u` ("unsafe option
+  // \"input-slave\" has been ignored for security reasons") — the line never
+  // did anything. So a matched subtitle changes nothing about the playlist
+  // body; all these cases are byte-identical to the no-match case.
+
+  it("is byte-identical to the single-URL form even when a subtitle matches", async () => {
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.1080p.WEB-DL.mkv", url: "http://up.test/v", bytes: 900 },
       { filename: "Kepler.S02E04.1080p.WEB-DL.eng.srt", url: "http://up.test/s", bytes: 40 },
     ]);
     const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toBe(
-      `#EXTM3U\n` +
-        `#EXTVLCOPT:input-slave=http://box.test:9161/stream/${sid}/1.vtt?k=${cap}\n` +
-        `http://box.test:9161/stream/${sid}/0?k=${cap}\n`,
-    );
+    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
   });
 
   it("is byte-identical to the old single-URL form when nothing matches", async () => {
@@ -1999,8 +2003,8 @@ describe("the .m3u with a matched subtitle", () => {
   });
 
   it("puts no torrent-supplied text in the playlist body", async () => {
-    // The constraint the original one-bare-URL form existed to guarantee. Both
-    // URLs are built from streamHandle and the capability, so a filename with a
+    // The constraint the one-bare-URL form exists to guarantee. The URL is
+    // built from streamHandle and the capability, so a filename with a
     // newline or a quote in it cannot reach a file another application parses.
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
@@ -2008,25 +2012,13 @@ describe("the .m3u with a matched subtitle", () => {
     ]);
     const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
     expect(res.body).not.toContain("evil");
-    expect(res.body.split("\n").filter(Boolean)).toHaveLength(3);
+    expect(res.body.split("\n").filter(Boolean)).toHaveLength(1);
   });
 
-  it("prefers the English subtitle for the input-slave", async () => {
-    const { deps, sid, cap } = await readySession([
-      { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
-      { filename: "Kepler.S02E04.spa.srt", url: "http://up.test/s1", bytes: 40 },
-      { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s2", bytes: 40 },
-    ]);
-    const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toContain(`/stream/${sid}/2.vtt?k=${cap}`);
-  });
-
-  it("does not offer a non-renderable subtitle as the input-slave", async () => {
-    // The .vtt route always runs its source through srtToVtt, whatever the
-    // real format was. An .ass sibling run through that converter produces
-    // bytes that are valid neither as WebVTT nor as ASS, so VLC would get a
-    // subtitle file it can't use and silently show nothing. An .ass-only match
-    // must therefore behave exactly like no match: the plain single-URL form.
+  it("is byte-identical when only a non-renderable subtitle matches", async () => {
+    // An .ass-only match used to still be treated as "no usable subtitle" by
+    // the input-slave logic; now there is no logic left to have an opinion —
+    // the body is the same either way.
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
       { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s", bytes: 40 },
@@ -2035,14 +2027,14 @@ describe("the .m3u with a matched subtitle", () => {
     expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
   });
 
-  it("prefers a renderable .srt over a matched .ass for the input-slave", async () => {
+  it("is byte-identical when both a renderable and non-renderable subtitle match", async () => {
     const { deps, sid, cap } = await readySession([
       { filename: "Kepler.S02E04.mkv", url: "http://up.test/v", bytes: 900 },
       { filename: "Kepler.S02E04.eng.ass", url: "http://up.test/s1", bytes: 40 },
       { filename: "Kepler.S02E04.eng.srt", url: "http://up.test/s2", bytes: 40 },
     ]);
     const res = await request(deps, `/stream/${sid}/0.m3u?k=${cap}`, { host: "box.test:9161" });
-    expect(res.body).toContain(`/stream/${sid}/2.vtt?k=${cap}`);
+    expect(res.body).toBe(`http://box.test:9161/stream/${sid}/0?k=${cap}\n`);
   });
 });
 
