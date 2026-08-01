@@ -202,6 +202,10 @@ const magnetInput = el<HTMLInputElement>("magnet");
 const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
+const alertBox = el<HTMLDivElement>("alert");
+const alertLine = el<HTMLSpanElement>("alert-line");
+const alertAction = el<HTMLButtonElement>("alert-action");
+const alertDismiss = el<HTMLButtonElement>("alert-dismiss");
 const conn = el<HTMLSpanElement>("conn");
 const picker = el<HTMLDialogElement>("picker");
 const pickerTitle = el<HTMLParagraphElement>("picker-title");
@@ -338,6 +342,48 @@ function showNotice(message: string): void {
     notice.hidden = true;
   }, NOTICE_MS);
 }
+
+/**
+ * Something went wrong. Says so until the user says otherwise.
+ *
+ * SEPARATE FROM showNotice, and the split is the fix. `showNotice` writes into a
+ * paragraph in normal flow and hides it after four seconds, which is right for
+ * "Added." and wrong for every failure: a play that fails ninety seconds into a
+ * resolve reports to a paragraph the user scrolled past long ago, so the app
+ * simply goes quiet. This project already diagnosed that once — it is why
+ * `#prepare` is fixed to the viewport — and this applies the same remedy to the
+ * alarming case rather than only the reassuring one.
+ *
+ * `action` is the difference between reporting a failure and letting the user
+ * do something about it. Without it, "try again" means scrolling back to find
+ * the row that failed.
+ */
+function showError(message: string, action?: { label: string; run: () => void }): void {
+  alertLine.textContent = message;
+  if (action) {
+    alertAction.textContent = action.label;
+    alertAction.hidden = false;
+    // Replaced wholesale rather than added to: this element is reused for every
+    // error, and a listener left behind would fire the previous failure's retry.
+    alertAction.onclick = () => {
+      hideError();
+      action.run();
+    };
+  } else {
+    alertAction.hidden = true;
+    alertAction.onclick = null;
+  }
+  alertBox.hidden = false;
+}
+
+function hideError(): void {
+  alertBox.hidden = true;
+  alertLine.textContent = "";
+  alertAction.hidden = true;
+  alertAction.onclick = null;
+}
+
+alertDismiss.addEventListener("click", hideError);
 
 // The waiting line, or null to take it down. This is runPlay's `progress` effect
 // — separate from `notice` because this one persists for the length of a resolve
@@ -612,13 +658,13 @@ async function control(id: string, action: string): Promise<void> {
       body: JSON.stringify({ id, action }),
     });
   } catch {
-    showNotice(`${action} failed — the server is not responding.`);
+    showError(`${action} failed — the server is not responding.`);
     setConn("lost");
     return;
   }
   if (res.ok) return;
   const body = await readEnvelope(res);
-  showNotice(body.error ?? `${action} failed (HTTP ${res.status}).`);
+  showError(body.error ?? `${action} failed (HTTP ${res.status}).`);
 }
 
 // ---- streaming ------------------------------------------------------------
@@ -693,7 +739,7 @@ async function startSession(
     // `signal.aborted` immediately after this returns and reports the cancel
     // itself, so this stays silent and lets it.
     if (signal?.aborted) return { kind: "failed" };
-    showNotice("Play failed — the server is not responding.");
+    showError("Play failed — the server is not responding.");
     setConn("lost");
     return { kind: "failed" };
   }
@@ -712,7 +758,7 @@ async function startSession(
   }
   if (!res.ok) {
     const body = await readEnvelope(res);
-    showNotice(body.error ?? `Play failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Play failed (HTTP ${res.status}).`);
     return { kind: "failed" };
   }
 
@@ -723,7 +769,7 @@ async function startSession(
     !body.session ||
     typeof body.session !== "object"
   ) {
-    showNotice("Play failed — the server sent something unreadable.");
+    showError("Play failed — the server sent something unreadable.");
     return { kind: "failed" };
   }
   return {
@@ -991,7 +1037,20 @@ async function play(
         poll: pollSession,
         stop: stopSession,
         confirm: (message) => confirm(message),
-        notice: showNotice,
+        // A cancellation clears itself; a failure persists and offers to go
+        // again. Retrying re-enters this same function with the same arguments,
+        // so "Try again" means exactly what pressing Play again would have
+        // meant — without having to scroll back and find the row.
+        notice: (message, kind) => {
+          if (kind !== "failure") {
+            showNotice(message);
+            return;
+          }
+          showError(message, {
+            label: "Try again",
+            run: () => void play(row, onUnresolved, next),
+          });
+        },
         progress: showPrepare,
         // Closes over THIS row's hash, not a module-level variable — see
         // showPicker's comment for why that distinction is load-bearing.
@@ -2571,13 +2630,13 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
       body: JSON.stringify(addBody(result, plan.via)),
     });
   } catch {
-    showNotice("Add failed — the server is not responding.");
+    showError("Add failed — the server is not responding.");
     setConn("lost");
     return;
   }
   const body = await readEnvelope(res);
   if (!res.ok) {
-    showNotice(body.error ?? `Add failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Add failed (HTTP ${res.status}).`);
     return;
   }
   if (body.outcome === "duplicate") {
@@ -3587,7 +3646,7 @@ addForm.addEventListener("submit", (event) => {
         body: JSON.stringify({ magnet }),
       });
     } catch {
-      showNotice("Add failed — the server is not responding.");
+      showError("Add failed — the server is not responding.");
       setConn("lost");
       return;
     }
@@ -3597,7 +3656,7 @@ addForm.addEventListener("submit", (event) => {
       showNotice(body.outcome === "duplicate" ? "Already in the queue." : "Added.");
       return;
     }
-    showNotice(body.error ?? `Add failed (HTTP ${res.status}).`);
+    showError(body.error ?? `Add failed (HTTP ${res.status}).`);
   })();
 });
 

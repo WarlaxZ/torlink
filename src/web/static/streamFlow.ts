@@ -433,8 +433,22 @@ export interface PlayEffects {
   stop(sessionId: string): void;
   /** A blocking yes/no. window.confirm in the browser. */
   confirm(message: string): boolean;
-  /** Transient message in the dashboard's notice line. */
-  notice(message: string): void;
+  /**
+   * A message about how this play ended.
+   *
+   * `kind` exists because the two endings need opposite treatment and this flow
+   * is the only thing that knows which it is. A CANCELLATION is the user's own
+   * doing, already expected, and a line that clears itself is right. A FAILURE
+   * is news the user did not ask for and may not be looking at — a play can fail
+   * ninety seconds into a resolve, by which point they are a thousand pixels
+   * down a browse — so it has to persist and it has to offer a way to retry
+   * without re-finding the row.
+   *
+   * Optional so the parameter can be read as "info unless stated otherwise":
+   * every existing caller and test that ignores it keeps the old behaviour, and
+   * the five failure sites opt in explicitly.
+   */
+  notice(message: string, kind?: "cancelled" | "failure"): void;
   /**
    * The waiting line, or null to take it down.
    *
@@ -556,7 +570,7 @@ export async function runPlay(
   const cancel = (sessionId: string | null): void => {
     if (sessionId) fx.stop(sessionId);
     done();
-    fx.notice(CANCELLED_NOTICE);
+    fx.notice(CANCELLED_NOTICE, "cancelled");
   };
 
   if (signal?.aborted) {
@@ -585,7 +599,7 @@ export async function runPlay(
   if (start.kind === "confirm") {
     if (!fx.confirm(confirmFallbackMessage(start.reason, row.name))) {
       done();
-      fx.notice("Playback cancelled — nothing was streamed.");
+      fx.notice("Playback cancelled — nothing was streamed.", "cancelled");
       return;
     }
     start = await fx.start(row, true, signal);
@@ -594,7 +608,7 @@ export async function runPlay(
     // asking: one prompt per click.
     if (start.kind === "confirm") {
       done();
-      fx.notice("Couldn't start that stream.");
+      fx.notice("Couldn't start that stream.", "failure");
       return;
     }
   }
@@ -612,7 +626,7 @@ export async function runPlay(
     if (decision.kind === "settled") break;
     if (decision.kind === "timeout") {
       done();
-      fx.notice(decision.message);
+      fx.notice(decision.message, "failure");
       fx.stop(sessionId);
       return;
     }
@@ -634,7 +648,7 @@ export async function runPlay(
       // The session is gone or unreadable. Not stopped here: a DELETE we can't
       // read the answer to adds nothing, and the id may not exist at all.
       done();
-      fx.notice("Lost track of that stream — try again.");
+      fx.notice("Lost track of that stream — try again.", "failure");
       return;
     }
     session = next;
@@ -645,12 +659,12 @@ export async function runPlay(
   const outcome = streamOutcome(session, wanted);
   if (outcome.kind === "error") {
     // Already worded for a human by the core, which reuses the TUI's strings.
-    fx.notice(outcome.message);
+    fx.notice(outcome.message, "failure");
     fx.stop(sessionId);
     return;
   }
   if (outcome.kind === "empty") {
-    fx.notice("There is nothing playable in that torrent.");
+    fx.notice("There is nothing playable in that torrent.", "failure");
     fx.stop(sessionId);
     return;
   }

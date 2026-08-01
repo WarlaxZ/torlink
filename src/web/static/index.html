@@ -68,6 +68,25 @@
 
     <p id="notice" class="notice" hidden></p>
 
+    <!--
+      Errors do NOT go in #notice above, and that is the whole point of this
+      element. #notice is a paragraph in normal flow that hides itself after four
+      seconds — fine for "Added.", useless for "Play failed (HTTP 502)" ninety
+      seconds into a resolve, because by then the user is a thousand pixels down
+      a browse and the paragraph is off screen. That exact failure is already
+      written up on #prepare below; this applies the same remedy to the alarming
+      case rather than only the reassuring one.
+
+      Fixed to the viewport, persists until dismissed, and carries one optional
+      action so that recovering does not mean scrolling back to re-find the row.
+      role=alert because, unlike the resolve pill, this is news.
+    -->
+    <div id="alert" class="alert" role="alert" hidden>
+      <span id="alert-line" class="alert-line"></span>
+      <button id="alert-action" type="button" hidden></button>
+      <button id="alert-dismiss" type="button" aria-label="Dismiss">✕</button>
+    </div>
+
     <!-- The stream file picker. Shown only when a session resolves to more than
          one playable file; every child below the heading is built by app.js with
          createElement, because the filenames come out of a torrent.

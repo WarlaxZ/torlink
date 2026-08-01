@@ -319,6 +319,18 @@ button:hover {
     display: block;
   }
 
+  /* AND the name must be blockified with it. `.row-name` is a <span>, so the
+     moment its parent stops being a flex container the span goes back to
+     `display: inline` — where `overflow`, `text-overflow` and `min-width` are
+     all inert, because an inline box is not a box you can clip. The ellipsis
+     above silently stopped applying and a long torrent name pushed the queue
+     pane 310px wider than the viewport: measured `scrollWidth 700` against
+     `clientWidth 390`. The saved pane was unaffected only because its rows keep
+     a flex parent, which blockifies the span for free. */
+  .row-name {
+    display: block;
+  }
+
   .row-meta {
     display: block;
     margin-top: 0.2rem;
@@ -1508,6 +1520,56 @@ select:focus-visible {
   border-radius: 0.5rem;
   background: var(--raised);
   font-size: 0.75rem;
+}
+
+/* The error banner. Deliberately the same object as .prepare — same corner, same
+   size, same shape — because they are the same kind of thing: a message about
+   work the user started that must survive scrolling. Only the colour and the
+   persistence differ, so a user who has learned where the resolve pill appears
+   has already learned where failures appear.
+
+   Above .prepare in the stacking order and offset when both are up: a resolve
+   that fails puts them on screen together for a moment. */
+.alert {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(30rem, calc(100vw - 7rem));
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--error);
+  border-radius: 0.5rem;
+  background: var(--raised);
+  font-size: 0.75rem;
+}
+
+.alert:not([hidden]) ~ .prepare {
+  bottom: 4.2rem;
+}
+
+.alert-line {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.alert button {
+  flex-shrink: 0;
+}
+
+#alert-dismiss {
+  /* Square, so the ✕ is not a wide pill next to a text button. */
+  padding: 0.35rem 0.55rem;
+}
+
+@media (max-width: 30rem) {
+  .alert {
+    left: 1rem;
+    right: 1rem;
+    max-width: none;
+  }
 }
 
 .prepare-line {
