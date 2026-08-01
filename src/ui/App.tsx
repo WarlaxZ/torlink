@@ -77,6 +77,7 @@ import { isCategory, parseSection } from "./store";
 import {
   StoreContext,
   type CaptureMode,
+  type CastRowStatus,
   type DownloadFocus,
   type Region,
   type Section,
@@ -269,6 +270,35 @@ export function App({
   // terminal is the one a browser on this process sees.
   const castsRef = useRef<CastSessionRegistry | null>(null);
   if (!castsRef.current) castsRef.current = new CastSessionRegistry();
+  // Mirrored into React state, because the registry is a plain object and a
+  // component cannot re-render from one. Kept in step by the subscription below.
+  const [castStatus, setCastStatus] = useState<CastRowStatus | null>(null);
+  // One subscription for the life of the app, so the cast row follows a device
+  // that was paused or stopped from the television's own remote — and so a lost
+  // connection reaches the screen rather than leaving a row that claims to be
+  // playing. The registry hands its notice over exactly once, which is why it is
+  // read here and not polled anywhere else in this process.
+  useEffect(() => {
+    const casts = castsRef.current!;
+    const sync = (): void => {
+      const active = casts.active();
+      setCastStatus(
+        active
+          ? {
+              deviceName: active.device.name,
+              title: active.title,
+              state: active.status.state,
+              positionSec: active.status.positionSec,
+              durationSec: active.status.durationSec,
+            }
+          : null,
+      );
+      const notice = casts.takeNotice();
+      if (notice) setNotice(notice);
+    };
+    sync();
+    return casts.onChange(sync);
+  }, []);
   const [view, setView] = useState<View>("splash");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("all");
@@ -2303,6 +2333,7 @@ export function App({
       omdbApiKey: resolveOmdbApiKey(config),
       adultEnabled: resolveAdultContent(config),
       streamActive: activeStream !== null,
+    castStatus,
       debridStatus,
       cachedHashes,
       refreshCachedHashes,
@@ -2366,6 +2397,7 @@ export function App({
     importChooser,
     importingTrakt,
     activeStream,
+    castStatus,
     captureMode,
     downloadFocus,
     seedFocus,

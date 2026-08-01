@@ -200,6 +200,18 @@ describe("config vpnInterface", () => {
   });
 });
 
+describe("config castDevice", () => {
+  it("round-trips a configured Chromecast address", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [], castDevice: "192.168.0.40:8009" });
+    expect((await loadConfig()).castDevice).toBe("192.168.0.40:8009");
+  });
+
+  it("stays absent when nothing was set, so the device list is discovery-only", async () => {
+    await saveConfig({ downloadDir: "/tmp/dl", trackers: [] });
+    expect((await loadConfig()).castDevice).toBeUndefined();
+  });
+});
+
 describe("config favourites", () => {
   it("round-trips favourites with watched episodes", async () => {
     await saveConfig({

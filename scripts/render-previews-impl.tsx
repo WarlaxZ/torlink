@@ -155,6 +155,7 @@ function makeStore(
     omdbApiKey: "",
     adultEnabled: false,
     streamActive: false,
+    castStatus: null,
     debridStatus: null,
     cachedHashes: new Set(),
     refreshCachedHashes: noop,
