@@ -175,10 +175,10 @@ describe("subtitleErrorNotice", () => {
     );
   });
 
-  it("falls back to a generic word when the label is empty", () => {
+  it("reads naturally when the label is empty, rather than stuttering", () => {
     const spec: TrackSpec = { src: "/stream/abc/1.vtt?k=cap", srclang: "", label: "", default: false };
     expect(subtitleErrorNotice(spec)).toBe(
-      "Subtitles subtitles couldn't load — try another language or turn them off.",
+      "Subtitles couldn't load — try another language or turn them off.",
     );
   });
 });

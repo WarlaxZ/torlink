@@ -42,16 +42,6 @@ export function subtitleTracks(
 }
 
 /**
- * One line naming the subtitle tracks muxed inside this file, for the fallback
- * card.
- *
- * This exists because of a real report: a season pack whose episodes each
- * carried three subtitle tracks played fine in VLC with the subtitles right
- * there in its menu, and nothing in torlink ever said so. The browser cannot
- * render them — that would mean extracting with ffmpeg — but it can say they
- * are there, which is the difference between a dead end and an instruction.
- */
-/**
  * What to say when a `<track>` the page offered fails to load — the sibling
  * `.vtt` route answered 502, or the session was reaped between the menu being
  * built and the user picking a language from it.
@@ -61,8 +51,8 @@ export function subtitleTracks(
  * *why*: the file itself, not the browser, is what's missing.
  */
 export function subtitleErrorNotice(spec: TrackSpec): string {
-  const language = spec.label || "Subtitles";
-  return `${language} subtitles couldn't load — try another language or turn them off.`;
+  if (!spec.label) return "Subtitles couldn't load — try another language or turn them off.";
+  return `${spec.label} subtitles couldn't load — try another language or turn them off.`;
 }
 
 /**
@@ -131,6 +121,16 @@ export function subtitleDownload(
   return { label: "Download subtitle", href: subtitlePath(target, preferred.index) };
 }
 
+/**
+ * One line naming the subtitle tracks muxed inside this file, for the fallback
+ * card.
+ *
+ * This exists because of a real report: a season pack whose episodes each
+ * carried three subtitle tracks played fine in VLC with the subtitles right
+ * there in its menu, and nothing in torlink ever said so. The browser cannot
+ * render them — that would mean extracting with ffmpeg — but it can say they
+ * are there, which is the difference between a dead end and an instruction.
+ */
 export function embeddedNotice(info: StreamInfoResponse | null): string {
   const tracks = info?.subtitles.embedded ?? [];
   if (tracks.length === 0) return "";
