@@ -116,4 +116,24 @@ describe("copyNotice", () => {
     expect(notice).not.toContain("secure context");
     expect(notice).not.toContain(".m3u");
   });
+
+  /**
+   * The dashboard's results list copies a magnet through the same `copyText`,
+   * and reveals it in the alert rather than in a field. One function decides
+   * the wording for both so they cannot drift into describing the same refusal
+   * differently — but it has to name the right place, because sending someone's
+   * eyes to a field that does not exist is worse than saying nothing.
+   */
+  it("names what was copied and where it went", () => {
+    expect(copyNotice("copied", "Magnet")).toBe("Magnet copied.");
+    expect(copyNotice("manual", "Magnet", "the message below")).toContain("the message below");
+    expect(copyNotice("manual", "Magnet", "the message below")).not.toContain("the field");
+  });
+
+  it("still defaults to the player page's wording", () => {
+    // The player passes neither argument, so its two messages must be byte-for
+    // -byte what they were before the parameters existed.
+    expect(copyNotice("copied")).toBe("Stream URL copied.");
+    expect(copyNotice("manual")).toContain("the field");
+  });
 });

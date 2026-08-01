@@ -292,8 +292,13 @@ export function vlcLinks(absolute: string, platform: Platform): ExternalLink[] {
  * The one that works, `Open in VLC`, was last. Where a platform has a working
  * scheme, that is the button to lead with.
  *
- * Desktop keeps `.m3u` first, which is the thing that genuinely works there —
- * `vlcLinks` returns nothing at all on Windows and Linux.
+ * EVERY DESKTOP keeps `.m3u` first, macOS included. An earlier version of this
+ * comment justified that for macOS by saying its `vlc-x-callback` scheme worked
+ * but the lossless route won anyway — which was wrong on the first half:
+ * `vlcLinks` establishes that the scheme belongs to VLC's iOS app and the
+ * desktop app registers none, so there is no macOS VLC link to lead with. The
+ * answer is the same either way; the reason is not, and the two must agree or
+ * the next person changes one of them.
  */
 export function primaryAction(platform: Platform): "vlc" | "m3u" {
   return platform === "ios" || platform === "android" ? "vlc" : "m3u";

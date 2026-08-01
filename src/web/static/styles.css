@@ -1833,6 +1833,11 @@ select:focus-visible {
 .alert-line {
   color: var(--fg);
   overflow-wrap: anywhere;
+  /* pre-line so a message can put a value on its own line — the copy-magnet
+     refusal path puts the magnet itself here for the user to select, and a
+     magnet run into the end of a sentence is not selectable in any useful way.
+     Ordinary single-line messages are unaffected. */
+  white-space: pre-line;
 }
 
 .alert button {

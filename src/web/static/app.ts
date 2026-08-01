@@ -192,6 +192,7 @@ import { authHeadersFor, readStoredToken, storeToken } from "./token";
 import { routeFromSearch, urlForRoute, type RouteState } from "./route";
 import { rememberReturn } from "./returnTo";
 import { foldRecent, magnetFor, readRecent, writeRecent } from "./recentSearches";
+import { clipboardPorts, copyNotice, copyText } from "./copyText";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -2122,21 +2123,25 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   copyButton.textContent = "copy magnet";
   tagControl(copyButton, rowKey, "copy");
   copyButton.addEventListener("click", () => {
-    // Same two failure modes as the player page's copy button, reported for the
-    // same reason: clipboard.writeText does not exist on an insecure origin —
-    // which is the normal way this dashboard is reached over a LAN — and
-    // rejects when the page is not focused. A copy button that silently does
-    // nothing is worse than no button.
-    const clip = navigator.clipboard;
     const magnet = magnetFor(result.infoHash, result.name);
-    if (!clip) {
-      showNotice("Copying needs a secure context (https or localhost).");
-      return;
-    }
-    void clip.writeText(magnet).then(
-      () => showNotice("Magnet copied."),
-      () => showNotice("Couldn't copy that magnet."),
-    );
+    // THROUGH copyText, not navigator.clipboard directly. `navigator.clipboard`
+    // exists only in a secure context, and the normal way this dashboard is
+    // reached is a LAN address — so a bare `writeText` here would do nothing but
+    // explain itself on the very surface this button is for. copyText falls back
+    // to execCommand, which is why it must be called straight from the click
+    // with nothing awaited in front of it: the browser only permits that inside
+    // the task the gesture started.
+    const outcome = copyText(magnet, clipboardPorts());
+    void Promise.resolve(outcome).then((res) => {
+      if (res === "copied") {
+        showNotice(copyNotice(res, "Magnet"));
+        return;
+      }
+      // Refused. The alert is this page's equivalent of the player's read-only
+      // field: it persists, and its line is selectable text — so putting the
+      // magnet in it means the button still gets the user what they came for.
+      showError(`${copyNotice(res, "Magnet", "the message below")}\n${magnet}`);
+    });
   });
   actions.append(copyButton);
 

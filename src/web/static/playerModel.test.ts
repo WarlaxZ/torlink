@@ -422,10 +422,12 @@ describe("primaryAction", () => {
   });
 
   /**
-   * macOS has a working vlc-x-callback scheme, but it also has a desktop OS's
-   * file handling — a downloaded .m3u opens VLC there. The lossless route wins.
+   * macOS is a desktop, and `vlcLinks` returns nothing for it — the
+   * vlc-x-callback scheme belongs to VLC's iOS app, not the desktop one. So
+   * there is no VLC button to lead with even if this said otherwise.
    */
   it("keeps the .m3u first on macOS", () => {
     expect(primaryAction("macos")).toBe("m3u");
+    expect(vlcLinks("http://x/y", "macos")).toEqual([]);
   });
 });
