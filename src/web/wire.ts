@@ -132,6 +132,48 @@ export interface StreamInfoResponse {
 }
 
 /**
+ * `GET /stream/:sid/:idx.files?k=…` — everything else in this session.
+ *
+ * Capability-authenticated for the same reason `.info` is: the player page is a
+ * separate document that knows only what its own URL tells it, and it may be a
+ * phone that was handed a link, so it holds the session capability and not the
+ * server's bearer token.
+ *
+ * WHY THE PLAYER PAGE NEEDS THIS AT ALL. Without it the page knows about one
+ * file, so finishing an episode means going Back — which, before this, threw
+ * the whole search away. The terminal never had that problem: its picker stays
+ * open after launching a player (`src/ui/App.tsx`, `playFromPicker`) precisely
+ * so the next episode is one keypress. This is the browser catching up.
+ *
+ * `files` REUSES `PublicStreamFile` rather than declaring a parallel shape, and
+ * is produced by `toPublicSession` — so it inherits that function's guarantee
+ * that the upstream URL (a debrid credential, or a useless localhost address)
+ * is replaced by a `/stream/:sid/:idx` handle. A second mapping here would be
+ * the fifth copy-then-drift bug in this codebase's ledger.
+ *
+ * It carries only the video candidates (`streamCandidates`), and it is in
+ * SESSION ORDER — `index` addresses the session, so the two cannot be conflated.
+ * Display order is the page's business and it applies the same
+ * `sortStreamFiles` the picker does.
+ */
+export interface StreamFilesResponse {
+  /** The session's release name, e.g. `Harrowgate.S03.1080p.WEB-DL`. */
+  name: string;
+  /**
+   * The torrent this session is of.
+   *
+   * Here so the player page can record the episode it opened — `POST
+   * /api/library {action:"watched"}` is keyed by info hash, and a page that
+   * knows only its own URL has no other way to learn it. Not a disclosure: an
+   * info hash is a torrent's public name, the search results the user clicked
+   * through already carried it, and whoever holds this session's capability can
+   * already stream every byte of the thing it identifies.
+   */
+  infoHash: string;
+  files: PublicStreamFile[];
+}
+
+/**
  * A live stream session as a browser is allowed to see it. The body of
  * `GET /api/stream/:sid`, and the `session` field of the start response.
  *

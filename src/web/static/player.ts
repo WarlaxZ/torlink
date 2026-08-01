@@ -19,6 +19,7 @@ import {
   chooseSource,
   detectPlatform,
   fallbackMessage,
+  filesPath,
   infoPath,
   interruptedNotice,
   parsePlayerLocation,
@@ -30,14 +31,19 @@ import {
   type PlayerTarget,
 } from "./playerModel";
 import { mountHls } from "./hlsMount";
-import type { StreamInfoResponse } from "../wire";
+import { upNextView, type EpisodeRow } from "./upNext";
+import { authHeadersFor, readStoredToken } from "./token";
+import type { LibraryRequest, StreamFilesResponse, StreamInfoResponse } from "../wire";
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+const backLink = el<HTMLAnchorElement>("back");
+const breadcrumb = el<HTMLParagraphElement>("breadcrumb");
 const nameLabel = el<HTMLParagraphElement>("file-name");
 const stage = el<HTMLDivElement>("stage");
 const actions = el<HTMLDivElement>("actions");
 const notice = el<HTMLParagraphElement>("notice");
+const episodes = el<HTMLDivElement>("episodes");
 const NOTICE_MS = 4000;
 
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -280,6 +286,21 @@ async function render(): Promise<void> {
   }
   actions.replaceChildren(...controls);
 
+  // The rest of the torrent, and the bookkeeping — BEFORE the playability
+  // question below, and never gated on its answer. The whole reported failure
+  // is the flow where the browser CANNOT play the file: the user downloads the
+  // .m3u, watches it in VLC, comes back, and wants the next episode. Putting
+  // this after an early `return` would remove it from exactly that case.
+  //
+  // Not awaited: `.files` is a small JSON read and the playability probe behind
+  // `.info` can take seconds, so they run together and whichever lands first
+  // paints. Nothing below depends on this.
+  void fetchFiles(target).then((body) => {
+    if (!body) return; // offline, a 401, an older server — the page still plays
+    recordPlayed(body, target);
+    renderEpisodes(body, target);
+  });
+
   // Ask the server what this file actually is before creating any element. This
   // is what removes the twelve-second black rectangle: a container or codec the
   // browser refuses is now known up front rather than discovered by a decode
@@ -320,5 +341,146 @@ async function fetchInfo(target: PlayerTarget): Promise<StreamInfoResponse | nul
     return null;
   }
 }
+
+/** Fetch `.files`, or null. Null on any failure, for the reason `fetchInfo` is. */
+async function fetchFiles(target: PlayerTarget): Promise<StreamFilesResponse | null> {
+  try {
+    const res = await fetch(absoluteUrl(location.origin, filesPath(target)));
+    if (!res.ok) return null;
+    return (await res.json()) as StreamFilesResponse;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tell the server this file was opened, so Continue-watching keeps advancing.
+ *
+ * THE SAME CALL THE PICKER MAKES, deliberately. `app.ts` fires this before
+ * navigating here, which was the only writer while the picker was the only way
+ * to reach a player page. Jumping episode to episode from the list below never
+ * touches the picker, so without this the high-water mark would freeze at
+ * whichever episode you happened to pick — and the saved pane would keep
+ * offering an episode you watched an hour ago.
+ *
+ * One mechanism, two call sites, one route. `recordPlayedFile`
+ * (`src/core/streamHistory.ts`) is a high-water mark that returns the same array
+ * reference when nothing moved, so recording twice costs nothing and the
+ * picker's call stays as the fallback for when this one cannot be made.
+ *
+ * BEST-EFFORT, and silent. `/api/library` needs the bearer token, which this
+ * page reads from sessionStorage: `openPlayer` navigates the same tab, so it is
+ * simply there for the ordinary flow. A cold-opened player URL — a bookmark, a
+ * link handed to a phone — has no token and does not record, which is the right
+ * answer for someone else's link anyway. Nothing here is worth interrupting
+ * playback to report.
+ */
+function recordPlayed(body: StreamFilesResponse, target: PlayerTarget): void {
+  const filename = body.files.find((f) => f.index === target.index)?.filename;
+  if (!filename) return;
+  const request: LibraryRequest = {
+    infoHash: body.infoHash,
+    name: body.name,
+    action: "watched",
+    filename,
+  };
+  void fetch("/api/library", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeadersFor(readStoredToken()) },
+    body: JSON.stringify(request),
+  }).catch(() => {});
+}
+
+/** One heading in the episode list. A `<p>`, not an `<h*>`: it labels a run of rows. */
+function listHeading(text: string): HTMLParagraphElement {
+  const p = document.createElement("p");
+  p.className = "episodes-heading";
+  p.textContent = text;
+  return p;
+}
+
+/**
+ * One row: a link to the same page for a different file.
+ *
+ * `textContent`, as everywhere on this page — a filename comes out of a torrent,
+ * i.e. from whoever uploaded it. The `href` is a property assignment built by
+ * `playerPath`, not markup.
+ */
+function episodeRow(row: EpisodeRow): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.className = row.current ? "episode-row is-current" : "episode-row";
+  a.href = row.href;
+  a.textContent = row.label;
+  a.title = row.file.filename;
+  if (row.current) {
+    // The page you are already on. Announced rather than merely styled, so the
+    // list reads the same to a screen reader as it looks.
+    a.setAttribute("aria-current", "true");
+  }
+  return a;
+}
+
+/**
+ * The rest of the torrent, under the player.
+ *
+ * Hidden entirely for a single-file session, so a film looks exactly as it did
+ * before this existed.
+ */
+function renderEpisodes(body: StreamFilesResponse, target: PlayerTarget): void {
+  const view = upNextView(body, target.sid, target.index, target.capability);
+
+  breadcrumb.replaceChildren(link(view.breadcrumb.label, view.breadcrumb.href));
+  breadcrumb.hidden = false;
+
+  if (view.rows.length === 0) {
+    episodes.replaceChildren();
+    episodes.hidden = true;
+    return;
+  }
+
+  const nodes: HTMLElement[] = [];
+  // "Up next" sits ABOVE the full list on purpose: it is the one action this
+  // page exists to offer, and it must not depend on scrolling past sixty rows.
+  if (view.next) {
+    nodes.push(listHeading("up next"), episodeRow(view.next));
+  }
+  nodes.push(listHeading(view.next ? "all episodes" : "everything in this torrent"));
+  for (const row of view.rows) {
+    if (row.heading) nodes.push(listHeading(row.heading));
+    nodes.push(episodeRow(row));
+  }
+  episodes.replaceChildren(...nodes);
+  episodes.hidden = false;
+}
+
+/** A plain anchor. Same rule as everything else here: textContent, href as a property. */
+function link(text: string, href: string): HTMLAnchorElement {
+  const a = document.createElement("a");
+  a.textContent = text;
+  a.href = href;
+  return a;
+}
+
+/**
+ * Back means "the page I came from", when there is one.
+ *
+ * The `href` in the markup is the fallback and stays working: a bookmarked
+ * player URL, or one opened in a new tab, has no history entry to return to, and
+ * `history.back()` there would either do nothing or leave the site. The referrer
+ * check is what distinguishes the two — same-origin means the dashboard sent us
+ * here, and the dashboard now keeps its query in its own URL, so going back one
+ * entry restores the search rather than reloading an empty one.
+ */
+backLink.addEventListener("click", (event) => {
+  let sameOrigin = false;
+  try {
+    sameOrigin = document.referrer !== "" && new URL(document.referrer).origin === location.origin;
+  } catch {
+    sameOrigin = false; // a malformed referrer is not a page we can go back to
+  }
+  if (!sameOrigin || history.length <= 1) return; // let the href do its job
+  event.preventDefault();
+  history.back();
+});
 
 void render();

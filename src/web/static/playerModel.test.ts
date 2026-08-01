@@ -5,6 +5,7 @@ import {
   detectPlatform,
   extensionOf,
   fallbackMessage,
+  filesPath,
   infoPath,
   interruptedNotice,
   parsePlayerLocation,
@@ -118,6 +119,20 @@ describe("infoPath", () => {
 
   it("omits the query entirely when there is no capability", () => {
     expect(infoPath(target({ capability: "" }))).toBe("/stream/sid-1/0.info");
+  });
+});
+
+describe("filesPath", () => {
+  it("is the stream handle plus .files, carrying the capability", () => {
+    expect(filesPath(target())).toBe("/stream/sid-1/0.files?k=cap-1");
+  });
+
+  it("encodes a session id with a slash in it", () => {
+    expect(filesPath(target({ sid: "a/b" }))).toBe("/stream/a%2Fb/0.files?k=cap-1");
+  });
+
+  it("omits the query entirely when there is no capability", () => {
+    expect(filesPath(target({ capability: "" }))).toBe("/stream/sid-1/0.files");
   });
 });
 
