@@ -1,12 +1,13 @@
 import path from "node:path";
 import os from "node:os";
 import { promises as fs } from "node:fs";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { DownloadQueue, seedPolicyReached, strayDownload, type DebridDeps } from "./queue";
 import type { HistoryItem } from "./history";
 import { RealDebridError } from "../integrations/debrid/realdebrid";
 import { TorBoxError } from "../integrations/debrid/torbox";
 import { deleteTorrentMeta, saveTorrentMeta } from "./persist";
+import type { AddHandlers } from "./engine";
 
 const tmpDirs: string[] = [];
 
@@ -467,6 +468,168 @@ describe("DownloadQueue Real-Debrid scheduling", () => {
     q.cancel("rd1");
     await waitFor(async () => !(await fileExists(file)), "partial file deleted"); // async best-effort cleanup
     q.suspend();
+  });
+});
+
+describe("DownloadQueue.fetchAndExportTorrent", () => {
+  it("exports cached metadata immediately, without touching the engine", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fetch-export-"));
+    const fakeEngine = (q as unknown as { engine: { add: () => void } }).engine;
+    fakeEngine.add = () => {
+      throw new Error("must not touch the engine when metadata is cached");
+    };
+    try {
+      await saveTorrentMeta("cached1", new Uint8Array([1, 2, 3]));
+      const file = await q.fetchAndExportTorrent(
+        {
+          id: "cached1",
+          name: "Cached Torrent",
+          magnet: "magnet:?xt=urn:btih:cccccccccccccccccccccccccccccccccccccccc",
+        },
+        outDir,
+      );
+      expect(file).toBe(path.join(outDir, "Cached Torrent.torrent"));
+      await expect(fs.readFile(file!)).resolves.toEqual(Buffer.from([1, 2, 3]));
+    } finally {
+      deleteTorrentMeta("cached1");
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
+  });
+
+  it("skips a magnet already active in the queue instead of double-adding it", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fetch-export-"));
+    const fakeEngine = (q as unknown as { engine: { add: () => void } }).engine;
+    fakeEngine.add = () => {
+      throw new Error("must not add a torrent that's already active in the queue");
+    };
+    (q as unknown as { items: Map<string, unknown> }).items.set("active1", {});
+    try {
+      const file = await q.fetchAndExportTorrent(
+        {
+          id: "active1",
+          name: "Active",
+          magnet: "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+        outDir,
+      );
+      expect(file).toBeNull();
+    } finally {
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
+  });
+
+  it("fetches metadata over the network, tears the handle down immediately, then exports", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fetch-export-"));
+    const removed: string[] = [];
+    const fakeEngine = (
+      q as unknown as {
+        engine: {
+          add: (id: string, magnet: string, dir: string, handlers: AddHandlers) => void;
+          remove: (id: string) => void;
+        };
+      }
+    ).engine;
+    fakeEngine.add = (_id, _magnet, _dir, handlers) => {
+      handlers.onMetadata?.({
+        name: "Fresh Torrent",
+        total: 100,
+        files: 1,
+        fileList: [{ index: 0, name: "Fresh Torrent.mkv", path: "Fresh Torrent.mkv", length: 100 }],
+        torrentFile: new Uint8Array([9, 9, 9]),
+      });
+    };
+    fakeEngine.remove = (id) => removed.push(id);
+    try {
+      const file = await q.fetchAndExportTorrent(
+        {
+          id: "fresh1",
+          name: "Fresh Torrent",
+          magnet: "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+        outDir,
+      );
+      expect(file).toBe(path.join(outDir, "Fresh Torrent.torrent"));
+      await expect(fs.readFile(file!)).resolves.toEqual(Buffer.from([9, 9, 9]));
+      // Removed before export resolves: no file content ever hits disk.
+      expect(removed).toEqual(["__meta__fresh1"]);
+    } finally {
+      deleteTorrentMeta("fresh1");
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
+  });
+
+  it("resolves null and tears down the handle when the metadata fetch fails", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fetch-export-"));
+    const removed: string[] = [];
+    const fakeEngine = (
+      q as unknown as {
+        engine: {
+          add: (id: string, magnet: string, dir: string, handlers: AddHandlers) => void;
+          remove: (id: string) => void;
+        };
+      }
+    ).engine;
+    fakeEngine.add = (_id, _magnet, _dir, handlers) => {
+      handlers.onError?.("no peers");
+    };
+    fakeEngine.remove = (id) => removed.push(id);
+    try {
+      const file = await q.fetchAndExportTorrent(
+        {
+          id: "gone1",
+          name: "Gone",
+          magnet: "magnet:?xt=urn:btih:dddddddddddddddddddddddddddddddddddddddd",
+        },
+        outDir,
+      );
+      expect(file).toBeNull();
+      expect(removed).toEqual(["__meta__gone1"]);
+    } finally {
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
+  });
+
+  it("gives up after a metadata timeout and tears the handle down", async () => {
+    const q = new DownloadQueue();
+    const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "torlink-fetch-export-"));
+    const removed: string[] = [];
+    const fakeEngine = (
+      q as unknown as {
+        engine: {
+          add: (id: string, magnet: string, dir: string, handlers: AddHandlers) => void;
+          remove: (id: string) => void;
+        };
+      }
+    ).engine;
+    // A magnet with no peers: neither onMetadata nor onError ever fires.
+    fakeEngine.add = () => {};
+    fakeEngine.remove = (id) => removed.push(id);
+    vi.useFakeTimers();
+    try {
+      const pending = q.fetchAndExportTorrent(
+        {
+          id: "stuck1",
+          name: "Stuck",
+          magnet: "magnet:?xt=urn:btih:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        },
+        outDir,
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(await pending).toBeNull();
+      expect(removed).toEqual(["__meta__stuck1"]);
+    } finally {
+      vi.useRealTimers();
+      await fs.rm(outDir, { recursive: true, force: true });
+      q.suspend();
+    }
   });
 });
 

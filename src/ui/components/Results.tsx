@@ -207,6 +207,11 @@ function Detail({
           </>
         ) : null}
         <Text dimColor>{`  ${ICON.dot}  `}</Text>
+        <Text color={COLOR.accent} bold>
+          e
+        </Text>
+        <Text color={COLOR.text}> Export</Text>
+        <Text dimColor>{`  ${ICON.dot}  `}</Text>
         <Text color={COLOR.alt}>esc</Text>
         <Text dimColor> back</Text>
       </Box>
@@ -241,6 +246,8 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     streamResult,
     debridProvider,
     copyMagnet,
+    fetchAndExportTorrent,
+    setResultFocus,
     contentWidth,
     listRows,
     queue,
@@ -406,6 +413,15 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   useEffect(() => {
     if (!focused) setMode("list");
   }, [focused]);
+
+  // Mirrors the detail/list split into the store so the footer can advertise the
+  // keys the current view actually binds. Cleared on blur so another section's
+  // footer is never rendered against a stale results focus.
+  useEffect(() => {
+    if (!focused) return;
+    setResultFocus(mode === "detail" ? "detail" : "list");
+    return () => setResultFocus(null);
+  }, [mode, focused, setResultFocus]);
 
   // Entering search mode remounts the TextField with `query` in it, so the draft
   // is resynced to match. Otherwise leaving the box with text in it and arrowing
@@ -736,6 +752,8 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       else if (input === "y" && detail) copyResultMagnet(detail);
       else if (input === "i" && detail) openImdbFor(detail.name);
       else if (input === "b" && detail && canFavourite(detail)) toggleFavourite(favInput(detail));
+      else if (input === "e" && detail)
+        fetchAndExportTorrent({ id: detail.infoHash, name: detail.name, magnet: detail.magnet });
     },
     { isActive: focused && mode === "detail" },
   );
@@ -1020,11 +1038,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                       {showStats ? (
                         <>
                           <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                            <Text dimColor>{r.sizeBytes > 0 ? formatBytes(r.sizeBytes) : "-"}</Text>
+                            <Text
+                              dimColor={!here}
+                              bold={here}
+                            >{r.sizeBytes > 0 ? formatBytes(r.sizeBytes) : "-"}
+                            </Text>
                           </Box>
                           <Box width={9} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                            <Text color={r.seeders > 0 ? COLOR.good : undefined} dimColor={r.seeders === 0}>
-                              {r.seeders || r.leechers
+                            <Text
+                              color={r.seeders > 0 ? COLOR.good : undefined}
+                              dimColor={!here}
+                              bold={here}
+                            >{r.seeders || r.leechers
                                 ? `${formatCount(r.seeders)}:${formatCount(r.leechers)}`
                                 : "-"}
                             </Text>
@@ -1032,12 +1057,19 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                         </>
                       ) : (
                         <Box width={12} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                          <Text dimColor>{formatRelative(r.added) || "-"}</Text>
+                          <Text
+                            dimColor={!here}
+                            bold={here}
+                          >{formatRelative(r.added) || "-"}
+                          </Text>
                         </Box>
                       )}
                       <Box width={4} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                        <Text color={ss.color} dimColor={!here}>
-                          {ss.tag}
+                        <Text
+                          color={ss.color}
+                          dimColor={!here}
+                          bold={here}
+                        >{ss.tag}
                         </Text>
                       </Box>
                     </Box>
