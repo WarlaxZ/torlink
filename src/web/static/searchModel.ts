@@ -515,6 +515,34 @@ export function addBody(
 }
 
 /**
+ * The `POST /api/export` body for a search hit.
+ *
+ * `name` matters more here than it does in `addBody`: it is not a list label,
+ * it is the name of the file written to disk. Without it the user gets
+ * "3f2a1c….torrent" in their downloads folder.
+ */
+export function exportBody(result: PublicSearchResult): { infoHash: string; name: string } {
+  return { infoHash: result.infoHash, name: result.name };
+}
+
+/**
+ * What to tell the user after a successful export.
+ *
+ * The path is the SERVER's, and this dashboard is usually open on a different
+ * machine — so the notice names the folder rather than just saying "exported",
+ * which on a remote surface is a claim with nowhere to go and check it.
+ *
+ * Splits on both separators because the server may be Windows while the browser
+ * is not; there is no `path` module here and `navigator.platform` would be
+ * answering for the wrong machine anyway.
+ */
+export function exportedNotice(file: string): string {
+  const cut = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+  if (cut < 0) return `Exported ${file}.`;
+  return `Exported ${file.slice(cut + 1)} to ${file.slice(0, cut)}.`;
+}
+
+/**
  * Whether a preview is worth asking OMDb about for this tab.
  *
  * The TUI gates its preview pane the same way (`previewSection` in

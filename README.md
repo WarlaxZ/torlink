@@ -198,7 +198,9 @@ re-sort without scrolling back to the top of a long browse. Press **`/`** to jum
 anywhere, and drive the list with the arrow keys.
 
 From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid
-provider is configured, or **play** it straight away. Under TorBox, a result already on their servers
+provider is configured, **play** it straight away, **copy magnet**, or **export .torrent** — the same
+metadata-only export as the terminal's `e`, writing the file into the download folder on the machine
+torlink is running on, and telling you which folder that was. Under TorBox, a result already on their servers
 also carries a **cached** marker — Real-Debrid results never show one, for the same reason the terminal
 doesn't (see [Debrid](#debrid-real-debrid-or-torbox)).
 
@@ -226,9 +228,8 @@ anything other than loopback requires a token.
 
 - **No restarting a stopped seed.** Stopping one drops it out of the status payload into history, which
   the browser can't see. (A failed *download* is a different thing and does have a **Retry** button.)
-- **No exporting a `.torrent` and no "open folder".** Both are TUI-only: one needs a file the browser
-  would have to be handed, the other means opening a file manager on the machine torlink is running on,
-  which a phone on your sofa is not.
+- **No "open folder".** TUI-only, because it means opening a file manager on the machine torlink is
+  running on, which a phone on your sofa is not. (Exporting a `.torrent` *is* here — see below.)
 - **Two keyboard shortcuts, not the terminal's hundred-odd.** `/` focuses the search box from anywhere
   and the arrow keys walk the results. There is no `?` overlay — the browser is buttons, and the
   shortcuts worth having on a surface you mostly touch are few.
@@ -279,6 +280,10 @@ fetches its poster and plot and renders them right in the terminal (bring your o
 
 Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50;
 press `Enter` to run one again or `x` to remove it.
+
+Press `Enter` on a result to open its details, and `e` there to save it as a `.torrent` file in your
+download folder — handy for handing a release to another client. Nothing is downloaded: torlink fetches
+just the metadata and drops the connection the moment it arrives.
 
 <p align="center">
   <img src="preview/browse.svg" alt="torlink's Movies view: the sidebar, search bar, merged results, and a preview pane showing the highlighted film's poster and plot" style="max-width: 1024px; width: 100%; height: auto;">
