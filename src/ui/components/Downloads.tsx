@@ -66,24 +66,31 @@ function SourceBadge({
   method,
   source,
   dim,
+  bold,
 }: {
   method: "RD" | "TB" | "P2P" | null;
   source?: SourceId;
   dim?: boolean;
+  bold?: boolean;
 }) {
   const ss = source ? SOURCE_STYLE[source] : undefined;
   const methodColor = method === "RD" || method === "TB" ? COLOR.good : COLOR.warn;
-  if (!method && !ss) return <Text dimColor>mag</Text>;
+  if (!method && !ss)
+    return (
+      <Text dimColor bold={bold}>
+        mag
+      </Text>
+    );
   return (
     <Text>
       {method ? (
-        <Text color={methodColor} dimColor={dim}>
+        <Text color={methodColor} dimColor={dim} bold={bold}>
           {method}
         </Text>
       ) : null}
       {method && ss ? <Text dimColor>·</Text> : null}
       {ss ? (
-        <Text color={ss.color} dimColor={dim}>
+        <Text color={ss.color} dimColor={dim} bold={bold}>
           {ss.tag}
         </Text>
       ) : null}
@@ -267,10 +274,19 @@ export function Downloads() {
                 </Text>
               </Box>
               <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                <Text dimColor>{it.totalBytes > 0 ? formatBytes(it.totalBytes) : "-"}</Text>
+                <Text
+                  dimColor={!here}
+                  bold={here}
+                >{it.totalBytes > 0 ? formatBytes(it.totalBytes) : "-"}
+                </Text>
               </Box>
               <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-                <SourceBadge method={deliveryMethod(it.via, it.provider)} source={it.source} dim={!here} />
+                <SourceBadge
+                  method={deliveryMethod(it.via, it.provider)}
+                  source={it.source}
+                  dim={!here}
+                  bold={here}
+                />
               </Box>
             </Box>
             <Box>
@@ -321,16 +337,25 @@ export function Downloads() {
               </Text>
             </Box>
             <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-              <Text dimColor>{h.sizeBytes > 0 ? formatBytes(h.sizeBytes) : "-"}</Text>
+              <Text
+                dimColor={!here}
+                bold={here}
+              >{h.sizeBytes > 0 ? formatBytes(h.sizeBytes) : "-"}
+              </Text>
             </Box>
             <Box width={12} flexShrink={0} marginLeft={1} justifyContent="flex-end">
-              <Text dimColor>{when || "-"}</Text>
+              <Text
+                dimColor={!here}
+                bold={here}
+              >{when || "-"}
+              </Text>
             </Box>
             <Box width={8} flexShrink={0} marginLeft={1} justifyContent="flex-end">
               <SourceBadge
                 method={h.via === undefined ? null : deliveryMethod(h.via, h.provider)}
                 source={h.source}
                 dim={!here}
+                bold={here}
               />
             </Box>
           </Box>

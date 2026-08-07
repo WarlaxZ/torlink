@@ -12,6 +12,8 @@ import {
   debridProviderLabel,
   emptyView,
   erroredSources,
+  exportBody,
+  exportedNotice,
   modeForQuery,
   parseGrouping,
   parseLayout,
@@ -536,6 +538,37 @@ describe("addBody", () => {
 
   it("carries no magnet — that field is not on the wire at all", () => {
     expect(addBody(result(), "p2p")).not.toHaveProperty("magnet");
+  });
+});
+
+describe("exportBody", () => {
+  it("sends the name, not just the hash — the name IS the exported filename", () => {
+    // MUTATION GUARD, and a sharper one than addBody's: drop the name here and
+    // the user does not get a badly-labelled queue row, they get a file on disk
+    // called "3f2a….torrent".
+    const body = exportBody(result({ infoHash: "3f2a", name: "Kestrel 2010" }));
+    expect(body).toEqual({ infoHash: "3f2a", name: "Kestrel 2010" });
+    expect(body.name).not.toBe(body.infoHash);
+  });
+
+  it("carries no magnet — a search hit has none on the wire", () => {
+    expect(exportBody(result())).not.toHaveProperty("magnet");
+  });
+});
+
+describe("exportedNotice", () => {
+  it("names the folder the file landed in, since the disk is the server's", () => {
+    // On a LAN dashboard the export is on a machine the user may not be sitting
+    // at. "Exported." alone gives them nothing to go looking with.
+    expect(exportedNotice("/downloads/Kestrel 2010.torrent")).toContain("/downloads");
+  });
+
+  it("survives a Windows path", () => {
+    expect(exportedNotice("C:\\Users\\a\\Downloads\\Kestrel.torrent")).toContain("Kestrel.torrent");
+  });
+
+  it("falls back to the bare path when there is no separator to split on", () => {
+    expect(exportedNotice("Kestrel.torrent")).toContain("Kestrel.torrent");
   });
 });
 

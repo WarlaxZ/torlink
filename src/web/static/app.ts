@@ -46,6 +46,8 @@ import {
   debridAddLabel,
   debridProviderLabel,
   emptyView,
+  exportBody,
+  exportedNotice,
   defaultExpandedKeys,
   groupCountLabel,
   groupHeading,
@@ -704,6 +706,8 @@ function render(): void {
 interface ApiError {
   error?: string;
   outcome?: string;
+  /** `POST /api/export`'s server-side path. Present only on its 200. */
+  file?: string;
 }
 
 // A response body as a plain object, or {} for anything that is not one —
@@ -2145,7 +2149,50 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   });
   actions.append(copyButton);
 
+  // The terminal's `e` in the results detail view. Writes the .torrent next to
+  // the user's other downloads WITHOUT downloading the content — the server
+  // fetches metadata only and tears the handle down as it arrives.
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.textContent = "export .torrent";
+  tagControl(exportButton, rowKey, "export");
+  exportButton.addEventListener("click", () => void exportResult(result, exportButton));
+  actions.append(exportButton);
+
   return actions;
+}
+
+// Disabled while in flight because it is not instant: a magnet with no cached
+// metadata joins the swarm and can sit there for up to the server's 20s
+// timeout, and a button that looks idle for that long invites a second click
+// (and a second swarm join) for the same file.
+async function exportResult(result: PublicSearchResult, button: HTMLButtonElement): Promise<void> {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "exporting…";
+  try {
+    let res: Response;
+    try {
+      res = await fetch("/api/export", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(exportBody(result)),
+      });
+    } catch {
+      showError("Export failed — the server is not responding.");
+      setConn("lost");
+      return;
+    }
+    const body = await readEnvelope(res);
+    if (!res.ok) {
+      showError(body.error ?? `Export failed (HTTP ${res.status}).`);
+      return;
+    }
+    showNotice(exportedNotice(String(body.file ?? "")));
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
 }
 
 // How many quality badges a row shows. A stacked 4K remux carries nine, which is

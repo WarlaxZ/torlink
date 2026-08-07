@@ -570,6 +570,34 @@ export interface AddResponse {
 }
 
 /**
+ * The body of `POST /api/export` — write a search hit's .torrent file out
+ * without downloading its content. The TUI's `e` in the results detail view.
+ *
+ * Same shape as `AddRequest` for the same reason: `PublicSearchResult` carries
+ * no magnet, so the browser sends the bare hash and the name, and the server
+ * rebuilds the magnet. `name` is what the exported file is called.
+ */
+export interface ExportTorrentRequest {
+  magnet?: string;
+  infoHash?: string;
+  name?: string;
+}
+
+/**
+ * The 200 body of `POST /api/export`.
+ *
+ * `file` is a path on the SERVER, not a download the browser receives — the
+ * export lands next to the user's other downloads exactly as the TUI's `e`
+ * does. Saying so is the point of returning the path rather than a bare `ok`:
+ * on a remote dashboard, "exported" without a location is a claim the user
+ * cannot check.
+ */
+export interface ExportTorrentResponse {
+  ok: true;
+  file: string;
+}
+
+/**
  * What a release name parsed to, when `GET /api/title` was asked with `?release=`.
  *
  * PARSING HAPPENS ON THE SERVER, and this field is why the browser can live

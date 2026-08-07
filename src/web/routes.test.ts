@@ -3774,3 +3774,107 @@ describe("the cast routes", () => {
     });
   });
 });
+
+describe("POST /api/export — exporting a search hit as a .torrent", () => {
+  const HASH = "abcdef0123456789abcdef0123456789abcdef01";
+
+  function exportRuntime(result: string | null = "/tmp/dl/Kestrel.torrent"): {
+    runtime: Runtime;
+    fetchAndExportTorrent: ReturnType<typeof vi.fn>;
+  } {
+    const fetchAndExportTorrent = vi.fn(async () => result);
+    return {
+      runtime: {
+        queue: { fetchAndExportTorrent } as unknown as Runtime["queue"],
+        downloadDir: "/tmp/dl",
+        sessions: new StreamSessionRegistry(),
+        casts: new CastSessionRegistry(),
+      },
+      fetchAndExportTorrent,
+    };
+  }
+
+  const post = (d: WebDeps, body: unknown): Promise<WebResponse> =>
+    handleWebApi(
+      d,
+      "POST",
+      "/api/export",
+      new URLSearchParams(),
+      AUTH,
+      typeof body === "string" ? body : JSON.stringify(body),
+    );
+
+  it("exports to the CONFIGURED download dir, not the runtime's boot-time one", async () => {
+    // MUTATION GUARD. runtime.downloadDir is where the process started; the
+    // config is what the user has since set, and every other write path reads
+    // it per request (see the read-modify-write rule in CLAUDE.md). Exporting
+    // to the stale one drops the file somewhere the user is not looking.
+    const { runtime: rt, fetchAndExportTorrent } = exportRuntime("/downloads/Kestrel.torrent");
+    const res = await post(
+      deps({
+        runtime: rt,
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/downloads" }),
+      }),
+      { infoHash: HASH, name: "Kestrel 2010" },
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, file: "/downloads/Kestrel.torrent" });
+    expect(fetchAndExportTorrent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: HASH, name: "Kestrel 2010" }),
+      "/downloads",
+    );
+  });
+
+  it("builds a magnet from the hash, since a search hit carries none on the wire", async () => {
+    const { runtime: rt, fetchAndExportTorrent } = exportRuntime();
+    await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel 2010" });
+    const passed = fetchAndExportTorrent.mock.calls[0]![0] as { magnet: string };
+    expect(passed.magnet.startsWith("magnet:?")).toBe(true);
+    expect(passed.magnet).toContain(HASH);
+  });
+
+  it("reports 502 when the metadata never arrives, rather than a hollow ok", async () => {
+    // fetchAndExportTorrent resolves null on a no-peer magnet, on its 20s
+    // timeout, and on a torrent already active in the queue. A 200 here would
+    // tell the user a file exists that does not.
+    const { runtime: rt } = exportRuntime(null);
+    const res = await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel" });
+    expect(res.status).toBe(502);
+    expect((res.json as { error?: string }).error).toBeTruthy();
+    expect(res.json).not.toMatchObject({ ok: true });
+  });
+
+  it("rejects a request with no magnet or info hash", async () => {
+    const { runtime: rt, fetchAndExportTorrent } = exportRuntime();
+    const res = await post(deps({ runtime: rt }), { name: "Kestrel" });
+    expect(res.status).toBe(400);
+    expect(fetchAndExportTorrent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an info hash that is not one, so nothing hands junk to WebTorrent", async () => {
+    const { runtime: rt, fetchAndExportTorrent } = exportRuntime();
+    const res = await post(deps({ runtime: rt }), { infoHash: "../../etc/passwd", name: "x" });
+    expect(res.status).toBe(400);
+    expect(fetchAndExportTorrent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a body that is not json", async () => {
+    const { runtime: rt } = exportRuntime();
+    const res = await post(deps({ runtime: rt }), "not-json");
+    expect(res.status).toBe(400);
+  });
+
+  it("is behind the token gate — it joins a swarm", async () => {
+    const { runtime: rt, fetchAndExportTorrent } = exportRuntime();
+    const res = await handleWebApi(
+      deps({ runtime: rt, token: "secret" }),
+      "POST",
+      "/api/export",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ infoHash: HASH, name: "Kestrel" }),
+    );
+    expect(res.status).toBe(401);
+    expect(fetchAndExportTorrent).not.toHaveBeenCalled();
+  });
+});

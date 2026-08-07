@@ -81,6 +81,7 @@ import type {
   CachedResponse,
   CastDevicesResponse,
   CastStatusResponse,
+  ExportTorrentResponse,
   PublicCastDevice,
   ContinueWatchingResponse,
   LibraryResponse,
@@ -890,6 +891,57 @@ async function addToQueue(
   const outcome = await addInput(deps.runtime, input, options);
   if (outcome === "invalid") return { status: 400, json: { error: "invalid magnet or info hash" } };
   const out: AddResponse = { ok: true, outcome };
+  return { status: 200, json: out };
+}
+
+/**
+ * POST /api/export — write a search hit's .torrent out without downloading it.
+ *
+ * The browser half of the TUI's `e` in the results detail view, and it shares
+ * the TUI's implementation rather than reimplementing it:
+ * `queue.fetchAndExportTorrent` fetches metadata only and destroys the handle
+ * the instant it arrives, so no file content is ever written.
+ *
+ * The destination is `config.downloadDir` READ PER REQUEST, not
+ * `runtime.downloadDir`. The latter is where the process booted; the user may
+ * have changed the folder in the TUI since, and `serve --web` is a separate
+ * process that would never have seen it.
+ */
+async function exportResultTorrent(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseStartBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid json body" } };
+
+  // Same precedence and the same validator as /api/add and /api/stream: a
+  // magnet wins, a bare hash is the fallback, and nothing unparsed reaches
+  // WebTorrent.
+  const raw = typeof body.magnet === "string" && body.magnet.trim() ? body.magnet : body.infoHash;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { status: 400, json: { error: "missing magnet or info hash" } };
+  }
+  const parsed = parseInput(raw);
+  if (!parsed) return { status: 400, json: { error: "invalid magnet or info hash" } };
+  const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : parsed.name;
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const file = await deps.runtime.queue.fetchAndExportTorrent(
+    { id: parsed.infoHash, name, magnet: parsed.magnet },
+    config.downloadDir,
+  );
+  // null covers three cases the queue does not tell apart: no peers, the 20s
+  // metadata timeout, and a torrent already active in the queue. A 200 would
+  // announce a file that is not there, so this fails loudly and says why it
+  // might have.
+  if (!file) {
+    return {
+      status: 502,
+      json: {
+        error:
+          "Couldn't fetch this torrent's metadata — it may have no seeders, " +
+          "or it may already be in your queue.",
+      },
+    };
+  }
+  const out: ExportTorrentResponse = { ok: true, file };
   return { status: 200, json: out };
 }
 
@@ -2008,6 +2060,14 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === STREAM_BASE) {
     return startStream(deps, bodyText);
+  }
+
+  // Below the gate with the streaming routes, not up with /api/add, and for the
+  // gate's own reason: exporting a magnet that has never been downloaded joins
+  // the swarm to fetch its metadata. That is the user's IP in a swarm, which is
+  // not something an anonymous caller gets to arrange.
+  if (method === "POST" && urlPath === "/api/export") {
+    return exportResultTorrent(deps, bodyText);
   }
 
   // Casting. Past the same token gate, and it needs it for the same reason: none

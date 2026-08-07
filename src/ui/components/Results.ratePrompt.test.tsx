@@ -53,6 +53,8 @@ function baseStore(overrides: Partial<Store> = {}): Store {
     streamResult: () => {},
     debridConfigured: false,
     copyMagnet: () => {},
+    fetchAndExportTorrent: () => {},
+    setResultFocus: () => {},
     contentWidth: 80,
     listRows: 20,
     queue,
