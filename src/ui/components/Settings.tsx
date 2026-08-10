@@ -53,11 +53,15 @@ interface SettingsProps {
   onEditLimits: () => void;
   onEditVpn: () => void;
   onEditPlayer: () => void;
+  onEditCastDevice: () => void;
+  onEditCastHost: () => void;
   onToggleAdult: () => void;
   onToggleProxy: () => void;
   dnsEnvOverride?: boolean;
   playerEnvOverride?: boolean;
   adultEnvOverride?: boolean;
+  castDeviceEnvOverride?: boolean;
+  castHostEnvOverride?: boolean;
 }
 
 interface RowAction {
@@ -168,6 +172,20 @@ export function Settings(props: SettingsProps) {
       props.onEditLimits,
     ),
     setting("VPN", "VPN kill switch", "fail closed if this interface drops", config.vpnInterface || "off", props.onEditVpn),
+    setting(
+      "CAST",
+      "Cast device",
+      "a Chromecast mDNS can't reach",
+      withEnv(config.castDevice || "auto-discover", props.castDeviceEnvOverride),
+      props.onEditCastDevice,
+    ),
+    setting(
+      "HOST",
+      "Cast host",
+      "LAN address a TV fetches media from",
+      withEnv(config.castAdvertiseHost || "auto", props.castHostEnvOverride),
+      props.onEditCastHost,
+    ),
     setting(
       "PLAY",
       "Media player",

@@ -137,6 +137,7 @@ import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
 import { VpnPrompt } from "./components/VpnPrompt";
+import { CastAddressPrompt } from "./components/CastAddressPrompt";
 import { RatePrompt } from "./components/RatePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
@@ -374,6 +375,8 @@ export function App({
   const [editingTrackers, setEditingTrackers] = useState(false);
   const [editingLimits, setEditingLimits] = useState(false);
   const [editingVpn, setEditingVpn] = useState(false);
+  const [editingCastDevice, setEditingCastDevice] = useState(false);
+  const [editingCastHost, setEditingCastHost] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   // Context for a stream awaiting a player-command decision: the URL, an
@@ -996,6 +999,26 @@ export function App({
     const vpnInterface = raw.trim() || undefined;
     setConfig({ ...config, vpnInterface });
     setNotice(vpnInterface ? `VPN guard set to ${vpnInterface}.` : "VPN guard disabled.");
+  }, [config, setConfig]);
+
+  // A manual Chromecast address, for a device mDNS cannot reach (a Docker bridge
+  // or a VLAN). Persisted so it is offered alongside discovered devices next time.
+  const setCastDeviceAddress = useCallback((raw: string) => {
+    setEditingCastDevice(false);
+    if (!config) return;
+    const castDevice = raw.trim() || undefined;
+    setConfig({ ...config, castDevice });
+    setNotice(castDevice ? `Cast device set to ${castDevice}.` : "Cast device cleared.");
+  }, [config, setConfig]);
+
+  // The host a TV should fetch media FROM when this machine's own address is not
+  // routable from the LAN (WSL2's default NAT, bridged Docker).
+  const setCastHost = useCallback((raw: string) => {
+    setEditingCastHost(false);
+    if (!config) return;
+    const castAdvertiseHost = raw.trim() || undefined;
+    setConfig({ ...config, castAdvertiseHost });
+    setNotice(castAdvertiseHost ? `Cast host set to ${castAdvertiseHost}.` : "Cast host cleared.");
   }, [config, setConfig]);
 
   const ensureVpnSafe = useCallback(async (): Promise<boolean> => {
@@ -2569,7 +2592,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -2645,6 +2668,8 @@ export function App({
     editingTrackers,
     editingLimits,
     editingVpn,
+    editingCastDevice,
+    editingCastHost,
     toggleSource,
     pendingP2P,
     pendingDownload,
@@ -2708,6 +2733,8 @@ export function App({
       if (editingTrackers) return; // the trackers prompt owns input
       if (editingLimits) return; // the limits prompt owns input
       if (editingVpn) return; // the VPN prompt owns input
+      if (editingCastDevice) return; // the cast-device prompt owns input
+      if (editingCastHost) return; // the cast-host prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (pendingDownload) return; // the download-to prompt owns input
       if (fileSelection) return; // the download file picker owns input
@@ -3371,6 +3398,34 @@ export function App({
           </Box>
         ) : null}
 
+        {editingCastDevice ? (
+          <Box marginTop={1}>
+            <CastAddressPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              title="cast device"
+              value={store.config.castDevice ?? ""}
+              placeholder="host or host:port (192.168.0.40:8009)"
+              hint="A Chromecast mDNS can't find. Empty clears it. TORLINK_CAST_DEVICE overrides this."
+              onSubmit={setCastDeviceAddress}
+              onCancel={() => setEditingCastDevice(false)}
+            />
+          </Box>
+        ) : null}
+
+        {editingCastHost ? (
+          <Box marginTop={1}>
+            <CastAddressPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              title="cast host"
+              value={store.config.castAdvertiseHost ?? ""}
+              placeholder="host or host:port (192.168.0.10:8080)"
+              hint="The LAN address a TV should fetch from (WSL / bridged Docker). Empty clears it. TORLINK_CAST_HOST overrides this."
+              onSubmit={setCastHost}
+              onCancel={() => setEditingCastHost(false)}
+            />
+          </Box>
+        ) : null}
+
         {pendingDownload ? (
           <Box marginTop={1}>
             <FolderPrompt
@@ -3393,7 +3448,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -3458,11 +3513,15 @@ export function App({
                 onEditLimits={() => setEditingLimits(true)}
                 onEditVpn={() => setEditingVpn(true)}
                 onEditPlayer={() => setEditingPlayer(true)}
+                onEditCastDevice={() => setEditingCastDevice(true)}
+                onEditCastHost={() => setEditingCastHost(true)}
                 onToggleAdult={toggleAdult}
                 onToggleProxy={toggleProxy}
                 dnsEnvOverride={process.env["TORLINK_DNS"] !== undefined}
                 playerEnvOverride={Boolean(process.env["TORLINK_PLAYER"]?.trim())}
                 adultEnvOverride={process.env["TORLINK_ADULT"] !== undefined}
+                castDeviceEnvOverride={Boolean(process.env["TORLINK_CAST_DEVICE"]?.trim())}
+                castHostEnvOverride={Boolean(process.env["TORLINK_CAST_HOST"]?.trim())}
               />
             </Box>
             <Box display={section === "continueWatching" ? "flex" : "none"} flexDirection="column">
@@ -3496,7 +3555,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }

@@ -567,7 +567,7 @@ one is used automatically; with both and no explicit choice made yet, torlink pr
 upgrading from an earlier version that only knew about Real-Debrid doesn't change how it behaves.
 
 <p align="center">
-  <img src="preview/settings.svg" alt="torlink's Settings tab: preferences for the download folder, sources, playback quality, DNS, trackers, transfer limits, VPN, media player and adult content, above the accounts — Real-Debrid marked active alongside a connected TorBox, plus RuTracker, reccd and OMDb, each with its plan and connection status" style="max-width: 1024px; width: 100%; height: auto;">
+  <img src="preview/settings.svg" alt="torlink's Settings tab: preferences for the download folder, sources, playback quality, DNS, trackers, transfer limits, VPN, cast device and host, media player and adult content, above the accounts — Real-Debrid marked active alongside a connected TorBox, plus RuTracker, reccd and OMDb, each with its plan and connection status" style="max-width: 1024px; width: 100%; height: auto;">
 </p>
 
 Once one's connected, downloading and streaming get an upgrade:

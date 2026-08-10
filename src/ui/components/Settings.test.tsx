@@ -67,11 +67,15 @@ const baseProps = {
   onEditLimits: noop,
   onEditVpn: noop,
   onEditPlayer: noop,
+  onEditCastDevice: noop,
+  onEditCastHost: noop,
   onToggleAdult: noop,
   onToggleProxy: noop,
   dnsEnvOverride: false,
   playerEnvOverride: false,
   adultEnvOverride: false,
+  castDeviceEnvOverride: false,
+  castHostEnvOverride: false,
 };
 
 function props(over: Partial<typeof baseProps> = {}) {
@@ -97,6 +101,8 @@ describe("Settings", () => {
     expect(frame).toContain("Extra trackers");
     expect(frame).toContain("Transfer limits");
     expect(frame).toContain("VPN kill switch");
+    expect(frame).toContain("Cast device");
+    expect(frame).toContain("Cast host");
     expect(frame).toContain("Media player");
     expect(frame).toContain("Adult content");
     expect(frame).toContain("Relay debrid streams");

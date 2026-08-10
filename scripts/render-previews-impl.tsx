@@ -392,13 +392,13 @@ save(
   "settings",
   // Tall enough for the settings rows and all five account rows at two lines
   // each — below this the pane windows and the last rows scroll out of the shot.
-  makeStore({ section: "settings", region: "content", contentWidth: BROWSE_CW, listRows: 46, cols: BROWSE_COLS, rows: 60 }),
+  makeStore({ section: "settings", region: "content", contentWidth: BROWSE_CW, listRows: 56, cols: BROWSE_COLS, rows: 70 }),
   <Box flexDirection="column" width={BROWSE_COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
     <Rule width={BROWSE_RULE} />
-    <Box height={45} marginTop={1}>
+    <Box height={54} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
         <Settings
@@ -440,6 +440,8 @@ save(
           onEditLimits={() => {}}
           onEditVpn={() => {}}
           onEditPlayer={() => {}}
+          onEditCastDevice={() => {}}
+          onEditCastHost={() => {}}
           onToggleAdult={() => {}}
           onToggleProxy={() => {}}
         />
