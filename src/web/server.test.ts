@@ -641,6 +641,24 @@ describe("startWebServer — Cloudflare Access guard", () => {
     expect(res.status).toBe(403);
     expect(JSON.parse(body).error).toBe("forbidden");
   });
+
+  // Access at the origin is a strictly stronger gate than a token, so a
+  // tokenless bind on a public interface is allowed when Access is enforced —
+  // and NOT minted a token (a token would break the browser UI behind a tunnel).
+  it("allows a tokenless non-loopback bind when Access is enforced", async () => {
+    handle = await startWebServer(runtime(), {
+      port: 0,
+      host: "0.0.0.0",
+      cloudflareAccess: { teamDomain: TEAM, aud: AUD },
+    });
+    expect(handle.port).toBeGreaterThan(0);
+  });
+
+  it("still refuses a tokenless non-loopback bind when Access is NOT configured", async () => {
+    await expect(
+      startWebServer(runtime(), { port: 0, host: "0.0.0.0" }),
+    ).rejects.toThrow(/refusing to bind/);
+  });
 });
 
 describe("writeWebResponse", () => {

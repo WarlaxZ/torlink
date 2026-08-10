@@ -245,14 +245,6 @@ export async function startWebServer(
   const token = options.token && options.token.trim() ? options.token.trim() : null;
   const log: WebLog = options.log ?? ((): void => {});
 
-  // Fail soft, not open — the same rule daemon/serve.ts enforces. The web UI
-  // exposes strictly more than the add API does, so it cannot be laxer.
-  if (!LOOPBACK_HOSTS.has(host) && !token) {
-    throw new Error(
-      `refusing to bind ${host} without a token: pass a token (or set TORLINK_API_TOKEN), or bind 127.0.0.1`,
-    );
-  }
-
   // Cloudflare Access: built once, since the JWKS resolver caches its own keys.
   // A null config leaves the guard below inert, so every default install (and
   // every existing test) is unchanged.
@@ -261,6 +253,18 @@ export async function startWebServer(
     ? (options.accessKeySetImpl ?? createRemoteJWKSet(accessJwksUrl(accessCfg.teamDomain)))
     : null;
   if (accessCfg) log(`cloudflare access: enforcing (team ${accessCfg.teamDomain})`);
+
+  // Fail soft, not open — the same rule daemon/serve.ts enforces. The web UI
+  // exposes strictly more than the add API does, so it cannot be laxer. When
+  // Access is enforced the origin JWT check is a strictly stronger gate than a
+  // token, so a tokenless non-loopback bind is allowed then (and not minted —
+  // a token would break the browser UI behind a tunnel).
+  if (!LOOPBACK_HOSTS.has(host) && !token && !accessCfg) {
+    throw new Error(
+      `refusing to bind ${host} without a token: pass a token (or set TORLINK_API_TOKEN), ` +
+        `enforce Cloudflare Access, or bind 127.0.0.1`,
+    );
+  }
 
   const staticRoot = options.staticDir ?? (options.findStaticDirImpl ?? findStaticDir)();
   if (!staticRoot) {
