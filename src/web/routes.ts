@@ -20,6 +20,7 @@ import {
   loadConfig,
   resolveActiveDebrid,
   resolveCastDevice,
+  resolveCloudflareAccess,
   qualityPrefsFrom,
   resolveAdultContent,
   resolveMediaPlayer,
@@ -786,6 +787,9 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     // config fields, so both env vars count — the browser must agree with the
     // TUI about which provider is on, and the TUI resolves it the same way.
     debridConfigured: active !== null,
+    // A capability flag like debridConfigured — whether the origin enforces
+    // Cloudflare Access, never the team domain or AUD behind it.
+    cloudflareAccessEnforced: resolveCloudflareAccess(config) !== null,
     debridProvider: active?.provider ?? null,
     debridCachedCheck: active ? getDebridProvider(active.provider).checkCached !== undefined : false,
     // resolveOmdbApiKey, not config.omdbApiKey, so TORLINK_OMDB_KEY counts —
@@ -1283,6 +1287,7 @@ function settingsAccountsOf(config: Config): SettingsAccounts {
   const active = resolveActiveDebrid(config);
   return {
     debridConfigured: active !== null,
+    cloudflareAccessEnforced: resolveCloudflareAccess(config) !== null,
     debridProvider: active?.provider ?? null,
     omdbConfigured: resolveOmdbApiKey(config) !== "",
     reccConfigured: resolveReccConfig(config).reccUrl !== undefined,

@@ -44,6 +44,10 @@ interface SettingsProps {
   omdbEnvOverride?: boolean;
   onManageOmdb: () => void;
   onSignOutOmdb: () => void;
+  // Read-only: whether the origin enforces Cloudflare Access. Configured by
+  // env/config on the host, never from this pane — so this row shows status
+  // with no action affordance.
+  cfAccessEnforced: boolean;
   // ---- settings dispatch (open the existing editors / flip the toggles) ----
   onEditFolder: () => void;
   onEditSources: () => void;
@@ -85,7 +89,9 @@ interface Row {
   ok: boolean;
   status: string;
   emptyStatus: string;
-  primary: RowAction;
+  // Absent on a read-only row (e.g. Cloudflare Access status), which shows no
+  // action affordance — never a fake no-op keybind.
+  primary?: RowAction;
   secondary: RowAction[];
 }
 
@@ -290,14 +296,31 @@ export function Settings(props: SettingsProps) {
     })(),
   ];
 
-  const rows: Row[] = [...settingRows, ...accountRows];
+  // Read-only status, not an account and not an editable setting: whether the
+  // origin enforces Cloudflare Access. Rendered with the "setting" kind (a plain
+  // dot + status, no health tick) and no `primary`, so it shows no keybind — the
+  // gate is configured on the host, never from this pane.
+  const cfAccessRow: Row = {
+    tag: "CFA",
+    color: COLOR.accent,
+    label: "Cloudflare Access",
+    sub: "origin request gate · read-only",
+    kind: "setting",
+    present: true,
+    ok: true,
+    status: props.cfAccessEnforced ? "enforced" : "not configured",
+    emptyStatus: props.cfAccessEnforced ? "enforced" : "not configured",
+    secondary: [],
+  };
+
+  const rows: Row[] = [...settingRows, cfAccessRow, ...accountRows];
   const clamped = Math.min(cursor, rows.length - 1);
 
   useInput(
     (input, key) => {
       if (key.upArrow) setCursor(wrapStep(clamped, -1, rows.length));
       else if (key.downArrow) setCursor(wrapStep(clamped, 1, rows.length));
-      else if (key.return) rows[clamped]!.primary.run();
+      else if (key.return) rows[clamped]!.primary?.run();
       else {
         const action = rows[clamped]!.secondary.find((a) => a.key === input);
         if (action) action.run();
@@ -358,19 +381,21 @@ export function Settings(props: SettingsProps) {
                   <Text dimColor wrap="truncate">{`${ICON.dot} ${r.emptyStatus}`}</Text>
                 )}
               </Box>
-              <Box flexShrink={0} marginLeft={1}>
-                <Text>
-                  <Text color={COLOR.alt}>{r.primary.key}</Text>
-                  <Text dimColor>{` ${r.primary.verb}`}</Text>
-                  {r.secondary.map((a) => (
-                    <Text key={a.key}>
-                      <Text dimColor>{`  ${ICON.dot}  `}</Text>
-                      <Text color={COLOR.alt}>{a.key}</Text>
-                      <Text dimColor>{` ${a.verb}`}</Text>
-                    </Text>
-                  ))}
-                </Text>
-              </Box>
+              {r.primary && (
+                <Box flexShrink={0} marginLeft={1}>
+                  <Text>
+                    <Text color={COLOR.alt}>{r.primary.key}</Text>
+                    <Text dimColor>{` ${r.primary.verb}`}</Text>
+                    {r.secondary.map((a) => (
+                      <Text key={a.key}>
+                        <Text dimColor>{`  ${ICON.dot}  `}</Text>
+                        <Text color={COLOR.alt}>{a.key}</Text>
+                        <Text dimColor>{` ${a.verb}`}</Text>
+                      </Text>
+                    ))}
+                  </Text>
+                </Box>
+              )}
             </Box>
           );
         })}

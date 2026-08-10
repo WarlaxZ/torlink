@@ -235,6 +235,14 @@ export function accountRows(accounts: SettingsAccounts): AccountRow[] {
     },
     { label: "OMDb", status: accounts.omdbConfigured ? "Key set" : "Not configured", ok: accounts.omdbConfigured },
     { label: "reccd", status: reccStatus, ok: accounts.reccConfigured },
+    // Read-only, like the rest of this section: whether the origin enforces
+    // Cloudflare Access. A capability flag — the browser never sees the team
+    // domain or AUD, only whether the gate is on.
+    {
+      label: "Cloudflare Access",
+      status: accounts.cloudflareAccessEnforced ? "Enforced" : "Not configured",
+      ok: accounts.cloudflareAccessEnforced,
+    },
   ];
 }
 

@@ -3513,6 +3513,7 @@ export function App({
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}
                 onSignOutOmdb={clearOmdbKey}
+                cfAccessEnforced={cloudflareAccessRef.current !== null}
                 onEditFolder={() => setEditingFolder(true)}
                 onEditSources={() => setEditingSources(true)}
                 onEditQuality={() => setEditingQuality(true)}

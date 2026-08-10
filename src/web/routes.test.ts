@@ -95,6 +95,8 @@ const AUTH = "Bearer secret";
 beforeEach(() => {
   vi.stubEnv("REALDEBRID_API_TOKEN", "");
   vi.stubEnv("TORBOX_API_TOKEN", "");
+  vi.stubEnv("TORLINK_CF_ACCESS_TEAM_DOMAIN", "");
+  vi.stubEnv("TORLINK_CF_ACCESS_AUD", "");
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -1206,6 +1208,32 @@ describe("GET /api/sources", () => {
   it("reports nothing configured when there is no token", async () => {
     const body = await get();
     expect(body).toMatchObject({ debridConfigured: false, debridProvider: null, debridCachedCheck: false });
+  });
+
+  // A capability flag, never a credential: the browser learns whether the origin
+  // enforces Cloudflare Access without ever seeing the team domain or AUD.
+  it("reports cloudflareAccessEnforced=false when unconfigured", async () => {
+    const res = await handleWebApi(deps({ token: "secret" }), "GET", "/api/sources", new URLSearchParams(), AUTH, "");
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ cloudflareAccessEnforced: false });
+  });
+
+  it("reports cloudflareAccessEnforced=true when both halves are configured", async () => {
+    const loadConfigImpl = async () => ({
+      ...defaultConfig,
+      downloadDir: "/tmp/dl",
+      cfAccessTeamDomain: "t.cloudflareaccess.com",
+      cfAccessAud: "aud-1",
+    });
+    const res = await handleWebApi(
+      deps({ token: "secret", loadConfigImpl }),
+      "GET",
+      "/api/sources",
+      new URLSearchParams(),
+      AUTH,
+      "",
+    );
+    expect(res.json).toMatchObject({ cloudflareAccessEnforced: true });
   });
 
   it("never puts a TorBox token in any response", async () => {
