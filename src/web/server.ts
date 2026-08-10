@@ -40,6 +40,13 @@ import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
 import { readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
 import { loadConfig, resolveCastAdvertiseHost } from "../config/config";
+import { createRemoteJWKSet, type JWTVerifyGetKey } from "jose";
+import {
+  accessJwksUrl,
+  accessTokenFromHeaders,
+  verifyAccessAssertion,
+  type AccessConfig,
+} from "../core/cloudflareAccess";
 import type { Runtime } from "../daemon/runtime";
 
 export const DEFAULT_WEB_PORT = 9162;
@@ -106,6 +113,10 @@ export interface WebServerOptions {
     Partial<StreamDeps>,
     "sessions" | "log" | "probeCache" | "hlsVerdictCache" | "trustProxy"
   >;
+  /** When set, verify Cloudflare Access assertions and 403 requests without one. */
+  cloudflareAccess?: AccessConfig;
+  /** Test seam: overrides the JWKS resolver (default: remote JWKS from the team domain). */
+  accessKeySetImpl?: JWTVerifyGetKey;
 }
 
 export interface WebServerHandle {
@@ -241,6 +252,15 @@ export async function startWebServer(
       `refusing to bind ${host} without a token: pass a token (or set TORLINK_API_TOKEN), or bind 127.0.0.1`,
     );
   }
+
+  // Cloudflare Access: built once, since the JWKS resolver caches its own keys.
+  // A null config leaves the guard below inert, so every default install (and
+  // every existing test) is unchanged.
+  const accessCfg = options.cloudflareAccess ?? null;
+  const accessKeySet = accessCfg
+    ? (options.accessKeySetImpl ?? createRemoteJWKSet(accessJwksUrl(accessCfg.teamDomain)))
+    : null;
+  if (accessCfg) log(`cloudflare access: enforcing (team ${accessCfg.teamDomain})`);
 
   const staticRoot = options.staticDir ?? (options.findStaticDirImpl ?? findStaticDir)();
   if (!staticRoot) {
@@ -483,6 +503,23 @@ export async function startWebServer(
         writeJson(res, 403, { error: "cross-site request blocked" });
         log(`${method} ${urlPath} -> 403 (cross-site)`);
         return;
+      }
+
+      // Cloudflare Access: the origin refuses anything that did not arrive through
+      // Access, so it is safe even if this port is ever reachable directly. Health
+      // and the media routes are exempt — the latter carry the per-session ?k=
+      // capability instead, because <video>/VLC/Chromecast can't present a cert.
+      if (accessCfg) {
+        const exempt = urlPath === "/health" || isStreamPath(urlPath) || isPlayPath(urlPath);
+        if (!exempt) {
+          const assertion = accessTokenFromHeaders(req.headers);
+          const verdict = await verifyAccessAssertion(assertion, accessKeySet!, accessCfg);
+          if (!verdict.ok) {
+            writeJson(res, 403, { error: "forbidden" });
+            log(`${method} ${urlPath} -> 403 (access: ${verdict.reason})`);
+            return;
+          }
+        }
       }
 
       // Long-lived, so it is handled before the router: the router's contract is

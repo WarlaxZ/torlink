@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JSONWebKeySet } from "jose";
 import { startWebServer, writeWebResponse, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
@@ -512,6 +513,62 @@ describe("startWebServer", () => {
       await reader.cancel().catch(() => {});
       handle = null;
     });
+  });
+});
+
+// REAL timers, deliberately: jose validates the JWT `exp` against the real
+// wall clock, and the tokens minted here carry a real "1h" expiry. Faking time
+// would make jose see them as expired (or the clock as frozen at 0) and every
+// "allows" case would 403. This describe never calls vi.useFakeTimers(), and
+// the file does not enable them globally, so nothing to reset.
+describe("startWebServer — Cloudflare Access guard", () => {
+  const TEAM = "myteam.cloudflareaccess.com";
+  const AUD = "aud-tag-123";
+
+  async function serverWithAccess() {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "k1";
+    jwk.alg = "RS256";
+    const jwks: JSONWebKeySet = { keys: [jwk] };
+    const accessKeySetImpl = createLocalJWKSet(jwks);
+    handle = await startWebServer(runtime(), {
+      port: 0,
+      host: "127.0.0.1",
+      log: () => {},
+      cloudflareAccess: { teamDomain: TEAM, aud: AUD },
+      accessKeySetImpl,
+    });
+    const mint = (claims: Record<string, unknown>, exp?: string | number) =>
+      new SignJWT(claims)
+        .setProtectedHeader({ alg: "RS256", kid: "k1" })
+        .setIssuer(`https://${TEAM}`)
+        .setAudience(AUD)
+        .setIssuedAt()
+        .setExpirationTime(exp ?? "1h")
+        .sign(privateKey);
+    return { handle: handle!, mint };
+  }
+
+  it("403s an api request with no assertion", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/status`);
+    expect(res.status).toBe(403);
+  });
+
+  it("allows an api request carrying a valid assertion", async () => {
+    const { handle, mint } = await serverWithAccess();
+    const token = await mint({ email: "owner@example.com" });
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/status`, {
+      headers: { "Cf-Access-Jwt-Assertion": token },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("exempts /health from the assertion check", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/health`);
+    expect(res.status).toBe(200);
   });
 });
 
