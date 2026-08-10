@@ -1,0 +1,83 @@
+# torlnk behind Cloudflare Tunnel + Cloudflare Access, for a public domain.
+#
+# Where docker-compose.yml binds loopback and hands you a token'd link, this
+# variant runs torlnk with NO token and lets Cloudflare Access be the gate:
+# torlnk verifies the Cf-Access-Jwt-Assertion header itself, so binding 0.0.0.0
+# behind the tunnel is safe. The dashboard side (Tunnel, Access application,
+# login method) is in the README under
+# "Exposing torlink on a public domain (Cloudflare Access)".
+#
+#   docker compose -f docker-compose.access.yml up -d --build
+#
+# Secrets come from the environment — a .env file next to this one, or a secrets
+# manager. Required:
+#   CF_TUNNEL_TOKEN                - the token from your dashboard-managed Tunnel
+#   TORLINK_CF_ACCESS_TEAM_DOMAIN  - <your-team>.cloudflareaccess.com
+#   TORLINK_CF_ACCESS_AUD          - the Access application's Audience (AUD) tag
+#
+# Both services sit on the compose project's DEFAULT network, so cloudflared
+# reaches torlnk by its service name — point your Tunnel's public hostname at
+# http://torlnk:9162 in the dashboard. (No named network needed; a named/external
+# one is only for reaching a cloudflared that lives in a *different* compose.)
+
+services:
+  torlnk:
+    build: .
+    image: torlnk:local
+    container_name: torlnk
+    restart: unless-stopped
+
+    environment:
+      # Enforcement switches on only when BOTH are set. With them set, torlnk
+      # binds 0.0.0.0 tokenless (the Dockerfile's CMD) because Access is the gate.
+      TORLINK_CF_ACCESS_TEAM_DOMAIN: ${TORLINK_CF_ACCESS_TEAM_DOMAIN:?set your <team>.cloudflareaccess.com}
+      TORLINK_CF_ACCESS_AUD:         ${TORLINK_CF_ACCESS_AUD:?set the Access application AUD tag}
+      # Optional — cast to a TV that mDNS can't reach (a container can't see the
+      # LAN's mDNS). Give the TV's address and a LAN address it can fetch media
+      # from. Example IPs are RFC 5737 documentation addresses; use your own.
+      #   TORLINK_CAST_DEVICE: "192.0.2.10"        # the TV: host, or host:port
+      #   TORLINK_CAST_HOST:   "192.0.2.20:9162"   # a LAN address that reaches this container's 9162
+      REALDEBRID_API_TOKEN: ${REALDEBRID_API_TOKEN:-}
+      TORBOX_API_TOKEN: ${TORBOX_API_TOKEN:-}
+      TORLINK_OMDB_KEY: ${TORLINK_OMDB_KEY:-}
+
+    volumes:
+      # One directory holds config (tokens), queue, watch history, seeds, posters.
+      - ./state:/state
+      - ./state/Downloads/torlink:/state/Downloads/torlink
+
+    # Only needed if you cast to a LAN device: the TV fetches /stream directly
+    # over the LAN (an Access-exempt, ?k=-guarded path), so the web port has to be
+    # reachable on the LAN. Browser access does NOT need this — it comes in
+    # through the tunnel. Match the port to TORLINK_CAST_HOST above.
+    # ports:
+    #   - "9162:9162"
+
+    healthcheck:
+      # /health, not /, because with Access enforced every non-exempt path
+      # (including /) requires an assertion this check can't present. /health is
+      # exempt (as are /stream and /play).
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:9162/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  cloudflared:
+    # The Tunnel connector. Replaces the standalone
+    # `docker run cloudflare/cloudflared ... --token ...` the dashboard suggests —
+    # run one or the other, not both. It reads the token from the environment so
+    # it never lands on the command line or in `docker inspect`.
+    image: cloudflare/cloudflared:latest
+    container_name: torlnk-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN from your Tunnel}
+    depends_on: [torlnk]

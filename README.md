@@ -939,6 +939,31 @@ Once enforced, the **Settings** pane in both front ends shows **Cloudflare Acces
 the browser reports the status but, being a client of the config rather than an editor of it, never sees
 or sets the team domain or the AUD.
 
+#### As containers
+
+`docker-compose.access.yml` brings up torlink **and** its Tunnel connector together. Build from this
+checkout:
+
+```sh
+docker compose -f docker-compose.access.yml up -d --build
+```
+
+The parts that catch people out:
+
+- **The `cloudflared` sidecar is required** — it *is* the Tunnel connector, and nothing reaches torlink
+  without it. It lives in the same compose so it shares the project's default network and resolves torlink
+  by service name, so point the Tunnel's public hostname at `http://torlnk:9162` (the service name), not
+  `localhost`. Use it *instead of* the standalone `docker run cloudflare/cloudflared …` the dashboard
+  suggests — not as well.
+- **No `TORLINK_API_TOKEN`** — with the two Access settings present, torlink binds `0.0.0.0` tokenless
+  because Access is the gate; a token would only add a `#k=` login step in front of the one Cloudflare
+  already does.
+- **The healthcheck hits `/health`, not `/`** — with Access on, `/` needs an assertion the check can't
+  present, whereas `/health` is exempt.
+
+`CF_TUNNEL_TOKEN` and the two `TORLINK_CF_ACCESS_*` values are read from the environment, so they pair
+with a `.env` file or a secrets manager rather than being written into the compose file.
+
 #### Caveats, stated plainly
 
 - **It's single-tenant.** A shared friend uses *your* torlink instance — your [debrid](#debrid-real-debrid-or-torbox)
