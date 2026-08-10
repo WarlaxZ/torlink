@@ -15,6 +15,7 @@ import {
   resolveCastDevice,
   qualityPrefsFrom,
   sanitiseQualityPrefs,
+  sanitiseSettingsPatch,
 } from "./config";
 import type { Config } from "./config";
 
@@ -414,6 +415,79 @@ describe("sanitiseQualityPrefs", () => {
     const out = sanitiseQualityPrefs({ requireFeatures: ["dv", "hdr"], excludeFeatures: ["dv"] });
     expect(out.excludeFeatures).toEqual(["dv"]);
     expect(out.requireFeatures).toEqual(["hdr"]);
+  });
+});
+
+describe("sanitiseSettingsPatch", () => {
+  it("returns an empty patch when nothing is provided, so absent keys are left untouched", () => {
+    expect(sanitiseSettingsPatch({})).toEqual({});
+  });
+
+  it("only ever emits the non-secret, web-writable fields — never a token", () => {
+    // A hand-crafted or malicious body that smuggles a token must not survive.
+    const out = sanitiseSettingsPatch({
+      realDebridToken: "sneaky",
+      omdbApiKey: "sneaky",
+      reccToken: "sneaky",
+      adultContent: true,
+    } as never);
+    expect(out).toEqual({ adultContent: true });
+    expect("realDebridToken" in out).toBe(false);
+    expect("omdbApiKey" in out).toBe(false);
+    expect("reccToken" in out).toBe(false);
+  });
+
+  it("coerces the toggles to strict booleans", () => {
+    expect(sanitiseSettingsPatch({ adultContent: true, proxyDebridStreams: false }))
+      .toEqual({ adultContent: true, proxyDebridStreams: false });
+    // Anything that isn't literally true reads as false.
+    expect(sanitiseSettingsPatch({ adultContent: "yes" as never })).toEqual({ adultContent: false });
+  });
+
+  it("floors positive transfer limits and clears non-positive or invalid ones", () => {
+    expect(sanitiseSettingsPatch({ downloadLimitKbps: 1500.7, uploadLimitKbps: 200 }))
+      .toEqual({ downloadLimitKbps: 1500, uploadLimitKbps: 200 });
+    // 0 / negative / NaN mean "no limit" — the field is cleared.
+    expect(sanitiseSettingsPatch({ downloadLimitKbps: 0, uploadLimitKbps: -5 }))
+      .toEqual({ downloadLimitKbps: undefined, uploadLimitKbps: undefined });
+    expect(sanitiseSettingsPatch({ downloadLimitKbps: "fast" as never }))
+      .toEqual({ downloadLimitKbps: undefined });
+  });
+
+  it("keeps a fractional seed ratio but floors seed minutes", () => {
+    expect(sanitiseSettingsPatch({ seedRatio: 1.5, seedMinutes: 90.9 }))
+      .toEqual({ seedRatio: 1.5, seedMinutes: 90 });
+    expect(sanitiseSettingsPatch({ seedRatio: 0, seedMinutes: -1 }))
+      .toEqual({ seedRatio: undefined, seedMinutes: undefined });
+  });
+
+  it("dedupes disabledSources and drops non-string / empty entries", () => {
+    expect(sanitiseSettingsPatch({ disabledSources: ["yts", "yts", "", 7, "tpb-tv"] as never }))
+      .toEqual({ disabledSources: ["yts", "tpb-tv"] });
+    expect(sanitiseSettingsPatch({ disabledSources: "not-an-array" as never }))
+      .toEqual({ disabledSources: [] });
+  });
+
+  it("trims downloadDir and ignores it when blank, but lets mediaPlayer clear to empty", () => {
+    expect(sanitiseSettingsPatch({ downloadDir: "  /media/dl  " })).toEqual({ downloadDir: "/media/dl" });
+    // downloadDir is required, so a blank value must not blank the stored one.
+    expect(sanitiseSettingsPatch({ downloadDir: "   " })).toEqual({});
+    // mediaPlayer empty is meaningful: "clear it, fall back to auto-detect".
+    expect(sanitiseSettingsPatch({ mediaPlayer: "  mpv " })).toEqual({ mediaPlayer: "mpv" });
+    expect(sanitiseSettingsPatch({ mediaPlayer: "" })).toEqual({ mediaPlayer: "" });
+  });
+
+  it("folds in sanitiseQualityPrefs when any quality field is present", () => {
+    expect(
+      sanitiseSettingsPatch({
+        maxResolution: "1080p",
+        requireFeatures: ["atmos", "laserdisc"] as never,
+        excludeFeatures: ["dv"],
+      }),
+    ).toEqual({ maxResolution: "1080p", requireFeatures: ["atmos"], excludeFeatures: ["dv"] });
+    // A quality field present but empty still normalises the trio.
+    expect(sanitiseSettingsPatch({ requireFeatures: [] }))
+      .toEqual({ maxResolution: undefined, requireFeatures: [], excludeFeatures: [] });
   });
 });
 

@@ -37,6 +37,7 @@ import type {
   PublicSearchSnapshot,
   PublicStreamHistoryItem,
   SavedResponse,
+  SettingsResponse,
   SourcesResponse,
 } from "./wire";
 import type { Runtime } from "../daemon/runtime";
@@ -1432,6 +1433,160 @@ describe("POST /api/preferences", () => {
       new URLSearchParams(),
       undefined,
       JSON.stringify({ action: "set", preferences: { maxResolution: null, require: [], exclude: [] } }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/settings", () => {
+  async function get(over: Partial<WebDeps> = {}): Promise<SettingsResponse> {
+    const res = await handleWebApi(deps(over), "GET", "/api/settings", new URLSearchParams(), AUTH, "");
+    expect(res.status).toBe(200);
+    return res.json as SettingsResponse;
+  }
+
+  it("returns the non-secret settings snapshot", async () => {
+    const body = await get({
+      loadConfigImpl: async () =>
+        searchConfig({
+          downloadDir: "/media/dl",
+          mediaPlayer: "mpv",
+          adultContent: true,
+          proxyDebridStreams: true,
+          downloadLimitKbps: 1500,
+          seedRatio: 1.5,
+          disabledSources: ["yts"],
+          maxResolution: "1080p",
+        }),
+    });
+    expect(body.settings.downloadDir).toBe("/media/dl");
+    expect(body.settings.mediaPlayer).toBe("mpv");
+    expect(body.settings.adultContent).toBe(true);
+    expect(body.settings.proxyDebridStreams).toBe(true);
+    expect(body.settings.downloadLimitKbps).toBe(1500);
+    expect(body.settings.uploadLimitKbps).toBeNull();
+    expect(body.settings.seedRatio).toBe(1.5);
+    expect(body.settings.disabledSources).toEqual(["yts"]);
+    expect(body.settings.preferences.maxResolution).toBe("1080p");
+    expect(body.refused).toEqual([]);
+  });
+
+  it("never leaks a token — the snapshot has no token-shaped field", async () => {
+    const body = await get({
+      loadConfigImpl: async () =>
+        searchConfig({ realDebridToken: "rd-secret", omdbApiKey: "omdb-secret", reccToken: "recc-secret" }),
+    });
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain("rd-secret");
+    expect(serialised).not.toContain("omdb-secret");
+    expect(serialised).not.toContain("recc-secret");
+  });
+
+  it("reports account status read-only without exposing the credentials", async () => {
+    const body = await get({
+      loadConfigImpl: async () =>
+        searchConfig({ realDebridToken: "rd", omdbApiKey: "k", reccUrl: "http://r:1", reccToken: "t" }),
+    });
+    expect(body.accounts.debridConfigured).toBe(true);
+    expect(body.accounts.debridProvider).toBe("realdebrid");
+    expect(body.accounts.omdbConfigured).toBe(true);
+    expect(body.accounts.reccConfigured).toBe(true);
+  });
+
+  it("flags env-locked fields so the overlay can render them read-only", async () => {
+    vi.stubEnv("TORLINK_ADULT", "1");
+    vi.stubEnv("TORLINK_PLAYER", "iina");
+    const body = await get({ loadConfigImpl: async () => searchConfig() });
+    expect(body.envLocks.adultContent).toBe(true);
+    expect(body.envLocks.mediaPlayer).toBe(true);
+    // The effective (resolved) value is what the overlay shows.
+    expect(body.settings.adultContent).toBe(true);
+    expect(body.settings.mediaPlayer).toBe("iina");
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(deps({ token: "secret" }), "GET", "/api/settings", new URLSearchParams(), undefined, "");
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /api/settings", () => {
+  async function post(body: unknown, over: Partial<WebDeps> = {}) {
+    return handleWebApi(deps(over), "POST", "/api/settings", new URLSearchParams(), AUTH, JSON.stringify(body));
+  }
+
+  it("merges the provided non-secret fields and echoes the fresh snapshot", async () => {
+    let saved: Config | null = null;
+    const res = await post(
+      { action: "set", settings: { adultContent: true, downloadLimitKbps: 2000, disabledSources: ["yts", "yts"] } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(res.status).toBe(200);
+    expect(saved!.adultContent).toBe(true);
+    expect(saved!.downloadLimitKbps).toBe(2000);
+    expect(saved!.disabledSources).toEqual(["yts"]);
+    const out = res.json as SettingsResponse;
+    expect(out.settings.adultContent).toBe(true);
+    expect(out.settings.downloadLimitKbps).toBe(2000);
+  });
+
+  it("clears a limit sent as null", async () => {
+    let saved: Config | null = null;
+    await post(
+      { action: "set", settings: { downloadLimitKbps: null } },
+      { loadConfigImpl: async () => searchConfig({ downloadLimitKbps: 999 }), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(saved!.downloadLimitKbps).toBeUndefined();
+  });
+
+  it("never writes a token even if the body smuggles one", async () => {
+    let saved: Config | null = null;
+    await post(
+      { action: "set", settings: { realDebridToken: "sneaky", adultContent: true } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(saved!.realDebridToken).toBeUndefined();
+    expect(saved!.adultContent).toBe(true);
+  });
+
+  it("refuses to write an env-locked field and reports it", async () => {
+    vi.stubEnv("TORLINK_ADULT", "0");
+    let saved: Config | null = null;
+    const res = await post(
+      { action: "set", settings: { adultContent: true, downloadLimitKbps: 500 } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    // The env-locked field is not written; the other field still is.
+    expect(saved!.adultContent).toBeUndefined();
+    expect(saved!.downloadLimitKbps).toBe(500);
+    expect((res.json as SettingsResponse).refused).toContain("adultContent");
+  });
+
+  it("re-reads config so a concurrent change to another field is not clobbered", async () => {
+    let saved: Config | null = null;
+    const loadConfigImpl = vi.fn(async () => searchConfig({ savedSearches: ["kestrel"] }));
+    await post(
+      { action: "set", settings: { adultContent: true } },
+      { loadConfigImpl, saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(loadConfigImpl).toHaveBeenCalledTimes(1);
+    expect(saved!.savedSearches).toEqual(["kestrel"]);
+  });
+
+  it("rejects a bad action and a non-object settings", async () => {
+    expect((await post({})).status).toBe(400);
+    expect((await post({ action: "toggle", settings: {} })).status).toBe(400);
+    expect((await post({ action: "set", settings: [] })).status).toBe(400);
+  });
+
+  it("requires the token when one is configured", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }),
+      "POST",
+      "/api/settings",
+      new URLSearchParams(),
+      undefined,
+      JSON.stringify({ action: "set", settings: { adultContent: true } }),
     );
     expect(res.status).toBe(401);
   });

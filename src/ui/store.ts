@@ -35,7 +35,7 @@ export type Section =
   | "library"
   | "downloads"
   | "seeding"
-  | "accounts"
+  | "settings"
   | "forYou";
 
 // The "category" sections (all/games/movies/tv/anime) — i.e. the results view,
@@ -47,7 +47,7 @@ export function isCategory(section: Section): boolean {
     section !== "library" &&
     section !== "downloads" &&
     section !== "seeding" &&
-    section !== "accounts" &&
+    section !== "settings" &&
     section !== "forYou"
   );
 }
@@ -79,12 +79,16 @@ const SECTIONS: Section[] = [
   "library",
   "downloads",
   "seeding",
-  "accounts",
+  "settings",
 ];
 
 // Parse a persisted "last section" preference (any sidebar tab), falling back
 // to "all" for unknown/stale values so torlink reopens where you left off.
 export function parseSection(raw: string | undefined): Section {
+  // The Accounts pane was folded into Settings; a config written before that
+  // stored "accounts" as its last section, so reopen it on Settings rather than
+  // dropping the user back on "all".
+  if (raw === "accounts") return "settings";
   return (SECTIONS as string[]).includes(raw ?? "") ? (raw as Section) : "all";
 }
 

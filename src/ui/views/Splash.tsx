@@ -137,7 +137,7 @@ export function Splash({
             {`${debridLabel}: connected${activeUsername ? ` as ${activeUsername}` : ""}`}
           </Text>
         ) : (
-          <Text dimColor>Tip — open the Accounts tab to connect Real-Debrid or TorBox for instant, private streaming.</Text>
+          <Text dimColor>Tip — open the Settings tab to connect Real-Debrid or TorBox for instant, private streaming.</Text>
         )}
       </Box>
 

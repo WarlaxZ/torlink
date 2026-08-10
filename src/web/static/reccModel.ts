@@ -217,7 +217,7 @@ export function reccStatus(state: ReccState): ReccStatusLine {
     case "not-configured":
       // The TUI's wording, pointed at the surface a browser user can reach.
       return {
-        text: "Recommendations aren't set up yet. Set up reccd in the TUI's Accounts pane, or set TORLINK_RECC_URL and TORLINK_RECC_TOKEN.",
+        text: "Recommendations aren't set up yet. Set up reccd in the TUI's Settings pane, or set TORLINK_RECC_URL and TORLINK_RECC_TOKEN.",
         tone: "info",
         show: true,
       };

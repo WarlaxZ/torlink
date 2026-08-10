@@ -15,7 +15,7 @@ import { Panel } from "../src/ui/components/Panel";
 import { Downloads } from "../src/ui/components/Downloads";
 import { HelpOverlay } from "../src/ui/components/HelpOverlay";
 import { SourcesPrompt } from "../src/ui/components/SourcesPrompt";
-import { Accounts } from "../src/ui/components/Accounts";
+import { Settings } from "../src/ui/components/Settings";
 import { Seeding } from "../src/ui/components/Seeding";
 import { PreviewPane } from "../src/ui/components/PreviewPane";
 import { footerHints } from "../src/ui/keymap";
@@ -389,19 +389,19 @@ save(
 );
 
 save(
-  "accounts",
-  // Tall enough for all five providers at two lines each — below ~18 the pane
-  // windows and the last rows scroll out of the shot.
-  makeStore({ section: "accounts", region: "content", contentWidth: BROWSE_CW, listRows: 19, cols: BROWSE_COLS, rows: 30 }),
+  "settings",
+  // Tall enough for the settings rows and all five account rows at two lines
+  // each — below this the pane windows and the last rows scroll out of the shot.
+  makeStore({ section: "settings", region: "content", contentWidth: BROWSE_CW, listRows: 46, cols: BROWSE_COLS, rows: 60 }),
   <Box flexDirection="column" width={BROWSE_COLS} paddingX={1}>
     <Box justifyContent="space-between">
       <Logo />
     </Box>
     <Rule width={BROWSE_RULE} />
-    <Box height={18} marginTop={1}>
+    <Box height={45} marginTop={1}>
       <Sidebar />
       <Box flexGrow={1} flexDirection="column">
-        <Accounts
+        <Settings
           debrid={[
             {
               provider: "realdebrid",
@@ -432,10 +432,20 @@ save(
           omdbConfigured
           onManageOmdb={() => {}}
           onSignOutOmdb={() => {}}
+          onEditFolder={() => {}}
+          onEditSources={() => {}}
+          onEditQuality={() => {}}
+          onEditDns={() => {}}
+          onEditTrackers={() => {}}
+          onEditLimits={() => {}}
+          onEditVpn={() => {}}
+          onEditPlayer={() => {}}
+          onToggleAdult={() => {}}
+          onToggleProxy={() => {}}
         />
       </Box>
     </Box>
-    <Footer hints={footerHints("content", "accounts")} />
+    <Footer hints={footerHints("content", "settings")} />
   </Box>,
   { cols: BROWSE_COLS },
 );

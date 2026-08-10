@@ -128,7 +128,7 @@ import { NetflixImportPrompt, type NetflixImportView } from "./components/Netfli
 import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
 import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
-import { Accounts } from "./components/Accounts";
+import { Settings } from "./components/Settings";
 import { SavedSearches } from "./components/SavedSearches";
 import { Favourites } from "./components/Favourites";
 import { ContinueWatching } from "./components/ContinueWatching";
@@ -1438,7 +1438,7 @@ export function App({
       if (!config || !queue) return;
       const active = resolveActiveDebrid(config);
       if (!active) {
-        setNotice("Set a Real-Debrid or TorBox token first — open the Accounts tab.");
+        setNotice("Set a Real-Debrid or TorBox token first — open the Settings tab.");
         return;
       }
       const meta = getDebridProvider(active.provider);
@@ -1927,7 +1927,7 @@ export function App({
       const meta = getDebridProvider(provider);
       const token = resolveDebridTokenFor(config, provider);
       if (!token) {
-        setNotice(`Set a ${meta.label} token first — open the Accounts tab.`);
+        setNotice(`Set a ${meta.label} token first — open the Settings tab.`);
         return;
       }
       const label = truncate(cleanText(input.name), 32);
@@ -2177,6 +2177,33 @@ export function App({
     setShowHelp(false);
     setEditingDns(true);
   }, []);
+
+  // The adult / relay toggles, extracted so the `X` and `N` keybindings and the
+  // Settings pane's rows drive one implementation — a second copy is the
+  // copy-then-drift bug this codebase keeps hitting.
+  const toggleAdult = useCallback(() => {
+    setShowHelp(false);
+    // The env var wins over config (resolveAdultContent), so flipping the stored
+    // preference can't override it — say so rather than silently no-op'ing.
+    if (process.env.TORLINK_ADULT !== undefined) {
+      setNotice("Adult content is controlled by the TORLINK_ADULT env var.");
+      return;
+    }
+    const enabled = config?.adultContent !== true;
+    persistConfig({ adultContent: enabled });
+    setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
+  }, [config, persistConfig]);
+
+  const toggleProxy = useCallback(() => {
+    setShowHelp(false);
+    const enabled = config?.proxyDebridStreams !== true;
+    persistConfig({ proxyDebridStreams: enabled });
+    setNotice(
+      enabled
+        ? "Debrid streams now relay through this machine — uses your upload bandwidth."
+        : "Debrid streams go straight from the provider to the player.",
+    );
+  }, [config, persistConfig]);
 
   // Persist a custom DNS spec and apply it immediately, so the next search uses
   // it without a restart. An empty value falls back to the system resolver.
@@ -2783,28 +2810,11 @@ export function App({
         return;
       }
       if (input === "X") {
-        setShowHelp(false);
-        // The env var wins over config (resolveAdultContent), so flipping the
-        // stored preference can't override it — say so rather than silently
-        // no-op'ing.
-        if (process.env.TORLINK_ADULT !== undefined) {
-          setNotice("Adult content is controlled by the TORLINK_ADULT env var.");
-          return;
-        }
-        const enabled = config?.adultContent !== true;
-        persistConfig({ adultContent: enabled });
-        setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
+        toggleAdult();
         return;
       }
       if (input === "N") {
-        setShowHelp(false);
-        const enabled = config?.proxyDebridStreams !== true;
-        persistConfig({ proxyDebridStreams: enabled });
-        setNotice(
-          enabled
-            ? "Debrid streams now relay through this machine — uses your upload bandwidth."
-            : "Debrid streams go straight from the provider to the player.",
-        );
+        toggleProxy();
         return;
       }
       if (input === "m") {
@@ -3412,8 +3422,8 @@ export function App({
             >
               <Seeding />
             </Box>
-            <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
-              <Accounts
+            <Box display={section === "settings" ? "flex" : "none"} flexDirection="column">
+              <Settings
                 debrid={DEBRID_PROVIDER_IDS.map((provider) => ({
                   provider,
                   token: resolveDebridTokenFor(store.config, provider),
@@ -3440,6 +3450,19 @@ export function App({
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}
                 onSignOutOmdb={clearOmdbKey}
+                onEditFolder={() => setEditingFolder(true)}
+                onEditSources={() => setEditingSources(true)}
+                onEditQuality={() => setEditingQuality(true)}
+                onEditDns={openDnsPrompt}
+                onEditTrackers={() => setEditingTrackers(true)}
+                onEditLimits={() => setEditingLimits(true)}
+                onEditVpn={() => setEditingVpn(true)}
+                onEditPlayer={() => setEditingPlayer(true)}
+                onToggleAdult={toggleAdult}
+                onToggleProxy={toggleProxy}
+                dnsEnvOverride={process.env["TORLINK_DNS"] !== undefined}
+                playerEnvOverride={Boolean(process.env["TORLINK_PLAYER"]?.trim())}
+                adultEnvOverride={process.env["TORLINK_ADULT"] !== undefined}
               />
             </Box>
             <Box display={section === "continueWatching" ? "flex" : "none"} flexDirection="column">

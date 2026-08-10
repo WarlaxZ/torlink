@@ -156,6 +156,18 @@ import {
 } from "./savedModel";
 import { tokenFromHash } from "./authLink";
 import {
+  ACCOUNTS_HINT,
+  accountRows,
+  numberPatch,
+  settingsSections,
+  sourceTogglePatch,
+  textPatch,
+  togglePatch,
+  type PublicWritableSettings,
+  type SettingsControl,
+  type SettingsResponse,
+} from "./settingsModel";
+import {
   FEATURE_IDS,
   FEATURES,
   NEXT_FEATURE_STATE,
@@ -227,9 +239,17 @@ const prepareBox = el<HTMLDivElement>("prepare");
 const prepareText = el<HTMLSpanElement>("prepare-line");
 const prepareCancel = el<HTMLButtonElement>("prepare-cancel");
 
-const prefsBlock = el<HTMLDetailsElement>("prefs");
 const prefsResSelect = el<HTMLSelectElement>("pref-res");
 const prefsFeaturesBox = el<HTMLDivElement>("pref-features");
+
+// The settings dialog and its dynamic sections (built by renderSettings).
+const openSettingsBtn = el<HTMLButtonElement>("open-settings");
+const settingsDialog = el<HTMLDialogElement>("settings");
+const settingsClose = el<HTMLButtonElement>("settings-close");
+const settingsScalars = el<HTMLDivElement>("settings-scalars");
+const settingsSourcesBox = el<HTMLDivElement>("settings-sources");
+const settingsAccountsBox = el<HTMLDivElement>("settings-accounts");
+const settingsAccountsHint = el<HTMLParagraphElement>("settings-accounts-hint");
 
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
@@ -1225,16 +1245,198 @@ prefsResSelect.addEventListener("change", () => {
   void savePrefs({ ...prefs, maxResolution: (value || null) as PublicQualityPrefs["maxResolution"] });
 });
 
-// `prefs` is otherwise only ever set at boot and from this tab's own POST
-// echo, so another surface changing the stored preference (the TUI's `P`,
-// or another browser tab) would sit unseen until reload — and the next click
-// here would build its whole-object POST from that stale snapshot and quietly
-// wipe the other surface's change. Re-read the moment the disclosure opens,
-// through the same fetch `loadSources()` already does, so there is no second
-// endpoint or parse path for the same data.
-prefsBlock.addEventListener("toggle", () => {
-  if (prefsBlock.open) void loadSources();
-});
+// ---- settings dialog ------------------------------------------------------
+// The gear. Every non-secret setting in one place, so none has to be found by a
+// shortcut key. The DECISIONS — which controls exist, what a change sends, the
+// account copy — live in settingsModel.ts; this is DOM wiring only: fetch,
+// render with createElement + textContent, POST. Source labels and the download
+// folder are user-controlled, so there is no innerHTML anywhere below.
+
+let settingsData: SettingsResponse | null = null;
+
+async function openSettings(): Promise<void> {
+  // Fetch fresh every open: the TUI (or another tab) may have changed a token,
+  // a source, the folder or a limit since the page loaded. loadSources()
+  // refreshes the source catalog and `prefs` through the same path the search
+  // pane uses, so the dialog's Sources list and Playback rows are never stale.
+  await loadSources();
+  try {
+    const res = await fetch("/api/settings", { headers: authHeaders() });
+    if (!res.ok) {
+      showNotice(`Settings didn't load (HTTP ${res.status}).`);
+      return;
+    }
+    settingsData = (await res.json()) as SettingsResponse;
+  } catch {
+    showNotice("Settings didn't reach the server.");
+    setConn("lost");
+    return;
+  }
+  renderPrefs();
+  renderSettings();
+  if (!settingsDialog.open) settingsDialog.showModal();
+}
+
+// Persist one change and re-render from the server's echo, never the local
+// guess: the server re-reads, sanitises and refuses env-locked fields, so the
+// dialog must reflect what it actually stored — a refused toggle springs back.
+async function saveSettings(patch: Partial<PublicWritableSettings>): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set", settings: patch }),
+    });
+  } catch {
+    showNotice("That didn't reach the server.");
+    setConn("lost");
+    return;
+  }
+  if (!res.ok) {
+    const body = await readEnvelope(res);
+    showNotice(body.error ?? `That didn't stick (HTTP ${res.status}).`);
+    return;
+  }
+  settingsData = (await res.json()) as SettingsResponse;
+  for (const key of settingsData.refused) {
+    showNotice(`${key} is set by an environment variable and can't be changed here.`);
+  }
+  // Adult and source changes reshape the search tab strip and the catalog this
+  // dialog draws from — refresh both through the same fetch used everywhere else.
+  await loadSources();
+  renderTabs();
+  renderPrefs();
+  renderSettings();
+}
+
+function renderSettings(): void {
+  if (!settingsData) return;
+  renderSettingsScalars(settingsData);
+  renderSettingsSources();
+  renderSettingsAccounts(settingsData);
+}
+
+function appendControlInput(label: HTMLElement, control: SettingsControl): void {
+  if (control.kind === "toggle") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "settings-toggle";
+    btn.setAttribute("aria-pressed", String(control.value));
+    btn.textContent = control.value ? "on" : "off";
+    btn.disabled = control.locked;
+    btn.addEventListener("click", () => void saveSettings(togglePatch(control.key, control.value)));
+    label.appendChild(btn);
+    return;
+  }
+  if (control.kind === "number") {
+    const field = document.createElement("input");
+    field.type = "number";
+    field.min = "0";
+    field.step = String(control.step);
+    field.placeholder = "no limit";
+    field.value = control.value === null ? "" : String(control.value);
+    field.addEventListener("change", () => void saveSettings(numberPatch(control.key, field.value)));
+    label.appendChild(field);
+    const unit = document.createElement("span");
+    unit.className = "settings-unit";
+    unit.textContent = control.unit;
+    label.appendChild(unit);
+    return;
+  }
+  const text = document.createElement("input");
+  text.type = "text";
+  text.value = control.value;
+  text.placeholder = control.placeholder;
+  text.disabled = control.locked;
+  text.addEventListener("change", () => void saveSettings(textPatch(control.key, text.value)));
+  label.appendChild(text);
+}
+
+function renderControl(control: SettingsControl): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "settings-row";
+  const label = document.createElement("label");
+  label.className = "control settings-control";
+  const name = document.createElement("span");
+  name.textContent = control.label;
+  label.appendChild(name);
+  appendControlInput(label, control);
+  row.appendChild(label);
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  // A locked control explains the env var that owns it in place of its usual hint.
+  hint.textContent = control.locked && control.lockNote ? control.lockNote : control.hint;
+  row.appendChild(hint);
+  return row;
+}
+
+function renderSettingsScalars(data: SettingsResponse): void {
+  settingsScalars.replaceChildren(
+    ...settingsSections(data).map((section) => {
+      const wrap = document.createElement("section");
+      wrap.className = "settings-group";
+      const heading = document.createElement("h3");
+      heading.textContent = section.title;
+      wrap.appendChild(heading);
+      for (const control of section.controls) wrap.appendChild(renderControl(control));
+      return wrap;
+    }),
+  );
+}
+
+function renderSettingsSources(): void {
+  const disabled = settingsData?.settings.disabledSources ?? [];
+  const disabledSet = new Set(disabled);
+  const byId = new Map((sources?.sources ?? []).map((s) => [s.id, s]));
+  settingsSourcesBox.replaceChildren(
+    ...(sources?.groups ?? []).map((group) => {
+      const wrap = document.createElement("div");
+      wrap.className = "settings-source-group";
+      const heading = document.createElement("h4");
+      heading.textContent = group.group;
+      wrap.appendChild(heading);
+      for (const id of group.sourceIds) {
+        const src = byId.get(id);
+        if (!src) continue;
+        const label = document.createElement("label");
+        label.className = "settings-source";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = !disabledSet.has(id);
+        box.addEventListener("change", () => void saveSettings(sourceTogglePatch(disabled, id, box.checked)));
+        const name = document.createElement("span");
+        name.textContent = src.label;
+        label.appendChild(box);
+        label.appendChild(name);
+        wrap.appendChild(label);
+      }
+      return wrap;
+    }),
+  );
+}
+
+function renderSettingsAccounts(data: SettingsResponse): void {
+  settingsAccountsHint.textContent = ACCOUNTS_HINT;
+  settingsAccountsBox.replaceChildren(
+    ...accountRows(data.accounts).map((account) => {
+      const row = document.createElement("div");
+      row.className = "settings-account";
+      const name = document.createElement("span");
+      name.className = "settings-account-name";
+      name.textContent = account.label;
+      const status = document.createElement("span");
+      status.className = account.ok ? "settings-account-ok" : "settings-account-off";
+      status.textContent = account.status;
+      row.appendChild(name);
+      row.appendChild(status);
+      return row;
+    }),
+  );
+}
+
+openSettingsBtn.addEventListener("click", () => void openSettings());
+settingsClose.addEventListener("click", () => settingsDialog.close());
 
 // ---- search ---------------------------------------------------------------
 // Everything to the next banner is the search pane. As with Play, the decisions
@@ -3756,7 +3958,7 @@ function showAuth(message?: string): void {
   // touching it before unlocking would fire an unauthenticated POST
   // /api/preferences and get a 401 for its trouble.
   viewsNav.hidden = true;
-  prefsBlock.hidden = true;
+  openSettingsBtn.hidden = true;
   authForm.hidden = false;
   if (message === undefined) {
     authError.hidden = true;
@@ -3775,7 +3977,7 @@ function showUnreachable(detail: string): void {
   authForm.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
-  prefsBlock.hidden = false;
+  openSettingsBtn.hidden = false;
   // On the queue pane, because that is where the explanation goes — a search
   // box over an unreachable server is an invitation to a second failure.
   showView("queue");
@@ -3791,7 +3993,7 @@ function openApp(payload: StatusPayload): void {
   authError.hidden = true;
   app.hidden = false;
   viewsNav.hidden = false;
-  prefsBlock.hidden = false;
+  openSettingsBtn.hidden = false;
   // The URL's tab, before the first render, so the strip and the state agree
   // from the outset. The QUERY is run at the end of this function, once the
   // panes exist and `loadSaved` has been kicked off — running it here would
@@ -3830,10 +4032,10 @@ function openApp(payload: StatusPayload): void {
   // says a release cannot play here. A ONE-SHOT INTENT, not view state, so it is
   // read straight off `location` rather than through RouteState: the next
   // `syncUrl` rebuilds the query from the route and drops it, which is exactly
-  // right. Reloading the page should not keep reopening a disclosure.
+  // right. Reloading the page should not keep reopening the dialog. The playback
+  // controls now live in the settings dialog, so this opens that.
   if (new URLSearchParams(location.search).get("prefs") === "1") {
-    prefsBlock.open = true;
-    prefsBlock.scrollIntoView({ block: "nearest" });
+    void openSettings();
     syncUrl();
   }
   // The search the URL asked for — last, and only when there is one.

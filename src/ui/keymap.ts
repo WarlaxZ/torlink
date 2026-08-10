@@ -32,11 +32,11 @@ export const HELP_GROUPS: HelpGroup[] = [
     ],
   },
   {
-    title: "Accounts",
+    title: "Settings",
     hints: [
-      { keys: "↑ ↓", label: "Move between services" },
-      { keys: "↵", label: "Sign in / switch account" },
-      { keys: "x", label: "Sign out" },
+      { keys: "↑ ↓", label: "Move between settings and accounts" },
+      { keys: "↵", label: "Change a setting, or sign in / switch account" },
+      { keys: "x", label: "Sign out (account rows)" },
       { keys: "i", label: "Import history — Netflix or Trakt (reccd)" },
       { keys: "c", label: "Claim the reccd account (set a username and password)" },
       { keys: "a", label: "Make the highlighted debrid provider active" },
@@ -163,10 +163,10 @@ export function footerHints(
       seedFocus === "seeding" ? "Pause" : seedFocus === "missing" ? "Retry" : "Resume";
     return [{ keys: "p", label }, { keys: "c", label: "Remove from list" }, FOLDER, SWITCH, ALWAYS];
   }
-  if (section === "accounts") {
+  if (section === "settings") {
     return [
       NAVIGATE,
-      { keys: "↵", label: "Sign in" },
+      { keys: "↵", label: "Change / sign in" },
       { keys: "x", label: "Sign out" },
       { keys: "i", label: "Import" },
       { keys: "c", label: "Claim" },

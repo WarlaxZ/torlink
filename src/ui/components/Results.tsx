@@ -813,7 +813,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     sources.some(
       (s) => s.id.startsWith("rt-") && /log in|login|session/i.test(search.perSource[s.id]?.error ?? ""),
     )
-      ? " Sign in from the Accounts tab to search RuTracker."
+      ? " Sign in from the Settings tab to search RuTracker."
       : "";
 
   const sortNote = sort === "none" ? "" : `  ${ICON.dot} sort: ${sortLabel(sort)}`;

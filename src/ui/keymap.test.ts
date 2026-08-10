@@ -45,15 +45,15 @@ describe("footerHints debrid discoverability", () => {
   });
 });
 
-describe("accounts keymap", () => {
-  it("shows sign-in/out hints on the accounts section", () => {
-    const keys = footerHints("content", "accounts").map((h) => h.keys);
+describe("settings keymap", () => {
+  it("shows change/sign-in and sign-out hints on the settings section", () => {
+    const keys = footerHints("content", "settings").map((h) => h.keys);
     expect(keys).toContain("↵");
     expect(keys).toContain("x");
   });
 
-  it("shows the make-active footer hint on the accounts section", () => {
-    const keys = footerHints("content", "accounts").map((h) => h.keys);
+  it("shows the make-active footer hint on the settings section", () => {
+    const keys = footerHints("content", "settings").map((h) => h.keys);
     expect(keys).toContain("a");
   });
 
@@ -62,7 +62,7 @@ describe("accounts keymap", () => {
     expect(entries.find((h) => h.keys === "r")?.label).toBe("Download via debrid (Real-Debrid / TorBox)");
   });
 
-  it("documents the accounts make-active key", () => {
+  it("documents the settings make-active key", () => {
     const entries = HELP_GROUPS.flatMap((g) => g.hints);
     expect(entries.some((h) => h.keys === "a")).toBe(true);
   });
@@ -73,10 +73,10 @@ describe("accounts keymap", () => {
     expect(allKeys).not.toContain("R");
   });
 
-  it("advertises c for claiming in both halves of the accounts keymap", () => {
-    const help = HELP_GROUPS.find((g) => g.title === "Accounts");
+  it("advertises c for claiming in both halves of the settings keymap", () => {
+    const help = HELP_GROUPS.find((g) => g.title === "Settings");
     expect(help?.hints.some((h) => h.keys === "c")).toBe(true);
-    const footer = footerHints("content", "accounts");
+    const footer = footerHints("content", "settings");
     expect(footer.some((h) => h.keys === "c")).toBe(true);
   });
 });

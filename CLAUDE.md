@@ -13,10 +13,17 @@ they saved is missing, and nothing on screen explains why.
 If a feature genuinely belongs in one surface only, say so explicitly in the PR body with the
 reason. Two reasons that actually qualify:
 
-- **Configuration.** Tokens, sources, limits, folders and DNS are TUI-only on purpose. The web
-  is a client of that config. `/api/sources` reports capability flags (`debridConfigured`,
-  `debridProvider`, `debridCachedCheck`, `omdbConfigured`) so the browser can adapt without
-  offering to change settings.
+- **Secret and host-specific configuration.** Every token (Real-Debrid, TorBox, OMDb, and reccd's
+  URL + bearer token), custom DNS, extra trackers, the VPN interface and the cast device/host are
+  TUI-only on purpose — they are credentials, or config specific to the machine torlink runs on.
+  The browser is a client of that config: `/api/sources` reports capability flags (`debridConfigured`,
+  `debridProvider`, `debridCachedCheck`, `omdbConfigured`) and the settings dialog shows account
+  status read-only, so the browser adapts without ever seeing a token.
+  **The non-secret preferences are NOT TUI-only** — the browser's settings gear (`GET`/`POST
+  /api/settings`, validated by `sanitiseSettingsPatch` in `src/config/config.ts`) writes adult
+  content, transfer/seed limits, which sources are on, playback quality, the download folder, the
+  media player and debrid-stream relaying. A new user-facing preference in that class ships in both
+  the TUI Settings pane (`src/ui/components/Settings.tsx`) and the web settings dialog.
 - **A surface can't express it.** The terminal has no posters; the browser has no keybindings.
 
 "I ran out of time" is not one of them. Half a feature is worse than a filed issue.
