@@ -514,6 +514,56 @@ export function resultAtRow<T>(row: GroupRow<T>): T | null {
 }
 
 /**
+ * What pressing play on a SEASON row should do.
+ *
+ * A season made of loose episodes has no single "the season" torrent, so
+ * `members[0]` is merely the best release of episode one — playing it silently is
+ * the bug this fixes. Instead: reveal the episodes and land on the one you are up
+ * to. A season that DOES contain a pack keeps today's behaviour — grab the pack
+ * (`members[0]`; packs sort first) and let the resolve→file-picker path preselect
+ * the next episode, which also surfaces any extras inside the pack.
+ *
+ * Pure and shared so both front ends decide identically; the front ends only
+ * wire the two outcomes. `resultAtRow` is deliberately NOT changed — add,
+ * favourite and preview still resolve a release from it.
+ */
+export type SeasonPlayPlan<T> =
+  | { kind: "resolve"; result: T | null }
+  | { kind: "reveal"; expandKey: string; selectKey: string | null; select: T | null };
+
+export function seasonPlayPlan<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  seasonKey: string,
+  positionFor?: PositionLookup,
+): SeasonPlayPlan<T> {
+  const node = seasonTree(groups).find(
+    (n): n is SeasonNode<T> => isSeasonNode(n) && n.key === seasonKey,
+  );
+  // Not a season row (a film, a single-episode group) or gone: behave as play
+  // does today — resolve the first member.
+  if (!node) {
+    return { kind: "resolve", result: groups.find((g) => g.key === seasonKey)?.members[0] ?? null };
+  }
+  // A child with no episode number is a pack: the whole season in one torrent.
+  if (node.children.some((c) => c.episode === undefined)) {
+    return { kind: "resolve", result: node.members[0] ?? null };
+  }
+  // Loose episodes only. Land on the next-up episode when the results have it,
+  // else the first episode. `children` are episodes ascending (seasonTree sorts).
+  const at = positionFor?.(showKeyOf(node.key)) ?? null;
+  const target =
+    (at &&
+      node.children.find((c) => c.season === at.season && c.episode === at.episode + 1)) ||
+    node.children[0]!;
+  return {
+    kind: "reveal",
+    expandKey: node.key,
+    selectKey: target.key,
+    select: target.members[0] ?? null,
+  };
+}
+
+/**
  * The note a season heading carries when you are part-way through it.
  *
  * "up to E07", NOT "watched" — the store holds a HIGH-WATER MARK, one entry per
