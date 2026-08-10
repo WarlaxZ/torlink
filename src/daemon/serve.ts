@@ -366,11 +366,16 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // When Access is enforced the origin JWT check is a strictly stronger gate
   // than a token, so a tokenless non-loopback bind is allowed (and not minted —
   // a minted token would break the browser UI behind a tunnel).
-  if (!LOOPBACK_HOSTS.has(host) && !token && !cloudflareAccess) {
+  // Cloudflare Access can stand in for the token ONLY on the --web path: that is
+  // the only server that verifies the Access assertion. The bare add-API
+  // (createApiServer) has no Access guard, so a tokenless non-loopback bind there
+  // is still refused even when Access is configured.
+  const accessRelaxesBind = cloudflareAccess !== null && options.web === true;
+  if (!LOOPBACK_HOSTS.has(host) && !token && !accessRelaxesBind) {
     if (!options.web) {
       console.error(
         `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
-          `(or set TORLINK_API_TOKEN), enforce Cloudflare Access, or bind 127.0.0.1.`,
+          `(or set TORLINK_API_TOKEN), or bind 127.0.0.1.`,
       );
       process.exit(1);
       return;

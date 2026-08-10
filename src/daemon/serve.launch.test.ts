@@ -334,6 +334,28 @@ describe("runServe --web startup output", () => {
     expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
   });
 
+  it("still refuses a non-loopback bind without --web even when Access is configured", async () => {
+    // Regression guard: Access relaxes the bind ONLY on the --web path, because
+    // only startWebServer installs the Access guard. The bare add-API
+    // (createApiServer) has no Access verification, so a tokenless non-loopback
+    // bind there must still hard-exit even with Access fully configured —
+    // otherwise a destructive, Access-UNVERIFIED API would bind all interfaces.
+    process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN = "myteam.cloudflareaccess.com";
+    process.env.TORLINK_CF_ACCESS_AUD = "aud-tag-123";
+    try {
+      await withTimeout(
+        runServe({ port: await freePort(), host: "0.0.0.0", downloadDir: dir }),
+        1000,
+        "the refusal to bind 0.0.0.0 without a token (Access configured, no --web)",
+      );
+      expect(process.exit).toHaveBeenCalledWith(1);
+      expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
+    } finally {
+      delete process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN;
+      delete process.env.TORLINK_CF_ACCESS_AUD;
+    }
+  });
+
   it("opens the loopback link, fragment and all", async () => {
     const port = await freePort();
     const opened: string[] = [];
