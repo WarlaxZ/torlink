@@ -25,6 +25,7 @@ import {
   nextUpRowKey,
   positionNote,
   resultAtRow,
+  seasonPlayPlan,
   showKeyOf,
   type PositionLookup,
 } from "../../util/resultGroup";
@@ -727,8 +728,25 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
         const r = resultAt(clamped);
         if (r) openDebrid(r);
       } else if (input === "v") {
-        const r = resultAt(clamped);
-        if (r) openStream(r);
+        const row = rows[clamped];
+        if (row?.kind === "season") {
+          const plan = seasonPlayPlan(
+            groupResults(results, hintForSection(section)),
+            row.key,
+            positionFor,
+          );
+          if (plan.kind === "reveal") {
+            // Reveal the episodes and land the cursor on the next-up one. selRef
+            // moves the cursor to the row once the rebuilt rows include it.
+            if (plan.select) selRef.current = { key: plan.selectKey!, hash: plan.select.infoHash };
+            setExpanded((current) => new Set(current).add(plan.expandKey));
+          } else if (plan.result) {
+            openStream(plan.result);
+          }
+        } else {
+          const r = resultAt(clamped);
+          if (r) openStream(r);
+        }
       } else if (input === "y") {
         const r = resultAt(clamped);
         if (r) copyResultMagnet(r);
