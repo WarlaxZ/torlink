@@ -616,5 +616,14 @@ describe("seasonPlayPlan", () => {
     const groups = groupResults([r("Kestrel.2010.1080p.BluRay.x264")]);
     const plan = seasonPlayPlan(groups, "kestrel|2010|movie");
     expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result?.name).toBe("Kestrel.2010.1080p.BluRay.x264");
+  });
+
+  it("resolves to null for a key that matches no group at all", () => {
+    const plan = seasonPlayPlan(groupResults([r("Kepler.S02E01.1080p.WEB-DL")]), "nope|series|s9");
+    expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result).toBeNull();
   });
 });

@@ -551,9 +551,9 @@ export function seasonPlayPlan<T extends GroupableResult>(
   // Loose episodes only. Land on the next-up episode when the results have it,
   // else the first episode. `children` are episodes ascending (seasonTree sorts).
   const at = positionFor?.(showKeyOf(node.key)) ?? null;
+  const want = at ? nextOf(at) : null;
   const target =
-    (at &&
-      node.children.find((c) => c.season === at.season && c.episode === at.episode + 1)) ||
+    (want && node.children.find((c) => c.season === want.season && c.episode === want.episode)) ||
     node.children[0]!;
   return {
     kind: "reveal",
