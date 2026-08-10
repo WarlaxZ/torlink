@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JSONWebKeySet } from "jose";
+import {
+  SignJWT,
+  exportJWK,
+  generateKeyPair,
+  createLocalJWKSet,
+  type JSONWebKeySet,
+  type JWTVerifyGetKey,
+} from "jose";
 import { verifyAccessAssertion, accessIssuer, accessJwksUrl } from "./cloudflareAccess.js";
 
 const TEAM = "myteam.cloudflareaccess.com";
@@ -93,5 +100,21 @@ describe("verifyAccessAssertion", () => {
     const { keySet } = await setup();
     const res = await verifyAccessAssertion("not-a-jwt", keySet, { teamDomain: TEAM, aud: AUD });
     expect(res).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("fails closed when the key resolver throws a JWKS error", async () => {
+    // A resolver that jose calls during key resolution and that throws a
+    // jose-style JWKS error, so mapError's code?.startsWith("ERR_JWKS") branch runs.
+    const throwingKeySet = (() => {
+      const err = new Error("jwks unreachable") as Error & { code?: string };
+      err.code = "ERR_JWKS_TIMEOUT";
+      throw err;
+    }) as unknown as JWTVerifyGetKey;
+    // A valid, well-formed RS256 token so jose gets past structural checks and
+    // actually invokes the resolver to look up a key.
+    const { privateKey } = await setup();
+    const token = await mint(privateKey, { email: "x@e.com" });
+    const res = await verifyAccessAssertion(token, throwingKeySet, { teamDomain: TEAM, aud: AUD });
+    expect(res).toEqual({ ok: false, reason: "jwks-error" });
   });
 });

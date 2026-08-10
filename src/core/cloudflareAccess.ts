@@ -65,6 +65,7 @@ export async function verifyAccessAssertion(
   if (!token) return { ok: false, reason: "no-assertion" };
   try {
     const { payload } = await jwtVerify(token, keySet, {
+      algorithms: ["RS256"],
       issuer: accessIssuer(cfg.teamDomain),
       audience: cfg.aud,
       clockTolerance,
