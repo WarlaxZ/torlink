@@ -57,11 +57,9 @@ export {
   type SortField,
 } from "../../util/resultSort";
 export {
-  defaultExpandedKeys,
   expansionSeed,
   groupCountLabel,
   groupHeading,
-  nextUpRowKey,
   positionNote,
   resultAtRow,
   seasonPlayPlan,
