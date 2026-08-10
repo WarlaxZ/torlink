@@ -483,7 +483,12 @@ export async function startWebServer(
       // Tokenless means loopback-bound, so require a loopback Host: a hostile
       // page can otherwise reach this port through DNS rebinding, arriving with
       // the attacker's name in Host and the user's cookies... and full API access.
-      if (!token && !hostHeaderOk(req.headers.host)) {
+      //
+      // The loopback-Host check defends a tokenless loopback bind against DNS
+      // rebinding. When Cloudflare Access is enforced it is redundant — a rebinding
+      // page can't mint a valid assertion — and it would otherwise 403 the public
+      // Host that cloudflared forwards. So skip it when Access is on.
+      if (!token && !accessCfg && !hostHeaderOk(req.headers.host)) {
         writeJson(res, 403, { error: "forbidden host" });
         log(`${method} ${urlPath} -> 403 (host)`);
         return;

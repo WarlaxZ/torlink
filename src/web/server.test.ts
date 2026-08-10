@@ -570,6 +570,52 @@ describe("startWebServer — Cloudflare Access guard", () => {
     const res = await fetch(`http://127.0.0.1:${handle.port}/health`);
     expect(res.status).toBe(200);
   });
+
+  // In the real deployment torlink binds loopback with no token and sits behind
+  // Cloudflare Tunnel, so cloudflared forwards the PUBLIC hostname in Host. The
+  // loopback-Host guard would 403 every proxied request before Access ran, so it
+  // must be skipped when Access is on. fetch() drops a Host override (see line
+  // ~98), so use raw http.request; and read the body to prove which 403 fires.
+  function requestWithHost(
+    port: number,
+    path: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path, method: "GET", headers },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("allows a non-loopback Host header when Access is on and the assertion is valid", async () => {
+    const { handle, mint } = await serverWithAccess();
+    const token = await mint({ email: "owner@example.com" });
+    const { status } = await requestWithHost(handle.port, "/api/status", {
+      Host: "torlink.example.com",
+      "Cf-Access-Jwt-Assertion": token,
+    });
+    expect(status).toBe(200);
+  });
+
+  it("still 403s a non-loopback Host header when Access is on but the assertion is missing", async () => {
+    const { handle } = await serverWithAccess();
+    const { status, body } = await requestWithHost(handle.port, "/api/status", {
+      Host: "torlink.example.com",
+    });
+    expect(status).toBe(403);
+    // The Access 403, not the host 403 — proving Access, not the skipped host
+    // guard, is what rejected it.
+    expect(JSON.parse(body).error).toBe("forbidden");
+  });
 });
 
 describe("writeWebResponse", () => {
