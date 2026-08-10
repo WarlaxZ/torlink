@@ -62,6 +62,7 @@ import {
   previewApplies,
   reportsHealthLookup,
   resultAtRow,
+  seasonPlayPlan,
   resultMeta,
   resultRowPlan,
   rowForPlay,
@@ -2061,7 +2062,11 @@ function mountResultPoster(
 // The four buttons a result offers, built once and used by both layouts: a
 // grid card that offered fewer of them than the list row would be a downgrade
 // dressed as a view option.
-function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivElement {
+function resultActions(
+  result: PublicSearchResult,
+  rowKey: string,
+  onPlay?: () => void,
+): HTMLDivElement {
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
@@ -2074,7 +2079,10 @@ function resultActions(result: PublicSearchResult, rowKey: string): HTMLDivEleme
   // several releases of one title), while play() is handed rowForPlay(result),
   // whose id is the hash. See tagPlayKey for why the two identities are separate.
   tagPlayKey(playButton, result.infoHash, "play");
-  playButton.addEventListener("click", () => void play(rowForPlay(result)));
+  playButton.addEventListener("click", () => {
+    if (onPlay) onPlay();
+    else void play(rowForPlay(result));
+  });
   actions.append(playButton);
 
   const addButton = document.createElement("button");
@@ -2511,7 +2519,27 @@ function renderGroupRow(
 
   const body = document.createElement("div");
   body.className = "group-body";
-  body.append(head, meta, resultActions(best, row.key));
+  // A season made of loose episodes plays nothing on click: it reveals the
+  // episodes and lands on the one you are up to. The decision is seasonPlayPlan
+  // (pure); this is only the wiring. A pack season / any other row keeps play.
+  let onPlay: (() => void) | undefined;
+  if (row.kind === "season") {
+    const positionFor = positionLookup(savedState.continueWatching);
+    const plan = seasonPlayPlan(
+      visibleGroups(searchView, reportsHealthLookup(sources)),
+      row.key,
+      positionFor,
+    );
+    if (plan.kind === "reveal") {
+      const target = plan.select;
+      onPlay = () => {
+        expandedGroups.add(plan.expandKey);
+        if (target) selectResult(target);
+        else renderResults();
+      };
+    }
+  }
+  body.append(head, meta, resultActions(best, row.key, onPlay));
 
   if (!postersApply(searchView.group, sources?.omdbConfigured === true)) {
     li.append(toggle, body);
