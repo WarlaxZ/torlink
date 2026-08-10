@@ -564,6 +564,38 @@ export function seasonPlayPlan<T extends GroupableResult>(
 }
 
 /**
+ * What a fresh result set should open and land on — and whether to stop trying.
+ *
+ * WHY `latch`: results stream in over SSE, so the FIRST frame is usually too
+ * sparse to have formed the multi-episode season. Seeding on that frame and
+ * latching (the previous behaviour in both front ends) opened nothing and never
+ * retried, so a search for a show you are part-way through rendered collapsed
+ * with no episode selected. Retry until either an expansion is applied or the
+ * search settles — never latch on a frame that produced neither.
+ */
+export interface ExpansionSeed {
+  /** Season keys to open. */
+  expandKeys: string[];
+  /** The group key to land selection on, or null. */
+  selectKey: string | null;
+  /** True once seeding is settled; the caller stops retrying. */
+  latch: boolean;
+}
+
+export function expansionSeed<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  positionFor: PositionLookup | undefined,
+  searchSettled: boolean,
+): ExpansionSeed {
+  const expandKeys = defaultExpandedKeys(groups, positionFor);
+  return {
+    expandKeys,
+    selectKey: positionFor ? nextUpRowKey(groups, positionFor) : null,
+    latch: expandKeys.length > 0 || searchSettled,
+  };
+}
+
+/**
  * The note a season heading carries when you are part-way through it.
  *
  * "up to E07", NOT "watched" — the store holds a HIGH-WATER MARK, one entry per
