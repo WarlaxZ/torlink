@@ -201,6 +201,82 @@ export function sanitiseQualityPrefs(raw: RawQualityPrefs): {
   return out;
 }
 
+// The subset of Config the web UI is allowed to write — non-secret settings
+// only. Values arrive from the browser as `unknown`, so every field is typed
+// loose and validated below. Tokens, DNS, trackers, VPN and cast are absent by
+// design: they stay TUI-only (secrets, or host-specific network config).
+export interface RawSettingsPatch {
+  downloadDir?: unknown;
+  mediaPlayer?: unknown;
+  adultContent?: unknown;
+  proxyDebridStreams?: unknown;
+  downloadLimitKbps?: unknown;
+  uploadLimitKbps?: unknown;
+  seedRatio?: unknown;
+  seedMinutes?: unknown;
+  maxResolution?: unknown;
+  requireFeatures?: unknown;
+  excludeFeatures?: unknown;
+  disabledSources?: unknown;
+}
+
+// A positive, finite number floored to an integer, or undefined — where
+// undefined means "no limit" (0, negative, or junk all clear the setting).
+function positiveInt(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined;
+}
+
+/**
+ * Validate a settings patch coming from an untrusted client (the web UI), so a
+ * value the browser sends can never be stored in a form the terminal would
+ * reject — the same contract `sanitiseQualityPrefs` gives the quality picker,
+ * extended to the rest of the non-secret settings.
+ *
+ * Only keys actually present in the input are emitted, so a caller can send a
+ * partial patch and leave everything else untouched. A present-but-empty
+ * `downloadDir` is dropped (it is required and must not be blanked); an empty
+ * `mediaPlayer` is kept, because empty legitimately means "auto-detect".
+ */
+export function sanitiseSettingsPatch(raw: RawSettingsPatch): Partial<Config> {
+  const out: Partial<Config> = {};
+  if (raw.downloadDir !== undefined) {
+    const dir = typeof raw.downloadDir === "string" ? raw.downloadDir.trim() : "";
+    if (dir) out.downloadDir = dir;
+  }
+  if (raw.mediaPlayer !== undefined) {
+    out.mediaPlayer = typeof raw.mediaPlayer === "string" ? raw.mediaPlayer.trim() : "";
+  }
+  if (raw.adultContent !== undefined) out.adultContent = raw.adultContent === true;
+  if (raw.proxyDebridStreams !== undefined) out.proxyDebridStreams = raw.proxyDebridStreams === true;
+  if (raw.downloadLimitKbps !== undefined) out.downloadLimitKbps = positiveInt(raw.downloadLimitKbps);
+  if (raw.uploadLimitKbps !== undefined) out.uploadLimitKbps = positiveInt(raw.uploadLimitKbps);
+  if (raw.seedRatio !== undefined) {
+    out.seedRatio =
+      typeof raw.seedRatio === "number" && Number.isFinite(raw.seedRatio) && raw.seedRatio > 0
+        ? raw.seedRatio
+        : undefined;
+  }
+  if (raw.seedMinutes !== undefined) out.seedMinutes = positiveInt(raw.seedMinutes);
+  if (raw.disabledSources !== undefined) {
+    out.disabledSources = Array.isArray(raw.disabledSources)
+      ? [...new Set(raw.disabledSources.filter((s): s is string => typeof s === "string" && s.length > 0))]
+      : [];
+  }
+  // The quality trio is interdependent (a require/exclude collision resolves in
+  // sanitiseQualityPrefs), so if any of the three is present, normalise all three.
+  if (
+    raw.maxResolution !== undefined ||
+    raw.requireFeatures !== undefined ||
+    raw.excludeFeatures !== undefined
+  ) {
+    const quality = sanitiseQualityPrefs(raw);
+    out.maxResolution = quality.maxResolution;
+    out.requireFeatures = quality.requireFeatures;
+    out.excludeFeatures = quality.excludeFeatures;
+  }
+  return out;
+}
+
 /** The picker's view of the config. */
 export function qualityPrefsFrom(config: Config): QualityPrefs {
   const clean = sanitiseQualityPrefs(config);

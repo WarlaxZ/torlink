@@ -485,7 +485,7 @@ describe("reccPosterHint", () => {
     const hint = reccPosterHint([{ kind: "no-key" }, { kind: "no-key" }, { kind: "no-key" }]);
     expect(hint).toBe(OMDB_KEY_HINT);
     expect(hint).toContain("OMDb API key");
-    expect(hint).toContain("Accounts tab");
+    expect(hint).toContain("Settings tab");
   });
 
   it("says it once for twenty no-key cards, not twenty times", () => {

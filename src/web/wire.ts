@@ -531,6 +531,88 @@ export interface SourcesResponse {
 }
 
 /**
+ * The non-secret settings the web UI may read and write, over the wire. The
+ * settings overlay renders its controls from this snapshot; `POST /api/settings`
+ * writes it back.
+ *
+ * What is DELIBERATELY ABSENT, and stays TUI-only: every token (Real-Debrid,
+ * TorBox, reccd, OMDb), and the host-specific network config — DNS, extra
+ * trackers, the VPN kill-switch interface, and the cast host/device. Tokens are
+ * credentials the browser must never see (the whole `/api/sources` capability-
+ * flag design exists to avoid it); the network fields are configuration a client
+ * of this config does not get to change.
+ *
+ * The four limits are `number | null` rather than absent for "no limit", so the
+ * browser round-trips the cleared state explicitly — the same reason
+ * `PublicQualityPrefs.maxResolution` is nullable.
+ */
+export interface PublicWritableSettings {
+  downloadDir: string;
+  /** The media-player command, or "" for auto-detect. */
+  mediaPlayer: string;
+  adultContent: boolean;
+  proxyDebridStreams: boolean;
+  downloadLimitKbps: number | null;
+  uploadLimitKbps: number | null;
+  seedRatio: number | null;
+  seedMinutes: number | null;
+  /** Ids of sources the user has switched off. */
+  disabledSources: string[];
+  /** The viewing preference, the same shape `POST /api/preferences` writes. */
+  preferences: PublicQualityPrefs;
+}
+
+/**
+ * Which settings an environment variable currently controls, so the overlay can
+ * render them read-only rather than offering a write the server will refuse.
+ * Mirrors the TUI, which shows "controlled by the TORLINK_* env var" and
+ * declines the toggle. Only the two writable fields that have an env override
+ * appear here (`TORLINK_ADULT`, `TORLINK_PLAYER`).
+ */
+export interface SettingsEnvLocks {
+  adultContent: boolean;
+  mediaPlayer: boolean;
+}
+
+/**
+ * Read-only account/capability status for the settings overlay's Accounts
+ * section. Booleans and ids only — never a token, exactly like
+ * `SourcesResponse`. Accounts are configured in the terminal; the browser shows
+ * their status and points the user there.
+ */
+export interface SettingsAccounts {
+  debridConfigured: boolean;
+  debridProvider: "realdebrid" | "torbox" | null;
+  omdbConfigured: boolean;
+  reccConfigured: boolean;
+  reccAccount: PublicReccAccount | null;
+}
+
+/**
+ * The body of both `GET /api/settings` and `POST /api/settings` — one shape, so
+ * the browser re-renders the overlay from the write's response with no second
+ * fetch. `refused` lists any field the write skipped because an env var controls
+ * it; it is always `[]` on the GET.
+ */
+export interface SettingsResponse {
+  settings: PublicWritableSettings;
+  envLocks: SettingsEnvLocks;
+  accounts: SettingsAccounts;
+  refused: string[];
+}
+
+/**
+ * The body of `POST /api/settings`. One action, `"set"`, that MERGES the given
+ * fields (a partial patch) rather than replacing the whole object — so the
+ * overlay can send just the control that changed. Env-locked fields in the patch
+ * are ignored and reported in `SettingsResponse.refused`.
+ */
+export interface SettingsRequest {
+  action: "set";
+  settings: Partial<PublicWritableSettings>;
+}
+
+/**
  * The body of `POST /api/add`.
  *
  * This route existed before the search UI as a thin alias for the legacy

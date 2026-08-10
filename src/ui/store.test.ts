@@ -32,7 +32,13 @@ describe("parseSection", () => {
     expect(parseSection("seeding")).toBe("seeding");
     expect(parseSection("forYou")).toBe("forYou");
     expect(parseSection("savedSearches")).toBe("savedSearches");
-    expect(parseSection("accounts")).toBe("accounts");
+    expect(parseSection("settings")).toBe("settings");
+  });
+
+  // The Accounts pane was folded into Settings; a config written before that
+  // stored "accounts" as its last section and must reopen on Settings.
+  it("maps a stale 'accounts' last-section onto settings", () => {
+    expect(parseSection("accounts")).toBe("settings");
   });
 
   it("falls back to 'all' for missing or unknown values", () => {
@@ -43,8 +49,8 @@ describe("parseSection", () => {
 });
 
 describe("isCategory", () => {
-  it("excludes the downloads/seeding/accounts sections", () => {
-    expect(isCategory("accounts")).toBe(false);
+  it("excludes the downloads/seeding/settings sections", () => {
+    expect(isCategory("settings")).toBe(false);
     expect(isCategory("savedSearches")).toBe(false);
     expect(isCategory("downloads")).toBe(false);
     expect(isCategory("seeding")).toBe(false);

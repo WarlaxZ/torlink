@@ -22,9 +22,11 @@ import {
   resolveCastDevice,
   qualityPrefsFrom,
   resolveAdultContent,
+  resolveMediaPlayer,
   resolveOmdbApiKey,
   resolveReccConfig,
   sanitiseQualityPrefs,
+  sanitiseSettingsPatch,
   saveConfig,
   type Config,
   type FavouriteItem,
@@ -101,6 +103,9 @@ import type {
   PublicTitleMeta,
   PublicTitleSuggestions,
   SavedResponse,
+  SettingsResponse,
+  SettingsAccounts,
+  PublicWritableSettings,
   SourcesResponse,
   StartStreamResponse,
   StreamConfirmResponse,
@@ -881,7 +886,7 @@ async function addToQueue(
     if (!active) {
       return {
         status: 400,
-        json: { error: "Set a Real-Debrid or TorBox token first — open the Accounts tab." },
+        json: { error: "Set a Real-Debrid or TorBox token first — open the Settings tab." },
       };
     }
     options.debridToken = active.token;
@@ -1234,6 +1239,106 @@ async function preferencesAction(deps: WebDeps, bodyText: string): Promise<WebRe
 
   const out: PreferencesResponse = { preferences: toPublicQualityPrefs(next) };
   return { status: 200, json: out };
+}
+
+// ---- settings ----------------------------------------------------------
+
+// Which writable settings an environment variable currently controls. Mirrors
+// the two resolve* helpers in config.ts that consult an env var — kept in step
+// with them by name; if either env var is renamed there, rename it here too. A
+// locked field is shown read-only by the overlay and refused by the write below,
+// exactly as the TUI declines the same toggle with "controlled by the env var".
+function settingsEnvLocks(): { adultContent: boolean; mediaPlayer: boolean } {
+  return {
+    // TORLINK_ADULT forces the flag on OR off, so its mere presence locks it.
+    adultContent: process.env.TORLINK_ADULT !== undefined,
+    // TORLINK_PLAYER only wins when it is a non-empty command.
+    mediaPlayer: (process.env.TORLINK_PLAYER ?? "").trim() !== "",
+  };
+}
+
+// The stored config, as the non-secret snapshot the overlay renders. Effective
+// (resolved) values for the env-overridable fields, so what the user sees is
+// what is in force; `envLocks` tells the overlay it cannot change them. Built by
+// picking fields, never spreading — no token can leak through it (same rule as
+// toPublicSession).
+function toPublicWritableSettings(config: Config): PublicWritableSettings {
+  return {
+    downloadDir: config.downloadDir,
+    mediaPlayer: resolveMediaPlayer(config),
+    adultContent: resolveAdultContent(config),
+    proxyDebridStreams: config.proxyDebridStreams === true,
+    downloadLimitKbps: config.downloadLimitKbps ?? null,
+    uploadLimitKbps: config.uploadLimitKbps ?? null,
+    seedRatio: config.seedRatio ?? null,
+    seedMinutes: config.seedMinutes ?? null,
+    disabledSources: [...(config.disabledSources ?? [])],
+    preferences: toPublicQualityPrefs(config),
+  };
+}
+
+// The account/capability status the overlay shows read-only — booleans and ids
+// only, never a token, the same contract as sourcesResponse.
+function settingsAccountsOf(config: Config): SettingsAccounts {
+  const active = resolveActiveDebrid(config);
+  return {
+    debridConfigured: active !== null,
+    debridProvider: active?.provider ?? null,
+    omdbConfigured: resolveOmdbApiKey(config) !== "",
+    reccConfigured: resolveReccConfig(config).reccUrl !== undefined,
+    reccAccount: config.reccAccountName
+      ? { name: config.reccAccountName, claimed: config.reccAccountClaimed === true }
+      : null,
+  };
+}
+
+function settingsResponse(config: Config, refused: string[]): SettingsResponse {
+  return {
+    settings: toPublicWritableSettings(config),
+    envLocks: settingsEnvLocks(),
+    accounts: settingsAccountsOf(config),
+    refused,
+  };
+}
+
+async function settingsAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+  const body = parseObjectBody(bodyText);
+  if (!body) return { status: 400, json: { error: "invalid JSON body" } };
+  if (body.action !== "set") return { status: 400, json: { error: "invalid action" } };
+
+  const raw = body.settings;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { status: 400, json: { error: "missing settings" } };
+  }
+
+  // Validated with the shared helper, so a value the browser sends can never be
+  // stored in a form the terminal would reject, and no field outside the
+  // non-secret set (a smuggled token) survives — it is not in RawSettingsPatch.
+  const patch = sanitiseSettingsPatch(raw as Record<string, unknown>);
+
+  // Drop any env-locked field from the write and report it, matching the TUI,
+  // which refuses the toggle rather than silently losing to the env var next
+  // read. Done after sanitising so `refused` only names fields actually sent.
+  const locks = settingsEnvLocks();
+  const refused: string[] = [];
+  if (locks.adultContent && "adultContent" in patch) {
+    delete patch.adultContent;
+    refused.push("adultContent");
+  }
+  if (locks.mediaPlayer && "mediaPlayer" in patch) {
+    delete patch.mediaPlayer;
+    refused.push("mediaPlayer");
+  }
+
+  // Re-read, per the note at the top of the saved-lists section: `serve --web`
+  // is a separate process from any running TUI, so writing back a snapshot taken
+  // before this request would silently revert a token, sort, or disabled-source
+  // edit the TUI made in between.
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const next: Config = { ...config, ...patch };
+  await (deps.saveConfigImpl ?? saveConfig)(next);
+
+  return { status: 200, json: settingsResponse(next, refused) };
 }
 
 // ---- title metadata ----------------------------------------------------
@@ -2020,6 +2125,15 @@ export async function handleWebApi(
 
   if (method === "POST" && urlPath === "/api/preferences") {
     return preferencesAction(deps, bodyText);
+  }
+
+  if (method === "GET" && urlPath === "/api/settings") {
+    const config = await (deps.loadConfigImpl ?? loadConfig)();
+    return { status: 200, json: settingsResponse(config, []) };
+  }
+
+  if (method === "POST" && urlPath === "/api/settings") {
+    return settingsAction(deps, bodyText);
   }
 
   if (method === "GET" && urlPath === "/api/title") {

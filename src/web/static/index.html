@@ -35,29 +35,13 @@
           queue<span id="queue-count" class="badge" hidden></span>
         </button>
       </nav>
+      <!-- Settings. A gear, not a fifth nav tab: the nav caps at four (see the
+           note on #views above), and settings is not a browsing surface. It
+           opens the #settings dialog below. Hidden until the app unlocks, like
+           #views, so it never fires an unauthenticated GET /api/settings. -->
+      <button id="open-settings" class="settings-open" type="button" aria-label="Settings" hidden>⚙</button>
       <span id="conn" class="conn" data-state="connecting">connecting</span>
     </header>
-
-    <!-- Playback preference. Outside every pane on purpose: it changes what
-         Play does on For You AND on the Continue Watching rows under Saved, so
-         it belongs to neither. A fifth nav tab is not an option — see the note
-         on #views above. Checkbox rows are built by app.ts from FEATURES, so
-         the terminal and the browser cannot drift apart. -->
-    <details id="prefs" class="card prefs" hidden>
-      <summary>playback preferences</summary>
-      <label class="control" for="pref-res">
-        <span>max resolution</span>
-        <select id="pref-res">
-          <option value="" selected>no limit</option>
-          <option value="2160p">2160p</option>
-          <option value="1080p">1080p</option>
-          <option value="720p">720p</option>
-          <option value="480p">480p</option>
-        </select>
-      </label>
-      <div id="pref-features" class="pref-features"></div>
-      <p class="hint">With nothing set, the best resolution available wins — then the largest file.</p>
-    </details>
 
     <form id="auth" class="card" hidden>
       <label for="token">Access token</label>
@@ -112,6 +96,59 @@
              largest-first. Its label is set by app.js from the current mode. -->
         <button id="picker-sort" type="button"></button>
         <button id="picker-cancel" type="button">Cancel</button>
+      </div>
+    </dialog>
+
+    <!-- Settings. A MODAL <dialog> OUTSIDE <main id="app">, both for the same
+         reasons the #picker above is: #app carries `hidden` until the page
+         loads, and a <dialog> inside a display:none subtree does not render;
+         modal centres it, takes focus and closes on Escape.
+
+         The browser writes only the NON-SECRET settings (adult, limits,
+         sources, folder, player, relay, quality). Tokens and accounts are shown
+         read-only and configured in the terminal — the browser never sees a
+         token, by design. Everything below the two static #pref-* controls is
+         built by app.ts with createElement + textContent (source labels and the
+         download folder are user-controlled, so never innerHTML). -->
+    <dialog id="settings" class="card settings">
+      <div class="settings-head">
+        <p class="settings-title">Settings</p>
+        <button id="settings-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="settings-body">
+        <!-- Playback preference. It used to be a standalone header disclosure
+             (#prefs); folded in here so every setting lives in one place, which
+             is the whole point of this dialog. It still changes what Play does
+             on For You and on the Continue Watching rows under Saved. Checkbox
+             rows are built by app.ts from FEATURES, so terminal and browser
+             cannot drift apart. -->
+        <section class="settings-group">
+          <h3>Playback</h3>
+          <label class="control" for="pref-res">
+            <span>max resolution</span>
+            <select id="pref-res">
+              <option value="" selected>no limit</option>
+              <option value="2160p">2160p</option>
+              <option value="1080p">1080p</option>
+              <option value="720p">720p</option>
+              <option value="480p">480p</option>
+            </select>
+          </label>
+          <div id="pref-features" class="pref-features"></div>
+          <p class="hint">With nothing set, the best resolution available wins — then the largest file.</p>
+        </section>
+        <!-- Scalar settings (Content / Downloads / Transfer limits), built from
+             GET /api/settings by app.ts via settingsModel.settingsSections. -->
+        <div id="settings-scalars"></div>
+        <section class="settings-group">
+          <h3>Sources</h3>
+          <div id="settings-sources"></div>
+        </section>
+        <section class="settings-group">
+          <h3>Accounts</h3>
+          <p id="settings-accounts-hint" class="hint"></p>
+          <div id="settings-accounts"></div>
+        </section>
       </div>
     </dialog>
 

@@ -222,27 +222,19 @@ h1 {
 }
 
 /* The playback-preference disclosure. Overrides .card's row layout the same
-   way .picker does — it is a heading (summary) above a form, not a strip of
-   controls — and stays block-level whether open or closed: <details> hides
-   its own content natively, independent of the display value set here. */
-.prefs {
-  display: block;
-}
+   way .picker does. */
 
-.prefs summary {
-  cursor: pointer;
-  font-size: 0.75rem;
+/* The gear that opens the settings dialog. A quiet glyph in the header, sized
+   to sit on the baseline next to the connection state. */
+.settings-open {
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.25rem 0.45rem;
   color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
-.prefs[open] summary {
-  margin-bottom: 0.75rem;
-}
-
-.prefs .control {
-  margin-bottom: 0.6rem;
+.settings-open:hover {
+  color: var(--accent);
 }
 
 /* One button per feature (releasePick.ts's FEATURE_IDS), not a checkbox list:
@@ -542,6 +534,134 @@ button:hover {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--accent);
+}
+
+/* The settings dialog. Same modal-<dialog> arrangement as .picker above: the
+   two display rules override the UA and .card's own `display: flex`, and the
+   margin/max-height restore centring and keep a long dialog scrollable inside
+   the viewport rather than pushing its close button off screen. */
+.settings[open] {
+  display: block;
+}
+
+.settings:not([open]) {
+  display: none;
+}
+
+.settings {
+  margin: auto;
+  border: 1px solid var(--line);
+  max-height: min(85vh, 48rem);
+  max-width: min(40rem, calc(100vw - 2rem));
+  overflow-y: auto;
+}
+
+.settings::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+/* A titled block of controls (Playback, Content, Downloads, …). The rule from
+   the top rather than a fixed gap, so grouped sections read as a stack. */
+.settings-group {
+  margin-bottom: 1.25rem;
+}
+
+.settings-group h3,
+.settings-source-group h4 {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.settings-row {
+  margin-bottom: 0.85rem;
+}
+
+.settings-row .hint {
+  margin-top: 0.25rem;
+}
+
+/* Label and its control on one row, the control pushed to the right — the same
+   shape .control already gives the max-resolution select. */
+.settings-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-control input[type="text"] {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.settings-control input[type="number"] {
+  width: 6rem;
+}
+
+.settings-unit {
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+
+/* The on/off pill. aria-pressed carries the state; colour follows it. */
+.settings-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-source-group {
+  margin-bottom: 0.9rem;
+}
+
+.settings-source {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.15rem 0;
+}
+
+/* Read-only account rows: name on the left, status on the right. Accounts are
+   configured in the terminal, so there is no control here — just a status. */
+.settings-account {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8rem;
+  padding: 0.2rem 0;
+}
+
+.settings-account-ok {
+  color: var(--accent);
+}
+
+.settings-account-off {
+  color: var(--dim);
 }
 
 .empty,

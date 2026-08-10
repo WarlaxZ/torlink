@@ -128,7 +128,7 @@ import { NetflixImportPrompt, type NetflixImportView } from "./components/Netfli
 import { TraktImportPrompt, type TraktImportView } from "./components/TraktImportPrompt";
 import { ImportSourcePrompt, type ImportSource } from "./components/ImportSourcePrompt";
 import { checkReccConnection, type ReccStatus } from "../recc/status";
-import { Accounts } from "./components/Accounts";
+import { Settings } from "./components/Settings";
 import { SavedSearches } from "./components/SavedSearches";
 import { Favourites } from "./components/Favourites";
 import { ContinueWatching } from "./components/ContinueWatching";
@@ -137,6 +137,7 @@ import { TrackersPrompt } from "./components/TrackersPrompt";
 import { DownloadFilePrompt } from "./components/DownloadFilePrompt";
 import { LimitsPrompt, type TransferLimits } from "./components/LimitsPrompt";
 import { VpnPrompt } from "./components/VpnPrompt";
+import { CastAddressPrompt } from "./components/CastAddressPrompt";
 import { RatePrompt } from "./components/RatePrompt";
 import { footerHints } from "./keymap";
 import { COLOR, ICON } from "./theme";
@@ -374,6 +375,8 @@ export function App({
   const [editingTrackers, setEditingTrackers] = useState(false);
   const [editingLimits, setEditingLimits] = useState(false);
   const [editingVpn, setEditingVpn] = useState(false);
+  const [editingCastDevice, setEditingCastDevice] = useState(false);
+  const [editingCastHost, setEditingCastHost] = useState(false);
   const [pendingP2P, setPendingP2P] = useState<DownloadInput | null>(null);
   const [fileSelection, setFileSelection] = useState<QueueItem | null>(null);
   // Context for a stream awaiting a player-command decision: the URL, an
@@ -998,6 +1001,26 @@ export function App({
     setNotice(vpnInterface ? `VPN guard set to ${vpnInterface}.` : "VPN guard disabled.");
   }, [config, setConfig]);
 
+  // A manual Chromecast address, for a device mDNS cannot reach (a Docker bridge
+  // or a VLAN). Persisted so it is offered alongside discovered devices next time.
+  const setCastDeviceAddress = useCallback((raw: string) => {
+    setEditingCastDevice(false);
+    if (!config) return;
+    const castDevice = raw.trim() || undefined;
+    setConfig({ ...config, castDevice });
+    setNotice(castDevice ? `Cast device set to ${castDevice}.` : "Cast device cleared.");
+  }, [config, setConfig]);
+
+  // The host a TV should fetch media FROM when this machine's own address is not
+  // routable from the LAN (WSL2's default NAT, bridged Docker).
+  const setCastHost = useCallback((raw: string) => {
+    setEditingCastHost(false);
+    if (!config) return;
+    const castAdvertiseHost = raw.trim() || undefined;
+    setConfig({ ...config, castAdvertiseHost });
+    setNotice(castAdvertiseHost ? `Cast host set to ${castAdvertiseHost}.` : "Cast host cleared.");
+  }, [config, setConfig]);
+
   const ensureVpnSafe = useCallback(async (): Promise<boolean> => {
     const name = config?.vpnInterface?.trim();
     if (!name) return true;
@@ -1438,7 +1461,7 @@ export function App({
       if (!config || !queue) return;
       const active = resolveActiveDebrid(config);
       if (!active) {
-        setNotice("Set a Real-Debrid or TorBox token first — open the Accounts tab.");
+        setNotice("Set a Real-Debrid or TorBox token first — open the Settings tab.");
         return;
       }
       const meta = getDebridProvider(active.provider);
@@ -1927,7 +1950,7 @@ export function App({
       const meta = getDebridProvider(provider);
       const token = resolveDebridTokenFor(config, provider);
       if (!token) {
-        setNotice(`Set a ${meta.label} token first — open the Accounts tab.`);
+        setNotice(`Set a ${meta.label} token first — open the Settings tab.`);
         return;
       }
       const label = truncate(cleanText(input.name), 32);
@@ -2177,6 +2200,33 @@ export function App({
     setShowHelp(false);
     setEditingDns(true);
   }, []);
+
+  // The adult / relay toggles, extracted so the `X` and `N` keybindings and the
+  // Settings pane's rows drive one implementation — a second copy is the
+  // copy-then-drift bug this codebase keeps hitting.
+  const toggleAdult = useCallback(() => {
+    setShowHelp(false);
+    // The env var wins over config (resolveAdultContent), so flipping the stored
+    // preference can't override it — say so rather than silently no-op'ing.
+    if (process.env.TORLINK_ADULT !== undefined) {
+      setNotice("Adult content is controlled by the TORLINK_ADULT env var.");
+      return;
+    }
+    const enabled = config?.adultContent !== true;
+    persistConfig({ adultContent: enabled });
+    setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
+  }, [config, persistConfig]);
+
+  const toggleProxy = useCallback(() => {
+    setShowHelp(false);
+    const enabled = config?.proxyDebridStreams !== true;
+    persistConfig({ proxyDebridStreams: enabled });
+    setNotice(
+      enabled
+        ? "Debrid streams now relay through this machine — uses your upload bandwidth."
+        : "Debrid streams go straight from the provider to the player.",
+    );
+  }, [config, persistConfig]);
 
   // Persist a custom DNS spec and apply it immediately, so the next search uses
   // it without a restart. An empty value falls back to the system resolver.
@@ -2542,7 +2592,7 @@ export function App({
       disabledSources: (config.disabledSources ?? []) as SourceId[],
       toggleSource,
       region:
-        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
+        showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || ratePrompt || importingNetflix || importChooser || importingTrakt
           ? "help"
           : region,
       setRegion,
@@ -2618,6 +2668,8 @@ export function App({
     editingTrackers,
     editingLimits,
     editingVpn,
+    editingCastDevice,
+    editingCastHost,
     toggleSource,
     pendingP2P,
     pendingDownload,
@@ -2681,6 +2733,8 @@ export function App({
       if (editingTrackers) return; // the trackers prompt owns input
       if (editingLimits) return; // the limits prompt owns input
       if (editingVpn) return; // the VPN prompt owns input
+      if (editingCastDevice) return; // the cast-device prompt owns input
+      if (editingCastHost) return; // the cast-host prompt owns input
       if (pendingP2P) return; // the P2P warning owns input
       if (pendingDownload) return; // the download-to prompt owns input
       if (fileSelection) return; // the download file picker owns input
@@ -2783,28 +2837,11 @@ export function App({
         return;
       }
       if (input === "X") {
-        setShowHelp(false);
-        // The env var wins over config (resolveAdultContent), so flipping the
-        // stored preference can't override it — say so rather than silently
-        // no-op'ing.
-        if (process.env.TORLINK_ADULT !== undefined) {
-          setNotice("Adult content is controlled by the TORLINK_ADULT env var.");
-          return;
-        }
-        const enabled = config?.adultContent !== true;
-        persistConfig({ adultContent: enabled });
-        setNotice(enabled ? "Adult content enabled." : "Adult content disabled.");
+        toggleAdult();
         return;
       }
       if (input === "N") {
-        setShowHelp(false);
-        const enabled = config?.proxyDebridStreams !== true;
-        persistConfig({ proxyDebridStreams: enabled });
-        setNotice(
-          enabled
-            ? "Debrid streams now relay through this machine — uses your upload bandwidth."
-            : "Debrid streams go straight from the provider to the player.",
-        );
+        toggleProxy();
         return;
       }
       if (input === "m") {
@@ -3361,6 +3398,34 @@ export function App({
           </Box>
         ) : null}
 
+        {editingCastDevice ? (
+          <Box marginTop={1}>
+            <CastAddressPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              title="cast device"
+              value={store.config.castDevice ?? ""}
+              placeholder="host or host:port (192.168.0.40:8009)"
+              hint="A Chromecast mDNS can't find. Empty clears it. TORLINK_CAST_DEVICE overrides this."
+              onSubmit={setCastDeviceAddress}
+              onCancel={() => setEditingCastDevice(false)}
+            />
+          </Box>
+        ) : null}
+
+        {editingCastHost ? (
+          <Box marginTop={1}>
+            <CastAddressPrompt
+              width={Math.max(30, Math.min(cols - 4, 72))}
+              title="cast host"
+              value={store.config.castAdvertiseHost ?? ""}
+              placeholder="host or host:port (192.168.0.10:8080)"
+              hint="The LAN address a TV should fetch from (WSL / bridged Docker). Empty clears it. TORLINK_CAST_HOST overrides this."
+              onSubmit={setCastHost}
+              onCancel={() => setEditingCastHost(false)}
+            />
+          </Box>
+        ) : null}
+
         {pendingDownload ? (
           <Box marginTop={1}>
             <FolderPrompt
@@ -3383,7 +3448,7 @@ export function App({
           height={bodyH}
           marginTop={compact ? 0 : 1}
           display={
-            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+            showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || fileSelection || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
               ? "none"
               : "flex"
           }
@@ -3412,8 +3477,8 @@ export function App({
             >
               <Seeding />
             </Box>
-            <Box display={section === "accounts" ? "flex" : "none"} flexDirection="column">
-              <Accounts
+            <Box display={section === "settings" ? "flex" : "none"} flexDirection="column">
+              <Settings
                 debrid={DEBRID_PROVIDER_IDS.map((provider) => ({
                   provider,
                   token: resolveDebridTokenFor(store.config, provider),
@@ -3440,6 +3505,23 @@ export function App({
                 omdbEnvOverride={Boolean(process.env["TORLINK_OMDB_KEY"]?.trim())}
                 onManageOmdb={openOmdbPrompt}
                 onSignOutOmdb={clearOmdbKey}
+                onEditFolder={() => setEditingFolder(true)}
+                onEditSources={() => setEditingSources(true)}
+                onEditQuality={() => setEditingQuality(true)}
+                onEditDns={openDnsPrompt}
+                onEditTrackers={() => setEditingTrackers(true)}
+                onEditLimits={() => setEditingLimits(true)}
+                onEditVpn={() => setEditingVpn(true)}
+                onEditPlayer={() => setEditingPlayer(true)}
+                onEditCastDevice={() => setEditingCastDevice(true)}
+                onEditCastHost={() => setEditingCastHost(true)}
+                onToggleAdult={toggleAdult}
+                onToggleProxy={toggleProxy}
+                dnsEnvOverride={process.env["TORLINK_DNS"] !== undefined}
+                playerEnvOverride={Boolean(process.env["TORLINK_PLAYER"]?.trim())}
+                adultEnvOverride={process.env["TORLINK_ADULT"] !== undefined}
+                castDeviceEnvOverride={Boolean(process.env["TORLINK_CAST_DEVICE"]?.trim())}
+                castHostEnvOverride={Boolean(process.env["TORLINK_CAST_HOST"]?.trim())}
               />
             </Box>
             <Box display={section === "continueWatching" ? "flex" : "none"} flexDirection="column">
@@ -3473,7 +3555,7 @@ export function App({
         {showFooter ? (
           <Box
             display={
-              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
+              showHelp || editingFolder || editingToken || editingRecc || claimingRecc || editingOmdb || editingPlayer || editingSources || editingQuality || editingDns || editingRutracker || editingTrackers || editingLimits || editingVpn || editingCastDevice || editingCastHost || pendingP2P || pendingDownload || streamFiles || preparing || torrentPrompt || keepPrompt || importingNetflix || importChooser || importingTrakt
                 ? "none"
                 : "flex"
             }

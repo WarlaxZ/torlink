@@ -107,7 +107,7 @@ A short, hand-picked list of trusted sources:
 | Music | The Pirate Bay, 1337x |
 
 **RuTracker** is available across Games, Movies, TV, Anime, Music, and Books and requires a free account.
-Sign in from the **Accounts** tab in the sidebar; credentials go only to rutracker.org and only the
+Sign in from the **Settings** tab in the sidebar; credentials go only to rutracker.org and only the
 session cookie is stored locally. If asked for a captcha, follow the link and copy the code back.
 
 Games are the only category that intentionally distributes executable software, so they come from
@@ -188,7 +188,7 @@ still advances it. Nothing is marked "watched": torlink keeps the furthest point
 reached, which is an honest thing to say, rather than guessing at every episode below it.
 
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
-[OMDb](https://www.omdbapi.com/apikey.aspx) key under **Accounts** in the TUI — the same key that powers
+[OMDb](https://www.omdbapi.com/apikey.aspx) key under **Settings** in the TUI — the same key that powers
 the terminal's preview pane. Without one everything still works; you just get the release names.
 
 That pane stays where you can see it: on a wide screen it pins below the toolbar and scrolls its own plot,
@@ -246,17 +246,19 @@ anything other than loopback requires a token.
   because there's no way to show one without re-encoding it, and torlink doesn't run ffmpeg. Tracks
   muxed *inside* the file are named on the fallback card so you know they're there — pulling one out
   has the same ffmpeg problem.
-- **No settings page, but there is a settings control.** Tokens, sources, limits, folders and the
-  [cast device and advertised-host addresses](#casting-to-a-tv) are still TUI-only — the browser has no page for them, and
-  that includes reccd's own URL and bearer token; the
-  browser only learns *whether* reccd is configured (which is what turns on title autocomplete and the
-  **For You** tab), never its address or token. It also includes claiming your
-  [reccd](#recommendations) account: that's credential entry too, so it stays where tokens live, and the
-  browser names the account and points you to the terminal instead. Playback preference is the
-  exception: the header's disclosure reads and writes it directly, over the same Origin-checked API as
-  everything else here. Counting that, the browser writes four things: your saved searches, your
-  library, your continue-watching list (the same searches, favourites and stream history the TUI's `w`,
-  `b`, and Continue-watching pane create), and that playback preference.
+- **No account or secret entry — but there is a settings page now.** The gear in the header opens a
+  **Settings** dialog that changes the non-secret preferences directly, over the same Origin-checked API
+  as everything else here: adult content, transfer and seeding limits, which sources are on, playback
+  quality, the download folder, the media player, and whether debrid streams relay through this machine.
+  What it deliberately still can't touch is credentials and host-specific network config — every token
+  (Real-Debrid, TorBox, OMDb, and reccd's own URL and bearer token), custom DNS, extra trackers, the VPN
+  kill switch, and the [cast device and advertised-host addresses](#casting-to-a-tv). Those stay TUI-only;
+  the Settings dialog shows account status read-only and points you to the terminal, and the browser only
+  ever learns *whether* reccd is configured (which is what turns on title autocomplete and the **For You**
+  tab), never its address or token. Claiming your [reccd](#recommendations) account is credential entry
+  too, so it stays there as well. Alongside the settings it writes, the browser writes your saved
+  searches, your library and your continue-watching list — the same searches, favourites and stream
+  history the TUI's `w`, `b`, and Continue-watching pane create.
 
 ### In your terminal
 
@@ -275,7 +277,7 @@ on its best copy, so `v` streams the pick you'd have chosen anyway. Rows carry s
 
 On a wide enough terminal a preview pane opens beside the results: highlight a film or show and torlink
 fetches its poster and plot and renders them right in the terminal (bring your own free
-[OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Accounts). Press `p` to toggle the pane, or
+[OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Settings). Press `p` to toggle the pane, or
 `i` on any result to open its IMDb page.
 
 Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50;
@@ -552,20 +554,20 @@ pulls the torrent onto its own servers and hands you back a plain, direct downlo
 even on a torrent with no seeders, nothing waiting on a swarm to wake up, and — because the provider does
 the torrenting, not you — your IP never touches the network.
 
-To connect one, open the **Accounts** tab in the sidebar (alongside Downloads and Seeding), select
-Real-Debrid or TorBox, and paste in the API token — from
+To connect one, open the **Settings** tab in the sidebar (alongside Downloads and Seeding), scroll to
+the accounts at the bottom, select Real-Debrid or TorBox, and paste in the API token — from
 [real-debrid.com/apitoken](https://real-debrid.com/apitoken) or
 [torbox.app/settings](https://torbox.app/settings) respectively. torlink checks it and remembers it.
 (Prefer to keep a token off disk? Set `REALDEBRID_API_TOKEN` or `TORBOX_API_TOKEN` in your environment
 instead and torlink picks it up — either one overrides whatever's saved in config for that provider.)
 
 If you connect both, torlink needs to know which one actually resolves your magnets: press **`a`** on the
-highlighted provider in the Accounts tab to make it the active one. With only one token configured, that
+highlighted provider in the Settings tab to make it the active one. With only one token configured, that
 one is used automatically; with both and no explicit choice made yet, torlink prefers Real-Debrid, so
 upgrading from an earlier version that only knew about Real-Debrid doesn't change how it behaves.
 
 <p align="center">
-  <img src="preview/accounts.svg" alt="torlink's Accounts tab: Real-Debrid marked active alongside a connected TorBox, plus RuTracker, reccd and OMDb, each with its plan and connection status" style="max-width: 1024px; width: 100%; height: auto;">
+  <img src="preview/settings.svg" alt="torlink's Settings tab: preferences for the download folder, sources, playback quality, DNS, trackers, transfer limits, VPN, cast device and host, media player and adult content, above the accounts — Real-Debrid marked active alongside a connected TorBox, plus RuTracker, reccd and OMDb, each with its plan and connection status" style="max-width: 1024px; width: 100%; height: auto;">
 </p>
 
 Once one's connected, downloading and streaming get an upgrade:
@@ -657,7 +659,7 @@ to `false`. A `reccUrl` you've pointed at your own reccd is never signed up agai
 
 The account it creates has a generated name like `quiet-heron-4f2a` and no password, so as it stands it
 lives in that one `config.json` and nowhere else. **Claiming** it — press **`c`** on the reccd row in the
-**Accounts** tab — sets a username and password of your choosing, keeping the account's id, its token,
+**Settings** tab — sets a username and password of your choosing, keeping the account's id, its token,
 and everything it's already learned. Claiming is terminal-only, because it's credential entry, the same
 as tokens; the browser instead shows a line naming the account and pointing here. Claim it before you
 copy `config.json` to a second machine or put a config directory on a sync service — an unclaimed account
@@ -666,9 +668,9 @@ accounts and a split history.
 
 **If you claim your account and then sign in with it at reccd.stream — the exact reason claiming
 exists — recommendations will stop.** reccd's sign-in reissues the account's bearer token and retires
-the old one, so the token torlink is holding is no longer valid; the Accounts row starts reading `Token
+the old one, so the token torlink is holding is no longer valid; the Settings row starts reading `Token
 rejected` and the For You tab goes quiet. It's recoverable: sign in at reccd.stream, then press `↵` on
-the reccd row in Accounts and paste the token it gives you back. If this happens, torlink isn't broken —
+the reccd row in Settings and paste the token it gives you back. If this happens, torlink isn't broken —
 it's holding a token reccd just replaced.
 
 **To stop torlink signing you up**, point `TORLINK_RECC_URL` at your own instance instead of the default
@@ -677,13 +679,13 @@ torlink yet) — either one heads off the auto-signup described above. (Neither 
 already exists: `reccAutoSignup: false` with a token still in `config.json` leaves that account working
 exactly as before, and pointing `reccUrl` elsewhere redirects recommendations rather than switching them
 off.) To disconnect an account entirely,
-clear it from the Accounts pane instead — **`x`**, or blank both fields in the prompt. Either one sets
+clear it from the Settings pane instead — **`x`**, or blank both fields in the prompt. Either one sets
 `reccAutoSignup: false` for you as part of clearing everything else, so a cleared connection stays
 cleared rather than being re-provisioned on the next launch. Both clear paths refuse if the connection
 came from `TORLINK_RECC_URL`/`TORLINK_RECC_TOKEN`, since config can't override an environment variable.
 
 **Prefer to run your own reccd** — a small, self-hosted recommendations engine — instead of the hosted
-one? Connect it from the **Accounts** tab: select reccd, enter its URL and the bearer token from reccd's
+one? Connect it from the **Settings** tab: select reccd, enter its URL and the bearer token from reccd's
 `user:add`. (Prefer to keep it off disk? Set `TORLINK_RECC_URL` and `TORLINK_RECC_TOKEN` in your
 environment instead.) Pointing `reccUrl` at anything other than `https://reccd.stream` is what
 self-hosting looks like to torlink, and it's the one case the auto-signup above leaves alone.
@@ -725,7 +727,7 @@ Seed reccd with what you've already watched on Netflix, so its recommendations k
 1. Open [netflix.com/viewingactivity](https://www.netflix.com/viewingactivity) and click **Download all**
    (bottom of the page). You'll get a CSV.
 2. Import it, either way:
-   - **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and
+   - **In the app:** open the **Settings** tab, select **reccd** (once it's connected), press **`i`**, and
      give it the CSV path — you can drag the file onto the terminal to paste the path.
    - **From the shell:** `torlnk import-netflix ~/Downloads/NetflixViewingActivity.csv`
 
@@ -738,7 +740,7 @@ exports upload in batches automatically, and re-importing the same file won't do
 Already track your watching on [Trakt](https://trakt.tv)? Pull your watch history and ratings straight
 in — no file needed.
 
-- **In the app:** open the **Accounts** tab, select **reccd** (once it's connected), press **`i`**, and
+- **In the app:** open the **Settings** tab, select **reccd** (once it's connected), press **`i`**, and
   choose **Trakt**. You'll get a short code and a URL — open the URL, enter the code to authorize, and
   torlink imports automatically. After the first time you won't need to re-authorize.
 - **From the shell:** `torlnk import-trakt` — it prints the code + URL, waits for you to authorize, then

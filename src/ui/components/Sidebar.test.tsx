@@ -22,13 +22,13 @@ function baseStore(): Store {
 }
 
 describe("Sidebar", () => {
-  it("lists an Accounts entry in the library group", () => {
+  it("lists a Settings entry in the library group", () => {
     const { lastFrame } = render(
       <StoreContext.Provider value={baseStore()}>
         <Sidebar />
       </StoreContext.Provider>,
     );
-    expect(lastFrame() ?? "").toContain("Accounts");
+    expect(lastFrame() ?? "").toContain("Settings");
   });
 
   it("hides the For You entry when reccd is not configured", () => {
