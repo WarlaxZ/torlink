@@ -870,10 +870,10 @@ proxy that rewrites `Host` instead will produce a playlist pointing at the wrong
 
 If you want torlink on a real domain — reachable from anywhere, and shareable with one trusted friend —
 without opening a port on your router, the setup below puts [Cloudflare
-Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) in front of it. Your own
-devices carry a client certificate and get in silently; a friend signs in with an allowlisted email.
-torlink stays plain HTTP on loopback the whole time, and verifies the Access assertion itself at the
-origin, so the public port is never really public.
+Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) in front of it. You sign in
+through Cloudflare — a one-time email PIN, or an identity provider like Google — and a trusted friend
+does the same with an allowlisted email. torlink stays plain HTTP on loopback the whole time, and
+verifies the Access assertion itself at the origin, so the public port is never really public.
 
 **The shape.** Nothing about torlink changes — it's still `serve --web` bound to `127.0.0.1:9161`.
 `cloudflared` runs on the same box and dials *out* to Cloudflare, so there are no inbound ports and no
@@ -883,10 +883,10 @@ if that port were ever reached directly it refuses anything that didn't come thr
 
 ```
 your device ─┐                             ┌ cloudflared ─┐
- (mTLS cert) │                             │ (outbound,   │   http://127.0.0.1:9161
+ (SSO / PIN) │                             │ (outbound,   │   http://127.0.0.1:9161
              ├─▶ Cloudflare Access ─▶ Tunnel│  same box)   ├─▶ torlnk serve --web
  a friend ───┘   (the front gate)          └──────────────┘   (re-checks the Access assertion)
- (email/SSO)
+ (allowlisted email)
 ```
 
 #### Cloudflare setup
@@ -895,25 +895,22 @@ In the Cloudflare dashboard, in order:
 
 1. **Put the domain on Cloudflare.** Change your registrar's nameservers to the pair Cloudflare gives
    you and wait for the zone to go active.
-2. **Create a Tunnel** (Zero Trust → Networks → Tunnels), install the connector it hands you on the same
-   box as torlink (and [reccd](#recommendations), if you self-host it), and add one public-hostname
-   ingress rule: `torlink.example.com` → `http://localhost:9161` — the `serve --web` port.
-3. **Set up mTLS for your own devices.** Generate a root CA, upload the CA certificate under the zone's
-   mTLS settings (SSL/TLS → Client Certificates), then issue one client certificate per device and
-   install it. Installing a client cert on a laptop or a phone is a two-minute job; browsing the UI *on*
-   an Android TV or Nvidia Shield with a client cert is awkward and not really supported — use the Shield
-   as a [cast/playback target](#casting-to-a-tv) instead, which stays on your LAN and is untouched by any
-   of this.
-4. **Create one Access application** on `torlink.example.com` with a single policy that is an **OR**:
-
-   | Arm | Who it's for |
-   | --- | --- |
-   | Valid client certificate | your own devices — silent, install-once auth |
-   | Email is in your allowlist | a shared friend — nothing to install, they sign in with SSO |
-
-   The certificate arm lets your devices in without a prompt; the email arm lets a friend in after a
-   Cloudflare login, without ever touching a certificate. Note the application's **Audience (AUD) tag** —
-   torlink needs it below — and your team domain, `<your-team>.cloudflareaccess.com`.
+2. **Create a Tunnel** (Zero Trust → Networks → Tunnels). Run the connector it hands you on the same box
+   as torlink (and [reccd](#recommendations), if you self-host it) — a token'd `cloudflared` container is
+   fine — and add one public-hostname ingress rule: `torlink.example.com` → `http://localhost:9161`, the
+   `serve --web` port. (In a container, point it at torlink's container name and port over a shared Docker
+   network instead of `localhost`.)
+3. **Choose a login method** (Zero Trust → Settings → Authentication). The built-in **one-time PIN**
+   (Cloudflare emails a code) needs no setup; or add an **identity provider** such as Google for one-click
+   sign-in. Both are on the free Zero Trust plan. If you want *silent, no-login-page* device auth, there
+   are two upgrades: enrol your devices in **WARP** and require it in the policy (also free), or — on an
+   **Enterprise** plan only — **client certificates (mTLS)**, uploaded under Zero Trust → Access controls
+   → Service credentials → Mutual TLS (not the zone's SSL/TLS page — that's a different mTLS feature).
+   mTLS is the only fully-invisible option, but it is Enterprise-gated.
+4. **Create one Access application** on `torlink.example.com`, policy *Allow*, **Include → Emails**: your
+   address and your trusted friend's. Set a long **session duration** (say a week) so you rarely
+   re-authenticate — that is what makes it feel like it just knows you. Note the application's **Audience
+   (AUD) tag** — torlink needs it below — and your team domain, `<your-team>.cloudflareaccess.com`.
 
 #### torlink's two settings
 
@@ -943,22 +940,25 @@ or sets the team domain or the AUD.
 
 - **It's single-tenant.** A shared friend uses *your* torlink instance — your [debrid](#debrid-real-debrid-or-torbox)
   quota, your library, your watch history. There is no per-user separation; whoever's in, is in as you.
-- **The `OR email` arm trades a little invisibility for shareability.** With it, a stranger who guesses
-  the hostname sees a Cloudflare login page — still locked, they can't get in — rather than nothing at
-  all. A certificate-only policy would be more invisible, but it can't be shared without installing a
-  cert on the friend's device. Pick the arm you actually need.
-- **Casting is unaffected.** [Casting to a device](#casting-to-a-tv) on your home LAN stays on the LAN and
-  never goes near Cloudflare. Browsing the UI directly *on* an Android TV with mTLS is the unsupported
-  case; casting *to* it is not.
+- **A stranger sees a login page, not nothing.** Anyone who guesses the hostname reaches Cloudflare's
+  login screen — still locked, they can't get in — rather than a blank wall. A fully-invisible front door
+  needs WARP enrolment or Enterprise mTLS; the SSO and PIN methods always show a login page. That is the
+  price of install-nothing sharing.
+- **Casting is unaffected — but discovery may need a nudge.** [Casting to a device](#casting-to-a-tv) on
+  your home LAN stays on the LAN and never goes near Cloudflare. If torlink runs in a container, or
+  anywhere mDNS can't reach your TV (WSL, a bridged Docker network), auto-discovery won't find it — set
+  the TV's address and the LAN address it should fetch media from explicitly, via `TORLINK_CAST_DEVICE`
+  and `TORLINK_CAST_HOST` (or the TUI's cast fields). Browsing the UI *on* the TV itself is the
+  unsupported case; casting *to* it is not.
 - **For watching remotely, prefer direct debrid streaming.** Leave [stream relaying](#relaying-streams-through-this-machine)
   off, so video goes debrid-CDN → your browser rather than being pulled down to your house and pushed
   back up through your uplink and Cloudflare. Relaying a remote stream spends your home upload twice over
   (see the figures in that section).
 - **Media paths are exempt from the Access check.** `/health`, `/stream/*` and `/play/*` skip it, because
-  a `<video>` element, VLC or a Chromecast can't present a client certificate. Those paths keep torlink's
+  a `<video>` element, VLC or a Chromecast can't authenticate to Access. Those paths keep torlink's
   existing per-session capability (the `?k=` token from [Remote access](#remote-access-and-tokens))
-  instead. In-browser playback on a device that *does* hold the cert works normally — the page loads
-  behind Access, and the media it pulls is capability-scoped.
+  instead. In-browser playback on a signed-in device works normally — the page loads behind Access, and
+  the media it pulls is capability-scoped.
 
 ### Blocked by your network?
 
