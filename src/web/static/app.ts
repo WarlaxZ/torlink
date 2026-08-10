@@ -48,10 +48,9 @@ import {
   emptyView,
   exportBody,
   exportedNotice,
-  defaultExpandedKeys,
+  expansionSeed,
   groupCountLabel,
   groupHeading,
-  nextUpRowKey,
   positionLookup,
   positionNote,
   showKeyOf,
@@ -2587,16 +2586,17 @@ function renderResults(): void {
   if (!seededExpansion) {
     const groups = visibleGroups(searchView, reportsHealthLookup(sources));
     if (groups.length > 0) {
-      seededExpansion = true;
       const positionFor = positionLookup(savedState.continueWatching);
-      for (const key of defaultExpandedKeys(groups, positionFor)) expandedGroups.add(key);
-      // Select the episode you are up to, so it is the one already in the
-      // preview. Resolved from the GROUPS rather than the rows: the rows do not
-      // exist yet, and a group hands back its best member directly. Null when
-      // the results do not have that episode — nothing phantom gets selected.
-      const nextKey = nextUpRowKey(groups, positionFor);
-      const landing = nextKey ? groups.find((g) => g.key === nextKey) : undefined;
+      // `running` is true between submit and the `done` frame; !running == settled.
+      const seed = expansionSeed(groups, positionFor, !searchView.running);
+      for (const key of seed.expandKeys) expandedGroups.add(key);
+      // Select the episode you are up to, resolved from the GROUPS (rows do not
+      // exist yet). Null when the results do not have it — nothing phantom.
+      const landing = seed.selectKey ? groups.find((g) => g.key === seed.selectKey) : undefined;
       if (landing?.members[0]) selectedHash = landing.members[0].infoHash;
+      // Latch only once something was opened or the search settled, so a sparse
+      // first SSE frame no longer freezes the list collapsed.
+      seededExpansion = seed.latch;
     }
   }
   currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
