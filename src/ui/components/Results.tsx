@@ -18,13 +18,14 @@ import { releaseBadges } from "../../util/releaseBadges";
 // The grouping engine, shared with the browser's results list. `groupCountLabel`
 // is deliberately NOT used here — see the "×5" comment on the count cell below.
 import {
-  defaultExpandedKeys,
+  expansionSeed,
   groupHeading,
   groupResults,
   groupRowPlan,
   nextUpRowKey,
   positionNote,
   resultAtRow,
+  seasonPlayPlan,
   showKeyOf,
   type PositionLookup,
 } from "../../util/resultGroup";
@@ -397,11 +398,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       return;
     }
     if (seeded.current) return;
-    seeded.current = true;
-    landed.current = true;
-    const keys = defaultExpandedKeys(groupResults(results, hintForSection(section)), positionFor);
-    if (keys.length > 0) setExpanded(new Set(keys));
-  }, [results, section, positionFor]);
+    const seed = expansionSeed(
+      groupResults(results, hintForSection(section)),
+      positionFor,
+      !search.loading,
+    );
+    if (seed.expandKeys.length > 0) setExpanded(new Set(seed.expandKeys));
+    if (seed.latch) {
+      seeded.current = true;
+      // Arm the cursor "land" only when there is somewhere to land.
+      landed.current = seed.selectKey !== null;
+    }
+  }, [results, section, positionFor, search.loading]);
 
 
   useEffect(() => {
@@ -645,7 +653,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     if (!landed.current || rows.length === 0) return;
     const key = nextUpRowKey(groupResults(results, hintForSection(section)), positionFor);
     if (!key) {
-      landed.current = false; // nothing to land on; stop looking
+      if (!search.loading) landed.current = false; // settled with nothing to land on
       return;
     }
     const at = rows.findIndex((row) => row.key === key);
@@ -659,7 +667,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     // moveTo is recreated every render and intentionally left out: this fires
     // once per result set, and depending on it would re-run on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, results, section, positionFor]);
+  }, [rows, results, section, positionFor, search.loading]);
 
   useInput(
     (input, key) => {
@@ -727,8 +735,25 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
         const r = resultAt(clamped);
         if (r) openDebrid(r);
       } else if (input === "v") {
-        const r = resultAt(clamped);
-        if (r) openStream(r);
+        const row = rows[clamped];
+        if (row?.kind === "season") {
+          const plan = seasonPlayPlan(
+            groupResults(results, hintForSection(section)),
+            row.key,
+            positionFor,
+          );
+          if (plan.kind === "reveal") {
+            // Reveal the episodes and land the cursor on the next-up one. selRef
+            // moves the cursor to the row once the rebuilt rows include it.
+            if (plan.select) selRef.current = { key: plan.selectKey!, hash: plan.select.infoHash };
+            setExpanded((current) => new Set(current).add(plan.expandKey));
+          } else if (plan.result) {
+            openStream(plan.result);
+          }
+        } else {
+          const r = resultAt(clamped);
+          if (r) openStream(r);
+        }
       } else if (input === "y") {
         const r = resultAt(clamped);
         if (r) copyResultMagnet(r);

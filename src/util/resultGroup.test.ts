@@ -6,12 +6,15 @@ import {
   groupResults,
   groupRowPlan,
   defaultExpandedKeys,
+  expansionSeed,
   isSeasonNode,
   nextUpRowKey,
   positionNote,
   showKeyOf,
   resultAtRow,
+  seasonPlayPlan,
   seasonTree,
+  type PositionLookup,
 } from "./resultGroup";
 
 const r = (name: string) => ({ name });
@@ -561,5 +564,97 @@ describe("positionNote", () => {
 
   it("says nothing without a position", () => {
     expect(positionNote(3, null)).toBe("");
+  });
+});
+
+describe("seasonPlayPlan", () => {
+  const looseSeason = () =>
+    groupResults([
+      r("Kepler.S02E01.1080p.WEB-DL"),
+      r("Kepler.S02E02.1080p.WEB-DL"),
+      r("Kepler.S02E03.1080p.WEB-DL"),
+    ]);
+  const seasonKey = "kepler|series|s2";
+  const upTo = (episode: number): PositionLookup => (showKey) =>
+    showKey === "kepler" ? { season: 2, episode } : null;
+
+  it("reveals loose episodes and lands on the next-up episode", () => {
+    const plan = seasonPlayPlan(looseSeason(), seasonKey, upTo(1));
+    expect(plan.kind).toBe("reveal");
+    if (plan.kind !== "reveal") throw new Error("expected reveal");
+    expect(plan.expandKey).toBe(seasonKey);
+    expect(plan.selectKey).toBe("kepler|series|s2|e2");
+    expect(plan.select?.name).toBe("Kepler.S02E02.1080p.WEB-DL");
+  });
+
+  it("lands on the first episode when there is no watch position", () => {
+    const plan = seasonPlayPlan(looseSeason(), seasonKey);
+    expect(plan.kind).toBe("reveal");
+    if (plan.kind !== "reveal") throw new Error("expected reveal");
+    expect(plan.selectKey).toBe("kepler|series|s2|e1");
+  });
+
+  it("lands on the first episode when the next-up episode is not in the results", () => {
+    const plan = seasonPlayPlan(looseSeason(), seasonKey, upTo(3));
+    expect(plan.kind).toBe("reveal");
+    if (plan.kind !== "reveal") throw new Error("expected reveal");
+    expect(plan.selectKey).toBe("kepler|series|s2|e1");
+  });
+
+  it("resolves (does not reveal) when the season contains a pack", () => {
+    const groups = groupResults([
+      r("Kepler.S02.1080p.WEB-DL"),
+      r("Kepler.S02E01.1080p.WEB-DL"),
+      r("Kepler.S02E02.1080p.WEB-DL"),
+    ]);
+    const plan = seasonPlayPlan(groups, seasonKey, upTo(1));
+    expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result?.name).toBe("Kepler.S02.1080p.WEB-DL");
+  });
+
+  it("resolves for a key that is not a season node", () => {
+    const groups = groupResults([r("Kestrel.2010.1080p.BluRay.x264")]);
+    const plan = seasonPlayPlan(groups, "kestrel|2010|movie");
+    expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result?.name).toBe("Kestrel.2010.1080p.BluRay.x264");
+  });
+
+  it("resolves to null for a key that matches no group at all", () => {
+    const plan = seasonPlayPlan(groupResults([r("Kepler.S02E01.1080p.WEB-DL")]), "nope|series|s9");
+    expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result).toBeNull();
+  });
+});
+
+describe("expansionSeed", () => {
+  const looseSeason = () =>
+    groupResults([
+      r("Kepler.S02E01.1080p.WEB-DL"),
+      r("Kepler.S02E02.1080p.WEB-DL"),
+      r("Kepler.S02E03.1080p.WEB-DL"),
+    ]);
+  const upTo1: PositionLookup = (showKey) => (showKey === "kepler" ? { season: 2, episode: 1 } : null);
+
+  it("opens the season and points selection at the next-up episode", () => {
+    const seed = expansionSeed(looseSeason(), upTo1, false);
+    expect(seed.expandKeys).toContain("kepler|series|s2");
+    expect(seed.selectKey).toBe("kepler|series|s2|e2");
+    expect(seed.latch).toBe(true);
+  });
+
+  it("does NOT latch on a sparse frame that forms no season, while the search runs", () => {
+    const oneEpisode = groupResults([r("Kepler.S02E01.1080p.WEB-DL")]);
+    const seed = expansionSeed(oneEpisode, upTo1, false);
+    expect(seed.expandKeys).toEqual([]);
+    expect(seed.latch).toBe(false);
+  });
+
+  it("latches once the search has settled even with nothing to open", () => {
+    const oneEpisode = groupResults([r("Kepler.S02E01.1080p.WEB-DL")]);
+    const seed = expansionSeed(oneEpisode, upTo1, true);
+    expect(seed.latch).toBe(true);
   });
 });

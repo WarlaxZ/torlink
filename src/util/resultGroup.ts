@@ -514,6 +514,88 @@ export function resultAtRow<T>(row: GroupRow<T>): T | null {
 }
 
 /**
+ * What pressing play on a SEASON row should do.
+ *
+ * A season made of loose episodes has no single "the season" torrent, so
+ * `members[0]` is merely the best release of episode one — playing it silently is
+ * the bug this fixes. Instead: reveal the episodes and land on the one you are up
+ * to. A season that DOES contain a pack keeps today's behaviour — grab the pack
+ * (`members[0]`; packs sort first) and let the resolve→file-picker path preselect
+ * the next episode, which also surfaces any extras inside the pack.
+ *
+ * Pure and shared so both front ends decide identically; the front ends only
+ * wire the two outcomes. `resultAtRow` is deliberately NOT changed — add,
+ * favourite and preview still resolve a release from it.
+ */
+export type SeasonPlayPlan<T> =
+  | { kind: "resolve"; result: T | null }
+  | { kind: "reveal"; expandKey: string; selectKey: string | null; select: T | null };
+
+export function seasonPlayPlan<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  seasonKey: string,
+  positionFor?: PositionLookup,
+): SeasonPlayPlan<T> {
+  const node = seasonTree(groups).find(
+    (n): n is SeasonNode<T> => isSeasonNode(n) && n.key === seasonKey,
+  );
+  // Not a season row (a film, a single-episode group) or gone: behave as play
+  // does today — resolve the first member.
+  if (!node) {
+    return { kind: "resolve", result: groups.find((g) => g.key === seasonKey)?.members[0] ?? null };
+  }
+  // A child with no episode number is a pack: the whole season in one torrent.
+  if (node.children.some((c) => c.episode === undefined)) {
+    return { kind: "resolve", result: node.members[0] ?? null };
+  }
+  // Loose episodes only. Land on the next-up episode when the results have it,
+  // else the first episode. `children` are episodes ascending (seasonTree sorts).
+  const at = positionFor?.(showKeyOf(node.key)) ?? null;
+  const want = at ? nextOf(at) : null;
+  const target =
+    (want && node.children.find((c) => c.season === want.season && c.episode === want.episode)) ||
+    node.children[0]!;
+  return {
+    kind: "reveal",
+    expandKey: node.key,
+    selectKey: target.key,
+    select: target.members[0] ?? null,
+  };
+}
+
+/**
+ * What a fresh result set should open and land on — and whether to stop trying.
+ *
+ * WHY `latch`: results stream in over SSE, so the FIRST frame is usually too
+ * sparse to have formed the multi-episode season. Seeding on that frame and
+ * latching (the previous behaviour in both front ends) opened nothing and never
+ * retried, so a search for a show you are part-way through rendered collapsed
+ * with no episode selected. Retry until either an expansion is applied or the
+ * search settles — never latch on a frame that produced neither.
+ */
+export interface ExpansionSeed {
+  /** Season keys to open. */
+  expandKeys: string[];
+  /** The group key to land selection on, or null. */
+  selectKey: string | null;
+  /** True once seeding is settled; the caller stops retrying. */
+  latch: boolean;
+}
+
+export function expansionSeed<T extends GroupableResult>(
+  groups: readonly ResultGroup<T>[],
+  positionFor: PositionLookup | undefined,
+  searchSettled: boolean,
+): ExpansionSeed {
+  const expandKeys = defaultExpandedKeys(groups, positionFor);
+  return {
+    expandKeys,
+    selectKey: positionFor ? nextUpRowKey(groups, positionFor) : null,
+    latch: expandKeys.length > 0 || searchSettled,
+  };
+}
+
+/**
  * The note a season heading carries when you are part-way through it.
  *
  * "up to E07", NOT "watched" — the store holds a HIGH-WATER MARK, one entry per

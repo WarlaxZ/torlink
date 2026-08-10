@@ -173,9 +173,12 @@ group at all.
 
 **A show nests the way a show does.** One row per season, newest first, holding the season packs and then
 each episode in order — so a search for a show is a handful of rows rather than forty siblings in seeder
-order. The season you are most likely to want opens itself; the rest stay shut until you ask. Acting on a
-collapsed season acts on its best **season pack**, so `play` on `Harrowgate S03` gets the season and not
-episode one. Inside a season the show's name is stated once, by the season row, and its children read
+order. The season you are most likely to want opens itself; the rest stay shut until you ask. A collapsed
+season that has a **season pack** plays the pack, so `play` on `Harrowgate S03` gets the season and not
+episode one — and the pack's file picker opens on the episode you are up to. A season that is only loose
+episodes has no such single torrent, so `play` there **reveals the episodes and selects the one you are up
+to** (the next one if you are part-way through, else the first) rather than silently playing episode one —
+you choose which to watch. Inside a season the show's name is stated once, by the season row, and its children read
 `Season pack`, `S03E01`, `S03E02`. The **group** control still turns all of it off and gives you every
 release as its own row.
 
