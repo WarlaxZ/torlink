@@ -866,6 +866,100 @@ deliberately ignored — trusting them unconditionally would let any client pois
 proxy that rewrites `Host` instead will produce a playlist pointing at the wrong address until a
 `--trust-proxy` flag exists.
 
+### Exposing torlink on a public domain (Cloudflare Access)
+
+If you want torlink on a real domain — reachable from anywhere, and shareable with one trusted friend —
+without opening a port on your router, the setup below puts [Cloudflare
+Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) in front of it. Your own
+devices carry a client certificate and get in silently; a friend signs in with an allowlisted email.
+torlink stays plain HTTP on loopback the whole time, and verifies the Access assertion itself at the
+origin, so the public port is never really public.
+
+**The shape.** Nothing about torlink changes — it's still `serve --web` bound to `127.0.0.1:9161`.
+`cloudflared` runs on the same box and dials *out* to Cloudflare, so there are no inbound ports and no
+router configuration. Cloudflare Access is the front gate; every request that reaches your tunnel has
+already passed it. torlink then re-checks the Access assertion on its own as defence in depth, so even
+if that port were ever reached directly it refuses anything that didn't come through Access.
+
+```
+your device ─┐                             ┌ cloudflared ─┐
+ (mTLS cert) │                             │ (outbound,   │   http://127.0.0.1:9161
+             ├─▶ Cloudflare Access ─▶ Tunnel│  same box)   ├─▶ torlnk serve --web
+ a friend ───┘   (the front gate)          └──────────────┘   (re-checks the Access assertion)
+ (email/SSO)
+```
+
+#### Cloudflare setup
+
+In the Cloudflare dashboard, in order:
+
+1. **Put the domain on Cloudflare.** Change your registrar's nameservers to the pair Cloudflare gives
+   you and wait for the zone to go active.
+2. **Create a Tunnel** (Zero Trust → Networks → Tunnels), install the connector it hands you on the same
+   box as torlink (and [reccd](#recommendations), if you self-host it), and add one public-hostname
+   ingress rule: `torlink.example.com` → `http://localhost:9161` — the `serve --web` port.
+3. **Set up mTLS for your own devices.** Generate a root CA, upload the CA certificate under the zone's
+   mTLS settings (SSL/TLS → Client Certificates), then issue one client certificate per device and
+   install it. Installing a client cert on a laptop or a phone is a two-minute job; browsing the UI *on*
+   an Android TV or Nvidia Shield with a client cert is awkward and not really supported — use the Shield
+   as a [cast/playback target](#casting-to-a-tv) instead, which stays on your LAN and is untouched by any
+   of this.
+4. **Create one Access application** on `torlink.example.com` with a single policy that is an **OR**:
+
+   | Arm | Who it's for |
+   | --- | --- |
+   | Valid client certificate | your own devices — silent, install-once auth |
+   | Email is in your allowlist | a shared friend — nothing to install, they sign in with SSO |
+
+   The certificate arm lets your devices in without a prompt; the email arm lets a friend in after a
+   Cloudflare login, without ever touching a certificate. Note the application's **Audience (AUD) tag** —
+   torlink needs it below — and your team domain, `<your-team>.cloudflareaccess.com`.
+
+#### torlink's two settings
+
+Enforcement is off until you give torlink both halves of what it needs to verify an Access assertion: the
+team domain to fetch Cloudflare's signing keys from, and the AUD tag to check each token was minted for
+*your* application. These are host-specific config, so — like every token and the VPN interface — they
+are set in the TUI or by environment variable, never from the browser. Set them either as env on the
+service:
+
+```sh
+TORLINK_CF_ACCESS_TEAM_DOMAIN=<your-team>.cloudflareaccess.com
+TORLINK_CF_ACCESS_AUD=<the Access application's AUD tag>
+```
+
+…or in `config.json` as `cfAccessTeamDomain` / `cfAccessAud`. **Both must be present** for enforcement to
+switch on (either both via env, or both in config). Restart `serve --web`; on startup the log prints:
+
+```
+cloudflare access: enforcing (team <your-team>.cloudflareaccess.com)
+```
+
+Once enforced, the **Settings** pane in both front ends shows **Cloudflare Access: enforced** read-only —
+the browser reports the status but, being a client of the config rather than an editor of it, never sees
+or sets the team domain or the AUD.
+
+#### Caveats, stated plainly
+
+- **It's single-tenant.** A shared friend uses *your* torlink instance — your [debrid](#debrid-real-debrid-or-torbox)
+  quota, your library, your watch history. There is no per-user separation; whoever's in, is in as you.
+- **The `OR email` arm trades a little invisibility for shareability.** With it, a stranger who guesses
+  the hostname sees a Cloudflare login page — still locked, they can't get in — rather than nothing at
+  all. A certificate-only policy would be more invisible, but it can't be shared without installing a
+  cert on the friend's device. Pick the arm you actually need.
+- **Casting is unaffected.** [Casting to a device](#casting-to-a-tv) on your home LAN stays on the LAN and
+  never goes near Cloudflare. Browsing the UI directly *on* an Android TV with mTLS is the unsupported
+  case; casting *to* it is not.
+- **For watching remotely, prefer direct debrid streaming.** Leave [stream relaying](#relaying-streams-through-this-machine)
+  off, so video goes debrid-CDN → your browser rather than being pulled down to your house and pushed
+  back up through your uplink and Cloudflare. Relaying a remote stream spends your home upload twice over
+  (see the figures in that section).
+- **Media paths are exempt from the Access check.** `/health`, `/stream/*` and `/play/*` skip it, because
+  a `<video>` element, VLC or a Chromecast can't present a client certificate. Those paths keep torlink's
+  existing per-session capability (the `?k=` token from [Remote access](#remote-access-and-tokens))
+  instead. In-browser playback on a device that *does* hold the cert works normally — the page loads
+  behind Access, and the media it pulls is capability-scoped.
+
 ### Blocked by your network?
 
 Some networks (ISPs, work Wi-Fi, some routers) quietly block torrent sites at the DNS level, so every
