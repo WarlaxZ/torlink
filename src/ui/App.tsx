@@ -14,6 +14,7 @@ import {
   resolveOmdbApiKey,
   resolveAdultContent,
   resolveCloudflareAccess,
+  isCloudflareAccessHalfConfigured,
   qualityPrefsFrom,
   type Config,
   type FavouriteItem,
@@ -627,6 +628,11 @@ export function App({
   // below, never a dependency of it.
   const cloudflareAccessRef = useRef<ReturnType<typeof resolveCloudflareAccess>>(null);
   cloudflareAccessRef.current = config ? resolveCloudflareAccess(config) : null;
+  // Held in a ref for the same reason as above (read once by the mount effect,
+  // never a dependency of it). True when exactly one Access half is set, which
+  // resolves to a null policy that enforces nothing — worth a warning.
+  const cfAccessHalfConfiguredRef = useRef(false);
+  cfAccessHalfConfiguredRef.current = config ? isCloudflareAccessHalfConfigured(config) : false;
 
   // The web server's state for the splash's status line. Stays null unless
   // --web was passed, so a plain launch says nothing; only ever holds a url the
@@ -646,6 +652,13 @@ export function App({
     // false while no server is mounted (see `ensureCastWeb`), so it cannot tear
     // down and rebind a socket that is already serving.
     if ((!web && !castWeb) || !queue) return;
+    // A half-configured Access gate (one of team domain / AUD, not both) resolves
+    // to null above and enforces nothing — warn so it isn't mistaken for "on".
+    if (cfAccessHalfConfiguredRef.current) {
+      log.warn(
+        "[web] cloudflare access is half-configured (need BOTH team domain and AUD) — origin gate is OFF",
+      );
+    }
     const sessions = sessionsRef.current!;
     // A cast needs an address a television can route to, so a wildcard rather
     // than loopback — and therefore a token, which startWebServer requires for

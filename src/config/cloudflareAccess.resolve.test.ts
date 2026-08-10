@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultConfig, resolveCloudflareAccess } from "./config.js";
+import { defaultConfig, isCloudflareAccessHalfConfigured, resolveCloudflareAccess } from "./config.js";
 
 const TEAM_ENV = "TORLINK_CF_ACCESS_TEAM_DOMAIN";
 const AUD_ENV = "TORLINK_CF_ACCESS_AUD";
@@ -38,5 +38,37 @@ describe("resolveCloudflareAccess", () => {
       cfAccessAud: "file-aud",
     });
     expect(res).toEqual({ teamDomain: "env.cloudflareaccess.com", aud: "env-aud" });
+  });
+});
+
+describe("isCloudflareAccessHalfConfigured", () => {
+  beforeEach(() => {
+    vi.stubEnv(TEAM_ENV, "");
+    vi.stubEnv(AUD_ENV, "");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is true when only the team domain is set", () => {
+    expect(
+      isCloudflareAccessHalfConfigured({ ...defaultConfig, cfAccessTeamDomain: "t.cloudflareaccess.com" }),
+    ).toBe(true);
+  });
+
+  it("is true when only the aud is set", () => {
+    expect(isCloudflareAccessHalfConfigured({ ...defaultConfig, cfAccessAud: "aud" })).toBe(true);
+  });
+
+  it("is false when both are set", () => {
+    expect(
+      isCloudflareAccessHalfConfigured({
+        ...defaultConfig,
+        cfAccessTeamDomain: "t.cloudflareaccess.com",
+        cfAccessAud: "aud",
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when neither is set", () => {
+    expect(isCloudflareAccessHalfConfigured({ ...defaultConfig })).toBe(false);
   });
 });

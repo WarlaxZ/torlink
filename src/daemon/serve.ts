@@ -20,7 +20,7 @@ import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 import { openUrl } from "../util/openUrl";
 import { ensureReccAccount } from "../recc/provision";
-import { loadConfig, resolveCloudflareAccess } from "../config/config";
+import { loadConfig, resolveCloudflareAccess, isCloudflareAccessHalfConfigured } from "../config/config";
 
 export { isAuthorized } from "./auth";
 
@@ -389,6 +389,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     // read it once here purely to resolve the Access policy the server enforces.
     const startupConfig = await loadConfig();
     const cloudflareAccess = resolveCloudflareAccess(startupConfig);
+    if (isCloudflareAccessHalfConfigured(startupConfig)) {
+      log("warning: cloudflare access is half-configured (need BOTH team domain and AUD) — origin gate is OFF");
+    }
     try {
       web = await startWebServer(runtime, {
         port,

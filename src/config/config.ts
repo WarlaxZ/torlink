@@ -419,6 +419,17 @@ export function resolveCloudflareAccess(
   return { teamDomain, aud };
 }
 
+/**
+ * True when exactly one of the two Cloudflare Access settings is present — a
+ * likely misconfiguration that leaves the origin gate silently OFF. Callers log
+ * a warning so it isn't mistaken for "enforced".
+ */
+export function isCloudflareAccessHalfConfigured(config: Config): boolean {
+  const teamDomain = (process.env[CF_ACCESS_TEAM_DOMAIN_ENV]?.trim() || config.cfAccessTeamDomain?.trim()) ?? "";
+  const aud = (process.env[CF_ACCESS_AUD_ENV]?.trim() || config.cfAccessAud?.trim()) ?? "";
+  return (teamDomain === "") !== (aud === "");
+}
+
 const OMDB_KEY_ENV = "TORLINK_OMDB_KEY";
 
 // The effective OMDb API key (env wins over config, matching the other resolve*

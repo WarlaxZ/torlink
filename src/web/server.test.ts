@@ -616,6 +616,31 @@ describe("startWebServer — Cloudflare Access guard", () => {
     // guard, is what rejected it.
     expect(JSON.parse(body).error).toBe("forbidden");
   });
+
+  // Load-bearing exemption: <video>/VLC/Chromecast can't present an Access cert,
+  // so the media routes carry their own per-session ?k= capability instead and
+  // must NOT be rejected by the Access guard. /play serves static player HTML and
+  // needs no live session, so it is the clean route to prove the exemption on.
+  it("does not apply the Access guard to a /play path (exempt, not access-403)", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/play/sess1/0`);
+    const body = await res.text();
+    // Whatever the outcome (200 with player HTML if assets are built, else 404),
+    // it must not be the Access 403 — the exemption is what is under test.
+    expect(res.status).not.toBe(403);
+    expect(body).not.toBe(JSON.stringify({ error: "forbidden" }));
+  });
+
+  // SSE routes are gated too, not just plain /api/* — the guard sits ahead of the
+  // /api/search stream handler, so a request with no assertion is rejected before
+  // any stream is opened.
+  it("403s the /api/search SSE route with no assertion", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/search?q=kestrel`);
+    const body = await res.text();
+    expect(res.status).toBe(403);
+    expect(JSON.parse(body).error).toBe("forbidden");
+  });
 });
 
 describe("writeWebResponse", () => {

@@ -515,6 +515,10 @@ export async function startWebServer(
       // and the media routes are exempt — the latter carry the per-session ?k=
       // capability instead, because <video>/VLC/Chromecast can't present a cert.
       if (accessCfg) {
+        // INVARIANT: any path added here MUST carry its own capability (the
+        // stream/play ?k=) or return nothing sensitive — under Access the
+        // loopback-Host guard above is skipped, so an exempt path is otherwise
+        // reachable directly via DNS rebinding.
         const exempt = urlPath === "/health" || isStreamPath(urlPath) || isPlayPath(urlPath);
         if (!exempt) {
           const assertion = accessTokenFromHeaders(req.headers);
