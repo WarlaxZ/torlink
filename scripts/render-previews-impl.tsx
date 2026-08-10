@@ -432,6 +432,7 @@ save(
           omdbConfigured
           onManageOmdb={() => {}}
           onSignOutOmdb={() => {}}
+          cfAccessEnforced={false}
           onEditFolder={() => {}}
           onEditSources={() => {}}
           onEditQuality={() => {}}

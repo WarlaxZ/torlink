@@ -76,6 +76,7 @@
     "env-paths": "^4.0.0",
     "hls.js": "^1.6.16",
     "ink": "^7.0.5",
+    "jose": "^6.2.8",
     "jpeg-js": "^0.4.4",
     "multicast-dns": "^7.2.5",
     "parse-torrent": "^11.0.21",

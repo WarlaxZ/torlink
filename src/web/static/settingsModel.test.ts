@@ -27,6 +27,7 @@ function response(over: Partial<SettingsResponse["settings"]> = {}, envOver: Par
     envLocks: { adultContent: false, mediaPlayer: false, ...envOver },
     accounts: {
       debridConfigured: false,
+      cloudflareAccessEnforced: false,
       debridProvider: null,
       omdbConfigured: false,
       reccConfigured: false,
@@ -126,6 +127,7 @@ describe("accountRows", () => {
   it("names the active debrid provider and reports its status", () => {
     const accounts: SettingsAccounts = {
       debridConfigured: true,
+      cloudflareAccessEnforced: true,
       debridProvider: "torbox",
       omdbConfigured: true,
       reccConfigured: false,
@@ -140,6 +142,7 @@ describe("accountRows", () => {
   it("falls back to a generic debrid label when none is active", () => {
     const rows = accountRows({
       debridConfigured: false,
+      cloudflareAccessEnforced: false,
       debridProvider: null,
       omdbConfigured: false,
       reccConfigured: true,
@@ -147,5 +150,20 @@ describe("accountRows", () => {
     });
     expect(rows[0]).toEqual({ label: "Debrid", status: "Not connected", ok: false });
     expect(rows.find((r) => r.label === "reccd")).toMatchObject({ ok: true, status: "Signed in as quiet-heron-4f2a" });
+  });
+
+  it("reports Cloudflare Access as enforced or not configured, read-only", () => {
+    const base: SettingsAccounts = {
+      debridConfigured: false,
+      cloudflareAccessEnforced: true,
+      debridProvider: null,
+      omdbConfigured: false,
+      reccConfigured: false,
+      reccAccount: null,
+    };
+    const enforced = accountRows(base).find((r) => r.label === "Cloudflare Access");
+    expect(enforced).toEqual({ label: "Cloudflare Access", status: "Enforced", ok: true });
+    const off = accountRows({ ...base, cloudflareAccessEnforced: false }).find((r) => r.label === "Cloudflare Access");
+    expect(off).toEqual({ label: "Cloudflare Access", status: "Not configured", ok: false });
   });
 });

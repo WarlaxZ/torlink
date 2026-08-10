@@ -20,6 +20,7 @@ import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 import { openUrl } from "../util/openUrl";
 import { ensureReccAccount } from "../recc/provision";
+import { loadConfig, resolveCloudflareAccess, isCloudflareAccessHalfConfigured } from "../config/config";
 
 export { isAuthorized } from "./auth";
 
@@ -345,6 +346,15 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   let token = options.token && options.token.trim() ? options.token.trim() : null;
   let mintedToken = false;
 
+  // This process holds no config snapshot (routes.ts loads per request), so
+  // read it once here purely to resolve the Access policy the server enforces —
+  // and to inform the bind decision below.
+  const startupConfig = await loadConfig();
+  const cloudflareAccess = resolveCloudflareAccess(startupConfig);
+  if (isCloudflareAccessHalfConfigured(startupConfig)) {
+    log("warning: cloudflare access is half-configured (need BOTH team domain and AUD) — origin gate is OFF");
+  }
+
   // Fail soft, not open: never expose a public interface without a token.
   //
   // With --web there is a browser to hand a working link to, so the secret can
@@ -352,7 +362,16 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // two branches. Without --web there is nothing to hand it to: the caller is a
   // script, and a fresh secret every boot is worse than the error it replaced,
   // because the script would start failing 401 instead of failing to start.
-  if (!LOOPBACK_HOSTS.has(host) && !token) {
+  //
+  // When Access is enforced the origin JWT check is a strictly stronger gate
+  // than a token, so a tokenless non-loopback bind is allowed (and not minted —
+  // a minted token would break the browser UI behind a tunnel).
+  // Cloudflare Access can stand in for the token ONLY on the --web path: that is
+  // the only server that verifies the Access assertion. The bare add-API
+  // (createApiServer) has no Access guard, so a tokenless non-loopback bind there
+  // is still refused even when Access is configured.
+  const accessRelaxesBind = cloudflareAccess !== null && options.web === true;
+  if (!LOOPBACK_HOSTS.has(host) && !token && !accessRelaxesBind) {
     if (!options.web) {
       console.error(
         `error: refusing to bind ${host} without a token. Pass --token <secret> ` +
@@ -384,11 +403,14 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
 
   let web: WebServerHandle | null = null;
   if (options.web) {
+    // `cloudflareAccess` was resolved at the top of runServe (from the same
+    // one-shot config load), which is where the bind decision above needed it.
     try {
       web = await startWebServer(runtime, {
         port,
         host,
         ...(token ? { token } : {}),
+        ...(cloudflareAccess ? { cloudflareAccess } : {}),
         log,
       });
     } catch (e) {

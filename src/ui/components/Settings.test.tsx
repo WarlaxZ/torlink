@@ -58,6 +58,7 @@ const baseProps = {
   omdbEnvOverride: false,
   onManageOmdb: noop,
   onSignOutOmdb: noop,
+  cfAccessEnforced: false,
   // settings dispatch
   onEditFolder: noop,
   onEditSources: noop,
@@ -106,6 +107,16 @@ describe("Settings", () => {
     expect(frame).toContain("Media player");
     expect(frame).toContain("Adult content");
     expect(frame).toContain("Relay debrid streams");
+  });
+
+  it("shows Cloudflare Access status read-only, with no action keybind", () => {
+    const enforced = renderSettings({ cfAccessEnforced: true }).lastFrame() ?? "";
+    const enforcedLine = enforced.split("\n").find((l) => l.includes("enforced"));
+    expect(enforced).toContain("Cloudflare Access");
+    expect(enforcedLine).toBeDefined();
+    const off = renderSettings({ cfAccessEnforced: false }).lastFrame() ?? "";
+    expect(off).toContain("Cloudflare Access");
+    expect(off).toContain("not configured");
   });
 
   it("lists the account rows and marks the active debrid provider", () => {

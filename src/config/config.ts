@@ -148,6 +148,10 @@ export interface Config {
    * working too, which this setting cannot fix.
    */
   castAdvertiseHost?: string;
+  /** Cloudflare Access team domain, e.g. "myteam.cloudflareaccess.com". Host-specific; TUI/env only. */
+  cfAccessTeamDomain?: string;
+  /** Cloudflare Access application Audience (AUD) tag. Host-specific; TUI/env only. */
+  cfAccessAud?: string;
 }
 
 export const defaultConfig: Config = {
@@ -396,6 +400,34 @@ export function resolveCastAdvertiseHost(config: Config): string | undefined {
 export function resolveCastDevice(config: Config): string | undefined {
   const env = process.env[CAST_DEVICE_ENV]?.trim();
   return env || config.castDevice?.trim() || undefined;
+}
+
+const CF_ACCESS_TEAM_DOMAIN_ENV = "TORLINK_CF_ACCESS_TEAM_DOMAIN";
+const CF_ACCESS_AUD_ENV = "TORLINK_CF_ACCESS_AUD";
+
+/**
+ * Cloudflare Access enforcement config. env wins over the persisted value, both
+ * trimmed. Returns null unless BOTH halves are present — a half-configured gate
+ * would fail every request, so treat it as "off".
+ */
+export function resolveCloudflareAccess(
+  config: Config,
+): { teamDomain: string; aud: string } | null {
+  const teamDomain = (process.env[CF_ACCESS_TEAM_DOMAIN_ENV]?.trim() || config.cfAccessTeamDomain?.trim()) ?? "";
+  const aud = (process.env[CF_ACCESS_AUD_ENV]?.trim() || config.cfAccessAud?.trim()) ?? "";
+  if (!teamDomain || !aud) return null;
+  return { teamDomain, aud };
+}
+
+/**
+ * True when exactly one of the two Cloudflare Access settings is present — a
+ * likely misconfiguration that leaves the origin gate silently OFF. Callers log
+ * a warning so it isn't mistaken for "enforced".
+ */
+export function isCloudflareAccessHalfConfigured(config: Config): boolean {
+  const teamDomain = (process.env[CF_ACCESS_TEAM_DOMAIN_ENV]?.trim() || config.cfAccessTeamDomain?.trim()) ?? "";
+  const aud = (process.env[CF_ACCESS_AUD_ENV]?.trim() || config.cfAccessAud?.trim()) ?? "";
+  return (teamDomain === "") !== (aud === "");
 }
 
 const OMDB_KEY_ENV = "TORLINK_OMDB_KEY";

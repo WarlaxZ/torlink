@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JSONWebKeySet } from "jose";
 import { startWebServer, writeWebResponse, type WebServerHandle } from "./server";
 import { DownloadQueue } from "../download/queue";
 import { StreamSessionRegistry } from "../core/streamSession";
@@ -512,6 +513,151 @@ describe("startWebServer", () => {
       await reader.cancel().catch(() => {});
       handle = null;
     });
+  });
+});
+
+// REAL timers, deliberately: jose validates the JWT `exp` against the real
+// wall clock, and the tokens minted here carry a real "1h" expiry. Faking time
+// would make jose see them as expired (or the clock as frozen at 0) and every
+// "allows" case would 403. This describe never calls vi.useFakeTimers(), and
+// the file does not enable them globally, so nothing to reset.
+describe("startWebServer — Cloudflare Access guard", () => {
+  const TEAM = "myteam.cloudflareaccess.com";
+  const AUD = "aud-tag-123";
+
+  async function serverWithAccess() {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "k1";
+    jwk.alg = "RS256";
+    const jwks: JSONWebKeySet = { keys: [jwk] };
+    const accessKeySetImpl = createLocalJWKSet(jwks);
+    handle = await startWebServer(runtime(), {
+      port: 0,
+      host: "127.0.0.1",
+      log: () => {},
+      cloudflareAccess: { teamDomain: TEAM, aud: AUD },
+      accessKeySetImpl,
+    });
+    const mint = (claims: Record<string, unknown>, exp?: string | number) =>
+      new SignJWT(claims)
+        .setProtectedHeader({ alg: "RS256", kid: "k1" })
+        .setIssuer(`https://${TEAM}`)
+        .setAudience(AUD)
+        .setIssuedAt()
+        .setExpirationTime(exp ?? "1h")
+        .sign(privateKey);
+    return { handle: handle!, mint };
+  }
+
+  it("403s an api request with no assertion", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/status`);
+    expect(res.status).toBe(403);
+  });
+
+  it("allows an api request carrying a valid assertion", async () => {
+    const { handle, mint } = await serverWithAccess();
+    const token = await mint({ email: "owner@example.com" });
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/status`, {
+      headers: { "Cf-Access-Jwt-Assertion": token },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("exempts /health from the assertion check", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/health`);
+    expect(res.status).toBe(200);
+  });
+
+  // In the real deployment torlink binds loopback with no token and sits behind
+  // Cloudflare Tunnel, so cloudflared forwards the PUBLIC hostname in Host. The
+  // loopback-Host guard would 403 every proxied request before Access ran, so it
+  // must be skipped when Access is on. fetch() drops a Host override (see line
+  // ~98), so use raw http.request; and read the body to prove which 403 fires.
+  function requestWithHost(
+    port: number,
+    path: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path, method: "GET", headers },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("allows a non-loopback Host header when Access is on and the assertion is valid", async () => {
+    const { handle, mint } = await serverWithAccess();
+    const token = await mint({ email: "owner@example.com" });
+    const { status } = await requestWithHost(handle.port, "/api/status", {
+      Host: "torlink.example.com",
+      "Cf-Access-Jwt-Assertion": token,
+    });
+    expect(status).toBe(200);
+  });
+
+  it("still 403s a non-loopback Host header when Access is on but the assertion is missing", async () => {
+    const { handle } = await serverWithAccess();
+    const { status, body } = await requestWithHost(handle.port, "/api/status", {
+      Host: "torlink.example.com",
+    });
+    expect(status).toBe(403);
+    // The Access 403, not the host 403 — proving Access, not the skipped host
+    // guard, is what rejected it.
+    expect(JSON.parse(body).error).toBe("forbidden");
+  });
+
+  // Load-bearing exemption: <video>/VLC/Chromecast can't present an Access cert,
+  // so the media routes carry their own per-session ?k= capability instead and
+  // must NOT be rejected by the Access guard. /play serves static player HTML and
+  // needs no live session, so it is the clean route to prove the exemption on.
+  it("does not apply the Access guard to a /play path (exempt, not access-403)", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/play/sess1/0`);
+    const body = await res.text();
+    // Whatever the outcome (200 with player HTML if assets are built, else 404),
+    // it must not be the Access 403 — the exemption is what is under test.
+    expect(res.status).not.toBe(403);
+    expect(body).not.toBe(JSON.stringify({ error: "forbidden" }));
+  });
+
+  // SSE routes are gated too, not just plain /api/* — the guard sits ahead of the
+  // /api/search stream handler, so a request with no assertion is rejected before
+  // any stream is opened.
+  it("403s the /api/search SSE route with no assertion", async () => {
+    const { handle } = await serverWithAccess();
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/search?q=kestrel`);
+    const body = await res.text();
+    expect(res.status).toBe(403);
+    expect(JSON.parse(body).error).toBe("forbidden");
+  });
+
+  // Access at the origin is a strictly stronger gate than a token, so a
+  // tokenless bind on a public interface is allowed when Access is enforced —
+  // and NOT minted a token (a token would break the browser UI behind a tunnel).
+  it("allows a tokenless non-loopback bind when Access is enforced", async () => {
+    handle = await startWebServer(runtime(), {
+      port: 0,
+      host: "0.0.0.0",
+      cloudflareAccess: { teamDomain: TEAM, aud: AUD },
+    });
+    expect(handle.port).toBeGreaterThan(0);
+  });
+
+  it("still refuses a tokenless non-loopback bind when Access is NOT configured", async () => {
+    await expect(
+      startWebServer(runtime(), { port: 0, host: "0.0.0.0" }),
+    ).rejects.toThrow(/refusing to bind/);
   });
 });
 

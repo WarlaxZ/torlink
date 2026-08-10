@@ -463,6 +463,8 @@ export interface SourcesResponse {
    * thing the TUI does, and deliberately not a silent downgrade to P2P.
    */
   debridConfigured: boolean;
+  /** Whether the origin is enforcing Cloudflare Access. A capability flag, never a credential. */
+  cloudflareAccessEnforced: boolean;
   /**
    * Which debrid service resolves magnets, or null when none is configured.
    * A capability flag like `debridConfigured`, never a credential: it is what
@@ -582,6 +584,8 @@ export interface SettingsEnvLocks {
  */
 export interface SettingsAccounts {
   debridConfigured: boolean;
+  /** Whether the origin is enforcing Cloudflare Access. A capability flag, never a credential. */
+  cloudflareAccessEnforced: boolean;
   debridProvider: "realdebrid" | "torbox" | null;
   omdbConfigured: boolean;
   reccConfigured: boolean;

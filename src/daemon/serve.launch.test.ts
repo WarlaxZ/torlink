@@ -292,6 +292,31 @@ describe("runServe --web startup output", () => {
     await done;
   });
 
+  it("does not mint a token for a non-loopback --web bind when Access is enforced", async () => {
+    // Access at the origin is a strictly stronger gate than a token, so the
+    // bind is allowed tokenless — and NOT minted one: a minted token would
+    // break the browser UI behind a tunnel, which is the whole point of Access.
+    process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN = "myteam.cloudflareaccess.com";
+    process.env.TORLINK_CF_ACCESS_AUD = "aud-tag-123";
+    const port = await freePort();
+    const before = new Set(process.listeners("SIGTERM"));
+    try {
+      const done = runServe({ port, host: "0.0.0.0", web: true, downloadDir: dir });
+      expect(await waitUntil(() => isListening(port))).toBe(true);
+      // No 32-hex minted secret anywhere in the log.
+      expect(logs.join("\n")).not.toMatch(/\b[0-9a-f]{32}\b/);
+      // And it is Access, not a token, gating the API: a tokenless request is
+      // 403 (the Access guard), never 401 (a token check that isn't there).
+      const res = await fetch(`http://127.0.0.1:${port}/api/status`);
+      expect(res.status).toBe(403);
+      newSignalHandler(before)();
+      await done;
+    } finally {
+      delete process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN;
+      delete process.env.TORLINK_CF_ACCESS_AUD;
+    }
+  });
+
   it("still refuses a non-loopback bind without --web", async () => {
     // No link to hand back, so nothing justifies a secret the caller did not
     // choose: a scripted API consumer needs a token stable across restarts.
@@ -307,6 +332,28 @@ describe("runServe --web startup output", () => {
     );
     expect(process.exit).toHaveBeenCalledWith(1);
     expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
+  });
+
+  it("still refuses a non-loopback bind without --web even when Access is configured", async () => {
+    // Regression guard: Access relaxes the bind ONLY on the --web path, because
+    // only startWebServer installs the Access guard. The bare add-API
+    // (createApiServer) has no Access verification, so a tokenless non-loopback
+    // bind there must still hard-exit even with Access fully configured —
+    // otherwise a destructive, Access-UNVERIFIED API would bind all interfaces.
+    process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN = "myteam.cloudflareaccess.com";
+    process.env.TORLINK_CF_ACCESS_AUD = "aud-tag-123";
+    try {
+      await withTimeout(
+        runServe({ port: await freePort(), host: "0.0.0.0", downloadDir: dir }),
+        1000,
+        "the refusal to bind 0.0.0.0 without a token (Access configured, no --web)",
+      );
+      expect(process.exit).toHaveBeenCalledWith(1);
+      expect(errors.join("\n")).toContain("refusing to bind 0.0.0.0 without a token");
+    } finally {
+      delete process.env.TORLINK_CF_ACCESS_TEAM_DOMAIN;
+      delete process.env.TORLINK_CF_ACCESS_AUD;
+    }
   });
 
   it("opens the loopback link, fragment and all", async () => {
