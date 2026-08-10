@@ -58,15 +58,19 @@ export {
 } from "../../util/resultSort";
 export {
   defaultExpandedKeys,
+  expansionSeed,
   groupCountLabel,
   groupHeading,
   nextUpRowKey,
   positionNote,
   resultAtRow,
+  seasonPlayPlan,
   showKeyOf,
+  type ExpansionSeed,
   type GroupRow,
   type PositionLookup,
   type ResultGroup,
+  type SeasonPlayPlan,
 } from "../../util/resultGroup";
 
 /**
