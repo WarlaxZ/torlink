@@ -972,10 +972,12 @@ merged PRs.
 
 ## Star History
 
+## Star History
+
 <a href="https://www.star-history.com/?repos=WarlaxZ%2Ftorlink&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Yg4hUUad3yejtB59ol_9oa_txdk4yd_bnxalz7CMThT9SC9a-Wp0KGwr9kC5xkEDdh8NmVay3FEDNWRn7rzyua2XNIWZbPlRBKVhZBceS-_c0I17OmC4iPLdpvYczXgUs25ywnA4Xc2llpJ6bOcfu8y91CtmGj9qVOjlyMRsIzkGkABQvYWO2whetowq" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&theme=dark&legend=top-left&sealed_token=Euw1axWXSCUN7s2DIGsd5MecCi2-P2zYNp3l5fomrRjAIcIas-QnZSfAhETfZqiilPEPBnwSAKSa8n5xl4vU4zBWxwJrjpO9M2Szk75yh_2H5sNuhiQ3zZA-CH4FXSGDGIDt_EjbJhTor4m__kCLkJWNzgaTj8IsFi551hOEaCd4pdbXAWoAROboP9LW" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Euw1axWXSCUN7s2DIGsd5MecCi2-P2zYNp3l5fomrRjAIcIas-QnZSfAhETfZqiilPEPBnwSAKSa8n5xl4vU4zBWxwJrjpO9M2Szk75yh_2H5sNuhiQ3zZA-CH4FXSGDGIDt_EjbJhTor4m__kCLkJWNzgaTj8IsFi551hOEaCd4pdbXAWoAROboP9LW" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=WarlaxZ/torlink&type=date&legend=top-left&sealed_token=Euw1axWXSCUN7s2DIGsd5MecCi2-P2zYNp3l5fomrRjAIcIas-QnZSfAhETfZqiilPEPBnwSAKSa8n5xl4vU4zBWxwJrjpO9M2Szk75yh_2H5sNuhiQ3zZA-CH4FXSGDGIDt_EjbJhTor4m__kCLkJWNzgaTj8IsFi551hOEaCd4pdbXAWoAROboP9LW" />
  </picture>
 </a>
