@@ -20,6 +20,7 @@ import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 import { openUrl } from "../util/openUrl";
 import { ensureReccAccount } from "../recc/provision";
+import { loadConfig, resolveCloudflareAccess } from "../config/config";
 
 export { isAuthorized } from "./auth";
 
@@ -384,11 +385,16 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
 
   let web: WebServerHandle | null = null;
   if (options.web) {
+    // This process holds no config snapshot (routes.ts loads per request), so
+    // read it once here purely to resolve the Access policy the server enforces.
+    const startupConfig = await loadConfig();
+    const cloudflareAccess = resolveCloudflareAccess(startupConfig);
     try {
       web = await startWebServer(runtime, {
         port,
         host,
         ...(token ? { token } : {}),
+        ...(cloudflareAccess ? { cloudflareAccess } : {}),
         log,
       });
     } catch (e) {

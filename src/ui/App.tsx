@@ -13,6 +13,7 @@ import {
   resolveReccConfig,
   resolveOmdbApiKey,
   resolveAdultContent,
+  resolveCloudflareAccess,
   qualityPrefsFrom,
   type Config,
   type FavouriteItem,
@@ -621,6 +622,12 @@ export function App({
   const downloadDirRef = useRef("");
   if (config) downloadDirRef.current = config.downloadDir;
 
+  // The Cloudflare Access policy the in-process web server enforces, held in a
+  // ref for the same reason downloadDir is: read once at mount by the effect
+  // below, never a dependency of it.
+  const cloudflareAccessRef = useRef<ReturnType<typeof resolveCloudflareAccess>>(null);
+  cloudflareAccessRef.current = config ? resolveCloudflareAccess(config) : null;
+
   // The web server's state for the splash's status line. Stays null unless
   // --web was passed, so a plain launch says nothing; only ever holds a url the
   // server reported back as bound.
@@ -672,6 +679,7 @@ export function App({
           ...(webPort !== undefined ? { port: webPort } : {}),
           host,
           ...(token ? { token } : {}),
+          ...(cloudflareAccessRef.current ? { cloudflareAccess: cloudflareAccessRef.current } : {}),
           // THE constraint of this mount: Ink owns stdout and repaints by
           // tracking cursor position, so a stray write from a request handler
           // lands inside a rendered frame and corrupts it — and reads as a
