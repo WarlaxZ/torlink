@@ -27,6 +27,8 @@
 // Nothing here throws. Every "no" is the same `false`, because the caller's next
 // move is identical for all of them: fall to the next rung.
 
+import { torlinkFetch } from "../util/net";
+
 /**
  * The boundary the provider rounds a partial segment to.
  *
@@ -219,7 +221,11 @@ const MAX_TEXT_BYTES = 1024 * 1024;
  */
 export async function probeFetch(url: string, timeoutMs: number): Promise<ProbeResponse | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
+    // torlinkFetch, not the global `fetch`: the manifest and its segments live on
+    // the debrid provider's CDN, so on a box with custom DNS the probe must resolve
+    // through the same dispatcher as everything else or it fails for the same
+    // reason the poster cache once did — see the note in src/util/net.ts.
+    const res = await torlinkFetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "follow" });
     let bytes = 0;
     // Budgeted in BYTES read, not in string length: the two differ for anything
     // non-ASCII, and the point of the cap is to avoid decoding megabytes of a

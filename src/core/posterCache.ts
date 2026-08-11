@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { postersDir } from "../config/paths";
 import { renderPosterFile } from "../util/poster";
-import type { FetchImpl } from "../util/net";
+import { torlinkFetch, type FetchImpl } from "../util/net";
 import { log } from "../util/logger";
 
 // Hosts we are willing to fetch poster images from. The daemon fetching an
@@ -192,7 +192,10 @@ export async function getPoster(
 ): Promise<CachedPoster | null> {
   if (!posterUrlAllowed(url)) return null;
   const dir = opts.dir ?? postersDir;
-  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
+  // torlinkFetch, not the global `fetch`: poster CDNs must resolve through the
+  // custom-DNS dispatcher every other request uses, or a box whose network
+  // sinkholes DNS serves working search results with no poster behind any of them.
+  const fetchImpl = opts.fetchImpl ?? torlinkFetch;
   const file = path.join(dir, posterFileName(url));
 
   try {

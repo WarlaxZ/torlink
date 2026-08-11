@@ -11,7 +11,12 @@ export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 // torlink's real fetch: undici's fetch, so a custom-DNS dispatcher (when set)
 // and response decompression come from the same undici instance. With no custom
 // DNS it behaves exactly like the platform fetch. Tests inject their own impl.
-const dohFetch: FetchImpl = (url, init) => {
+//
+// Anything the daemon fetches from the network MUST go through this rather than
+// the global `fetch`, or it silently skips the custom-DNS dispatcher — which is
+// how the poster cache once ended up unreachable on a box whose network
+// sinkholed DNS while every other request (routed here) resolved fine.
+export const torlinkFetch: FetchImpl = (url, init) => {
   const dispatcher = getDnsDispatcher();
   const opts = dispatcher ? { ...init, dispatcher } : init;
   return undiciFetch(url, opts as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
@@ -136,7 +141,7 @@ export async function fetchResilient(
     retries = DEFAULT_RETRIES,
     baseMs = DEFAULT_BASE_MS,
     capMs = DEFAULT_CAP_MS,
-    fetchImpl = dohFetch,
+    fetchImpl = torlinkFetch,
     sleepImpl = realSleep,
     retryCdn503 = false,
     onAttempt,
