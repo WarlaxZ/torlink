@@ -2286,12 +2286,20 @@ function resultActions(
   });
   actions.append(playButton);
 
-  const addButton = document.createElement("button");
-  addButton.type = "button";
-  addButton.textContent = "add";
-  tagControl(addButton, rowKey, "add");
-  addButton.addEventListener("click", () => void addResult(result, "p2p"));
-  actions.append(addButton);
+  // A labelled debrid add button replaces the plain (P2P) "add" whenever a
+  // provider is configured — the server forces debrid in that case (it never
+  // downloads direct P2P on a headless box), so a P2P "add" button here would
+  // promise a network the server won't use. `debridProvider` guards the same
+  // `debridConfigured: true` with a null provider case the button below does.
+  const debridAddAvailable = Boolean(sources?.debridConfigured && sources.debridProvider);
+  if (!debridAddAvailable) {
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.textContent = "add";
+    tagControl(addButton, rowKey, "add");
+    addButton.addEventListener("click", () => void addResult(result, "p2p"));
+    actions.append(addButton);
+  }
 
   // Labelled by what the click will do, and rebuilt from savedState on every
   // render — the results list is re-rendered on every snapshot frame, so a
@@ -2313,8 +2321,9 @@ function resultActions(
   // Offered only where the TUI offers `r`: when a debrid token is actually
   // configured. A button that always answered "set a token first" is noise.
   // `debridProvider` guards against `debridConfigured: true` with a null
-  // provider producing a button labelled "add via null".
-  if (sources?.debridConfigured && sources.debridProvider) {
+  // provider producing a button labelled "add via null". This is the only add
+  // button shown when a provider is configured — see the plain "add" above.
+  if (debridAddAvailable && sources?.debridProvider) {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
     debridButton.textContent = debridAddLabel(sources.debridProvider);

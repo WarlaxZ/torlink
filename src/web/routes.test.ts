@@ -510,10 +510,14 @@ describe("POST /api/stream", () => {
   });
 });
 
-describe("POST /api/stream — torrent-confirm", () => {
-  // A configured Real-Debrid account that isn't premium. The TUI always warns
-  // here; the browser must be given the chance to do the same.
-  function confirmDeps(over: Partial<WebDeps> = {}) {
+describe("POST /api/stream — a configured provider is never swapped for P2P", () => {
+  // A configured Real-Debrid account whose live probe says it isn't premium.
+  // The old behaviour offered a P2P confirm here; the policy now is "force
+  // debrid, never direct" whenever a provider is configured, so the stream is
+  // attempted through debrid regardless of the (possibly stale) inactive status.
+  // If the account really is dead, debrid reports that through the session —
+  // which never puts the box's IP into a public swarm.
+  function inactiveDeps(over: Partial<WebDeps> = {}) {
     return deps({
       loadConfigImpl: async () => ({ ...defaultConfig, realDebridToken: "rd-token" }),
       debridStatusImpl: async () => ({
@@ -527,48 +531,34 @@ describe("POST /api/stream — torrent-confirm", () => {
     });
   }
 
-  it("refuses with a distinct state instead of quietly streaming over P2P", async () => {
-    // THE MUTATION THIS KILLS: treating torrent-confirm as torrent-auto. That
-    // reads as a harmless simplification and puts the user's own IP into a
-    // public swarm, after they deliberately set Real-Debrid up so it wouldn't
-    // be. Nothing may start until a human says yes.
-    const streamTorrentImpl = vi.fn(async () => torrentBackend());
-    const sessions = registry({ streamTorrentImpl });
-    const res = await post(confirmDeps({ runtime: runtime(sessions) }), { magnet: MAGNET });
-
-    expect(res.status).toBe(409);
-    expect(res.json).toEqual({
-      route: "torrent-confirm",
-      reason: "your Real-Debrid plan isn't active",
-    });
-    expect(streamTorrentImpl).not.toHaveBeenCalled();
-    expect(sessions.list()).toEqual([]);
-  });
-
-  it("is not satisfied by a truthy-but-not-true confirm", async () => {
-    const sessions = registry();
-    const res = await post(confirmDeps({ runtime: runtime(sessions) }), {
-      magnet: MAGNET,
-      confirm: "yes",
-    });
-    expect(res.status).toBe(409);
-    expect(sessions.list()).toEqual([]);
-  });
-
-  it("streams over P2P once the client confirms", async () => {
+  it("routes through debrid rather than offering a P2P fallback", async () => {
+    // THE MUTATION THIS KILLS: falling back to (or offering) a direct P2P swarm
+    // when a provider is configured but its account looks inactive. That leaks
+    // the box's IP — exactly what a debrid provider is set up to avoid.
     const streamTorrentImpl = vi.fn(async () => torrentBackend());
     const resolveDebridImpl = vi.fn(async () => [{ url: RD_URL, filename: "big.mkv", bytes: 900 }]);
     const sessions = registry({ streamTorrentImpl, resolveDebridImpl });
-    const res = await post(confirmDeps({ runtime: runtime(sessions) }), {
+    const res = await post(inactiveDeps({ runtime: runtime(sessions) }), { magnet: MAGNET });
+
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ session: { backend: "debrid" } });
+    expect(resolveDebridImpl).toHaveBeenCalledWith("realdebrid", "rd-token", MAGNET, expect.anything());
+    expect(streamTorrentImpl).not.toHaveBeenCalled();
+  });
+
+  it("ignores a P2P confirm flag — the client cannot opt the box into a swarm", async () => {
+    const streamTorrentImpl = vi.fn(async () => torrentBackend());
+    const resolveDebridImpl = vi.fn(async () => [{ url: RD_URL, filename: "big.mkv", bytes: 900 }]);
+    const sessions = registry({ streamTorrentImpl, resolveDebridImpl });
+    const res = await post(inactiveDeps({ runtime: runtime(sessions) }), {
       magnet: MAGNET,
       confirm: true,
     });
 
     expect(res.status).toBe(200);
-    expect(res.json).toMatchObject({ session: { backend: "torrent" } });
-    expect(streamTorrentImpl).toHaveBeenCalled();
-    // Confirmed means P2P, not "try Real-Debrid anyway with a dead account".
-    expect(resolveDebridImpl).not.toHaveBeenCalled();
+    expect(res.json).toMatchObject({ session: { backend: "debrid" } });
+    expect(resolveDebridImpl).toHaveBeenCalled();
+    expect(streamTorrentImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -2142,6 +2132,47 @@ describe("POST /api/add — adding a search hit by hash and name", () => {
     const { runtime: rt, add } = addRuntime();
     await post(deps({ runtime: rt }), { infoHash: HASH, name: "Kestrel", via: "p2p", sizeBytes: 4096 });
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ sizeBytes: 4096 }), "/tmp/dl");
+  });
+
+  // Policy: with a debrid provider configured the web server never issues a
+  // direct P2P download — it would put the box's IP in a public swarm and write
+  // to its disk. These three cover every way a P2P download could otherwise slip
+  // through.
+  const debridConfig = async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", realDebridToken: "rd-tok" });
+
+  it("forces debrid for a pasted magnet, closing the silent legacy-P2P gap", async () => {
+    // The add-box sends only { magnet } — no name, no via. That used to fall
+    // through to the legacy /add handler and download direct P2P with no prompt,
+    // even with a provider configured. It must go through debrid instead.
+    const { runtime: rt, add, addDebrid } = addRuntime();
+    const res = await post(
+      deps({ runtime: rt, loadConfigImpl: debridConfig }),
+      { magnet: `magnet:?xt=urn:btih:${HASH}&dn=Example` },
+    );
+    expect(res.status).toBe(200);
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Example" }),
+      "/tmp/dl",
+      "realdebrid",
+      "rd-tok",
+    );
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("forces debrid even when the client explicitly asks for p2p", async () => {
+    const { runtime: rt, add, addDebrid } = addRuntime();
+    const res = await post(
+      deps({ runtime: rt, loadConfigImpl: debridConfig }),
+      { infoHash: HASH, name: "Kestrel", via: "p2p" },
+    );
+    expect(res.status).toBe(200);
+    expect(addDebrid).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel" }),
+      "/tmp/dl",
+      "realdebrid",
+      "rd-tok",
+    );
+    expect(add).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown `via` instead of guessing a network", async () => {
