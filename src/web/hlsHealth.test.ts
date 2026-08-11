@@ -4,9 +4,11 @@ import {
   SEGMENT_QUANTUM,
   looksTruncated,
   makeCheckHls,
+  probeFetch,
   probeTarget,
   segmentUris,
 } from "./hlsHealth";
+import * as net from "../util/net";
 
 // A media playlist in the shape Real-Debrid actually serves: no version tag, no
 // stream-inf, relative segment names, ENDLIST at the bottom.
@@ -163,5 +165,25 @@ describe("makeCheckHls", () => {
     const fetchImpl = fetcher(manifest(704), okSegment);
     await makeCheckHls({ fetchImpl })(MANIFEST_URL);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("probeFetch", () => {
+  // The regression: probeFetch used the global `fetch`, so HLS health probes to
+  // the provider CDN skipped the custom-DNS dispatcher every other request uses —
+  // the same bug that made the poster cache unreachable on a custom-DNS box. The
+  // production probe MUST go through torlinkFetch, and still read status + bytes
+  // off the streamed body.
+  it("fetches through torlink's DNS-aware fetch and reports status and byte count", async () => {
+    const spy = vi
+      .spyOn(net, "torlinkFetch")
+      .mockResolvedValue(new Response(new Uint8Array([1, 2, 3, 4, 5]), { status: 200 }));
+    try {
+      const res = await probeFetch("https://28.stream.example.test/seg.ts", 1000);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(res).toEqual({ status: 200, bytes: 5, body: expect.any(String) });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -10,6 +10,7 @@ import {
   posterFileName,
   prunePosters,
 } from "./posterCache";
+import * as net from "../util/net";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
 
@@ -62,6 +63,23 @@ describe("getPoster", () => {
     expect(second?.path).toBe(first?.path);
     expect(second?.bytes).toBe(JPEG.length);
     await expect(fs.readFile(first!.path)).resolves.toEqual(JPEG);
+  });
+
+  // The regression this guards: getPoster used the global `fetch` rather than
+  // torlink's `torlinkFetch`, so poster fetches silently skipped the custom-DNS
+  // dispatcher every other request honours. On a box with custom DNS set (common
+  // where a network sinkholes DNS), every poster 404'd while search, OMDb and
+  // debrid — all routed through torlinkFetch — worked. The default MUST be the
+  // shared fetch so posters resolve the same way as everything else.
+  it("uses torlink's DNS-aware fetch when no fetchImpl is injected", async () => {
+    const spy = vi.spyOn(net, "torlinkFetch").mockResolvedValue(okResponse(JPEG));
+    try {
+      const hit = await getPoster("https://m.media-amazon.com/a.jpg", { dir });
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(hit).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("returns null for a non-http url without fetching", async () => {
