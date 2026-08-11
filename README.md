@@ -200,12 +200,14 @@ the list. The header, the category tabs and the sort controls are pinned too, so
 re-sort without scrolling back to the top of a long browse. Press **`/`** to jump to the search box from
 anywhere, and drive the list with the arrow keys.
 
-From a result you can **add** it to the queue, **add via RD** or **add via TorBox** where that debrid
-provider is configured, **play** it straight away, **copy magnet**, or **export .torrent** — the same
+From a result you can **add** it to the queue, **play** it straight away, **copy magnet**, or
+**export .torrent** — the same
 metadata-only export as the terminal's `e`, writing the file into the download folder on the machine
 torlink is running on, and telling you which folder that was. Under TorBox, a result already on their servers
 also carries a **cached** marker — Real-Debrid results never show one, for the same reason the terminal
-doesn't (see [Debrid](#debrid-real-debrid-or-torbox)).
+doesn't (see [Debrid](#debrid-real-debrid-or-torbox)). Where a debrid provider is configured the plain
+**add** is replaced by **add via RD** / **add via TorBox**: the browser routes every add through the
+provider and never downloads direct peer-to-peer (the terminal keeps its plain `d`, which warns first).
 
 `torlnk serve --web` lands on serve's own port, **`http://127.0.0.1:9161`**, and **opens your browser
 there for you**. `torlnk --web` lands on **`http://127.0.0.1:9162`** and prints the address on the
@@ -465,8 +467,11 @@ itself.
 
 **With a debrid account connected**, `v` and **play** stream from that provider's servers instead:
 faster, no waiting on seeders, and your IP never touches the swarm. torlink takes that route
-automatically whenever an account is active, and only falls back to a torrent stream if you confirm it —
-so connecting a debrid provider never quietly drops you onto peer-to-peer. By default the browser's player
+automatically whenever an account is active. In the terminal it falls back to a torrent stream only if you
+confirm it, so a debrid provider never quietly drops you onto peer-to-peer. The browser (`serve --web`) is
+stricter still: it is typically a headless or remote box whose IP must never touch the swarm, so when a
+provider is configured it *always* uses it and never streams — or downloads — direct peer-to-peer, even if
+the account looks lapsed (it attempts the provider and reports what the provider says). By default the browser's player
 redirects straight to their CDN, so the video never passes through the machine running torlnk — you get
 their bandwidth and native seeking. If you'd rather the link to your account never left the server, you
 can [relay it through this machine](#relaying-streams-through-this-machine) instead.

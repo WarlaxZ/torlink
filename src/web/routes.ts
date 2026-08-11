@@ -109,7 +109,6 @@ import type {
   PublicWritableSettings,
   SourcesResponse,
   StartStreamResponse,
-  StreamConfirmResponse,
   SavedSearchesResponse,
 } from "./wire";
 
@@ -389,8 +388,10 @@ interface StartStreamBody {
   magnet?: unknown;
   infoHash?: unknown;
   name?: unknown;
-  // Set by a client that has shown the user the `torrent-confirm` reason and
-  // had them accept it. Never inferred, never defaulted true.
+  // Legacy field: older clients set this after a `torrent-confirm` prompt to opt
+  // into a P2P stream. The web server no longer offers that fallback when a
+  // debrid provider is configured (see startStream's docblock), so it is now
+  // accepted-but-ignored rather than a break in the wire contract.
   confirm?: unknown;
 }
 
@@ -408,15 +409,16 @@ function parseStartBody(bodyText: string): StartStreamBody | null {
  * POST /api/stream — start a session and answer with its id, its capability
  * and its (public) state.
  *
- * Routing is `classifyStreamRoute`, the same decision the TUI makes, for the
- * same reason: a configured debrid account (Real-Debrid or TorBox) should be
- * used, and one that is configured but not working must not be quietly
- * swapped for a P2P swarm. The `torrent-confirm` case is reported to the
- * client as its own status and its own body and NOT downgraded to
- * `torrent-auto` here — the user set a debrid provider up precisely so their
- * IP would stay out of swarms, and a server that decides "close enough" on
- * their behalf exposes it without them ever seeing a prompt. The client asks,
- * and comes back with `confirm: true` if they accept.
+ * Routing starts from `classifyStreamRoute`, the same decision the TUI makes,
+ * but the web server applies a stricter policy on top: when a debrid provider
+ * is configured it is ALWAYS used and the server never streams direct P2P.
+ * `serve --web` is typically a headless/remote box behind a tunnel, where a P2P
+ * swarm would expose the server's own IP — so the TUI's "confirm, then stream
+ * P2P" fallback for an inactive account is not offered here. A configured
+ * provider that looks inactive is still attempted through debrid (the status
+ * probe can be stale); a genuinely dead account surfaces as a session error,
+ * never as a silent swarm. With no provider configured, P2P is the only option
+ * and is used directly. `confirm` in the body is therefore ignored.
  */
 async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse> {
   const body = parseStartBody(bodyText);
@@ -447,14 +449,15 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
 
   let route: StreamRoute = classified;
   if (classified.kind === "torrent-confirm") {
-    if (body.confirm !== true) {
-      const refusal: StreamConfirmResponse = { route: "torrent-confirm", reason: classified.reason };
-      // 409, not 200: nothing was started. A success status with a "please ask
-      // the user" body is the shape a client accidentally treats as done.
-      return { status: 409, json: refusal };
-    }
-    // Confirmed by a human, so it proceeds as an ordinary P2P stream.
-    route = { kind: "torrent-auto" };
+    // Policy for the web server: with a debrid provider configured, never fall
+    // back to (or offer) a direct P2P swarm — that exposes the box's IP, which
+    // is the whole reason a provider was set up. classifyStreamRoute only asks
+    // for a confirm when a provider IS configured but its account looks
+    // inactive, so force the debrid route here regardless. The status probe can
+    // be stale, so attempting debrid may just work; and if the account really
+    // is dead, the debrid resolve reports it through the session rather than
+    // silently streaming over P2P. `active` is necessarily set in this branch.
+    route = active ? { kind: "debrid", provider: active.provider } : { kind: "torrent-auto" };
   }
 
   // begin(), not start(): a Real-Debrid cache can take minutes and the answer
@@ -864,7 +867,19 @@ async function addToQueue(
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const rawVia = typeof body.via === "string" ? body.via.trim() : "";
-  if (!name && !rawVia) {
+
+  // Policy: when a debrid provider is configured the web server forces every
+  // add through debrid and never issues a direct P2P download — a headless/
+  // remote box would otherwise put its own IP into a public swarm and write the
+  // torrent to its disk. `active` decides it, so it is resolved up front.
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const active = resolveActiveDebrid(config);
+
+  // The legacy fallthrough (a bare `{ magnet }` add-box body: no name, no via)
+  // downloads direct P2P. It is only safe when NO provider is configured — with
+  // one set, that same body must be routed to debrid below instead of quietly
+  // hitting the swarm, so it does not fall through here.
+  if (!name && !rawVia && !active) {
     return fromApi(await handleApi(deps.runtime, deps.token, "POST", "/add", authHeader, bodyText));
   }
   if (rawVia && rawVia !== "p2p" && rawVia !== "debrid") {
@@ -884,17 +899,19 @@ async function addToQueue(
     options.sizeBytes = body.sizeBytes;
   }
 
-  if (rawVia === "debrid") {
-    const config = await (deps.loadConfigImpl ?? loadConfig)();
-    const active = resolveActiveDebrid(config);
-    if (!active) {
-      return {
-        status: 400,
-        json: { error: "Set a Real-Debrid or TorBox token first — open the Settings tab." },
-      };
-    }
+  if (active) {
+    // Force debrid regardless of what the client asked for (or omitted): an
+    // explicit `via: "p2p"` and the pasted-magnet fallthrough both land here.
     options.debridToken = active.token;
     options.debridProvider = active.provider;
+  } else if (rawVia === "debrid") {
+    // Asked for debrid with nothing configured. A silent P2P fallback would put
+    // the user's IP in a public swarm right after they asked for the thing that
+    // keeps it out of one, so refuse rather than guess.
+    return {
+      status: 400,
+      json: { error: "Set a Real-Debrid or TorBox token first — open the Settings tab." },
+    };
   }
 
   const outcome = await addInput(deps.runtime, input, options);
