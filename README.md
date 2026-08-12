@@ -287,7 +287,9 @@ On a wide enough terminal a preview pane opens beside the results: highlight a f
 fetches its poster and plot and renders them right in the terminal (bring your own free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Settings). Anime is the exception —
 its posters and plots come from [AniList](https://anilist.co/), a free anime database that needs no
-key. Press `p` to toggle the pane, or `i` on any result to open its IMDb page.
+key. Press `p` to toggle the pane, or `i` on any result to open its IMDb page. Adult results, which OMDb
+doesn't cover, instead show the full release name and a parsed breakdown (studio, year, resolution,
+source) — no key or lookup needed, and the same in the browser.
 
 Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50;
 press `Enter` to run one again or `x` to remove it.
