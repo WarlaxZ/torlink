@@ -9,6 +9,7 @@ import {
   isFeatureId, isMaxResolution, NO_PREFS,
   type FeatureId, type MaxResolution, type QualityPrefs,
 } from "../util/releasePick";
+import { OWNER_PROFILE, isOwnerProfile } from "../core/profile";
 
 // A pinned VIDEO torrent/series to return to, remembering which episodes have
 // been streamed. Never stores stream URLs — only the magnet + metadata, so it
@@ -21,6 +22,15 @@ export interface FavouriteItem {
   sizeBytes?: number;
   addedAt: number;
   watched?: string[]; // episode filenames already streamed
+}
+
+/** One friend's isolated lists. Mirrors the owner's top-level fields. */
+export interface ProfileState {
+  favourites?: FavouriteItem[];
+  savedSearches?: string[];
+  reccToken?: string;
+  reccAccountName?: string;
+  reccAccountClaimed?: boolean;
 }
 
 export interface Config {
@@ -97,6 +107,14 @@ export interface Config {
   // Pinned VIDEO torrents (the "Library"), most-recent first, each remembering
   // which episodes have been watched.
   favourites?: FavouriteItem[];
+  // The Access email that owns this install. Its profile is the existing top-level
+  // fields and stream-history.json; every other authenticated email gets its own
+  // profile. Host/security config: env (TORLINK_OWNER_EMAIL) or config, never
+  // web-writable — mirrors cfAccessTeamDomain.
+  ownerEmail?: string;
+  // Per-friend state, keyed by slugForEmail(email). The OWNER never appears here —
+  // the owner is the top-level fields above. Absent until a second user signs in.
+  profiles?: Record<string, ProfileState>;
   // Ceiling for auto-picked releases. Absent = no ceiling. Note that with no
   // ceiling set the highest resolution available wins, which will usually be a
   // remux — that is the intended reading of "best available", not a bug.
@@ -169,6 +187,34 @@ function isFavouriteItem(v: unknown): v is FavouriteItem {
     typeof r.name === "string" && r.name.length > 0 &&
     typeof r.magnet === "string" && r.magnet.length > 0
   );
+}
+
+// Drops hand-edited junk from the per-friend profiles map before it reaches a UI,
+// mirroring the top-level favourites/savedSearches validation in loadConfig.
+function sanitiseProfiles(input: unknown): Record<string, ProfileState> | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const out: Record<string, ProfileState> = {};
+  for (const [id, raw] of Object.entries(input as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const state: ProfileState = {};
+    if (Array.isArray(r.favourites)) {
+      state.favourites = r.favourites
+        .filter(isFavouriteItem)
+        .map((f) => ({ ...f, addedAt: typeof f.addedAt === "number" ? f.addedAt : 0 }))
+        .slice(0, 100);
+    }
+    if (Array.isArray(r.savedSearches)) {
+      state.savedSearches = r.savedSearches
+        .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+        .slice(0, 50);
+    }
+    if (typeof r.reccToken === "string" && r.reccToken.trim()) state.reccToken = r.reccToken;
+    if (typeof r.reccAccountName === "string") state.reccAccountName = r.reccAccountName;
+    if (typeof r.reccAccountClaimed === "boolean") state.reccAccountClaimed = r.reccAccountClaimed;
+    out[id] = state;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 interface RawQualityPrefs {
@@ -374,9 +420,17 @@ const RECC_TOKEN_ENV = "TORLINK_RECC_TOKEN";
 // The effective reccd connection (env wins over config, matching the other
 // resolve* helpers). An undefined reccUrl means "recommendations not
 // configured" — the For You view then shows a setup hint instead of fetching.
-export function resolveReccConfig(config: Config): ReccClientConfig {
+//
+// With a friend's profileId, the token comes from that profile alone: reccUrl is
+// shared infrastructure (every profile talks to the same reccd host), but a friend
+// never inherits the env/owner token — isolating their recommendations is the point.
+export function resolveReccConfig(config: Config, profileId: string = OWNER_PROFILE): ReccClientConfig {
   const url = process.env[RECC_URL_ENV]?.trim() || config.reccUrl?.trim() || undefined;
-  const token = process.env[RECC_TOKEN_ENV]?.trim() || config.reccToken?.trim() || undefined;
+  if (isOwnerProfile(profileId)) {
+    const token = process.env[RECC_TOKEN_ENV]?.trim() || config.reccToken?.trim() || undefined;
+    return { reccUrl: url, reccToken: token };
+  }
+  const token = config.profiles?.[profileId]?.reccToken?.trim() || undefined;
   return { reccUrl: url, reccToken: token };
 }
 
@@ -400,6 +454,18 @@ export function resolveCastAdvertiseHost(config: Config): string | undefined {
 export function resolveCastDevice(config: Config): string | undefined {
   const env = process.env[CAST_DEVICE_ENV]?.trim();
   return env || config.castDevice?.trim() || undefined;
+}
+
+const OWNER_EMAIL_ENV = "TORLINK_OWNER_EMAIL";
+
+/**
+ * The Access email that owns this install, normalised (trimmed + lower-cased), or
+ * undefined. env wins over config, matching every other resolve* helper. Undefined
+ * means "no owner set" — the whole feature then fails soft to single-user.
+ */
+export function resolveOwnerEmail(config: Config): string | undefined {
+  const v = process.env[OWNER_EMAIL_ENV]?.trim() || config.ownerEmail?.trim();
+  return v ? v.toLowerCase() : undefined;
 }
 
 const CF_ACCESS_TEAM_DOMAIN_ENV = "TORLINK_CF_ACCESS_TEAM_DOMAIN";
@@ -476,6 +542,11 @@ export async function loadConfig(): Promise<Config> {
           })
           .slice(0, 100)
       : [];
+    cfg.ownerEmail =
+      typeof parsed.ownerEmail === "string" && parsed.ownerEmail.trim().length > 0
+        ? parsed.ownerEmail.trim()
+        : undefined;
+    cfg.profiles = sanitiseProfiles(parsed.profiles);
     const quality = sanitiseQualityPrefs(parsed);
     cfg.maxResolution = quality.maxResolution;
     cfg.requireFeatures = quality.requireFeatures;
@@ -484,6 +555,55 @@ export async function loadConfig(): Promise<Config> {
   } catch {
     return { ...defaultConfig };
   }
+}
+
+// Per-profile list accessors. The owner reads/writes the top-level fields; a friend
+// reads/writes profiles[id], leaving the owner and every other friend untouched. All
+// setters return a fresh Config for the caller to saveConfig — read-modify-write, per
+// CLAUDE.md, never a held snapshot.
+
+export function profileFavourites(config: Config, profileId: string): FavouriteItem[] {
+  if (isOwnerProfile(profileId)) return config.favourites ?? [];
+  return config.profiles?.[profileId]?.favourites ?? [];
+}
+
+export function withProfileFavourites(
+  config: Config,
+  profileId: string,
+  favourites: FavouriteItem[],
+): Config {
+  if (isOwnerProfile(profileId)) return { ...config, favourites };
+  const prev = config.profiles?.[profileId] ?? {};
+  return { ...config, profiles: { ...config.profiles, [profileId]: { ...prev, favourites } } };
+}
+
+export function profileSavedSearches(config: Config, profileId: string): string[] {
+  if (isOwnerProfile(profileId)) return config.savedSearches ?? [];
+  return config.profiles?.[profileId]?.savedSearches ?? [];
+}
+
+export function withProfileSavedSearches(
+  config: Config,
+  profileId: string,
+  savedSearches: string[],
+): Config {
+  if (isOwnerProfile(profileId)) return { ...config, savedSearches };
+  const prev = config.profiles?.[profileId] ?? {};
+  return { ...config, profiles: { ...config.profiles, [profileId]: { ...prev, savedSearches } } };
+}
+
+export function withProfileReccAccount(
+  config: Config,
+  profileId: string,
+  patch: { reccToken: string; reccAccountName: string; reccAccountClaimed: boolean },
+): Config {
+  // Owner: spread onto the top level, exactly as provisioning did before profiles
+  // existed. reccUrl is intentionally left to the caller (the owner already has one
+  // by the time provisioning succeeds), which also keeps this file from importing
+  // DEFAULT_RECC_URL out of src/recc and creating a cycle.
+  if (isOwnerProfile(profileId)) return { ...config, ...patch };
+  const prev = config.profiles?.[profileId] ?? {};
+  return { ...config, profiles: { ...config.profiles, [profileId]: { ...prev, ...patch } } };
 }
 
 const write = serializeWrites();
