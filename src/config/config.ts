@@ -595,15 +595,19 @@ export function withProfileSavedSearches(
 export function withProfileReccAccount(
   config: Config,
   profileId: string,
-  patch: { reccToken: string; reccAccountName: string; reccAccountClaimed: boolean },
+  patch: { reccToken: string; reccAccountName: string; reccAccountClaimed: boolean; reccUrl?: string },
 ): Config {
+  const { reccUrl, ...account } = patch;
   // Owner: spread onto the top level, exactly as provisioning did before profiles
-  // existed. reccUrl is intentionally left to the caller (the owner already has one
-  // by the time provisioning succeeds), which also keeps this file from importing
-  // DEFAULT_RECC_URL out of src/recc and creating a cycle.
-  if (isOwnerProfile(profileId)) return { ...config, ...patch };
+  // existed (reccUrl included, when the caller supplies it). The caller passes the
+  // URL rather than this file importing DEFAULT_RECC_URL out of src/recc, which
+  // would create a cycle (src/recc already imports this module).
+  if (isOwnerProfile(profileId)) {
+    return { ...config, ...account, ...(reccUrl ? { reccUrl } : {}) };
+  }
+  // A friend never gets its own reccUrl — the reccd host is shared top-level infra.
   const prev = config.profiles?.[profileId] ?? {};
-  return { ...config, profiles: { ...config.profiles, [profileId]: { ...prev, ...patch } } };
+  return { ...config, profiles: { ...config.profiles, [profileId]: { ...prev, ...account } } };
 }
 
 const write = serializeWrites();

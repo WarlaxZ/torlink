@@ -23,6 +23,12 @@ export const configFile = path.join(configDir, "config.json");
 // dataDir because what it protects is a config write.
 export const reccProvisionLockFile = path.join(configDir, "recc-provision.lock");
 
+// A friend's provisioning lock, one per profile so two friends signing up at once
+// don't block each other. The owner keeps reccProvisionLockFile above.
+export function reccProvisionLockFileForProfile(profileId: string): string {
+  return path.join(configDir, `recc-provision.${profileId}.lock`);
+}
+
 export const queueFile = path.join(dataDir, "queue.json");
 
 export const historyFile = path.join(dataDir, "history.json");
