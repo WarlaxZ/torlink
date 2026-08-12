@@ -59,6 +59,7 @@ import {
   parseLayout,
   parseSort,
   previewApplies,
+  adultPreviewApplies,
   reportsHealthLookup,
   resultAtRow,
   seasonPlayPlan,
@@ -2868,7 +2869,14 @@ function renderResults(): void {
 function selectResult(result: PublicSearchResult): void {
   selectedHash = result.infoHash;
   renderResults();
-  preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
+  const group = searchView.group;
+  if (previewApplies(group)) {
+    preview.select(result.name, group);
+  } else if (adultPreviewApplies(group)) {
+    preview.selectLocal(result.name, group);
+  } else {
+    preview.select(null, group);
+  }
 }
 
 // Drops the selection, which hides the preview. One path for "nothing is
@@ -3186,6 +3194,16 @@ function renderPreview(state: PreviewState): void {
     previewBody.textContent = "Looking this up…";
     previewImdb.hidden = true;
     posterPlaceholder("Loading");
+    return;
+  }
+
+  if (state.kind === "local") {
+    const copy = state.copy;
+    previewTitle.textContent = copy.heading;
+    previewSub.textContent = copy.sub;
+    previewBody.textContent = copy.body;
+    previewImdb.hidden = true;
+    posterPlaceholder(copy.posterNote);
     return;
   }
 
