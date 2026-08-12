@@ -43,6 +43,12 @@ services:
 
     volumes:
       # One directory holds config (tokens), queue, watch history, seeds, posters.
+      #
+      # The image runs as uid 1000 (node). A bind mount keeps the HOST dir's
+      # ownership, so if ./state is root-owned, uid 1000 can't create /state/cache
+      # or /state/data — posters and logs then silently fail to persist. Make it
+      # writable by uid 1000 before the first `up`:
+      #   mkdir -p ./state && sudo chown -R 1000:1000 ./state
       - ./state:/state
       - ./state/Downloads/torlink:/state/Downloads/torlink
 

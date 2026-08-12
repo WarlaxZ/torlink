@@ -19,6 +19,7 @@ import { startWebServer, type WebServerHandle } from "../web/server";
 import type { StatusPayload } from "../web/wire";
 import { VERSION } from "../version";
 import { openUrl } from "../util/openUrl";
+import { checkStateDirsWritable } from "../util/stateDirCheck";
 import { ensureReccAccount } from "../recc/provision";
 import { loadConfig, resolveCloudflareAccess, isCloudflareAccessHalfConfigured } from "../config/config";
 
@@ -385,6 +386,16 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   }
 
   const runtime = await startRuntime(options.downloadDir);
+
+  // State lives under TORLINK_STATE_DIR (config, data, cache). If this process
+  // can't write there — the classic being a root-owned Docker bind mount under a
+  // non-root container user — posters, the log file and the download queue all
+  // fail silently, because the poster cache and the logger swallow the EACCES by
+  // design (a caching or logging failure must never crash a download). Probe it
+  // once at boot and say so loudly, so `docker logs` names the cause instead of
+  // showing a wall of blank posters with no explanation.
+  const stateWarning = await checkStateDirsWritable();
+  if (stateWarning) log(stateWarning);
 
   // A headless seedbox and `serve --web` get an account too. Fire-and-forget,
   // never awaited: reccd is a value-add, never a dependency. No onProvisioned

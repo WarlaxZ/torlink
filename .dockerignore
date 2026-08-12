@@ -16,6 +16,9 @@ dist
 .env
 .env.*
 config.json
+# Bind-mounted runtime state (torlnk's data/config/cache under a compose ./state
+# mount). Letting it into the build context busts the layer cache every run.
+state
 
 # Test and docs output that the runtime has no use for.
 coverage
