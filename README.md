@@ -948,6 +948,26 @@ Once enforced, the **Settings** pane in both front ends shows **Cloudflare Acces
 the browser reports the status but, being a client of the config rather than an editor of it, never sees
 or sets the team domain or the AUD.
 
+#### Sharing the server with a friend
+
+With Access enforcing named users, you can hand a friend the URL without them landing in your watch list.
+Set `ownerEmail` to your own Access email — as env on the service, or in `config.json`:
+
+```sh
+TORLINK_OWNER_EMAIL=you@example.com
+```
+
+Then torlink partitions the personal lists by who signed in:
+
+- **You** (that email, and the terminal UI) keep the existing watch history, favourites, saved searches,
+  and recommendations — nothing moves.
+- **Anyone else** who signs in through Access gets their *own* private watch history, favourites, saved
+  searches, and their own anonymous reccd account, so their viewing never touches yours.
+
+Sources, tokens, and machine settings stay shared — this splits only the per-user lists. Like the Access
+settings above, `ownerEmail` is host-specific config: set it in the TUI/env, never from the browser. With
+no `ownerEmail` set, torlink behaves exactly as before — one shared set of lists for everyone.
+
 #### As containers
 
 `docker-compose.access.yml` brings up torlink **and** its Tunnel connector together. Build from this
