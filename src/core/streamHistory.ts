@@ -4,7 +4,9 @@
 //
 // Deliberately NOT src/download/history.ts, which is completed downloads.
 import { promises as fs } from "node:fs";
-import { streamHistoryFile } from "../config/paths";
+import path from "node:path";
+import { streamHistoryFile, streamHistoryDir } from "../config/paths";
+import { OWNER_PROFILE, isOwnerProfile } from "./profile";
 import { serializeWrites, writeJsonAtomic } from "../util/atomic";
 import { parseRelease } from "../util/release";
 import type { EpisodeRef } from "../util/episode";
@@ -194,27 +196,42 @@ export function removeStreamHistory(
  */
 export async function forgetStreamHistory(
   key: string,
+  profileId: string = OWNER_PROFILE,
   deps: {
     load?: () => Promise<StreamHistoryItem[]>;
     save?: (items: readonly StreamHistoryItem[]) => Promise<void>;
   } = {},
 ): Promise<StreamHistoryItem[]> {
-  const next = removeStreamHistory(await (deps.load ?? loadStreamHistory)(), key);
-  await (deps.save ?? saveStreamHistory)(next);
+  const next = removeStreamHistory(await (deps.load ?? (() => loadStreamHistory(profileId)))(), key);
+  await (deps.save ?? ((items) => saveStreamHistory(items, profileId)))(next);
   return next;
 }
 
 const write = serializeWrites();
 
-export function saveStreamHistory(items: readonly StreamHistoryItem[]): Promise<void> {
-  return write(() => writeJsonAtomic(streamHistoryFile, items.slice(0, STREAM_HISTORY_CAP)));
+// The owner keeps the legacy flat file; a friend gets its own file in a directory,
+// so the feature never touches the owner's data on disk.
+function fileFor(profileId: string): string {
+  return isOwnerProfile(profileId) ? streamHistoryFile : path.join(streamHistoryDir, `${profileId}.json`);
+}
+
+export function saveStreamHistory(
+  items: readonly StreamHistoryItem[],
+  profileId: string = OWNER_PROFILE,
+): Promise<void> {
+  const file = fileFor(profileId);
+  return write(async () => {
+    // The per-friend directory does not exist until the first friend streams.
+    if (!isOwnerProfile(profileId)) await fs.mkdir(streamHistoryDir, { recursive: true }).catch(() => {});
+    await writeJsonAtomic(file, items.slice(0, STREAM_HISTORY_CAP));
+  });
 }
 
 /** An unreadable or corrupt file is an empty list, exactly as `loadHistory` treats one. */
-export async function loadStreamHistory(): Promise<StreamHistoryItem[]> {
+export async function loadStreamHistory(profileId: string = OWNER_PROFILE): Promise<StreamHistoryItem[]> {
   let raw: string;
   try {
-    raw = await fs.readFile(streamHistoryFile, "utf8");
+    raw = await fs.readFile(fileFor(profileId), "utf8");
   } catch {
     return [];
   }

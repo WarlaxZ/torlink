@@ -33,6 +33,11 @@ export const historyFile = path.join(dataDir, "history.json");
 // see one list misreport the other.
 export const streamHistoryFile = path.join(dataDir, "stream-history.json");
 
+// Per-friend stream history. The OWNER keeps streamHistoryFile above unchanged; a
+// friend's history is <dataDir>/stream-history/<profileId>.json. A directory, not a
+// suffix on the same file, so listing/clearing one friend never risks the others.
+export const streamHistoryDir = path.join(dataDir, "stream-history");
+
 export const seedsFile = path.join(dataDir, "seeds.json");
 
 export const rutrackerFile = path.join(dataDir, "rutracker.json");

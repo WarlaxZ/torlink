@@ -208,7 +208,7 @@ describe("forgetStreamHistory", () => {
     // so. This is the read-modify-write rule, one process out.
     const onDisk = [item({ key: "harrowgate|series", title: "Harrowgate" }), item({ key: "kepler|series" })];
     const saved: StreamHistoryItem[][] = [];
-    const next = await forgetStreamHistory("kepler|series", {
+    const next = await forgetStreamHistory("kepler|series", undefined, {
       load: async () => onDisk,
       save: async (items) => {
         saved.push([...items]);
@@ -222,7 +222,7 @@ describe("forgetStreamHistory", () => {
   it("propagates a failing read rather than writing a truncated file", async () => {
     const saved: StreamHistoryItem[][] = [];
     await expect(
-      forgetStreamHistory("kepler|series", {
+      forgetStreamHistory("kepler|series", undefined, {
         load: async () => {
           throw new Error("unreadable");
         },
@@ -347,5 +347,25 @@ describe("recordPlayedFile", () => {
     const s4 = recordPlayedFile([packEntry()], HASH, "Harrowgate.S04E01.mkv");
     expect(s4[0]!.season).toBe(4);
     expect(s4[0]!.episode).toBe(1);
+  });
+});
+
+describe("stream history is isolated per profile", () => {
+  it("keeps a friend's history in a separate file from the owner's", async () => {
+    const { dir, mod } = await isolated();
+    const { slugForEmail } = await import("./profile");
+    try {
+      const friend = slugForEmail("friend@example.com");
+      const row = (key: string): StreamHistoryItem => ({
+        key, title: key, rawName: `${key}.1080p`, infoHash: key, magnet: "magnet:", startedAt: 1,
+      });
+      await mod.saveStreamHistory([row("Kestrel")]); // owner (default)
+      await mod.saveStreamHistory([row("Harrowgate")], friend);
+
+      expect((await mod.loadStreamHistory()).map((e) => e.key)).toEqual(["Kestrel"]);
+      expect((await mod.loadStreamHistory(friend)).map((e) => e.key)).toEqual(["Harrowgate"]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
