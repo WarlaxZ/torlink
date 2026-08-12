@@ -4,6 +4,7 @@ import {
   imdbSearchUrl,
   posterPath,
   previewCopy,
+  localPreviewCopy,
   PREVIEW_DEBOUNCE_MS,
   type PreviewEffects,
   type PreviewState,
@@ -279,5 +280,33 @@ describe("previewEpisodeFor", () => {
 
   it("is null for a name with no title in it", () => {
     expect(previewEpisodeFor("1080p.WEB-DL.x265", "TV")).toBeNull();
+  });
+});
+
+describe("localPreviewCopy", () => {
+  it("uses the full name as the heading and a breakdown as the body, no poster/imdb", () => {
+    const copy = localPreviewCopy("Kestrel [Meridian Studios 2026] XXX WEB-DL 1080p MP4-P2P");
+    expect(copy.heading).toBe("Kestrel [Meridian Studios 2026] XXX WEB-DL 1080p MP4-P2P");
+    expect(copy.body).toContain("Studio: Meridian Studios");
+    expect(copy.posterUrl).toBeNull();
+    expect(copy.imdbUrl).toBeNull();
+  });
+});
+
+describe("selectLocal", () => {
+  it("renders a local state synchronously and never fetches", () => {
+    const { controller, rendered, asked } = harness();
+    controller.selectLocal("Ashfall.1999.1080p.WEB-DL.x264-GROUP", "Porn");
+    expect(asked).toEqual([]); // no OMDb request scheduled or sent
+    const last = rendered.at(-1);
+    expect(last?.kind).toBe("local");
+    if (last?.kind !== "local") throw new Error("unreachable");
+    expect(last.copy.heading).toBe("Ashfall.1999.1080p.WEB-DL.x264-GROUP");
+  });
+
+  it("hides the pane when release is null", () => {
+    const { controller, rendered } = harness();
+    controller.selectLocal(null, "Porn");
+    expect(rendered.at(-1)?.kind).toBe("hidden");
   });
 });
