@@ -34,6 +34,10 @@ describe("animeSearchTitle", () => {
     expect(animeSearchTitle("Harrowgate S03E04 [1080p]")).toBe("Harrowgate");
   });
 
+  it("strips multiple stacked leading group tags", () => {
+    expect(animeSearchTitle("[ANi] [Baha] Kestrel - 06 [1080p]")).toBe("Kestrel");
+  });
+
   it("returns null when only noise survives", () => {
     expect(animeSearchTitle("[Group] [1080p HEVC AAC]")).toBeNull();
   });

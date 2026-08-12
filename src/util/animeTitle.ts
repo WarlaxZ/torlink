@@ -35,8 +35,11 @@ export function animeSearchTitle(rawName: string): string | null {
   let s = rawName;
 
   // 1. Strip leading bracketed group/source tags: "[NanakoRaws] ", "(2026) ".
-  //    Repeated because releases often stack two ("[ANi] [Baha] ...").
-  s = s.replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*/g, "");
+  //    Looped because releases often stack two ("[ANi] [Baha] ..."); a single
+  //    `.replace(..., "g")` call only removes the first, since `^` does not
+  //    re-match mid-string even with the `g` flag.
+  const leadingTag = /^\s*(?:\[[^\]]*\]|\([^)]*\))\s*/;
+  while (leadingTag.test(s)) s = s.replace(leadingTag, "");
 
   // 2. Cut everything from the first remaining bracketed block onward — that is
   //    where the quality/codec/subtitle metadata lives ("... [WebRip 1080p]").
