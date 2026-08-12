@@ -18,6 +18,7 @@ import {
   parseGrouping,
   parseLayout,
   previewApplies,
+  adultPreviewApplies,
   progressLabel,
   reportsHealthLookup,
   resultMeta,
@@ -585,6 +586,19 @@ describe("previewApplies", () => {
     expect(previewApplies("Games")).toBe(false);
     expect(previewApplies("Music")).toBe(false);
     expect(previewApplies("Books")).toBe(false);
+  });
+});
+
+describe("adultPreviewApplies", () => {
+  it("is true only for the adult group", () => {
+    expect(adultPreviewApplies("Porn")).toBe(true);
+    expect(adultPreviewApplies("Movies")).toBe(false);
+    expect(adultPreviewApplies("All")).toBe(false);
+  });
+  it("never overlaps previewApplies (OMDb vs local are exclusive)", () => {
+    for (const g of ["All", "Movies", "TV", "Anime", "Porn", "Games"]) {
+      expect(previewApplies(g) && adultPreviewApplies(g)).toBe(false);
+    }
   });
 });
 
