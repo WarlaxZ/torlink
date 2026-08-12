@@ -17,6 +17,7 @@ import {
 } from "./routes";
 import { DownloadQueue } from "../download/queue";
 import { defaultConfig, type Config, type FavouriteItem } from "../config/config";
+import { slugForEmail } from "../core/profile";
 import { StreamSessionRegistry, type StreamSession } from "../core/streamSession";
 import { CastSessionRegistry } from "../core/cast/session";
 import { CastError } from "../core/cast/connection";
@@ -4196,5 +4197,69 @@ describe("POST /api/export — exporting a search hit as a .torrent", () => {
     );
     expect(res.status).toBe(401);
     expect(fetchAndExportTorrent).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleWebApi — per-Access-email isolation", () => {
+  const HASH = "c".repeat(40);
+  const OWNER = "owner@example.com";
+  const FRIEND_EMAIL = "friend@example.com";
+  const FRIEND = slugForEmail(FRIEND_EMAIL);
+
+  beforeEach(() => {
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+    vi.stubEnv("TORLINK_OWNER_EMAIL", "");
+  });
+
+  // A config store that actually persists writes, so a favourite added by one
+  // caller is visible to the next request — the whole point being who sees it.
+  function store(initial: Partial<Config> = {}) {
+    let current: Config = { ...defaultConfig, downloadDir: "/tmp/dl", ownerEmail: OWNER, ...initial };
+    const d = deps({
+      loadConfigImpl: async () => ({ ...current }),
+      saveConfigImpl: async (c: Config) => { current = c; },
+    });
+    return { deps: d, get: () => current };
+  }
+
+  const addFav = (d: WebDeps, email: string | undefined) =>
+    handleWebApi(
+      d, "POST", "/api/library", new URLSearchParams(), undefined,
+      JSON.stringify({ infoHash: HASH, name: "Ashfall.1999.1080p", action: "toggle" }),
+      email,
+    );
+
+  const saved = (d: WebDeps, email: string | undefined) =>
+    handleWebApi(d, "GET", "/api/saved", new URLSearchParams(), undefined, "", email);
+
+  it("a friend's favourite is invisible to the owner and stored under their profile", async () => {
+    const s = store();
+    await addFav(s.deps, FRIEND_EMAIL);
+
+    const ownerView = (await saved(s.deps, OWNER)).json as SavedResponse;
+    const friendView = (await saved(s.deps, FRIEND_EMAIL)).json as SavedResponse;
+    expect(ownerView.library).toHaveLength(0);
+    expect(friendView.library.map((f) => f.name)).toEqual(["Ashfall.1999.1080p"]);
+
+    // Persisted under profiles[slug], never the owner's top-level fields.
+    expect(s.get().favourites ?? []).toHaveLength(0);
+    expect(s.get().profiles?.[FRIEND]?.favourites?.map((f) => f.name)).toEqual(["Ashfall.1999.1080p"]);
+  });
+
+  it("the owner's own email writes the top-level list, exactly as before", async () => {
+    const s = store();
+    await addFav(s.deps, OWNER);
+    expect(s.get().favourites?.map((f) => f.name)).toEqual(["Ashfall.1999.1080p"]);
+    expect(s.get().profiles).toBeUndefined();
+    expect(((await saved(s.deps, OWNER)).json as SavedResponse).library).toHaveLength(1);
+  });
+
+  it("with no owner configured, a friend's email still maps to the shared owner list (fail-soft)", async () => {
+    const s = store({ ownerEmail: undefined });
+    await addFav(s.deps, FRIEND_EMAIL);
+    // No owner set → everyone is the owner → the top-level shared list, as today.
+    expect(s.get().favourites?.map((f) => f.name)).toEqual(["Ashfall.1999.1080p"]);
+    expect(s.get().profiles).toBeUndefined();
   });
 });
