@@ -320,6 +320,17 @@ export interface StreamConfirmResponse {
  * `TorrentResult.sources` which is optional until `mergeDuplicateResults` runs.
  * `sizeBytes` is bytes; `added` is epoch ms, absent when the source gave none.
  */
+/** One screenshot for an adult result: a small thumb for the strip, the full image for enlarge. */
+export interface Shot {
+  thumb: string;
+  full: string;
+}
+
+/** The body of `GET /api/screenshots`. Empty when disabled or nothing resolved. */
+export interface ScreenshotsResponse {
+  images: Shot[];
+}
+
 export interface PublicSearchResult {
   infoHash: string;
   name: string;

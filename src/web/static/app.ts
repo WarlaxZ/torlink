@@ -97,6 +97,8 @@ import {
 
   previewEpisodeFor,
 } from "./previewModel";
+import type { StripItem } from "./screenshotStrip";
+import type { Shot } from "../wire";
 import {
   createPosterCache,
   postersApply,
@@ -308,6 +310,7 @@ const previewTitle = el<HTMLParagraphElement>("preview-title");
 const previewSub = el<HTMLParagraphElement>("preview-sub");
 const previewBody = el<HTMLParagraphElement>("preview-body");
 const previewImdb = el<HTMLAnchorElement>("preview-imdb");
+const previewShots = el<HTMLDivElement>("preview-shots");
 
 // readStoredToken/storeToken moved to ./token.ts when the player page became a
 // second reader of the same sessionStorage slot — moved down rather than copied,
@@ -2873,7 +2876,15 @@ function selectResult(result: PublicSearchResult): void {
   if (previewApplies(group)) {
     preview.select(result.name, group);
   } else if (adultPreviewApplies(group)) {
-    preview.selectLocal(result.name, group);
+    // Pass the source + ref only when screenshots are enabled, so a disabled
+    // toggle means no screenshot fetch fires at all.
+    const wantShots = sources?.adultScreenshots === true;
+    preview.selectLocal(
+      result.name,
+      group,
+      wantShots ? result.source : undefined,
+      wantShots ? result.screenshotRef : undefined,
+    );
   } else {
     preview.select(null, group);
   }
@@ -3180,8 +3191,58 @@ async function loadPoster(url: string, generation: number): Promise<void> {
 // a second round trip that starts after the metadata has already landed.
 let previewGeneration = 0;
 
+// Empty and hide the screenshot strip. Called at the top of every render so a
+// row change wipes the previous strip; the async renderShots refills it for a
+// local (adult) row once /api/screenshots resolves.
+function clearShots(): void {
+  while (previewShots.firstChild) previewShots.removeChild(previewShots.firstChild);
+  previewShots.hidden = true;
+}
+
+// Mount the proxied thumbnails. Every node is createElement — the src is a
+// same-origin /api/screenshot path, never the uploader's URL.
+function renderShots(items: StripItem[]): void {
+  clearShots();
+  if (items.length === 0) return;
+  for (const item of items) {
+    const img = document.createElement("img");
+    img.className = "preview-shot";
+    img.src = item.thumbSrc;
+    img.loading = "lazy";
+    img.alt = "";
+    img.addEventListener("click", () => openLightbox(item.fullSrc));
+    previewShots.appendChild(img);
+  }
+  previewShots.hidden = false;
+}
+
+// A minimal click/Escape-to-close overlay for the full-size image, built lazily.
+let lightboxEl: HTMLDivElement | null = null;
+function openLightbox(src: string): void {
+  if (!lightboxEl) {
+    lightboxEl = document.createElement("div");
+    lightboxEl.className = "screenshot-lightbox";
+    lightboxEl.hidden = true;
+    const img = document.createElement("img");
+    img.className = "screenshot-lightbox-img";
+    img.alt = "";
+    lightboxEl.appendChild(img);
+    lightboxEl.addEventListener("click", () => {
+      if (lightboxEl) lightboxEl.hidden = true;
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && lightboxEl) lightboxEl.hidden = true;
+    });
+    document.body.appendChild(lightboxEl);
+  }
+  const img = lightboxEl.querySelector("img");
+  if (img) img.src = src;
+  lightboxEl.hidden = false;
+}
+
 function renderPreview(state: PreviewState): void {
   previewGeneration++;
+  clearShots();
   if (state.kind === "hidden") {
     previewPane.hidden = true;
     posterPlaceholder("");
@@ -3247,9 +3308,21 @@ const preview = createPreviewController({
       return null;
     }
   },
+  async fetchScreenshots(source, ref): Promise<Shot[]> {
+    try {
+      const params = new URLSearchParams({ source, ref });
+      const res = await fetch(`/api/screenshots?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return [];
+      const body = (await res.json()) as { images?: Shot[] };
+      return Array.isArray(body.images) ? body.images : [];
+    } catch {
+      return [];
+    }
+  },
   schedule: (fn, ms) => setTimeout(fn, ms) as unknown as number,
   cancel: (handle) => clearTimeout(handle),
   render: renderPreview,
+  renderShots,
 });
 
 // ---- for you --------------------------------------------------------------

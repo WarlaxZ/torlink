@@ -1200,6 +1200,43 @@ select:focus-visible {
   padding: 0.3rem 0.6rem;
 }
 
+/* Adult-result screenshot thumbnails. A wrapping row of small, uniform thumbs;
+   clicking one opens the full image in the lightbox below. */
+.preview-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+}
+
+.preview-shot {
+  height: 3.5rem;
+  width: auto;
+  max-width: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+  cursor: pointer;
+}
+
+/* Full-size overlay. Fixed, dark, click or Escape to dismiss. */
+.screenshot-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.85);
+  cursor: zoom-out;
+}
+
+.screenshot-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+}
+
 /* PINNED under the toolbar. Before this the pane loaded correctly and then sat
    above the top of the window — measured at -1402px with a row selected barely
    two screens down, which is to say the feature was unreachable in normal use.
