@@ -17,8 +17,15 @@ import {
   qualityPrefsFrom,
   sanitiseQualityPrefs,
   sanitiseSettingsPatch,
+  resolveOwnerEmail,
+  profileFavourites,
+  withProfileFavourites,
+  profileSavedSearches,
+  withProfileSavedSearches,
+  withProfileReccAccount,
 } from "./config";
-import type { Config } from "./config";
+import type { Config, FavouriteItem } from "./config";
+import { OWNER_PROFILE, slugForEmail } from "../core/profile";
 
 describe("config realDebridToken", () => {
   it("round-trips the token through save and load", async () => {
@@ -554,5 +561,82 @@ describe("cast resolvers", () => {
     expect(
       resolveCastAdvertiseHost({ downloadDir: "/tmp", trackers: [], castAdvertiseHost: "  " }),
     ).toBeUndefined();
+  });
+});
+
+describe("per-profile config helpers", () => {
+  const base: Config = { downloadDir: "/dl", trackers: [] };
+  const FRIEND = slugForEmail("friend@example.com");
+  const fav = (name: string): FavouriteItem => ({ id: name, name, magnet: `magnet:${name}`, addedAt: 1 });
+
+  describe("resolveOwnerEmail", () => {
+    afterEach(() => { delete process.env.TORLINK_OWNER_EMAIL; });
+    it("prefers the env var, trimmed and lower-cased", () => {
+      process.env.TORLINK_OWNER_EMAIL = "  Owner@Example.com ";
+      expect(resolveOwnerEmail({ ...base, ownerEmail: "other@example.com" })).toBe("owner@example.com");
+    });
+    it("falls back to config, and undefined when unset", () => {
+      expect(resolveOwnerEmail({ ...base, ownerEmail: "Owner@Example.com" })).toBe("owner@example.com");
+      expect(resolveOwnerEmail(base)).toBeUndefined();
+    });
+  });
+
+  describe("list accessors", () => {
+    it("owner reads and writes the top-level fields", () => {
+      const cfg = withProfileFavourites(base, OWNER_PROFILE, [fav("Kestrel")]);
+      expect(cfg.favourites).toHaveLength(1);
+      expect(profileFavourites(cfg, OWNER_PROFILE)).toHaveLength(1);
+      expect(profileFavourites(cfg, FRIEND)).toEqual([]);
+    });
+    it("a friend reads and writes profiles[id], leaving the owner untouched", () => {
+      const cfg = withProfileSavedSearches(base, FRIEND, ["harrowgate"]);
+      expect(profileSavedSearches(cfg, FRIEND)).toEqual(["harrowgate"]);
+      expect(cfg.savedSearches ?? []).toEqual([]);
+      expect(profileSavedSearches(cfg, OWNER_PROFILE)).toEqual([]);
+    });
+    it("two friends do not see each other's favourites", () => {
+      const other = slugForEmail("other@example.com");
+      let cfg = withProfileFavourites(base, FRIEND, [fav("Ashfall")]);
+      cfg = withProfileFavourites(cfg, other, [fav("Kepler")]);
+      expect(profileFavourites(cfg, FRIEND).map((f) => f.name)).toEqual(["Ashfall"]);
+      expect(profileFavourites(cfg, other).map((f) => f.name)).toEqual(["Kepler"]);
+    });
+  });
+
+  describe("resolveReccConfig per profile", () => {
+    it("owner uses the top-level token; a friend uses its own", () => {
+      const cfg = withProfileReccAccount(
+        { ...base, reccUrl: "https://reccd.stream", reccToken: "owner-tok" },
+        FRIEND,
+        { reccToken: "friend-tok", reccAccountName: "anon", reccAccountClaimed: false },
+      );
+      expect(resolveReccConfig(cfg).reccToken).toBe("owner-tok");
+      expect(resolveReccConfig(cfg, OWNER_PROFILE).reccToken).toBe("owner-tok");
+      expect(resolveReccConfig(cfg, FRIEND).reccToken).toBe("friend-tok");
+      expect(resolveReccConfig(cfg, FRIEND).reccUrl).toBe("https://reccd.stream");
+    });
+    it("with no profile is identical to the owner profile", () => {
+      const cfg: Config = { ...base, reccToken: "owner-tok" };
+      expect(resolveReccConfig(cfg)).toEqual(resolveReccConfig(cfg, OWNER_PROFILE));
+    });
+  });
+
+  describe("loadConfig validation", () => {
+    it("drops junk profiles and keeps valid ones", async () => {
+      await saveConfig({
+        ...base,
+        profiles: {
+          [FRIEND]: {
+            savedSearches: ["kepler", 3 as unknown as string, ""],
+            favourites: [{ nope: true } as unknown as FavouriteItem],
+          },
+          bad: 7 as unknown as never,
+        },
+      });
+      const cfg = await loadConfig();
+      expect(cfg.profiles?.[FRIEND]?.savedSearches).toEqual(["kepler"]);
+      expect(cfg.profiles?.[FRIEND]?.favourites).toEqual([]);
+      expect(cfg.profiles?.bad).toBeUndefined();
+    });
   });
 });

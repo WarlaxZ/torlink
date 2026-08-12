@@ -1,7 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { loadConfig, resolveReccConfig, saveConfig, type Config } from "../config/config";
-import { reccProvisionLockFile } from "../config/paths";
+import {
+  loadConfig,
+  resolveReccConfig,
+  saveConfig,
+  withProfileReccAccount,
+  type Config,
+} from "../config/config";
+import { reccProvisionLockFile, reccProvisionLockFileForProfile } from "../config/paths";
+import { OWNER_PROFILE, isOwnerProfile } from "../core/profile";
 import type { FetchImpl } from "../util/net";
 import { log } from "../util/logger";
 
@@ -33,7 +40,7 @@ function normaliseUrl(url: string): string {
  *    hand and left the token blank.
  * 3. Not opted out. Absent means opted in: a fresh install has no config.json.
  */
-export function shouldProvision(config: Config): boolean {
+export function shouldProvision(config: Config, profileId: string = OWNER_PROFILE): boolean {
   // `=== false` would be the obvious test and it is WRONG here. This is the
   // only boolean in Config whose absent state means ON, so it is the only one
   // where the usual `=== true` idiom inverts. config.json is hand-editable, and
@@ -42,9 +49,13 @@ export function shouldProvision(config: Config): boolean {
   // having explicitly asked not to be. So: absent or exactly `true` is on;
   // anything else present is an opt-out. It fails safe in the direction of not
   // contacting a third-party host, which is the only safe direction here.
+  //
+  // reccAutoSignup is a single install-wide switch: opting out turns off signup
+  // for the owner AND every friend. The token check, though, is per profile —
+  // the owner having an account says nothing about whether a friend needs one.
   const auto = config.reccAutoSignup;
   if (auto !== undefined && auto !== true) return false;
-  const { reccUrl, reccToken } = resolveReccConfig(config);
+  const { reccUrl, reccToken } = resolveReccConfig(config, profileId);
   if (reccToken) return false;
   if (reccUrl && normaliseUrl(reccUrl) !== DEFAULT_RECC_URL) return false;
   return true;
@@ -77,6 +88,8 @@ export interface EnsureReccAccountOptions {
    * calls loadConfig() per request.
    */
   onProvisioned?: (patch: ProvisionedPatch) => void;
+  /** Which profile to provision. Defaults to the owner (top-level fields). */
+  profileId?: string;
 }
 
 const LOCK_STALE_MS = 60_000;
@@ -146,13 +159,15 @@ function isAnonSignupBody(v: unknown): v is { name: string; token: string } {
  * self-limiting.
  */
 export async function ensureReccAccount(opts: EnsureReccAccountOptions = {}): Promise<void> {
+  const profileId = opts.profileId ?? OWNER_PROFILE;
   const load = opts.loadConfigImpl ?? loadConfig;
   const save = opts.saveConfigImpl ?? saveConfig;
-  const lockFile = opts.lockFile ?? reccProvisionLockFile;
+  const lockFile = opts.lockFile
+    ?? (isOwnerProfile(profileId) ? reccProvisionLockFile : reccProvisionLockFileForProfile(profileId));
   const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
 
   try {
-    if (!shouldProvision(await load())) return;
+    if (!shouldProvision(await load(), profileId)) return;
     if (!(await takeLock(lockFile))) {
       log.debug("recc provision: another process holds the lock, skipping");
       return;
@@ -182,7 +197,7 @@ export async function ensureReccAccount(opts: EnsureReccAccountOptions = {}): Pr
       // account is discarded — an orphan account on reccd is a far smaller
       // problem than overwriting what the user configured.
       const fresh = await load();
-      if (!shouldProvision(fresh)) {
+      if (!shouldProvision(fresh, profileId)) {
         log.debug("recc provision: config changed under us, discarding the new account");
         return;
       }
@@ -192,9 +207,18 @@ export async function ensureReccAccount(opts: EnsureReccAccountOptions = {}): Pr
         reccAccountName: body.name,
         reccAccountClaimed: false,
       };
-      await save({ ...fresh, ...patch });
+      // withProfileReccAccount routes the write: owner → top-level (exactly the old
+      // `{ ...fresh, ...patch }` minus reccUrl, which the owner already has by now),
+      // friend → profiles[id]. reccUrl stays as the caller's; the owner keeps its
+      // existing one and a friend shares the same host.
+      await save(withProfileReccAccount(fresh, profileId, {
+        reccToken: patch.reccToken,
+        reccAccountName: patch.reccAccountName,
+        reccAccountClaimed: patch.reccAccountClaimed,
+        reccUrl: patch.reccUrl,
+      }));
       opts.onProvisioned?.(patch);
-      log.debug(`recc provision: created anonymous account ${body.name}`);
+      log.debug(`recc provision: created anonymous account ${body.name} for profile ${profileId}`);
     } finally {
       await fs.unlink(lockFile).catch(() => {});
     }

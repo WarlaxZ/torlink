@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { DEFAULT_RECC_URL, shouldProvision, ensureReccAccount, type ProvisionedPatch } from "./provision";
 import { defaultConfig, type Config } from "../config/config";
+import { slugForEmail } from "../core/profile";
 import type { FetchImpl } from "../util/net";
 
 const base = (over: Partial<Config> = {}): Config => ({ ...defaultConfig, downloadDir: "/tmp/dl", ...over });
@@ -445,4 +446,41 @@ describe("call sites", () => {
       expect(source).toMatch(/void ensureReccAccount\([\s\S]{0,600}?\)\.catch\(/);
     });
   }
+});
+
+describe("ensureReccAccount per profile", () => {
+  const FRIEND = slugForEmail("friend@example.com");
+
+  beforeEach(() => {
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+  afterEach(async () => {
+    await Promise.all(tmpDirs.splice(0).map((d) => fs.rm(d, { recursive: true, force: true })));
+  });
+
+  it("shouldProvision looks at the friend's own token, not the owner's", () => {
+    // Owner already provisioned, but the friend has nothing → the friend still needs one.
+    const ownerHasToken = base({ reccToken: "owner-tok" });
+    expect(shouldProvision(ownerHasToken, FRIEND)).toBe(true);
+    const friendHasToken = base({ reccToken: "owner-tok", profiles: { [FRIEND]: { reccToken: "f" } } });
+    expect(shouldProvision(friendHasToken, FRIEND)).toBe(false);
+  });
+
+  it("writes the new account into profiles[id], leaving the owner untouched", async () => {
+    const store = fakeStore(base());
+    await ensureReccAccount({
+      profileId: FRIEND,
+      fetchImpl: signupFetch({ n: 0 }),
+      lockFile: await tmpLock(),
+      loadConfigImpl: store.load,
+      saveConfigImpl: store.save,
+    });
+    expect(store.get().profiles?.[FRIEND]?.reccToken).toBe("tok123");
+    expect(store.get().profiles?.[FRIEND]?.reccAccountName).toBe("quiet-heron-4f2a");
+    expect(store.get().profiles?.[FRIEND]?.reccAccountClaimed).toBe(false);
+    // Owner untouched, and reccUrl is NOT written into the friend's profile.
+    expect(store.get().reccToken).toBeUndefined();
+    expect(store.get().profiles?.[FRIEND]).not.toHaveProperty("reccUrl");
+  });
 });

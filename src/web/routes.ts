@@ -29,13 +29,20 @@ import {
   resolveAdultScreenshots,
   resolveMediaPlayer,
   resolveOmdbApiKey,
+  resolveOwnerEmail,
   resolveReccConfig,
+  profileFavourites,
+  withProfileFavourites,
+  profileSavedSearches,
+  withProfileSavedSearches,
   sanitiseQualityPrefs,
   sanitiseSettingsPatch,
   saveConfig,
   type Config,
   type FavouriteItem,
 } from "../config/config";
+import { resolveProfileId, isOwnerProfile } from "../core/profile";
+import { ensureReccAccount } from "../recc/provision";
 import {
   fetchRecommendations,
   fetchTitleSuggestions,
@@ -437,7 +444,11 @@ function parseStartBody(bodyText: string): StartStreamBody | null {
  * never as a silent swarm. With no provider configured, P2P is the only option
  * and is used directly. `confirm` in the body is therefore ignored.
  */
-async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function startStream(
+  deps: WebDeps,
+  bodyText: string,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const body = parseStartBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid json body" } };
 
@@ -522,26 +533,40 @@ async function startStream(deps: WebDeps, bodyText: string): Promise<WebResponse
       // resolve", said in the terminal's words, and the two surfaces cannot
       // drift apart on what counts as watchable.
       if (resolved.state !== "ready" || streamCandidates(resolved.files).length === 0) return;
-      return recordStreamStart(deps, parsed.infoHash, name).catch(() => {});
+      return recordStreamStart(deps, parsed.infoHash, name, accessEmail).catch(() => {});
     },
     () => {},
   );
   return { status: 200, json: out };
 }
 
-async function recordStreamStart(deps: WebDeps, infoHash: string, name: string): Promise<void> {
+async function recordStreamStart(
+  deps: WebDeps,
+  infoHash: string,
+  name: string,
+  accessEmail?: string,
+): Promise<void> {
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
   const item = historyItemFor({ id: infoHash, name, magnet: buildMagnet(infoHash, name) }, Date.now());
   // No title in the release name means no row worth drawing.
   if (item) {
     try {
-      const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
-      await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(recordStream(current, item));
+      const current = await (deps.loadStreamHistoryImpl ?? (() => loadStreamHistory(profileId)))();
+      await (deps.saveStreamHistoryImpl ?? ((items) => saveStreamHistory(items, profileId)))(
+        recordStream(current, item),
+      );
     } catch {
       // A convenience list must never take a stream down with it.
     }
   }
-  const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const reccConfig = resolveReccConfig(config);
+  // A friend's first stream provisions their own reccd account, so their taste
+  // never mixes with the owner's. Fire-and-forget, same rule as the event below;
+  // this stream's own `started` event may miss the fresh token, but the next won't.
+  if (!isOwnerProfile(profileId) && !resolveReccConfig(config, profileId).reccToken) {
+    void ensureReccAccount({ profileId }).catch(() => {});
+  }
+  const reccConfig = resolveReccConfig(config, profileId);
   if (!reccConfig.reccUrl || !name) return;
   const event: ReccEvent = { type: "started", rawName: name, ts: Date.now(), source: "torlink" };
   void (deps.postEventImpl ?? postEvent)(reccConfig, event).catch(() => {});
@@ -1032,14 +1057,15 @@ export function toPublicStreamHistoryItem(item: StreamHistoryItem): PublicStream
 }
 
 /** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
-async function savedLists(deps: WebDeps): Promise<WebResponse> {
+async function savedLists(deps: WebDeps, accessEmail?: string): Promise<WebResponse> {
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const history = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+  const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
+  const history = await (deps.loadStreamHistoryImpl ?? (() => loadStreamHistory(profileId)))();
   const out: SavedResponse = {
     // loadConfig already normalises both (junk dropped, caps applied), so these
     // coalesces are for a config object built in a test, not for disk data.
-    savedSearches: config.savedSearches ?? [],
-    library: (config.favourites ?? []).map(toPublicFavourite),
+    savedSearches: profileSavedSearches(config, profileId),
+    library: profileFavourites(config, profileId).map(toPublicFavourite),
     continueWatching: history.map(toPublicStreamHistoryItem),
   };
   return { status: 200, json: out };
@@ -1056,7 +1082,11 @@ function parseObjectBody(bodyText: string): Record<string, unknown> | null {
   }
 }
 
-async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function savedSearchesAction(
+  deps: WebDeps,
+  bodyText: string,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
 
@@ -1075,11 +1105,12 @@ async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<Web
   if (!query) return { status: 400, json: { error: "missing query" } };
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const current = config.savedSearches ?? [];
+  const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
+  const current = profileSavedSearches(config, profileId);
   const savedSearches =
     action === "remove" ? current.filter((q) => q !== query) : toggleSavedSearches(current, query);
 
-  await (deps.saveConfigImpl ?? saveConfig)({ ...config, savedSearches });
+  await (deps.saveConfigImpl ?? saveConfig)(withProfileSavedSearches(config, profileId, savedSearches));
 
   const out: SavedSearchesResponse = { saved: savedSearches.includes(query), savedSearches };
   return { status: 200, json: out };
@@ -1094,7 +1125,11 @@ async function savedSearchesAction(deps: WebDeps, bodyText: string): Promise<Web
  * ✕ pattern as the saved-searches remove, which exists for exactly that phone
  * behaviour) is a no-op the second time rather than an error.
  */
-async function continueWatchingAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function continueWatchingAction(
+  deps: WebDeps,
+  bodyText: string,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
 
@@ -1103,7 +1138,9 @@ async function continueWatchingAction(deps: WebDeps, bodyText: string): Promise<
   const key = typeof body.key === "string" ? body.key.trim() : "";
   if (!key) return { status: 400, json: { error: "missing key" } };
 
-  const current = await (deps.loadStreamHistoryImpl ?? loadStreamHistory)();
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
+  const current = await (deps.loadStreamHistoryImpl ?? (() => loadStreamHistory(profileId)))();
   const next = removeStreamHistory(current, key);
   // Only write when something actually changed. removeStreamHistory always
   // returns a new array (it is a plain `.filter`), so the write gate here is a
@@ -1111,14 +1148,18 @@ async function continueWatchingAction(deps: WebDeps, bodyText: string): Promise<
   // "watched" branch uses — either way, a no-op remove (a stale page, a
   // double-fired click) does not churn the history file.
   if (next.length !== current.length) {
-    await (deps.saveStreamHistoryImpl ?? saveStreamHistory)(next);
+    await (deps.saveStreamHistoryImpl ?? ((items) => saveStreamHistory(items, profileId)))(next);
   }
 
   const out: ContinueWatchingResponse = { continueWatching: next.map(toPublicStreamHistoryItem) };
   return { status: 200, json: out };
 }
 
-async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function libraryAction(
+  deps: WebDeps,
+  bodyText: string,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const body = parseObjectBody(bodyText);
   if (!body) return { status: 400, json: { error: "invalid JSON body" } };
 
@@ -1144,7 +1185,8 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
   if (!name) return { status: 400, json: { error: "missing name" } };
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const current = config.favourites ?? [];
+  const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
+  const current = profileFavourites(config, profileId);
   const wasFavourited = isFavourited(current, infoHash);
 
   if (action === "watched") {
@@ -1158,7 +1200,7 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
     // every re-watch, so the reference check is the write gate.
     const favourites = markWatched(current, infoHash, filename);
     if (favourites !== current) {
-      await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+      await (deps.saveConfigImpl ?? saveConfig)(withProfileFavourites(config, profileId, favourites));
     }
 
     // The same moment, for the same reason as the TUI's markPlayed: this is the
@@ -1171,9 +1213,9 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
     // this same file in another process. Same reference back means nothing
     // moved, which is the write gate.
     try {
-      const history = await loadStreamHistory();
+      const history = await loadStreamHistory(profileId);
       const advanced = recordPlayedFile(history, infoHash, filename);
-      if (advanced !== history) await saveStreamHistory(advanced);
+      if (advanced !== history) await saveStreamHistory(advanced, profileId);
     } catch {
       // A convenience list must never fail a play the user already started.
     }
@@ -1205,13 +1247,13 @@ async function libraryAction(deps: WebDeps, bodyText: string): Promise<WebRespon
     favourites = toggleInFavourites(current, item);
   }
 
-  await (deps.saveConfigImpl ?? saveConfig)({ ...config, favourites });
+  await (deps.saveConfigImpl ?? saveConfig)(withProfileFavourites(config, profileId, favourites));
 
   // Only a toggle rates anything. Removing a row from the library is
   // housekeeping — the TUI's ✕ posts no event either, and treating it as a
   // verdict would teach reccd that tidying up is a dislike.
   if (action === "toggle") {
-    const reccConfig = resolveReccConfig(config);
+    const reccConfig = resolveReccConfig(config, profileId);
     if (reccConfig.reccUrl) {
       const event: ReccEvent = {
         type: wasFavourited ? "unfavourited" : "favourited",
@@ -1726,7 +1768,11 @@ const RECC_LIMIT = 20;
  * reccd URL can be pasted into the Accounts pane at any moment, and a snapshot
  * taken at boot would answer "not configured" until the app restarted.
  */
-async function recommendations(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
+async function recommendations(
+  deps: WebDeps,
+  query: URLSearchParams,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const rawType = (query.get("type") ?? "").trim();
   // "all" is the browser's own name for "no filter" and is accepted as such, so
   // the UI can round-trip its select value without a special case. Anything
@@ -1742,7 +1788,7 @@ async function recommendations(deps: WebDeps, query: URLSearchParams): Promise<W
   const explore = rawExplore === "true" || rawExplore === "1";
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const reccConfig = resolveReccConfig(config);
+  const reccConfig = resolveReccConfig(config, resolveProfileId(accessEmail, resolveOwnerEmail(config)));
   if (!reccConfig.reccUrl) {
     // 200 with its own status, NOT a 500 — the same call `/api/title` makes for
     // a missing OMDb key. Nothing is broken: the user has no reccd, and the
@@ -1783,14 +1829,18 @@ async function recommendations(deps: WebDeps, query: URLSearchParams): Promise<W
  * `recommendations` does it: a reccd URL can be pasted into the Accounts pane
  * at any moment, and `serve --web` is a separate process from any running TUI.
  */
-async function titleSearch(deps: WebDeps, query: URLSearchParams): Promise<WebResponse> {
+async function titleSearch(
+  deps: WebDeps,
+  query: URLSearchParams,
+  accessEmail?: string,
+): Promise<WebResponse> {
   const raw = query.get("q");
   // Absent, not empty: a client that forgot the param is a bug worth a 400,
   // and it matches reccd's own behaviour for a missing q.
   if (raw === null) return { status: 400, json: { error: "missing q" } };
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const reccConfig = resolveReccConfig(config);
+  const reccConfig = resolveReccConfig(config, resolveProfileId(accessEmail, resolveOwnerEmail(config)));
   if (!reccConfig.reccUrl) {
     const out: PublicTitleSuggestions = { status: "not-configured" };
     return { status: 200, json: out };
@@ -1845,7 +1895,11 @@ const RECC_EVENTS: ReadonlySet<string> = new Set<PublicReccEventType>([
  * own process. So the 200 says "accepted", meaning handed off, and says so in
  * the type.
  */
-async function reccEvent(deps: WebDeps, bodyText: string): Promise<WebResponse> {
+async function reccEvent(
+  deps: WebDeps,
+  bodyText: string,
+  accessEmail?: string,
+): Promise<WebResponse> {
   let body: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(bodyText);
@@ -1867,7 +1921,7 @@ async function reccEvent(deps: WebDeps, bodyText: string): Promise<WebResponse> 
   if (!rawName) return { status: 400, json: { error: "missing rawName" } };
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
-  const reccConfig = resolveReccConfig(config);
+  const reccConfig = resolveReccConfig(config, resolveProfileId(accessEmail, resolveOwnerEmail(config)));
   if (!reccConfig.reccUrl) {
     // Same clean answer as the feed. `postEvent` would no-op on this anyway;
     // saying so explicitly is what lets the browser stop offering the buttons.
@@ -2130,6 +2184,10 @@ export async function handleWebApi(
   query: URLSearchParams,
   authHeader: string | undefined,
   bodyText: string,
+  // The Cloudflare Access email the server verified for this request, or undefined
+  // (no Access, an exempt path, or the owner). Each handler that touches a per-user
+  // list resolves it to a profileId against its own freshly-loaded config.
+  accessEmail?: string,
 ): Promise<WebResponse> {
   const { runtime, token } = deps;
 
@@ -2211,19 +2269,19 @@ export async function handleWebApi(
   }
 
   if (method === "GET" && urlPath === "/api/saved") {
-    return savedLists(deps);
+    return savedLists(deps, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/saved-searches") {
-    return savedSearchesAction(deps, bodyText);
+    return savedSearchesAction(deps, bodyText, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/library") {
-    return libraryAction(deps, bodyText);
+    return libraryAction(deps, bodyText, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/continue-watching") {
-    return continueWatchingAction(deps, bodyText);
+    return continueWatchingAction(deps, bodyText, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/preferences") {
@@ -2252,15 +2310,15 @@ export async function handleWebApi(
   // user's taste profile or reccd's catalog — reading it, searching it, or
   // writing to it.
   if (method === "GET" && urlPath === "/api/recommendations") {
-    return recommendations(deps, query);
+    return recommendations(deps, query, accessEmail);
   }
 
   if (method === "GET" && urlPath === "/api/title-search") {
-    return titleSearch(deps, query);
+    return titleSearch(deps, query, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/recc-event") {
-    return reccEvent(deps, bodyText);
+    return reccEvent(deps, bodyText, accessEmail);
   }
 
   // Ahead of the legacy passthrough below, which still owns `POST /add` and the
@@ -2276,7 +2334,7 @@ export async function handleWebApi(
   // none of these delegate to handleApi, which re-checks.
 
   if (method === "POST" && urlPath === STREAM_BASE) {
-    return startStream(deps, bodyText);
+    return startStream(deps, bodyText, accessEmail);
   }
 
   // Below the gate with the streaming routes, not up with /api/add, and for the

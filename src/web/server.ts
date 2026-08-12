@@ -518,6 +518,10 @@ export async function startWebServer(
       // Access, so it is safe even if this port is ever reachable directly. Health
       // and the media routes are exempt — the latter carry the per-session ?k=
       // capability instead, because <video>/VLC/Chromecast can't present a cert.
+      // The Access-verified email for this request, threaded into the router so
+      // per-user lists (watch history, favourites, saved searches, reccd) are
+      // partitioned by login. Undefined for exempt paths and when Access is off.
+      let accessEmail: string | undefined;
       if (accessCfg) {
         // INVARIANT: any path added here MUST carry its own capability (the
         // stream/play ?k=) or return nothing sensitive — under Access the
@@ -532,6 +536,7 @@ export async function startWebServer(
             log(`${method} ${urlPath} -> 403 (access: ${verdict.reason})`);
             return;
           }
+          accessEmail = verdict.email;
         }
       }
 
@@ -620,6 +625,7 @@ export async function startWebServer(
             url.searchParams,
             req.headers.authorization,
             body.text,
+            accessEmail,
           );
         } catch (err) {
           log(`${method} ${urlPath} threw: ${String(err)}`);
