@@ -15,6 +15,7 @@ function response(over: Partial<SettingsResponse["settings"]> = {}, envOver: Par
       downloadDir: "/downloads",
       mediaPlayer: "",
       adultContent: false,
+      adultScreenshots: true,
       proxyDebridStreams: false,
       downloadLimitKbps: null,
       uploadLimitKbps: null,
@@ -54,6 +55,7 @@ describe("settingsSections", () => {
       seedRatio: 1.5,
     });
     expect(controlFor(res, "adultContent")).toMatchObject({ kind: "toggle", value: true, locked: false });
+    expect(controlFor(res, "adultScreenshots")).toMatchObject({ kind: "toggle", value: true, locked: false });
     expect(controlFor(res, "proxyDebridStreams")).toMatchObject({ kind: "toggle", value: true });
     expect(controlFor(res, "downloadDir")).toMatchObject({ kind: "text", value: "/media/dl" });
     expect(controlFor(res, "mediaPlayer")).toMatchObject({ kind: "text", value: "mpv" });

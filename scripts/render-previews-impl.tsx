@@ -445,6 +445,7 @@ save(
           onEditCastHost={() => {}}
           onToggleAdult={() => {}}
           onToggleProxy={() => {}}
+        onToggleAdultScreenshots={() => {}}
         />
       </Box>
     </Box>

@@ -23,6 +23,7 @@ import {
   resolveCloudflareAccess,
   qualityPrefsFrom,
   resolveAdultContent,
+  resolveAdultScreenshots,
   resolveMediaPlayer,
   resolveOmdbApiKey,
   resolveReccConfig,
@@ -797,6 +798,9 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     })),
     sources,
     adultEnabled,
+    // A capability flag like omdbConfigured — lets the search UI decide whether
+    // to fetch screenshots on highlight without reading the user's config.
+    adultScreenshots: resolveAdultScreenshots(config),
     // Booleans and an id, never a token. resolveActiveDebrid, not the raw
     // config fields, so both env vars count — the browser must agree with the
     // TUI about which provider is on, and the TUI resolves it the same way.
@@ -1299,6 +1303,7 @@ function toPublicWritableSettings(config: Config): PublicWritableSettings {
     downloadDir: config.downloadDir,
     mediaPlayer: resolveMediaPlayer(config),
     adultContent: resolveAdultContent(config),
+    adultScreenshots: resolveAdultScreenshots(config),
     proxyDebridStreams: config.proxyDebridStreams === true,
     downloadLimitKbps: config.downloadLimitKbps ?? null,
     uploadLimitKbps: config.uploadLimitKbps ?? null,

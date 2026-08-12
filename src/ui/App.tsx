@@ -2249,6 +2249,14 @@ export function App({
     );
   }, [config, persistConfig]);
 
+  const toggleAdultScreenshots = useCallback(() => {
+    setShowHelp(false);
+    // Default is ON (absent === enabled), so the first toggle turns it OFF.
+    const enabled = config?.adultScreenshots === false;
+    persistConfig({ adultScreenshots: enabled });
+    setNotice(enabled ? "Adult screenshots enabled." : "Adult screenshots disabled.");
+  }, [config, persistConfig]);
+
   // Persist a custom DNS spec and apply it immediately, so the next search uses
   // it without a restart. An empty value falls back to the system resolver.
   const setDns = useCallback(
@@ -3539,6 +3547,7 @@ export function App({
                 onEditCastHost={() => setEditingCastHost(true)}
                 onToggleAdult={toggleAdult}
                 onToggleProxy={toggleProxy}
+                onToggleAdultScreenshots={toggleAdultScreenshots}
                 dnsEnvOverride={process.env["TORLINK_DNS"] !== undefined}
                 playerEnvOverride={Boolean(process.env["TORLINK_PLAYER"]?.trim())}
                 adultEnvOverride={process.env["TORLINK_ADULT"] !== undefined}

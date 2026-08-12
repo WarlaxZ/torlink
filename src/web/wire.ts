@@ -449,6 +449,12 @@ export interface SourcesResponse {
   /** Whether the adult category is on; when false no adult source appears above. */
   adultEnabled: boolean;
   /**
+   * Whether adult-result screenshots are enabled. A capability flag like
+   * `omdbConfigured` — it lets the search UI decide whether to fetch screenshots
+   * on highlight without reading the user's config.
+   */
+  adultScreenshots: boolean;
+  /**
    * Whether a debrid token is configured for whichever provider is active —
    * Real-Debrid or TorBox (file or their respective env vars).
    *
@@ -555,6 +561,8 @@ export interface PublicWritableSettings {
   /** The media-player command, or "" for auto-detect. */
   mediaPlayer: string;
   adultContent: boolean;
+  /** Whether screenshots are pulled from adult torrent descriptions. */
+  adultScreenshots: boolean;
   proxyDebridStreams: boolean;
   downloadLimitKbps: number | null;
   uploadLimitKbps: number | null;

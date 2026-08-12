@@ -104,6 +104,7 @@ const sourcesResponse = (over: Partial<SourcesResponse> = {}): SourcesResponse =
     },
   ],
   adultEnabled: false,
+  adultScreenshots: true,
   debridConfigured: false,
   cloudflareAccessEnforced: false,
   debridProvider: null,

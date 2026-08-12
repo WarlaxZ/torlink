@@ -60,6 +60,7 @@ interface SettingsProps {
   onEditCastDevice: () => void;
   onEditCastHost: () => void;
   onToggleAdult: () => void;
+  onToggleAdultScreenshots: () => void;
   onToggleProxy: () => void;
   dnsEnvOverride?: boolean;
   playerEnvOverride?: boolean;
@@ -205,6 +206,15 @@ export function Settings(props: SettingsProps) {
       "show the Porn category and sources",
       withEnv(adultEnabled ? "on" : "off", props.adultEnvOverride),
       props.onToggleAdult,
+      "toggle",
+    ),
+    setting(
+      "SHT",
+      "Adult screenshots",
+      "screenshots from adult torrent descriptions",
+      // Default ON: absent means enabled, only an explicit false is off.
+      config.adultScreenshots === false ? "off" : "on",
+      props.onToggleAdultScreenshots,
       "toggle",
     ),
     setting(
