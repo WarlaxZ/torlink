@@ -64,9 +64,11 @@ uses is resolved from the verified Access email:
 
 ### Owner identity (decision: explicit)
 
-A new `ownerEmail` config field designates which Access email is "you". Settable via
-the TUI settings and via `TORLINK_OWNER_EMAIL` env. The owner profile inherits the
-existing global lists on migration, and the TUI always maps to it.
+A new `ownerEmail` config field designates which Access email is "you". Resolved by a
+`resolveOwnerEmail` helper with `TORLINK_OWNER_EMAIL` env winning over the config
+field — exactly how `cfAccessTeamDomain` / `cfAccessAud` work today (env + config,
+no `Settings.tsx` UI row, since this is host-specific security config). The owner
+profile *is* the existing top-level storage, and the TUI always maps to it.
 
 ### reccd per profile (decision: auto-provision)
 
@@ -95,11 +97,16 @@ profiles?: {
 };
 ```
 
-Favourites, saved searches, and the reccd token move *into* the profile map. Keeping
-them in `config.json` preserves the existing read-modify-write discipline and the
-`sanitiseSettingsPatch` validation path. Watch history stays a separate per-profile
-file — `stream-history/<profileId>.json` — retaining the reasons it is separate today
-(the 200 cap and the cross-process re-read-before-write).
+**The owner keeps today's storage; only friends get namespaced storage.** The owner
+profile *is* the existing top-level `favourites` / `savedSearches` / `reccToken` fields
+and the existing `stream-history.json`. A friend profile's lists live in
+`profiles[id]`, and its watch history lives in `stream-history/<profileId>.json`.
+
+This choice deletes migration entirely: there is nothing to move, because the owner's
+data never changes location. It also makes the feature a strict no-op until
+`ownerEmail` is set (with no owner, every request resolves to the owner view = today's
+single shared state). Watch history stays a per-profile file for friends for the same
+reasons it is separate today (the 200 cap and the cross-process re-read-before-write).
 
 ### Identity resolution module
 
@@ -130,11 +137,8 @@ the TUI passes the owner. Pure and fully unit-tested.
 
 ### Migration
 
-One-time, in `loadConfig`, guarded and idempotent so concurrent TUI / `serve --web` /
-worktree processes cannot double-migrate: if `profiles` is absent, create
-`profiles[ownerId]` from the existing top-level `favourites` / `savedSearches` /
-`reccToken` / `reccAccountName` / `reccAccountClaimed`, and move
-`stream-history.json` → `stream-history/<ownerId>.json`. The owner loses nothing.
+None. The owner's data never moves (see the data model above). Friend profiles are
+created empty on first authenticated request.
 
 ### Fail-soft behaviour
 
