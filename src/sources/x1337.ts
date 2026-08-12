@@ -151,6 +151,8 @@ async function search(
         source,
         magnet: detail.magnet,
         added: detail.added,
+        // The detail-page path, reused for on-demand screenshot lookup.
+        screenshotRef: row.path,
       };
     }),
   );

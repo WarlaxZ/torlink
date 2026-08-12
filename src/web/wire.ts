@@ -334,6 +334,8 @@ export interface PublicSearchResult {
   sources: string[];
   /** Epoch ms the source published it, when it reports one. */
   added?: number;
+  /** Source-specific ref for on-demand screenshot lookup (apibay id / 1337x path). Not a secret. */
+  screenshotRef?: string;
 }
 
 /**

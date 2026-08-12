@@ -565,6 +565,7 @@ export function toPublicResult(r: TorrentResult): PublicSearchResult {
   // wire type marks both of these optional.
   if (r.numFiles !== undefined) out.numFiles = r.numFiles;
   if (r.added !== undefined) out.added = r.added;
+  if (r.screenshotRef !== undefined) out.screenshotRef = r.screenshotRef;
   return out;
 }
 

@@ -49,6 +49,9 @@ function toResult(it: ApibayItem, source: SourceId): TorrentResult | null {
     source,
     magnet: buildMagnet(infoHash, name),
     added: Number(it.added) || undefined,
+    // The apibay id, kept for on-demand screenshot lookup (t.php?id=). "0" is the
+    // no-result sentinel toResult already rejects above.
+    screenshotRef: it.id && it.id !== "0" ? it.id : undefined,
   };
 }
 

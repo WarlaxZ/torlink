@@ -808,6 +808,11 @@ describe("toPublicResult", () => {
     expect(out.numFiles).toBe(3);
   });
 
+  it("passes screenshotRef through when present", () => {
+    expect(toPublicResult(hit({ screenshotRef: "12345" })).screenshotRef).toBe("12345");
+    expect(toPublicResult(hit())).not.toHaveProperty("screenshotRef");
+  });
+
   // An explicit `undefined` key survives into any in-process consumer even
   // though JSON.stringify drops it, and the wire type marks these optional.
   it("omits the optional keys entirely when the source gave none", () => {
