@@ -1899,6 +1899,77 @@ describe("GET /api/title", () => {
   });
 });
 
+describe("/api/title anime routing", () => {
+  beforeEach(() => {
+    clearTitleCache();
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+  });
+
+  function animeDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }),
+      ...over,
+    });
+  }
+
+  const title = (d: WebDeps, qs: string): Promise<WebResponse> =>
+    handleWebApi(d, "GET", "/api/title", new URLSearchParams(qs), AUTH, "");
+
+  it("routes the Anime group through the AniList-first resolver", async () => {
+    let sawRawName = "";
+    const fetchTitleMetaByNameImpl = vi.fn(async () => {
+      throw new Error("OMDb must not be called for the Anime group");
+    });
+    const res = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async (args) => {
+          sawRawName = args.rawName;
+          return { ok: true, imdbId: null, plot: "p", posterUrl: "https://s4.anilist.co/x.jpg" };
+        },
+        fetchTitleMetaByNameImpl,
+      }),
+      "release=" + encodeURIComponent("[NanakoRaws] Kestrel S01E18 [1080p]") + "&group=Anime",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ status: "ok", posterUrl: "https://s4.anilist.co/x.jpg" });
+    expect(sawRawName).toContain("Kestrel");
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not return no-key for anime even without an OMDb key", async () => {
+    const res = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async () => ({ ok: false, error: "not found" }),
+      }),
+      "release=" + encodeURIComponent("Kestrel - 06 [1080p]") + "&group=Anime",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ status: "error", error: "not found" });
+  });
+
+  it("still routes non-anime groups through OMDb", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => ({
+      ok: true as const,
+      type: "movie" as const,
+      imdbId: "tt1",
+      plot: "p",
+      posterUrl: null,
+    }));
+    const res = await title(
+      animeDeps({
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", omdbApiKey: "KEY" }),
+        fetchTitleMetaByNameImpl,
+        fetchAnimeFirstMetaImpl: async () => {
+          throw new Error("AniList must not be called for Movies");
+        },
+      }),
+      "release=" + encodeURIComponent("Kestrel.2010.1080p.BluRay.x264") + "&group=Movies",
+    );
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("GET /api/title?release= — server-side release parsing", () => {
   const OK_META: FetchTitleMetaResult = {
     ok: true,
