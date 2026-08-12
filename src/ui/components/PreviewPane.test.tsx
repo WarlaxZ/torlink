@@ -46,4 +46,33 @@ describe("PreviewPane", () => {
     expect(f).not.toContain("No poster available.");
     expect(f).not.toContain("No plot available.");
   });
+
+  it("in local mode renders a screenshot's rows when present", () => {
+    const rows = ["\x1b[38;2;9;8;7m▀\x1b[0m"];
+    const f =
+      render(
+        <PreviewPane
+          {...base}
+          width={80}
+          local
+          title="Kestrel [Meridian Studios 2026]"
+          year={undefined}
+          plot="Studio: Meridian Studios"
+          posterRows={rows}
+        />,
+      ).lastFrame() ?? "";
+    expect(f).toContain("38;2;9;8;7"); // the half-block screenshot row
+    expect(f).toContain("Meridian Studios");
+    expect(f).not.toContain("No poster available.");
+  });
+
+  it("in local mode shows no poster placeholder while the screenshot is loading/absent", () => {
+    const f =
+      render(
+        <PreviewPane {...base} width={80} local title="Kestrel" year={undefined} plot="Studio: X" posterRows={undefined} />,
+      ).lastFrame() ?? "";
+    expect(f).not.toContain("Loading poster…");
+    expect(f).not.toContain("No poster available.");
+    expect(f).toContain("Studio: X");
+  });
 });

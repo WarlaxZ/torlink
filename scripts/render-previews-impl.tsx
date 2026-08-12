@@ -156,6 +156,7 @@ function makeStore(
     omdbConfigured: false,
     omdbApiKey: "",
     adultEnabled: false,
+    adultScreenshots: true,
     streamActive: false,
     castStatus: null,
     debridStatus: null,

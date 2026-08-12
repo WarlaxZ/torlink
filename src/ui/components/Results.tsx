@@ -16,6 +16,7 @@ import { parseRelease, hintForSection } from "../../util/release";
 // preference under `P` reads — one vocabulary, two front ends.
 import { releaseBadges } from "../../util/releaseBadges";
 import { breakdownSummary } from "../../util/releaseBreakdown";
+import { useScreenshots } from "../hooks/useScreenshots";
 // The grouping engine, shared with the browser's results list. `groupCountLabel`
 // is deliberately NOT used here — see the "×5" comment on the count cell below.
 import {
@@ -259,6 +260,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     toggleFavourite,
     isFavourited,
     adultEnabled,
+    adultScreenshots,
     streamHistory,
     omdbApiKey,
     cachedHashes,
@@ -605,6 +607,16 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
           ...(previewEpisode ?? {}),
         }
       : null,
+    posterCols: Math.max(8, previewWidth - 4),
+    posterMaxRows: Math.max(4, panelOuter - 8),
+  });
+
+  // The adult pane's screenshot, rendered as half-blocks in the poster slot.
+  const screenshots = useScreenshots({
+    enabled: adultSection && adultScreenshots,
+    source: selectedResult?.source,
+    ref: selectedResult?.screenshotRef,
+    cacheKey: adultSection ? (selectedResult?.infoHash ?? "") : "",
     posterCols: Math.max(8, previewWidth - 4),
     posterMaxRows: Math.max(4, panelOuter - 8),
   });
@@ -1128,7 +1140,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
             title={adultSection ? selectedResult.name : (parsed?.title ?? cleanText(selectedResult.name))}
             year={adultSection ? undefined : parsed?.year}
             plot={adultSection ? breakdownSummary(selectedResult.name) : preview.plot}
-            posterRows={adultSection ? null : preview.posterRows}
+            posterRows={adultSection ? screenshots.rows : preview.posterRows}
           />
         ) : null}
       </Box>

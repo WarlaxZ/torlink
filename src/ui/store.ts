@@ -209,6 +209,9 @@ export interface Store {
   // True when the adult ("Porn") category is enabled (config or TORLINK_ADULT).
   // Gates the Porn tab, its sources, and the Porn group in the sources panel.
   adultEnabled: boolean;
+  // True when adult-result screenshots are enabled (default on). Gates the
+  // screenshot fetch + half-block render in the search preview pane.
+  adultScreenshots: boolean;
   // True while a torrent-stream session is live. While true, "x" is reserved
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.

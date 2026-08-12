@@ -165,6 +165,7 @@ export function makeTestStore(overrides: Partial<Store> = {}): Store {
     omdbConfigured: false,
     omdbApiKey: "",
     adultEnabled: false,
+    adultScreenshots: true,
     sort: "none",
     setSort: noop,
     disabledSources: [],

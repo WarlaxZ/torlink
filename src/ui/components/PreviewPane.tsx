@@ -26,7 +26,18 @@ interface PreviewPaneProps {
 export function PreviewPane({ width, height, focused, title, year, plot, posterRows, note, local }: PreviewPaneProps) {
   return (
     <Panel title="Preview" width={width} focused={focused} height={height}>
-      {local ? null : posterRows === undefined ? (
+      {local ? (
+        // Local mode renders a screenshot when one resolved, and nothing while it
+        // is loading or absent — no "No poster available.", which would imply a
+        // failed OMDb lookup that never happened.
+        posterRows && posterRows.length ? (
+          <Box flexDirection="column">
+            {posterRows.map((row, i) => (
+              <Text key={i}>{row}</Text>
+            ))}
+          </Box>
+        ) : null
+      ) : posterRows === undefined ? (
         <Text dimColor>Loading poster…</Text>
       ) : posterRows === null ? (
         <Text dimColor>No poster available.</Text>
@@ -37,7 +48,7 @@ export function PreviewPane({ width, height, focused, title, year, plot, posterR
           ))}
         </Box>
       )}
-      <Box marginTop={local ? 0 : 1} flexDirection="column">
+      <Box marginTop={local && !(posterRows && posterRows.length) ? 0 : 1} flexDirection="column">
         <Text bold color={COLOR.accent} wrap={local ? "wrap" : "truncate-end"}>
           {cleanText(title)}
           {year ? <Text dimColor>{` (${year})`}</Text> : null}
