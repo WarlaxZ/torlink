@@ -965,6 +965,10 @@ The parts that catch people out:
   already does.
 - **The healthcheck hits `/health`, not `/`** — with Access on, `/` needs an assertion the check can't
   present, whereas `/health` is exempt.
+- **`./state` must be writable by uid 1000.** Same as the plain compose above: the container runs as the
+  `node` user (uid 1000) and the bind mount keeps the host directory's ownership, so a root-owned `./state`
+  leaves posters blank and the log file empty (config still loads, because it is only read). Run `mkdir -p
+  ./state && sudo chown -R 1000:1000 ./state` before the first `up`.
 
 `CF_TUNNEL_TOKEN` and the two `TORLINK_CF_ACCESS_*` values are read from the environment, so they pair
 with a `.env` file or a secrets manager rather than being written into the compose file.
@@ -1045,6 +1049,13 @@ Four things in there are decisions rather than defaults, and are worth knowing b
 - **One volume, `/state`.** `TORLINK_STATE_DIR` puts config, data and cache under a single directory, so
   that one mount holds your tokens, the queue, watch history, seeds and the poster cache. Downloads land
   in `/state/Downloads/torlink` — repoint that mount at a bigger disk and the files follow.
+- **The bind mount must be writable by uid 1000.** The image runs as the non-root `node` user (uid 1000),
+  and a bind mount keeps the *host* directory's ownership — Docker only applies the image's ownership to a
+  *named* volume, not to `./state`. So if `./state` is owned by root, uid 1000 can't create `/state/cache`
+  or `/state/data`, and posters and the log file silently fail to persist while `config.json` (only *read*)
+  still works. Make it writable once, before the first `up`: `mkdir -p ./state && sudo chown -R 1000:1000
+  ./state`. torlink also prints a loud warning on startup if it can't write `/state`, so `docker logs`
+  names the cause.
 - **`ffmpeg` is in the image.** It's what lets the player [know a release's real codecs](#press-play) up
   front instead of guessing from its name. It stays optional in the code — torlink runs fine without it —
   but a container is a controlled environment, so there's no reason to ship one without.

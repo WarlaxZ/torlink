@@ -35,6 +35,13 @@ services:
       # Everything torlnk persists: config (including tokens), the queue, watch
       # history, seeds, the poster cache. One directory, because
       # src/config/paths.ts puts all three of its trees under TORLINK_STATE_DIR.
+      #
+      # The image runs as the non-root `node` user (uid 1000). A bind mount keeps
+      # the HOST directory's ownership — unlike a named volume, Docker does NOT
+      # apply the image's chown to it — so if ./state is owned by root, uid 1000
+      # cannot create /state/cache or /state/data and posters and logs silently
+      # fail to persist. Make it writable by uid 1000 before the first `up`:
+      #   mkdir -p ./state && sudo chown -R 1000:1000 ./state
       - ./state:/state
       # Downloads default to $HOME/Downloads/torlink and HOME is /state, so this
       # is that path made explicit. Repoint it at a bigger disk and the files
