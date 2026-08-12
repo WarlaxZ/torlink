@@ -1,5 +1,8 @@
 import { handleApi } from "../daemon/serve";
 import { isAuthorized } from "../daemon/auth";
+import { screenshotsFor } from "../core/screenshots";
+import { getScreenshot, type CachedImage } from "../core/screenshotCache";
+import { SCREENSHOT_HOSTS, type Shot } from "../util/screenshotExtract";
 import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
 import type { StreamSession } from "../core/streamSession";
 import { classifyStreamRoute, type StreamRoute } from "../core/streamRoute";
@@ -23,6 +26,7 @@ import {
   resolveCloudflareAccess,
   qualityPrefsFrom,
   resolveAdultContent,
+  resolveAdultScreenshots,
   resolveMediaPlayer,
   resolveOmdbApiKey,
   resolveReccConfig,
@@ -117,6 +121,9 @@ export interface WebDeps {
   runtime: Runtime;
   token: string | null;
   getPosterImpl?: (url: string) => Promise<CachedPoster | null>;
+  /** Injected like getPosterImpl, so a test drives the screenshot resolve/proxy without the network. */
+  screenshotsForImpl?: (source: string, ref: string, opts: { limit: number }) => Promise<Shot[]>;
+  getScreenshotImpl?: (url: string) => Promise<CachedImage | null>;
   /**
    * How the stream routes reach configuration. There is no config on `Runtime`
    * and none captured at boot, and that is deliberate rather than an oversight
@@ -565,6 +572,7 @@ export function toPublicResult(r: TorrentResult): PublicSearchResult {
   // wire type marks both of these optional.
   if (r.numFiles !== undefined) out.numFiles = r.numFiles;
   if (r.added !== undefined) out.added = r.added;
+  if (r.screenshotRef !== undefined) out.screenshotRef = r.screenshotRef;
   return out;
 }
 
@@ -796,6 +804,9 @@ export function sourcesResponse(config: Config, health: Map<SourceId, Health>, n
     })),
     sources,
     adultEnabled,
+    // A capability flag like omdbConfigured — lets the search UI decide whether
+    // to fetch screenshots on highlight without reading the user's config.
+    adultScreenshots: resolveAdultScreenshots(config),
     // Booleans and an id, never a token. resolveActiveDebrid, not the raw
     // config fields, so both env vars count — the browser must agree with the
     // TUI about which provider is on, and the TUI resolves it the same way.
@@ -1298,6 +1309,7 @@ function toPublicWritableSettings(config: Config): PublicWritableSettings {
     downloadDir: config.downloadDir,
     mediaPlayer: resolveMediaPlayer(config),
     adultContent: resolveAdultContent(config),
+    adultScreenshots: resolveAdultScreenshots(config),
     proxyDebridStreams: config.proxyDebridStreams === true,
     downloadLimitKbps: config.downloadLimitKbps ?? null,
     uploadLimitKbps: config.uploadLimitKbps ?? null,
@@ -2152,6 +2164,41 @@ export async function handleWebApi(
     if (!POSTER_HOSTS.has(host)) return { status: 400, json: { error: "host not allowed" } };
     const hit = await (deps.getPosterImpl ?? getPoster)(url);
     if (!hit) return { status: 404, json: { error: "poster unavailable" } };
+    return posterResponse(hit);
+  }
+
+  if (method === "GET" && urlPath === "/api/screenshots") {
+    const config = await (deps.loadConfigImpl ?? loadConfig)();
+    // Gated on both the category and the toggle, so a disabled toggle (or adult
+    // off) never issues a description fetch and a stale client learns nothing.
+    if (!resolveAdultContent(config) || !resolveAdultScreenshots(config)) {
+      return { status: 200, json: { images: [] } };
+    }
+    const source = query.get("source") ?? "";
+    const ref = query.get("ref") ?? "";
+    if (!source || !ref) return { status: 200, json: { images: [] } };
+    const images = await (deps.screenshotsForImpl ?? screenshotsFor)(source, ref, { limit: 4 });
+    return { status: 200, json: { images } };
+  }
+
+  if (method === "GET" && urlPath === "/api/screenshot") {
+    const url = query.get("url") ?? "";
+    if (!url) return { status: 400, json: { error: "missing url" } };
+    let host: string;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return { status: 400, json: { error: "unsupported scheme" } };
+      }
+      host = parsed.hostname.toLowerCase();
+    } catch {
+      return { status: 400, json: { error: "invalid url" } };
+    }
+    // Redundant with getScreenshot's own allowlist (the authoritative one); this
+    // only picks 400-vs-404, exactly like /api/poster.
+    if (!SCREENSHOT_HOSTS.has(host)) return { status: 400, json: { error: "host not allowed" } };
+    const hit = await (deps.getScreenshotImpl ?? getScreenshot)(url);
+    if (!hit) return { status: 404, json: { error: "screenshot unavailable" } };
     return posterResponse(hit);
   }
 

@@ -82,6 +82,9 @@ export interface Config {
   // Opt-in adult ("Porn") category. Absent/false = OFF: the Porn tab and its
   // sources are hidden and never searched. A TORLINK_ADULT env var overrides it.
   adultContent?: boolean;
+  // Screenshots pulled from adult torrent descriptions in the preview. Absent =
+  // ON (adult content is already an explicit opt-in); false turns them off.
+  adultScreenshots?: boolean;
   // Remembered UI preferences, so torlink reopens the way you left it. Stored
   // as opaque strings validated by the UI layer (parseSort/parseSection) so a
   // hand-edited or stale value degrades gracefully to the default.
@@ -213,6 +216,7 @@ export interface RawSettingsPatch {
   downloadDir?: unknown;
   mediaPlayer?: unknown;
   adultContent?: unknown;
+  adultScreenshots?: unknown;
   proxyDebridStreams?: unknown;
   downloadLimitKbps?: unknown;
   uploadLimitKbps?: unknown;
@@ -251,6 +255,7 @@ export function sanitiseSettingsPatch(raw: RawSettingsPatch): Partial<Config> {
     out.mediaPlayer = typeof raw.mediaPlayer === "string" ? raw.mediaPlayer.trim() : "";
   }
   if (raw.adultContent !== undefined) out.adultContent = raw.adultContent === true;
+  if (raw.adultScreenshots !== undefined) out.adultScreenshots = raw.adultScreenshots === true;
   if (raw.proxyDebridStreams !== undefined) out.proxyDebridStreams = raw.proxyDebridStreams === true;
   if (raw.downloadLimitKbps !== undefined) out.downloadLimitKbps = positiveInt(raw.downloadLimitKbps);
   if (raw.uploadLimitKbps !== undefined) out.uploadLimitKbps = positiveInt(raw.uploadLimitKbps);
@@ -366,6 +371,13 @@ export function resolveAdultContent(config: Config): boolean {
   const env = process.env[ADULT_ENV];
   if (env !== undefined) return /^(1|true|yes|on)$/i.test(env.trim());
   return config.adultContent === true;
+}
+
+// Whether adult-result screenshots are shown. Default ON — absent means enabled,
+// since adult content is already an explicit opt-in; only an explicit `false`
+// turns them off. No env override: it is a plain preference, not host config.
+export function resolveAdultScreenshots(config: Config): boolean {
+  return config.adultScreenshots !== false;
 }
 
 const RECC_URL_ENV = "TORLINK_RECC_URL";

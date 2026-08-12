@@ -30,6 +30,10 @@ export interface ParsedRelease {
   channels?: number;
   bitdepth?: number;
   remux?: boolean;
+  /** Raw parser vocabulary for the medium the release came from ("web-dl", "bluray", …). */
+  source?: string;
+  /** The release group / P2P tag, as the parser read it ("GROUP", "P2P"). */
+  group?: string;
 }
 
 // Which medium a category section implies, if any.
@@ -112,6 +116,8 @@ export function parseRelease(name: string, hint?: SectionHint): ParsedRelease | 
   if (typeof p.channels === "number") result.channels = p.channels;
   if (typeof p.bitdepth === "number") result.bitdepth = p.bitdepth;
   if (p.remux === true) result.remux = true;
+  if (typeof p.source === "string") result.source = p.source;
+  if (typeof p.group === "string") result.group = p.group;
   // `colorlist`/`audiolist` are only present when the parser matched more than
   // one; fall back to the singular field so a single match is not lost.
   const colorList = p.colorlist ?? (typeof p.color === "string" ? [p.color] : undefined);

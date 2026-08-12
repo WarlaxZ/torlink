@@ -48,6 +48,11 @@ export const torrentsDir = path.join(dataDir, "torrents");
 // rather than re-fetching it. Safe to delete at any time — it is a cache.
 export const postersDir = path.join(cacheDir, "posters");
 
+// Cached torrent-description screenshots (adult results), keyed by a hash of the
+// direct image URL. Same treatment as posters — served as-is to the browser,
+// half-blocked for the TUI. A cache; safe to delete at any time.
+export const screenshotsDir = path.join(cacheDir, "screenshots");
+
 // Armed just before boot hands saved state to the torrent engine, disarmed
 // once the boot settles; see download/bootguard.ts.
 export const bootMarkerFile = path.join(dataDir, "boot.marker");

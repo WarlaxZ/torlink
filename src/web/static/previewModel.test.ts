@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createPreviewController,
   imdbSearchUrl,
   posterPath,
   previewCopy,
+  localPreviewCopy,
   PREVIEW_DEBOUNCE_MS,
   type PreviewEffects,
   type PreviewState,
@@ -11,6 +12,8 @@ import {
 
   previewEpisodeFor,
 } from "./previewModel";
+import type { Shot } from "../wire";
+import type { StripItem } from "./screenshotStrip";
 
 const OK: PublicTitleMeta = {
   status: "ok",
@@ -24,19 +27,29 @@ const OK: PublicTitleMeta = {
  * A controller wired to a fake clock and a counting fetch. `schedule`/`cancel`
  * are the injected seams precisely so this can be driven a keypress at a time.
  */
-function harness(answer: (release: string) => PublicTitleMeta | null = () => OK) {
+function harness(
+  answer: (release: string) => PublicTitleMeta | null = () => OK,
+  shotAnswer: (source: string, ref: string) => Shot[] = () => [],
+) {
   const rendered: PreviewState[] = [];
   const asked: string[] = [];
+  const shotsAsked: Array<[string, string]> = [];
+  const shotsRendered: StripItem[][] = [];
   const fx: PreviewEffects = {
     fetch: (release) => {
       asked.push(release);
       return Promise.resolve(answer(release));
     },
+    fetchScreenshots: (source, ref) => {
+      shotsAsked.push([source, ref]);
+      return Promise.resolve(shotAnswer(source, ref));
+    },
     schedule: (fn, ms) => setTimeout(fn, ms) as unknown as number,
     cancel: (handle) => clearTimeout(handle),
     render: (state) => rendered.push(state),
+    renderShots: (items) => shotsRendered.push(items),
   };
-  return { controller: createPreviewController(fx), rendered, asked };
+  return { controller: createPreviewController(fx), rendered, asked, shotsAsked, shotsRendered };
 }
 
 describe("createPreviewController", () => {
@@ -129,9 +142,11 @@ describe("createPreviewController", () => {
               slot.resolve = resolve;
             })
           : Promise.resolve(OK),
+      fetchScreenshots: () => Promise.resolve([]),
       schedule: (fn, ms) => setTimeout(fn, ms) as unknown as number,
       cancel: (handle) => clearTimeout(handle),
       render: (state) => rendered.push(state),
+      renderShots: () => {},
     };
     const controller = createPreviewController(fx);
 
@@ -279,5 +294,68 @@ describe("previewEpisodeFor", () => {
 
   it("is null for a name with no title in it", () => {
     expect(previewEpisodeFor("1080p.WEB-DL.x265", "TV")).toBeNull();
+  });
+});
+
+describe("localPreviewCopy", () => {
+  it("uses the full name as the heading and a breakdown as the body, no poster/imdb", () => {
+    const copy = localPreviewCopy("Kestrel [Meridian Studios 2026] XXX WEB-DL 1080p MP4-P2P");
+    expect(copy.heading).toBe("Kestrel [Meridian Studios 2026] XXX WEB-DL 1080p MP4-P2P");
+    expect(copy.body).toContain("Studio: Meridian Studios");
+    expect(copy.posterUrl).toBeNull();
+    expect(copy.imdbUrl).toBeNull();
+  });
+});
+
+describe("selectLocal", () => {
+  it("renders a local state synchronously and never fetches", () => {
+    const { controller, rendered, asked } = harness();
+    controller.selectLocal("Ashfall.1999.1080p.WEB-DL.x264-GROUP", "Porn");
+    expect(asked).toEqual([]); // no OMDb request scheduled or sent
+    const last = rendered.at(-1);
+    expect(last?.kind).toBe("local");
+    if (last?.kind !== "local") throw new Error("unreachable");
+    expect(last.copy.heading).toBe("Ashfall.1999.1080p.WEB-DL.x264-GROUP");
+  });
+
+  it("hides the pane when release is null", () => {
+    const { controller, rendered } = harness();
+    controller.selectLocal(null, "Porn");
+    expect(rendered.at(-1)?.kind).toBe("hidden");
+  });
+});
+
+describe("selectLocal — screenshots", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("fetches and renders the proxied strip when source+ref are given", async () => {
+    const shots: Shot[] = [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }];
+    const { controller, shotsAsked, shotsRendered } = harness(() => OK, () => shots);
+    controller.selectLocal("Kestrel [Meridian Studios 2026]", "Porn", "TPB", "42");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "42"]]);
+    expect(shotsRendered.at(-1)).toEqual([
+      {
+        thumbSrc: "/api/screenshot?url=" + encodeURIComponent("https://h/t.jpg"),
+        fullSrc: "/api/screenshot?url=" + encodeURIComponent("https://h/f.jpg"),
+      },
+    ]);
+  });
+
+  it("does not fetch screenshots when no ref is given", async () => {
+    const { controller, shotsAsked } = harness();
+    controller.selectLocal("Kestrel", "Porn");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([]);
+  });
+
+  it("drops a late strip for a row that has been left", async () => {
+    const { controller, shotsRendered } = harness(() => OK, () => [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }]);
+    controller.selectLocal("First", "Porn", "TPB", "1");
+    controller.selectLocal("Second", "Porn", "TPB", "2"); // moved before the first debounce fired
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    // Only the current row's strip renders; the first was cancelled by cancelPending.
+    expect(shotsRendered).toHaveLength(1);
   });
 });

@@ -7,6 +7,7 @@ import {
   resolveDnsServers,
   resolveReccConfig,
   resolveAdultContent,
+  resolveAdultScreenshots,
   defaultConfig,
   resolveActiveDebrid,
   resolveDebridTokenFor,
@@ -193,6 +194,22 @@ describe("resolveAdultContent", () => {
     await saveConfig({ downloadDir: "/tmp/dl", trackers: [], adultContent: true });
     const cfg = await loadConfig();
     expect(cfg.adultContent).toBe(true);
+  });
+});
+
+describe("resolveAdultScreenshots", () => {
+  it("defaults to ON when absent and honours an explicit false", () => {
+    expect(resolveAdultScreenshots({ downloadDir: "/d", trackers: [] })).toBe(true);
+    expect(resolveAdultScreenshots({ downloadDir: "/d", trackers: [], adultScreenshots: true })).toBe(true);
+    expect(resolveAdultScreenshots({ downloadDir: "/d", trackers: [], adultScreenshots: false })).toBe(false);
+  });
+});
+
+describe("sanitiseSettingsPatch — adultScreenshots", () => {
+  it("coerces to a strict boolean", () => {
+    expect(sanitiseSettingsPatch({ adultScreenshots: false })).toEqual({ adultScreenshots: false });
+    expect(sanitiseSettingsPatch({ adultScreenshots: true })).toEqual({ adultScreenshots: true });
+    expect(sanitiseSettingsPatch({ adultScreenshots: "yes" })).toEqual({ adultScreenshots: false });
   });
 });
 

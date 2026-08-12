@@ -236,6 +236,86 @@ describe("handleWebApi — /api/poster", () => {
   });
 });
 
+describe("handleWebApi — /api/screenshots", () => {
+  const shots = [{ thumb: "https://imgtraffic.com/t.jpg", full: "https://imgtraffic.com/f.jpg" }];
+
+  it("returns resolved shots when adult content and the toggle are on", async () => {
+    const screenshotsForImpl = vi.fn(async () => shots);
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({ ...defaultConfig, adultContent: true }),
+        screenshotsForImpl,
+      }),
+      "GET",
+      "/api/screenshots",
+      new URLSearchParams({ source: "TPB", ref: "42" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ images: shots });
+    expect(screenshotsForImpl).toHaveBeenCalledWith("TPB", "42", { limit: 4 });
+  });
+
+  it("returns no images when the toggle is off (never resolves)", async () => {
+    const screenshotsForImpl = vi.fn(async () => shots);
+    const res = await handleWebApi(
+      deps({
+        loadConfigImpl: async () => ({ ...defaultConfig, adultContent: true, adultScreenshots: false }),
+        screenshotsForImpl,
+      }),
+      "GET",
+      "/api/screenshots",
+      new URLSearchParams({ source: "TPB", ref: "42" }),
+      undefined,
+      "",
+    );
+    expect(res.json).toEqual({ images: [] });
+    expect(screenshotsForImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleWebApi — /api/screenshot", () => {
+  it("serves a cached screenshot on an allowed host", async () => {
+    const res = await handleWebApi(
+      deps({ getScreenshotImpl: async () => ({ path: "/tmp/ss/a.img", bytes: 7 }) }),
+      "GET",
+      "/api/screenshot",
+      new URLSearchParams({ url: "https://imgtraffic.com/1s/a.jpeg" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(200);
+    expect(res.filePath).toBe("/tmp/ss/a.img");
+  });
+
+  it("refuses a host outside the allowlist without fetching", async () => {
+    const getScreenshotImpl = vi.fn(async () => ({ path: "/tmp/x.img", bytes: 1 }));
+    const res = await handleWebApi(
+      deps({ getScreenshotImpl }),
+      "GET",
+      "/api/screenshot",
+      new URLSearchParams({ url: "http://169.254.169.254/latest/meta-data" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(400);
+    expect(getScreenshotImpl).not.toHaveBeenCalled();
+  });
+
+  it("404s when the screenshot cannot be cached", async () => {
+    const res = await handleWebApi(
+      deps({ getScreenshotImpl: async () => null }),
+      "GET",
+      "/api/screenshot",
+      new URLSearchParams({ url: "https://imgtraffic.com/1s/a.jpeg" }),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("handleWebApi — unknown routes", () => {
   it("404s an unknown api path", async () => {
     const res = await handleWebApi(deps(), "GET", "/api/nope", new URLSearchParams(), undefined, "");
@@ -806,6 +886,11 @@ describe("toPublicResult", () => {
     expect(out.sources).toEqual(["yts", "tpb-movies"]);
     expect(out.added).toBe(1700000000000);
     expect(out.numFiles).toBe(3);
+  });
+
+  it("passes screenshotRef through when present", () => {
+    expect(toPublicResult(hit({ screenshotRef: "12345" })).screenshotRef).toBe("12345");
+    expect(toPublicResult(hit())).not.toHaveProperty("screenshotRef");
   });
 
   // An explicit `undefined` key survives into any in-process consumer even

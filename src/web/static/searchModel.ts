@@ -556,6 +556,19 @@ export function previewApplies(group: string): boolean {
   return group === ALL_TAB || group === "Movies" || group === "TV" || group === "Anime";
 }
 
+/**
+ * Whether a group gets the LOCAL detail pane instead of the OMDb one.
+ *
+ * The adult ("Porn") group has no OMDb metadata, so its pane is built entirely
+ * from the result row — the full release name and a parsed breakdown, no lookup.
+ * Deliberately disjoint from `previewApplies`: widening the local pane must never
+ * widen the OMDb poster/title fetch (`postersApply` stays gated on
+ * `previewApplies` alone).
+ */
+export function adultPreviewApplies(group: string): boolean {
+  return group === "Porn";
+}
+
 /** What clicking a category tab should do. */
 export type TabClickPlan =
   | { action: "ignore" }

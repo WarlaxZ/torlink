@@ -59,6 +59,7 @@ import {
   parseLayout,
   parseSort,
   previewApplies,
+  adultPreviewApplies,
   reportsHealthLookup,
   resultAtRow,
   seasonPlayPlan,
@@ -96,6 +97,8 @@ import {
 
   previewEpisodeFor,
 } from "./previewModel";
+import type { StripItem } from "./screenshotStrip";
+import type { Shot } from "../wire";
 import {
   createPosterCache,
   postersApply,
@@ -307,6 +310,7 @@ const previewTitle = el<HTMLParagraphElement>("preview-title");
 const previewSub = el<HTMLParagraphElement>("preview-sub");
 const previewBody = el<HTMLParagraphElement>("preview-body");
 const previewImdb = el<HTMLAnchorElement>("preview-imdb");
+const previewShots = el<HTMLDivElement>("preview-shots");
 
 // readStoredToken/storeToken moved to ./token.ts when the player page became a
 // second reader of the same sessionStorage slot — moved down rather than copied,
@@ -2868,7 +2872,22 @@ function renderResults(): void {
 function selectResult(result: PublicSearchResult): void {
   selectedHash = result.infoHash;
   renderResults();
-  preview.select(previewApplies(searchView.group) ? result.name : null, searchView.group);
+  const group = searchView.group;
+  if (previewApplies(group)) {
+    preview.select(result.name, group);
+  } else if (adultPreviewApplies(group)) {
+    // Pass the source + ref only when screenshots are enabled, so a disabled
+    // toggle means no screenshot fetch fires at all.
+    const wantShots = sources?.adultScreenshots === true;
+    preview.selectLocal(
+      result.name,
+      group,
+      wantShots ? result.source : undefined,
+      wantShots ? result.screenshotRef : undefined,
+    );
+  } else {
+    preview.select(null, group);
+  }
 }
 
 // Drops the selection, which hides the preview. One path for "nothing is
@@ -3172,8 +3191,123 @@ async function loadPoster(url: string, generation: number): Promise<void> {
 // a second round trip that starts after the metadata has already landed.
 let previewGeneration = 0;
 
+// Screenshot images are fetched as authenticated blobs, not set as <img src>,
+// for the same reason posters are (see loadPoster): /api/screenshot is behind the
+// bearer token and an <img> cannot send an Authorization header. So the object
+// URLs are tracked and revoked rather than leaked across selections.
+let shotObjectUrls: string[] = [];
+
+// Fetch a same-origin /api/screenshot path with the bearer token and return an
+// object URL for its bytes, or null on any failure (falls back to no image).
+async function screenshotBlob(proxyPath: string): Promise<string | null> {
+  try {
+    const res = await fetch(proxyPath, { headers: authHeaders() });
+    if (!res.ok) return null;
+    return URL.createObjectURL(await res.blob());
+  } catch {
+    return null;
+  }
+}
+
+// Empty and hide the screenshot strip (revoking its blobs). Called at the top of
+// every render so a row change wipes the previous strip; the async renderShots
+// refills it for a local (adult) row once /api/screenshots resolves.
+function clearShots(): void {
+  for (const u of shotObjectUrls) URL.revokeObjectURL(u);
+  shotObjectUrls = [];
+  previewShots.replaceChildren();
+  previewShots.hidden = true;
+}
+
+// Mount the screenshots for a local (adult) result: the first as the main hero
+// image (replacing the "Adult content" placeholder), the rest as a thumbnail
+// strip. Each is an authenticated blob; every node is createElement. Staleness is
+// checked against previewGeneration after each await, like loadPoster, so a strip
+// for a row the user has left is dropped rather than painted over the new one.
+async function renderShots(items: StripItem[]): Promise<void> {
+  clearShots();
+  if (items.length === 0) return;
+  const gen = previewGeneration;
+
+  // Hero: the first screenshot, full size, in the poster slot.
+  const heroUrl = await screenshotBlob(items[0]!.fullSrc);
+  if (gen !== previewGeneration) {
+    if (heroUrl) URL.revokeObjectURL(heroUrl);
+    return;
+  }
+  if (heroUrl) {
+    releasePoster();
+    posterObjectUrl = heroUrl;
+    const hero = document.createElement("img");
+    hero.src = heroUrl;
+    hero.alt = "";
+    hero.className = "poster-shot";
+    hero.addEventListener("click", () => void openLightbox(items[0]!.fullSrc));
+    previewPoster.replaceChildren(hero);
+  }
+
+  // Strip: the remaining screenshots as clickable thumbnails.
+  for (const item of items.slice(1)) {
+    const thumbUrl = await screenshotBlob(item.thumbSrc);
+    if (gen !== previewGeneration) {
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+      return;
+    }
+    if (!thumbUrl) continue;
+    shotObjectUrls.push(thumbUrl);
+    const img = document.createElement("img");
+    img.className = "preview-shot";
+    img.src = thumbUrl;
+    img.loading = "lazy";
+    img.alt = "";
+    img.addEventListener("click", () => void openLightbox(item.fullSrc));
+    previewShots.appendChild(img);
+  }
+  previewShots.hidden = previewShots.childElementCount === 0;
+}
+
+// A minimal click/Escape-to-close overlay for the full-size image, built lazily.
+// The image is an authenticated blob too, revoked when the overlay is replaced
+// or dismissed.
+let lightboxEl: HTMLDivElement | null = null;
+let lightboxObjectUrl: string | null = null;
+function releaseLightbox(): void {
+  if (lightboxObjectUrl !== null) {
+    URL.revokeObjectURL(lightboxObjectUrl);
+    lightboxObjectUrl = null;
+  }
+}
+function closeLightbox(): void {
+  if (lightboxEl) lightboxEl.hidden = true;
+  releaseLightbox();
+}
+async function openLightbox(fullProxyPath: string): Promise<void> {
+  const url = await screenshotBlob(fullProxyPath);
+  if (!url) return;
+  if (!lightboxEl) {
+    lightboxEl = document.createElement("div");
+    lightboxEl.className = "screenshot-lightbox";
+    lightboxEl.hidden = true;
+    const img = document.createElement("img");
+    img.className = "screenshot-lightbox-img";
+    img.alt = "";
+    lightboxEl.appendChild(img);
+    lightboxEl.addEventListener("click", () => closeLightbox());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeLightbox();
+    });
+    document.body.appendChild(lightboxEl);
+  }
+  releaseLightbox();
+  lightboxObjectUrl = url;
+  const img = lightboxEl.querySelector("img");
+  if (img) img.src = url;
+  lightboxEl.hidden = false;
+}
+
 function renderPreview(state: PreviewState): void {
   previewGeneration++;
+  clearShots();
   if (state.kind === "hidden") {
     previewPane.hidden = true;
     posterPlaceholder("");
@@ -3186,6 +3320,16 @@ function renderPreview(state: PreviewState): void {
     previewBody.textContent = "Looking this up…";
     previewImdb.hidden = true;
     posterPlaceholder("Loading");
+    return;
+  }
+
+  if (state.kind === "local") {
+    const copy = state.copy;
+    previewTitle.textContent = copy.heading;
+    previewSub.textContent = copy.sub;
+    previewBody.textContent = copy.body;
+    previewImdb.hidden = true;
+    posterPlaceholder(copy.posterNote);
     return;
   }
 
@@ -3229,9 +3373,21 @@ const preview = createPreviewController({
       return null;
     }
   },
+  async fetchScreenshots(source, ref): Promise<Shot[]> {
+    try {
+      const params = new URLSearchParams({ source, ref });
+      const res = await fetch(`/api/screenshots?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return [];
+      const body = (await res.json()) as { images?: Shot[] };
+      return Array.isArray(body.images) ? body.images : [];
+    } catch {
+      return [];
+    }
+  },
   schedule: (fn, ms) => setTimeout(fn, ms) as unknown as number,
   cancel: (handle) => clearTimeout(handle),
   render: renderPreview,
+  renderShots,
 });
 
 // ---- for you --------------------------------------------------------------

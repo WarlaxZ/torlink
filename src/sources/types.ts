@@ -37,6 +37,12 @@ export interface TorrentResult {
   sources?: SourceId[];
   magnet: string;
   added?: number;
+  /**
+   * A source-specific handle for fetching this torrent's description/screenshots
+   * on demand: the apibay numeric id for TPB, the detail-page path for 1337x.
+   * A public listing ref (unlike the magnet), so it may cross the wire.
+   */
+  screenshotRef?: string;
 }
 
 export interface SearchOptions {

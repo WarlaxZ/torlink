@@ -149,3 +149,17 @@ describe("parseRelease quality fields", () => {
     expect(parseRelease("Kestrel.2010.1080p.BluRay.x264")?.key).toBe("kestrel|2010|movie");
   });
 });
+
+describe("parseRelease source and group", () => {
+  it("exposes the source and release group when the name states them", () => {
+    const p = parseRelease("Ashfall.1999.1080p.WEB-DL.x264-GROUP");
+    expect(p?.source).toBe("web-dl");
+    expect(p?.group).toBe("GROUP");
+  });
+
+  it("leaves source and group undefined when the name states none", () => {
+    const p = parseRelease("Ashfall.1999.1080p");
+    expect(p?.source).toBeUndefined();
+    expect(p?.group).toBeUndefined();
+  });
+});

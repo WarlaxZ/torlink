@@ -72,6 +72,7 @@ const baseProps = {
   onEditCastHost: noop,
   onToggleAdult: noop,
   onToggleProxy: noop,
+  onToggleAdultScreenshots: noop,
   dnsEnvOverride: false,
   playerEnvOverride: false,
   adultEnvOverride: false,

@@ -320,6 +320,17 @@ export interface StreamConfirmResponse {
  * `TorrentResult.sources` which is optional until `mergeDuplicateResults` runs.
  * `sizeBytes` is bytes; `added` is epoch ms, absent when the source gave none.
  */
+/** One screenshot for an adult result: a small thumb for the strip, the full image for enlarge. */
+export interface Shot {
+  thumb: string;
+  full: string;
+}
+
+/** The body of `GET /api/screenshots`. Empty when disabled or nothing resolved. */
+export interface ScreenshotsResponse {
+  images: Shot[];
+}
+
 export interface PublicSearchResult {
   infoHash: string;
   name: string;
@@ -334,6 +345,8 @@ export interface PublicSearchResult {
   sources: string[];
   /** Epoch ms the source published it, when it reports one. */
   added?: number;
+  /** Source-specific ref for on-demand screenshot lookup (apibay id / 1337x path). Not a secret. */
+  screenshotRef?: string;
 }
 
 /**
@@ -447,6 +460,12 @@ export interface SourcesResponse {
   /** Whether the adult category is on; when false no adult source appears above. */
   adultEnabled: boolean;
   /**
+   * Whether adult-result screenshots are enabled. A capability flag like
+   * `omdbConfigured` — it lets the search UI decide whether to fetch screenshots
+   * on highlight without reading the user's config.
+   */
+  adultScreenshots: boolean;
+  /**
    * Whether a debrid token is configured for whichever provider is active —
    * Real-Debrid or TorBox (file or their respective env vars).
    *
@@ -553,6 +572,8 @@ export interface PublicWritableSettings {
   /** The media-player command, or "" for auto-detect. */
   mediaPlayer: string;
   adultContent: boolean;
+  /** Whether screenshots are pulled from adult torrent descriptions. */
+  adultScreenshots: boolean;
   proxyDebridStreams: boolean;
   downloadLimitKbps: number | null;
   uploadLimitKbps: number | null;

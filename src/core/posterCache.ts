@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { postersDir } from "../config/paths";
 import { renderPosterFile } from "../util/poster";
 import { torlinkFetch, type FetchImpl } from "../util/net";
+import { fetchAllowedImageBytes } from "./imageProxy";
 import { log } from "../util/logger";
 
 // Hosts we are willing to fetch poster images from. The daemon fetching an
@@ -31,16 +32,6 @@ export const MAX_POSTER_CACHE_BYTES = 200 * 1024 * 1024;
 // the web layer exposes /api/poster, so refuse anything implausibly large
 // rather than buffering it into memory.
 export const MAX_POSTER_BYTES = 8 * 1024 * 1024;
-
-const DEFAULT_TIMEOUT_MS = 8000;
-
-// Statuses that carry a Location we're willing to act on.
-const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
-
-// A CDN-to-CDN bounce (img.omdbapi.com handing off to Amazon's CDN) is the only
-// legitimate redirect here, so one hop is the entire budget. Anything longer is
-// either broken or someone walking us somewhere.
-const MAX_POSTER_REDIRECTS = 1;
 
 /**
  * Whether we're willing to issue a request for this URL at all: an http(s) URL
@@ -73,42 +64,6 @@ function posterUrlAllowed(url: string): boolean {
     return false;
   }
   return true;
-}
-
-/**
- * The URL a redirect response points at, or null if we won't follow it.
- *
- * We fetch with `redirect: "manual"` and resolve the hop ourselves because the
- * allowlist otherwise only guards the *first* request: an allowlisted CDN with
- * an open redirect could walk us to the cloud instance metadata service. The
- * response body is checked later, but a request that fires at all is already a
- * problem — a GET that mutates state on some internal service succeeds whether
- * or not we ever read what it returns.
- */
-function redirectTarget(res: Response, currentUrl: string): string | null {
-  const location = res.headers.get("location");
-  if (!location) return null;
-  let resolved: URL;
-  try {
-    // Relative Locations are legal and common, so resolve against the URL we
-    // actually requested rather than assuming an absolute target.
-    resolved = new URL(location, currentUrl);
-  } catch {
-    return null;
-  }
-  // `hostname` (not `host`, not a prefix test) is what defeats a userinfo
-  // bypass: new URL("https://m.media-amazon.com@evil.example/").hostname is
-  // "evil.example". Scheme is re-checked so a hop can't leave http(s).
-  if (resolved.protocol !== "https:" && resolved.protocol !== "http:") return null;
-  if (!POSTER_HOSTS.has(resolved.hostname.toLowerCase())) {
-    log.warn(
-      `poster not fetched: redirected to host "${resolved.hostname}", which is not in the ` +
-        `allowed poster CDN list (POSTER_HOSTS in core/posterCache.ts). The redirect was not ` +
-        `followed and the poster will fall back to a placeholder.`,
-    );
-    return null;
-  }
-  return resolved.href;
 }
 
 // Pruning walks and stats the whole directory, and during a browse session
@@ -211,43 +166,19 @@ export async function getPoster(
     /* miss — fetch below */
   }
 
-  let buf: Buffer;
-  try {
-    // One deadline for the whole exchange, shared across the hop, so following a
-    // redirect can't double the time a caller waits.
-    const signal = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    const get = (u: string): Promise<Response> =>
-      fetchImpl(u, { method: "GET", redirect: "manual", signal });
-
-    let target = url;
-    let hops = 0;
-    let res = await get(target);
-    while (REDIRECT_STATUS.has(res.status)) {
-      if (hops++ >= MAX_POSTER_REDIRECTS) return null;
-      const next = redirectTarget(res, target);
-      if (!next) return null;
-      target = next;
-      res = await get(target);
-    }
-
-    // The loop above only exits on a non-redirect, so everything from here down
-    // is validating the *final* response: a hop is a path through these guards,
-    // never around them.
-    if (!res.ok) return null;
-    // Trust content-length only to bail out early; the real check is the
-    // buffer length below, since the header is optional and can lie.
-    const declared = Number(res.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > MAX_POSTER_BYTES) return null;
-    buf = Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    log.debug(`poster cache: fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-  if (buf.length === 0 || buf.length > MAX_POSTER_BYTES) return null;
-  // A 200 that isn't actually a JPEG (an HTML error page, a placeholder GIF)
-  // must not be cached: it would fail to decode forever, and every lookup would
-  // touch its mtime so LRU could never evict it.
-  if (buf.length < 2 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  // The redirect loop, allowlist re-check, size cap and magic-byte validation all
+  // live in the shared fetcher now — one copy for posters and screenshots, so the
+  // SSRF guard can't drift between them. JPEG only, as before: the half-block
+  // renderer decodes JPEG, and a 200 that isn't one (an HTML error page, a
+  // placeholder GIF) must not be cached or it would fail to decode forever.
+  const buf = await fetchAllowedImageBytes(url, {
+    allow: posterUrlAllowed,
+    maxBytes: MAX_POSTER_BYTES,
+    accept: (b) => b.length >= 2 && b[0] === 0xff && b[1] === 0xd8,
+    timeoutMs: opts.timeoutMs,
+    fetchImpl,
+  });
+  if (!buf) return null;
 
   try {
     await fs.mkdir(dir, { recursive: true });
