@@ -1,5 +1,5 @@
 import { it, expect } from "vitest";
-import { screenshotProxyPath, stripItems } from "./screenshotStrip";
+import { stripItems } from "./screenshotStrip";
 
 it("proxies through same-origin and caps the count", () => {
   const shots = Array.from({ length: 6 }, (_, i) => ({ thumb: `https://h/t${i}.jpg`, full: `https://h/f${i}.jpg` }));

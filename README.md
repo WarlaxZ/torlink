@@ -289,7 +289,11 @@ fetches its poster and plot and renders them right in the terminal (bring your o
 its posters and plots come from [AniList](https://anilist.co/), a free anime database that needs no
 key. Press `p` to toggle the pane, or `i` on any result to open its IMDb page. Adult results, which OMDb
 doesn't cover, instead show the full release name and a parsed breakdown (studio, year, resolution,
-source) — no key or lookup needed, and the same in the browser.
+source) — no key or lookup needed, and the same in the browser. When a torrent's description carries
+screenshots, those show too — a strip of thumbnails you can click to enlarge in the browser, one image
+in the terminal — fetched only when you highlight the result and proxied through torlink so your browser
+never touches the image host directly. It falls back to the breakdown when a description has none. Turn
+it off with the **Adult screenshots** setting (on by default).
 
 Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50;
 press `Enter` to run one again or `x` to remove it.
