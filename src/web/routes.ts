@@ -1495,6 +1495,14 @@ export function parseTitleLookup(
   // which is missing often enough that grid cards would blank at random.
   const ep = episodeFromQuery(query);
 
+  // The provider a name lookup resolves through depends on the group
+  // (Anime -> AniList-first, everything else -> OMDb; see titleMeta()), so the
+  // cache key must distinguish them. Without this tag, a Movies/TV tab and the
+  // Anime tab that happen to parse to the same title|year|type would share one
+  // cache entry, and whichever tab asked first would silently serve its
+  // provider's poster/plot to the other.
+  const animeTag = query.get("group") === "Anime" ? "anime:" : "";
+
   const release = query.get("release") ?? "";
   if (release !== "") {
     const parsed = parseRelease(release, hintForGroup(query.get("group")));
@@ -1508,7 +1516,7 @@ export function parseTitleLookup(
       // Season and episode ARE part of the identity. Without them every episode
       // of a season shares one cache entry and renders the first one's plot — a
       // bug that reads as OMDb being wrong rather than a key being too coarse.
-      cacheKey: `n:${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}${
+      cacheKey: `n:${animeTag}${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}${
         ep ? `|s${ep.season}e${ep.episode}` : ""
       }`,
       name: parsed.title,
@@ -1544,7 +1552,7 @@ export function parseTitleLookup(
   }
 
   const lookup: TitleLookup = {
-    cacheKey: `n:${name.toLowerCase()}|${year ?? ""}|${type ?? ""}`,
+    cacheKey: `n:${animeTag}${name.toLowerCase()}|${year ?? ""}|${type ?? ""}`,
     name,
   };
   if (year !== undefined) lookup.year = year;

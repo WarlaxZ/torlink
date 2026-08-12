@@ -1968,6 +1968,41 @@ describe("/api/title anime routing", () => {
     expect(fetchTitleMetaByNameImpl).toHaveBeenCalled();
     expect(res.status).toBe(200);
   });
+
+  // Before this task the provider was always OMDb, so a group-independent
+  // cache key was correct. Now the provider depends on the group, so the same
+  // parsed title|year|type in a non-Anime tab and the Anime tab must NOT share
+  // one cache entry — otherwise whichever asked first serves the other tab
+  // its provider's poster/plot.
+  it("does not let a non-anime lookup's cache entry leak into the Anime tab", async () => {
+    const release = "Kestrel.2010.1080p.BluRay.x264";
+    const movies = await title(
+      animeDeps({
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", omdbApiKey: "KEY" }),
+        fetchTitleMetaByNameImpl: async () => ({
+          ok: true,
+          imdbId: "tt1",
+          plot: "p",
+          posterUrl: "https://m.media-amazon.com/images/M/omdb-poster.jpg",
+        }),
+      }),
+      `release=${encodeURIComponent(release)}&group=Movies`,
+    );
+    expect(movies.json).toMatchObject({ posterUrl: "https://m.media-amazon.com/images/M/omdb-poster.jpg" });
+
+    const anime = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async () => ({
+          ok: true,
+          imdbId: null,
+          plot: "p",
+          posterUrl: "https://s4.anilist.co/x.jpg",
+        }),
+      }),
+      `release=${encodeURIComponent(release)}&group=Anime`,
+    );
+    expect(anime.json).toMatchObject({ posterUrl: "https://s4.anilist.co/x.jpg" });
+  });
 });
 
 describe("GET /api/title?release= — server-side release parsing", () => {
