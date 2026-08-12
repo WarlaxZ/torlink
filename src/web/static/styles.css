@@ -1218,6 +1218,11 @@ select:focus-visible {
   cursor: pointer;
 }
 
+/* The hero screenshot occupying the poster slot for an adult result. */
+.poster-shot {
+  cursor: zoom-in;
+}
+
 /* Full-size overlay. Fixed, dark, click or Escape to dismiss. */
 .screenshot-lightbox {
   position: fixed;

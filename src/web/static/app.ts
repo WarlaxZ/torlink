@@ -3191,34 +3191,99 @@ async function loadPoster(url: string, generation: number): Promise<void> {
 // a second round trip that starts after the metadata has already landed.
 let previewGeneration = 0;
 
-// Empty and hide the screenshot strip. Called at the top of every render so a
-// row change wipes the previous strip; the async renderShots refills it for a
-// local (adult) row once /api/screenshots resolves.
+// Screenshot images are fetched as authenticated blobs, not set as <img src>,
+// for the same reason posters are (see loadPoster): /api/screenshot is behind the
+// bearer token and an <img> cannot send an Authorization header. So the object
+// URLs are tracked and revoked rather than leaked across selections.
+let shotObjectUrls: string[] = [];
+
+// Fetch a same-origin /api/screenshot path with the bearer token and return an
+// object URL for its bytes, or null on any failure (falls back to no image).
+async function screenshotBlob(proxyPath: string): Promise<string | null> {
+  try {
+    const res = await fetch(proxyPath, { headers: authHeaders() });
+    if (!res.ok) return null;
+    return URL.createObjectURL(await res.blob());
+  } catch {
+    return null;
+  }
+}
+
+// Empty and hide the screenshot strip (revoking its blobs). Called at the top of
+// every render so a row change wipes the previous strip; the async renderShots
+// refills it for a local (adult) row once /api/screenshots resolves.
 function clearShots(): void {
-  while (previewShots.firstChild) previewShots.removeChild(previewShots.firstChild);
+  for (const u of shotObjectUrls) URL.revokeObjectURL(u);
+  shotObjectUrls = [];
+  previewShots.replaceChildren();
   previewShots.hidden = true;
 }
 
-// Mount the proxied thumbnails. Every node is createElement — the src is a
-// same-origin /api/screenshot path, never the uploader's URL.
-function renderShots(items: StripItem[]): void {
+// Mount the screenshots for a local (adult) result: the first as the main hero
+// image (replacing the "Adult content" placeholder), the rest as a thumbnail
+// strip. Each is an authenticated blob; every node is createElement. Staleness is
+// checked against previewGeneration after each await, like loadPoster, so a strip
+// for a row the user has left is dropped rather than painted over the new one.
+async function renderShots(items: StripItem[]): Promise<void> {
   clearShots();
   if (items.length === 0) return;
-  for (const item of items) {
+  const gen = previewGeneration;
+
+  // Hero: the first screenshot, full size, in the poster slot.
+  const heroUrl = await screenshotBlob(items[0]!.fullSrc);
+  if (gen !== previewGeneration) {
+    if (heroUrl) URL.revokeObjectURL(heroUrl);
+    return;
+  }
+  if (heroUrl) {
+    releasePoster();
+    posterObjectUrl = heroUrl;
+    const hero = document.createElement("img");
+    hero.src = heroUrl;
+    hero.alt = "";
+    hero.className = "poster-shot";
+    hero.addEventListener("click", () => void openLightbox(items[0]!.fullSrc));
+    previewPoster.replaceChildren(hero);
+  }
+
+  // Strip: the remaining screenshots as clickable thumbnails.
+  for (const item of items.slice(1)) {
+    const thumbUrl = await screenshotBlob(item.thumbSrc);
+    if (gen !== previewGeneration) {
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+      return;
+    }
+    if (!thumbUrl) continue;
+    shotObjectUrls.push(thumbUrl);
     const img = document.createElement("img");
     img.className = "preview-shot";
-    img.src = item.thumbSrc;
+    img.src = thumbUrl;
     img.loading = "lazy";
     img.alt = "";
-    img.addEventListener("click", () => openLightbox(item.fullSrc));
+    img.addEventListener("click", () => void openLightbox(item.fullSrc));
     previewShots.appendChild(img);
   }
-  previewShots.hidden = false;
+  previewShots.hidden = previewShots.childElementCount === 0;
 }
 
 // A minimal click/Escape-to-close overlay for the full-size image, built lazily.
+// The image is an authenticated blob too, revoked when the overlay is replaced
+// or dismissed.
 let lightboxEl: HTMLDivElement | null = null;
-function openLightbox(src: string): void {
+let lightboxObjectUrl: string | null = null;
+function releaseLightbox(): void {
+  if (lightboxObjectUrl !== null) {
+    URL.revokeObjectURL(lightboxObjectUrl);
+    lightboxObjectUrl = null;
+  }
+}
+function closeLightbox(): void {
+  if (lightboxEl) lightboxEl.hidden = true;
+  releaseLightbox();
+}
+async function openLightbox(fullProxyPath: string): Promise<void> {
+  const url = await screenshotBlob(fullProxyPath);
+  if (!url) return;
   if (!lightboxEl) {
     lightboxEl = document.createElement("div");
     lightboxEl.className = "screenshot-lightbox";
@@ -3227,16 +3292,16 @@ function openLightbox(src: string): void {
     img.className = "screenshot-lightbox-img";
     img.alt = "";
     lightboxEl.appendChild(img);
-    lightboxEl.addEventListener("click", () => {
-      if (lightboxEl) lightboxEl.hidden = true;
-    });
+    lightboxEl.addEventListener("click", () => closeLightbox());
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && lightboxEl) lightboxEl.hidden = true;
+      if (e.key === "Escape") closeLightbox();
     });
     document.body.appendChild(lightboxEl);
   }
+  releaseLightbox();
+  lightboxObjectUrl = url;
   const img = lightboxEl.querySelector("img");
-  if (img) img.src = src;
+  if (img) img.src = url;
   lightboxEl.hidden = false;
 }
 
