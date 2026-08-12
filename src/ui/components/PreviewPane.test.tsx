@@ -27,4 +27,23 @@ describe("PreviewPane", () => {
     const f = render(<PreviewPane {...base} plot={null} posterRows={rows} />).lastFrame() ?? "";
     expect(f).toContain("38;2;1;2;3");
   });
+
+  it("in local mode shows the name and breakdown with no poster/plot placeholders", () => {
+    const f =
+      render(
+        <PreviewPane
+          {...base}
+          width={80}
+          local
+          title="Kestrel [Meridian Studios 2026] XXX WEB-DL 1080p MP4-P2P"
+          year={undefined}
+          plot="Studio: Meridian Studios · Year: 2026 · Resolution: 1080p"
+          posterRows={null}
+        />,
+      ).lastFrame() ?? "";
+    expect(f).toContain("Studio: Meridian Studios · Year: 2026");
+    // Nothing implying a failed lookup, and no poster region.
+    expect(f).not.toContain("No poster available.");
+    expect(f).not.toContain("No plot available.");
+  });
 });

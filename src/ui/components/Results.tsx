@@ -15,6 +15,7 @@ import { parseRelease, hintForSection } from "../../util/release";
 // The same badges the browser's rows show, from the same table the quality
 // preference under `P` reads — one vocabulary, two front ends.
 import { releaseBadges } from "../../util/releaseBadges";
+import { breakdownSummary } from "../../util/releaseBreakdown";
 // The grouping engine, shared with the browser's results list. `groupCountLabel`
 // is deliberately NOT used here — see the "×5" comment on the count cell below.
 import {
@@ -527,17 +528,19 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   // imdbId, so we parse a title+year out of the release name and look it up by
   // name — best-effort, gated to video sections and an OMDb key.
   const selectedResult = resultAt(clamped) ?? undefined;
-  const previewSection = useMemo(() => {
-    const g = CATEGORIES.find((c) => c.key === section)?.group;
-    return !g || g === "Movies" || g === "TV" || g === "Anime";
-  }, [section]);
+  const previewGroup = useMemo(() => CATEGORIES.find((c) => c.key === section)?.group, [section]);
+  // OMDb pane: film/TV, needs a key. `!previewGroup` is the "All" section.
+  const previewSection = !previewGroup || previewGroup === "Movies" || previewGroup === "TV" || previewGroup === "Anime";
+  // Anime previews from AniList, so it needs no OMDb key.
   const sectionIsAnime = section === "anime";
+  // Local pane: the adult group has no OMDb metadata, so it is built from the
+  // release name — no key, no lookup.
+  const adultSection = previewGroup === "Porn";
   const showPreview =
     previewOn &&
-    (omdbApiKey !== "" || sectionIsAnime) &&
-    previewSection &&
     mode !== "detail" &&
-    contentWidth >= PREVIEW_MIN_WIDTH;
+    contentWidth >= PREVIEW_MIN_WIDTH &&
+    (adultSection || (previewSection && (omdbApiKey !== "" || sectionIsAnime)));
   const previewWidth = showPreview ? Math.min(46, Math.max(30, Math.round(contentWidth * 0.4))) : 0;
   const listWidth = showPreview ? contentWidth - previewWidth - 1 : contentWidth;
 
@@ -583,7 +586,8 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       : null;
   const preview = useTitlePreview({
     omdbApiKey,
-    enabled: showPreview,
+    // Adult uses the local pane, never OMDb/AniList; anime uses AniList.
+    enabled: showPreview && !adultSection,
     anime: sectionIsAnime,
     // Prefix with an anime discriminator so a title|year|type seen once in the
     // Anime section (AniList) and once elsewhere (OMDb) don't collide on one
@@ -1120,10 +1124,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
             width={previewWidth}
             height={panelOuter}
             focused={focused && mode === "list"}
-            title={parsed?.title ?? cleanText(selectedResult.name)}
-            year={parsed?.year}
-            plot={preview.plot}
-            posterRows={preview.posterRows}
+            local={adultSection}
+            title={adultSection ? selectedResult.name : (parsed?.title ?? cleanText(selectedResult.name))}
+            year={adultSection ? undefined : parsed?.year}
+            plot={adultSection ? breakdownSummary(selectedResult.name) : preview.plot}
+            posterRows={adultSection ? null : preview.posterRows}
           />
         ) : null}
       </Box>
