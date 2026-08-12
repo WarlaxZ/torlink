@@ -8,6 +8,7 @@ import {
   getPoster,
   MAX_POSTER_BYTES,
   posterFileName,
+  POSTER_HOSTS,
   prunePosters,
 } from "./posterCache";
 import * as net from "../util/net";
@@ -358,5 +359,14 @@ describe("prunePosters", () => {
 
   it("never throws on a missing directory", async () => {
     await expect(prunePosters(path.join(dir, "nope"), 10)).resolves.toBeUndefined();
+  });
+});
+
+describe("POSTER_HOSTS allowlist", () => {
+  it("accepts the AniList cover CDN", () => {
+    expect(POSTER_HOSTS.has("s4.anilist.co")).toBe(true);
+  });
+  it("still accepts the OMDb/Amazon hosts", () => {
+    expect(POSTER_HOSTS.has("m.media-amazon.com")).toBe(true);
   });
 });

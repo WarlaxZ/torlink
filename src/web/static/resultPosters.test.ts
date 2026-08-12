@@ -88,6 +88,28 @@ describe("searchHint", () => {
   });
 });
 
+describe("postersApply — Anime is keyless", () => {
+  it("applies for Anime even without an OMDb key", () => {
+    expect(postersApply("Anime", false)).toBe(true);
+  });
+  it("still requires a key for Movies", () => {
+    expect(postersApply("Movies", false)).toBe(false);
+    expect(postersApply("Movies", true)).toBe(true);
+  });
+  it("does not apply to a non-preview group regardless", () => {
+    expect(postersApply("Games", true)).toBe(false);
+  });
+});
+
+describe("searchHint — no OMDb nudge on the Anime tab", () => {
+  it("returns null (no key hint) for Anime with no key", () => {
+    expect(searchHint(false, "Anime", null)).toBeNull();
+  });
+  it("still nudges for a key on Movies with no key", () => {
+    expect(searchHint(false, "Movies", null)).not.toBeNull();
+  });
+});
+
 describe("createPosterCache", () => {
   it("fetches metadata then bytes, and answers with the object URL", async () => {
     const { cache, metaCalls, blobCalls } = harness();

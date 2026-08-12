@@ -531,8 +531,13 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const g = CATEGORIES.find((c) => c.key === section)?.group;
     return !g || g === "Movies" || g === "TV" || g === "Anime";
   }, [section]);
+  const sectionIsAnime = section === "anime";
   const showPreview =
-    previewOn && omdbApiKey !== "" && previewSection && mode !== "detail" && contentWidth >= PREVIEW_MIN_WIDTH;
+    previewOn &&
+    (omdbApiKey !== "" || sectionIsAnime) &&
+    previewSection &&
+    mode !== "detail" &&
+    contentWidth >= PREVIEW_MIN_WIDTH;
   const previewWidth = showPreview ? Math.min(46, Math.max(30, Math.round(contentWidth * 0.4))) : 0;
   const listWidth = showPreview ? contentWidth - previewWidth - 1 : contentWidth;
 
@@ -579,8 +584,12 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   const preview = useTitlePreview({
     omdbApiKey,
     enabled: showPreview,
+    anime: sectionIsAnime,
+    // Prefix with an anime discriminator so a title|year|type seen once in the
+    // Anime section (AniList) and once elsewhere (OMDb) don't collide on one
+    // cache entry — matches the web route's `anime:` cache-key tag.
     cacheKey: parsed
-      ? `${parsed.key}|${previewEpisode ? `s${previewEpisode.season}e${previewEpisode.episode}` : ""}`
+      ? `${sectionIsAnime ? "anime:" : ""}${parsed.key}|${previewEpisode ? `s${previewEpisode.season}e${previewEpisode.episode}` : ""}`
       : "",
     query: parsed
       ? {
@@ -588,6 +597,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
           title: parsed.title,
           year: parsed.year,
           type: parsed.type,
+          rawName: selectedResult?.name,
           ...(previewEpisode ?? {}),
         }
       : null,

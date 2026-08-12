@@ -1899,6 +1899,112 @@ describe("GET /api/title", () => {
   });
 });
 
+describe("/api/title anime routing", () => {
+  beforeEach(() => {
+    clearTitleCache();
+    vi.stubEnv("TORLINK_OMDB_KEY", "");
+  });
+
+  function animeDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }),
+      ...over,
+    });
+  }
+
+  const title = (d: WebDeps, qs: string): Promise<WebResponse> =>
+    handleWebApi(d, "GET", "/api/title", new URLSearchParams(qs), AUTH, "");
+
+  it("routes the Anime group through the AniList-first resolver", async () => {
+    let sawRawName = "";
+    const fetchTitleMetaByNameImpl = vi.fn(async () => {
+      throw new Error("OMDb must not be called for the Anime group");
+    });
+    const res = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async (args) => {
+          sawRawName = args.rawName;
+          return { ok: true, imdbId: null, plot: "p", posterUrl: "https://s4.anilist.co/x.jpg" };
+        },
+        fetchTitleMetaByNameImpl,
+      }),
+      "release=" + encodeURIComponent("[NanakoRaws] Kestrel S01E18 [1080p]") + "&group=Anime",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ status: "ok", posterUrl: "https://s4.anilist.co/x.jpg" });
+    expect(sawRawName).toContain("Kestrel");
+    expect(fetchTitleMetaByNameImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not return no-key for anime even without an OMDb key", async () => {
+    const res = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async () => ({ ok: false, error: "not found" }),
+      }),
+      "release=" + encodeURIComponent("Kestrel - 06 [1080p]") + "&group=Anime",
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ status: "error", error: "not found" });
+  });
+
+  it("still routes non-anime groups through OMDb", async () => {
+    const fetchTitleMetaByNameImpl = vi.fn(async () => ({
+      ok: true as const,
+      type: "movie" as const,
+      imdbId: "tt1",
+      plot: "p",
+      posterUrl: null,
+    }));
+    const res = await title(
+      animeDeps({
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", omdbApiKey: "KEY" }),
+        fetchTitleMetaByNameImpl,
+        fetchAnimeFirstMetaImpl: async () => {
+          throw new Error("AniList must not be called for Movies");
+        },
+      }),
+      "release=" + encodeURIComponent("Kestrel.2010.1080p.BluRay.x264") + "&group=Movies",
+    );
+    expect(fetchTitleMetaByNameImpl).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+  });
+
+  // Before this task the provider was always OMDb, so a group-independent
+  // cache key was correct. Now the provider depends on the group, so the same
+  // parsed title|year|type in a non-Anime tab and the Anime tab must NOT share
+  // one cache entry — otherwise whichever asked first serves the other tab
+  // its provider's poster/plot.
+  it("does not let a non-anime lookup's cache entry leak into the Anime tab", async () => {
+    const release = "Kestrel.2010.1080p.BluRay.x264";
+    const movies = await title(
+      animeDeps({
+        loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", omdbApiKey: "KEY" }),
+        fetchTitleMetaByNameImpl: async () => ({
+          ok: true,
+          imdbId: "tt1",
+          plot: "p",
+          posterUrl: "https://m.media-amazon.com/images/M/omdb-poster.jpg",
+        }),
+      }),
+      `release=${encodeURIComponent(release)}&group=Movies`,
+    );
+    expect(movies.json).toMatchObject({ posterUrl: "https://m.media-amazon.com/images/M/omdb-poster.jpg" });
+
+    const anime = await title(
+      animeDeps({
+        fetchAnimeFirstMetaImpl: async () => ({
+          ok: true,
+          imdbId: null,
+          plot: "p",
+          posterUrl: "https://s4.anilist.co/x.jpg",
+        }),
+      }),
+      `release=${encodeURIComponent(release)}&group=Anime`,
+    );
+    expect(anime.json).toMatchObject({ posterUrl: "https://s4.anilist.co/x.jpg" });
+  });
+});
+
 describe("GET /api/title?release= — server-side release parsing", () => {
   const OK_META: FetchTitleMetaResult = {
     ok: true,

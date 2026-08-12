@@ -192,7 +192,10 @@ reached, which is an honest thing to say, rather than guessing at every episode 
 
 Selecting a result shows its poster, plot and IMDb link, if you've added a free
 [OMDb](https://www.omdbapi.com/apikey.aspx) key under **Settings** in the TUI — the same key that powers
-the terminal's preview pane. Without one everything still works; you just get the release names.
+the terminal's preview pane. Without one everything still works; you just get the release names. The
+**Anime** tab is the exception: it fetches posters and plots from
+[AniList](https://anilist.co/), a free anime database that needs no key, so anime has artwork even
+before you set one up.
 
 That pane stays where you can see it: on a wide screen it pins below the toolbar and scrolls its own plot,
 and on a phone it becomes a bar across the bottom of the window rather than something 25,000 pixels below
@@ -282,8 +285,9 @@ on its best copy, so `v` streams the pick you'd have chosen anyway. Rows carry s
 
 On a wide enough terminal a preview pane opens beside the results: highlight a film or show and torlink
 fetches its poster and plot and renders them right in the terminal (bring your own free
-[OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Settings). Press `p` to toggle the pane, or
-`i` on any result to open its IMDb page.
+[OMDb](https://www.omdbapi.com/apikey.aspx) key, added under Settings). Anime is the exception —
+its posters and plots come from [AniList](https://anilist.co/), a free anime database that needs no
+key. Press `p` to toggle the pane, or `i` on any result to open its IMDb page.
 
 Press `w` on any named search to add or remove it from your Saved searches. The pane keeps up to 50;
 press `Enter` to run one again or `x` to remove it.

@@ -19,6 +19,8 @@ export const POSTER_HOSTS = new Set([
   "m.media-amazon.com",
   "ia.media-imdb.com",
   "img.omdbapi.com",
+  // AniList cover art (the Anime group's metadata provider).
+  "s4.anilist.co",
 ]);
 
 // Cap the cache rather than letting it grow forever. Posters are ~50-200KB, so

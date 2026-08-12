@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FetchImpl } from "../../util/net";
 import { fetchTitleMeta, fetchTitleMetaByName, type OmdbType } from "../../recc/omdb";
+import { fetchAnimeFirstMeta } from "../../recc/animeMeta";
 import { cachedPosterRows } from "../../core/posterCache";
 
 // How to look a title up: by IMDb id (For You, where reccd supplies it) or by
@@ -18,6 +19,8 @@ export type MetaQuery =
        */
       season?: number;
       episode?: number;
+      /** The raw release name, for AniList normalization on the anime path. */
+      rawName?: string;
     };
 
 interface Meta {
@@ -53,6 +56,10 @@ interface Args {
   posterMaxRows: number;
   fetchImpl?: FetchImpl;
   debounceMs?: number;
+  // Look this selection up on AniList first (Anime section), OMDb as fallback.
+  // AniList is keyless, so the metadata effect below does not require an OMDb key
+  // when this is set.
+  anime?: boolean;
 }
 
 // Lazily resolves a selection's plot + poster from OMDb, debounced and cached
@@ -68,6 +75,7 @@ export function useTitlePreview(args: Args): TitlePreview {
     posterMaxRows,
     fetchImpl,
     debounceMs = 150,
+    anime = false,
   } = args;
 
   const metas = useRef(new Map<string, Meta>());
@@ -82,7 +90,9 @@ export function useTitlePreview(args: Args): TitlePreview {
 
   // Metadata (plot + poster URL), debounced so scrolling doesn't spam OMDb.
   useEffect(() => {
-    if (!omdbApiKey || !enabled || !cacheKey || metas.current.has(cacheKey)) return;
+    // Anime does not need an OMDb key (AniList is keyless); every other path
+    // still does.
+    if ((!omdbApiKey && !anime) || !enabled || !cacheKey || metas.current.has(cacheKey)) return;
     let cancelled = false;
     const t = setTimeout(() => {
       const q = queryRef.current;
@@ -90,13 +100,20 @@ export function useTitlePreview(args: Args): TitlePreview {
       const p =
         q.by === "id"
           ? fetchTitleMeta(q.imdbId, omdbApiKey, { fetchImpl })
-          : fetchTitleMetaByName(q.title, omdbApiKey, {
-              year: q.year,
-              type: q.type,
-              season: q.season,
-              episode: q.episode,
-              fetchImpl,
-            });
+          : anime
+            ? fetchAnimeFirstMeta({
+                rawName: q.rawName ?? q.title,
+                omdb: { title: q.title, year: q.year, type: q.type },
+                omdbApiKey,
+                fetchImpl,
+              })
+            : fetchTitleMetaByName(q.title, omdbApiKey, {
+                year: q.year,
+                type: q.type,
+                season: q.season,
+                episode: q.episode,
+                fetchImpl,
+              });
       void p.then((res) => {
         if (cancelled) return;
         metas.current.set(
@@ -112,7 +129,7 @@ export function useTitlePreview(args: Args): TitlePreview {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [omdbApiKey, enabled, cacheKey, fetchImpl, debounceMs]);
+  }, [omdbApiKey, enabled, cacheKey, fetchImpl, debounceMs, anime]);
 
   const meta = cacheKey ? metas.current.get(cacheKey) : undefined;
   const posterUrl = meta?.posterUrl ?? null;

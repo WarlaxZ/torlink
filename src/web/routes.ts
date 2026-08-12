@@ -62,6 +62,7 @@ import {
   type FetchTitleMetaResult,
   type OmdbType,
 } from "../recc/omdb";
+import { fetchAnimeFirstMeta } from "../recc/animeMeta";
 import { openSseChannel, type SseWrite } from "./sse";
 import type { Source, SourceGroup, SourceId, TorrentResult } from "../sources/types";
 import { addInput, type AddInputOptions, type Runtime } from "../daemon/runtime";
@@ -205,6 +206,15 @@ export interface WebDeps {
     apiKey: string,
     opts: { year?: number; type?: OmdbType },
   ) => Promise<FetchTitleMetaResult>;
+  /**
+   * AniList-first metadata for `/api/title?release=&group=Anime`. Injected to
+   * keep tests offline. Defaults to the real resolver in src/recc/animeMeta.
+   */
+  fetchAnimeFirstMetaImpl?: (args: {
+    rawName: string;
+    omdb: { title: string; year?: number; type?: OmdbType };
+    omdbApiKey: string;
+  }) => Promise<FetchTitleMetaResult>;
   /** reccd's feed, for `/api/recommendations`. Injected to keep tests off the network. */
   fetchRecommendationsImpl?: (
     config: ReccClientConfig,
@@ -1485,6 +1495,14 @@ export function parseTitleLookup(
   // which is missing often enough that grid cards would blank at random.
   const ep = episodeFromQuery(query);
 
+  // The provider a name lookup resolves through depends on the group
+  // (Anime -> AniList-first, everything else -> OMDb; see titleMeta()), so the
+  // cache key must distinguish them. Without this tag, a Movies/TV tab and the
+  // Anime tab that happen to parse to the same title|year|type would share one
+  // cache entry, and whichever tab asked first would silently serve its
+  // provider's poster/plot to the other.
+  const animeTag = query.get("group") === "Anime" ? "anime:" : "";
+
   const release = query.get("release") ?? "";
   if (release !== "") {
     const parsed = parseRelease(release, hintForGroup(query.get("group")));
@@ -1498,7 +1516,7 @@ export function parseTitleLookup(
       // Season and episode ARE part of the identity. Without them every episode
       // of a season shares one cache entry and renders the first one's plot — a
       // bug that reads as OMDb being wrong rather than a key being too coarse.
-      cacheKey: `n:${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}${
+      cacheKey: `n:${animeTag}${parsed.title.toLowerCase()}|${parsed.year ?? ""}|${parsed.type ?? ""}${
         ep ? `|s${ep.season}e${ep.episode}` : ""
       }`,
       name: parsed.title,
@@ -1534,7 +1552,7 @@ export function parseTitleLookup(
   }
 
   const lookup: TitleLookup = {
-    cacheKey: `n:${name.toLowerCase()}|${year ?? ""}|${type ?? ""}`,
+    cacheKey: `n:${animeTag}${name.toLowerCase()}|${year ?? ""}|${type ?? ""}`,
     name,
   };
   if (year !== undefined) lookup.year = year;
@@ -1614,7 +1632,13 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
 
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const apiKey = resolveOmdbApiKey(config);
-  if (!apiKey) {
+
+  // Anime (name lookups in the Anime group) resolves via AniList, which needs no
+  // key — so the no-key short-circuit below must not apply to it, and its
+  // resolver skips the OMDb fallback when apiKey is "".
+  const isAnime = query.get("group") === "Anime" && lookup.imdbId === undefined;
+
+  if (!apiKey && !isAnime) {
     // 200 with its own status, NOT a 500 and not an empty "ok". Nothing is
     // broken — the user simply has no key — and the UI needs to tell them that
     // rather than showing a failure or an empty plot. Deliberately not cached:
@@ -1627,12 +1651,22 @@ async function titleMeta(deps: WebDeps, query: URLSearchParams): Promise<WebResp
   const result =
     lookup.imdbId !== undefined
       ? await (deps.fetchTitleMetaImpl ?? fetchTitleMeta)(lookup.imdbId, apiKey)
-      : await (deps.fetchTitleMetaByNameImpl ?? fetchTitleMetaByName)(lookup.name ?? "", apiKey, {
-          ...(lookup.year !== undefined ? { year: lookup.year } : {}),
-          ...(lookup.type !== undefined ? { type: lookup.type } : {}),
-          ...(lookup.season !== undefined ? { season: lookup.season } : {}),
-          ...(lookup.episode !== undefined ? { episode: lookup.episode } : {}),
-        });
+      : isAnime
+        ? await (deps.fetchAnimeFirstMetaImpl ?? fetchAnimeFirstMeta)({
+            rawName: query.get("release") ?? lookup.name ?? "",
+            omdb: {
+              title: lookup.name ?? "",
+              ...(lookup.year !== undefined ? { year: lookup.year } : {}),
+              ...(lookup.type !== undefined ? { type: lookup.type } : {}),
+            },
+            omdbApiKey: apiKey,
+          })
+        : await (deps.fetchTitleMetaByNameImpl ?? fetchTitleMetaByName)(lookup.name ?? "", apiKey, {
+            ...(lookup.year !== undefined ? { year: lookup.year } : {}),
+            ...(lookup.type !== undefined ? { type: lookup.type } : {}),
+            ...(lookup.season !== undefined ? { season: lookup.season } : {}),
+            ...(lookup.episode !== undefined ? { episode: lookup.episode } : {}),
+          });
 
   if (!result.ok) {
     // Not cached either, and this is the deliberate half of the caching policy:

@@ -69,9 +69,14 @@ export interface PosterCache {
  * key check is the other half, and it is the one that matters for cost: with no
  * key configured every lookup would return `no-key`, so a keyless server should
  * make none of them.
+ *
+ * The Anime group is the exception: it is served from AniList, which needs no
+ * key, so it previews whether or not OMDb is configured.
  */
 export function postersApply(group: string, omdbConfigured: boolean): boolean {
-  return omdbConfigured && previewApplies(group);
+  if (!previewApplies(group)) return false;
+  if (group === "Anime") return true;
+  return omdbConfigured;
 }
 
 /**
@@ -103,6 +108,8 @@ export function searchHint(
 ): string | null {
   if (omdbConfigured === null) return null;
   if (!previewApplies(group)) return null;
+  // Anime needs no OMDb key (AniList is keyless), so never nudge for one here.
+  if (group === "Anime") return cacheHint;
   if (!omdbConfigured) return OMDB_KEY_HINT;
   return cacheHint;
 }
