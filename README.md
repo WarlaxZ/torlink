@@ -86,8 +86,9 @@ Globally-installed copies keep themselves current: `torlnk update` pulls the lat
 `torlnk` quietly points it out when one is available).
 
 That's the only thing you'll type. torlink opens straight to a search bar: search for what you want,
-paste in a magnet link or a bare infohash, or just press Enter on an empty box to browse the curated
-library. From there it's all keypresses, nothing to memorize, and `?` brings up the full list anytime.
+paste in a magnet link or a bare infohash, drag a `.torrent` file from your file manager onto the
+window, or just press Enter on an empty box to browse the curated library. From there it's all
+keypresses, nothing to memorize, and `?` brings up the full list anytime.
 
 <p align="center">
   <img src="preview/help.svg" alt="torlink's keyboard help overlay: every shortcut grouped by what it does" style="max-width: 832px; width: 100%; height: auto;">

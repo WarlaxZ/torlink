@@ -161,7 +161,7 @@ export function Splash({
           width={barWidth}
           value=""
           editing
-          placeholder="Search or paste a magnet link…"
+          placeholder="Search, paste a magnet, or drop a .torrent…"
           history={searchHistory}
           suggestions={suggest.items}
           completion={suggest.completion}
