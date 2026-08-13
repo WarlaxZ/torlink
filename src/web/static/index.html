@@ -71,6 +71,17 @@
       <button id="alert-dismiss" type="button" aria-label="Dismiss">✕</button>
     </div>
 
+    <!-- Shown by app.js only while a file is being dragged over the page, the
+         browser's half of the terminal's "drag a .torrent onto the search
+         field". Static text with no interpolation — nothing here is built from a
+         filename, so the no-innerHTML rule is kept trivially. -->
+    <div id="drop-overlay" class="drop-overlay" role="status" aria-live="polite" hidden>
+      <div class="drop-overlay-card">
+        <span class="drop-overlay-icon" aria-hidden="true">↓</span>
+        <span>Drop a <strong>.torrent</strong> to add it</span>
+      </div>
+    </div>
+
     <!-- The stream file picker. Shown only when a session resolves to more than
          one playable file; every child below the heading is built by app.js with
          createElement, because the filenames come out of a torrent.

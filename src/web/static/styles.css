@@ -1223,6 +1223,40 @@ select:focus-visible {
   cursor: zoom-in;
 }
 
+/* The drag-a-.torrent overlay. Fixed over everything, pointer-events off so it
+   never eats the drop the window listener is waiting for, shown only while a
+   file is dragged across the page. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  pointer-events: none;
+  background: rgba(12, 13, 19, 0.82);
+}
+
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 2.5rem;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 1.1rem;
+  text-align: center;
+}
+
+.drop-overlay-icon {
+  font-size: 2rem;
+  color: var(--accent);
+}
+
 /* Full-size overlay. Fixed, dark, click or Escape to dismiss. */
 .screenshot-lightbox {
   position: fixed;

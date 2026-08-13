@@ -4348,3 +4348,106 @@ describe("handleWebApi — per-Access-email isolation", () => {
     expect(s.get().profiles).toBeUndefined();
   });
 });
+
+describe("POST /api/add-torrent — a .torrent dropped onto the browser", () => {
+  // Hand-rolled bencode, so the fixture is a real .torrent the parser accepts
+  // rather than a checked-in binary blob (mirrors torrentFile.test.ts).
+  function bstr(str: string): Buffer {
+    const b = Buffer.from(str, "utf8");
+    return Buffer.concat([Buffer.from(`${b.length}:`), b]);
+  }
+  function torrentBase64(name: string): string {
+    const info = Buffer.concat([
+      Buffer.from("d"),
+      bstr("length"), Buffer.from("i1024e"),
+      bstr("name"), bstr(name),
+      bstr("piece length"), Buffer.from("i16384e"),
+      bstr("pieces"), Buffer.from("20:"), Buffer.alloc(20, 7),
+      Buffer.from("e"),
+    ]);
+    return Buffer.concat([Buffer.from("d"), bstr("info"), info, Buffer.from("e")]).toString("base64");
+  }
+
+  function addRuntime(): { runtime: Runtime; add: ReturnType<typeof vi.fn> } {
+    const add = vi.fn();
+    return {
+      runtime: {
+        queue: { has: () => false, add, addDebrid: vi.fn() } as unknown as Runtime["queue"],
+        downloadDir: "/tmp/dl",
+        sessions: new StreamSessionRegistry(),
+        casts: new CastSessionRegistry(),
+      },
+      add,
+    };
+  }
+
+  const post = (d: WebDeps, body: unknown): Promise<WebResponse> =>
+    handleWebApi(d, "POST", "/api/add-torrent", new URLSearchParams(), AUTH, JSON.stringify(body));
+
+  it("parses the uploaded bytes and queues it under the torrent's own name", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), { torrent: torrentBase64("Kestrel.2010.torrent") });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, outcome: "added" });
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Kestrel.2010.torrent" }),
+      "/tmp/dl",
+    );
+  });
+
+  it("forces the add through debrid when a provider is configured", async () => {
+    const addDebrid = vi.fn(() => new Promise<void>(() => {}));
+    const add = vi.fn();
+    const rt = {
+      queue: { has: () => false, add, addDebrid } as unknown as Runtime["queue"],
+      downloadDir: "/tmp/dl",
+      sessions: new StreamSessionRegistry(),
+      casts: new CastSessionRegistry(),
+    };
+    const d = deps({
+      runtime: rt,
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl", realDebridToken: "rd-token" }),
+    });
+    const res = await post(d, { torrent: torrentBase64("Ashfall.1999.torrent") });
+    expect(res.status).toBe(200);
+    expect(addDebrid).toHaveBeenCalledTimes(1);
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("rejects bytes that aren't a torrent, without queueing anything", async () => {
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), {
+      torrent: Buffer.from("not a torrent").toString("base64"),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ error: "couldn't read a torrent from that file" });
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("rejects a 20-byte upload rather than queueing it as a raw infohash", async () => {
+    // parse-torrent reads any 20-byte buffer as an infohash; the route must not
+    // queue a dropped non-torrent file just because it happens to be 20 bytes.
+    const { runtime: rt, add } = addRuntime();
+    const res = await post(deps({ runtime: rt }), {
+      torrent: Buffer.alloc(20, 7).toString("base64"),
+    });
+    expect(res.status).toBe(400);
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing torrent field and a non-object body", async () => {
+    expect((await post(deps(), {})).status).toBe(400);
+    expect((await post(deps(), {})).json).toMatchObject({ error: "missing torrent" });
+    const bad = await handleWebApi(deps(), "POST", "/api/add-torrent", new URLSearchParams(), AUTH, "not json");
+    expect(bad.status).toBe(400);
+    expect(bad.json).toMatchObject({ error: "invalid json body" });
+  });
+
+  it("requires the token", async () => {
+    const res = await handleWebApi(
+      deps({ token: "secret" }), "POST", "/api/add-torrent", new URLSearchParams(), undefined,
+      JSON.stringify({ torrent: torrentBase64("Kestrel.2010.torrent") }),
+    );
+    expect(res.status).toBe(401);
+  });
+});

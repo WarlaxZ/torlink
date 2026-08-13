@@ -213,6 +213,10 @@ doesn't (see [Debrid](#debrid-real-debrid-or-torbox)). Where a debrid provider i
 **add** is replaced by **add via RD** / **add via TorBox**: the browser routes every add through the
 provider and never downloads direct peer-to-peer (the terminal keeps its plain `d`, which warns first).
 
+You can also **drag a `.torrent` file onto the page** — the browser's version of dropping one on the
+terminal's search field. An overlay confirms the target while you drag; on drop the file is read and
+queued through the same path as an add (so a configured debrid provider is still honoured).
+
 `torlnk serve --web` lands on serve's own port, **`http://127.0.0.1:9161`**, and **opens your browser
 there for you**. `torlnk --web` lands on **`http://127.0.0.1:9162`** and prints the address on the
 splash — it doesn't steal focus, because you asked for a terminal UI; press **shift+w** (anywhere but
