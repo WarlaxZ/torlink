@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isWsl } from "./wsl";
 
 function run(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve) => {
@@ -61,7 +62,7 @@ function write(cmd: string, args: string[], text: string): Promise<boolean> {
 // installed and the native commands silently fail. Windows' clip.exe and
 // powershell.exe are always reachable via WSL interop and target the Windows
 // clipboard the user actually pastes into, so prefer them when running there.
-const isWsl = process.platform === "linux" && !!process.env.WSL_DISTRO_NAME;
+const isWslHost = isWsl();
 
 const LINUX_READ: [string, string[]][] = [
   ["wl-paste", ["--no-newline"]],
@@ -88,7 +89,7 @@ export async function readClipboard(): Promise<string> {
   if (process.platform === "darwin") {
     return (await run("pbpaste", [])).trim();
   }
-  const readers = isWsl ? [...WSL_READ, ...LINUX_READ] : LINUX_READ;
+  const readers = isWslHost ? [...WSL_READ, ...LINUX_READ] : LINUX_READ;
   for (const [cmd, args] of readers) {
     const out = (await run(cmd, args)).trim();
     if (out) return out;
@@ -107,7 +108,7 @@ export async function writeClipboard(text: string): Promise<boolean> {
   if (process.platform === "darwin") {
     return write("pbcopy", [], text);
   }
-  const writers = isWsl ? [...WSL_WRITE, ...LINUX_WRITE] : LINUX_WRITE;
+  const writers = isWslHost ? [...WSL_WRITE, ...LINUX_WRITE] : LINUX_WRITE;
   for (const [cmd, args] of writers) {
     if (await write(cmd, args, text)) return true;
   }
