@@ -29,6 +29,12 @@ export const DEFAULT_API_PORT = 9161;
 
 const MAX_BODY_BYTES = 64 * 1024; // a magnet is small; cap the body hard
 
+// The /api/add-torrent upload carries a base64'd .torrent, which is metadata
+// (capped at 16 MiB by torrentFile). Base64 inflates by ~4/3, plus JSON, so the
+// body cap is larger than the raw-torrent cap. Still bounded, so a stray upload
+// can't exhaust memory.
+export const MAX_TORRENT_BODY_BYTES = 24 * 1024 * 1024;
+
 export interface ApiResponse {
   status: number;
   body: Record<string, unknown>;
@@ -262,7 +268,10 @@ export async function handleApi(
 // Read the body up to the size cap. On overflow resolve tooLarge immediately
 // (further chunks are ignored) so the caller can answer 413 on a live socket
 // and close the connection afterwards, instead of writing to a destroyed one.
-export function readBody(req: http.IncomingMessage): Promise<{ text: string; tooLarge: boolean }> {
+export function readBody(
+  req: http.IncomingMessage,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<{ text: string; tooLarge: boolean }> {
   return new Promise((resolve) => {
     let size = 0;
     let settled = false;
@@ -270,7 +279,7 @@ export function readBody(req: http.IncomingMessage): Promise<{ text: string; too
     req.on("data", (c: Buffer) => {
       if (settled) return;
       size += c.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         settled = true;
         resolve({ text: "", tooLarge: true });
         return;

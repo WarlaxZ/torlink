@@ -210,6 +210,7 @@ import { routeFromSearch, urlForRoute, type RouteState } from "./route";
 import { rememberReturn } from "./returnTo";
 import { foldRecent, magnetFor, readRecent, writeRecent } from "./recentSearches";
 import { clipboardPorts, copyNotice, copyText } from "./copyText";
+import { dragHasFiles, pickTorrentFile } from "./torrentDrop";
 
 const EMPTY_TEXT = "Nothing in the queue.";
 const NOTICE_MS = 4000;
@@ -222,6 +223,7 @@ const tokenInput = el<HTMLInputElement>("token");
 const app = el<HTMLElement>("app");
 const addForm = el<HTMLFormElement>("add");
 const magnetInput = el<HTMLInputElement>("magnet");
+const dropOverlay = el<HTMLDivElement>("drop-overlay");
 const rowsList = el<HTMLUListElement>("rows");
 const emptyNote = el<HTMLParagraphElement>("empty");
 const notice = el<HTMLParagraphElement>("notice");
@@ -4330,6 +4332,92 @@ addForm.addEventListener("submit", (event) => {
     showError(body.error ?? `Add failed (HTTP ${res.status}).`);
   })();
 });
+
+// A .torrent dropped anywhere on the page is the browser's version of dropping
+// one on the terminal. dragover MUST preventDefault or the browser navigates
+// away to display the file; we only claim the gesture (and show the overlay)
+// while files are being dragged, so dragging selected text or a link is
+// unaffected. dragenter/dragleave fire once per element crossed, so a depth
+// counter keeps the overlay from flickering as the pointer moves over children.
+let dragDepth = 0;
+function endDrag(): void {
+  dragDepth = 0;
+  dropOverlay.hidden = true;
+}
+window.addEventListener("dragenter", (event) => {
+  if (!dragHasFiles(event.dataTransfer?.types)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  dropOverlay.hidden = false;
+});
+window.addEventListener("dragover", (event) => {
+  if (!dragHasFiles(event.dataTransfer?.types)) return;
+  event.preventDefault();
+});
+window.addEventListener("dragleave", (event) => {
+  if (!dragHasFiles(event.dataTransfer?.types)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dropOverlay.hidden = true;
+});
+window.addEventListener("drop", (event) => {
+  if (!dragHasFiles(event.dataTransfer?.types)) return;
+  event.preventDefault();
+  endDrag();
+  const file = pickTorrentFile([...(event.dataTransfer?.files ?? [])]);
+  if (!file) {
+    showError("That wasn't a .torrent file. Drop a .torrent to add it.");
+    return;
+  }
+  void uploadTorrent(file);
+});
+
+// readAsDataURL yields "data:…;base64,XXXX"; the route wants just the base64.
+// Base64 (not raw bytes) because the request-body plumbing is text.
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.onload = () => {
+      const result = reader.result;
+      const comma = typeof result === "string" ? result.indexOf(",") : -1;
+      if (typeof result !== "string" || comma < 0) {
+        reject(new Error("unexpected reader result"));
+        return;
+      }
+      resolve(result.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadTorrent(file: File): Promise<void> {
+  showNotice(`Reading ${file.name}…`);
+  let torrent: string;
+  try {
+    torrent = await fileToBase64(file);
+  } catch {
+    showError("Couldn't read the dropped file.");
+    return;
+  }
+  let res: Response;
+  try {
+    res = await fetch("/api/add-torrent", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ torrent }),
+    });
+  } catch {
+    showError("Add failed — the server is not responding.");
+    setConn("lost");
+    return;
+  }
+  const body = await readEnvelope(res);
+  if (res.ok) {
+    showNotice(body.outcome === "duplicate" ? "Already in the queue." : "Added.");
+    return;
+  }
+  showError(body.error ?? `Add failed (HTTP ${res.status}).`);
+}
 
 // Startup. A tokenless (loopback) server answers /api/status straight away and
 // unlocks with no prompt; a 401 means we need one.

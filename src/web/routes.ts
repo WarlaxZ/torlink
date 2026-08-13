@@ -57,6 +57,7 @@ import {
 import { getDebridProvider } from "../integrations/debrid";
 import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
 import { buildMagnet, isInfoHash, normalizeInfoHash, parseInput } from "../sources/magnet";
+import { magnetFromTorrentBytes } from "../sources/torrentFile";
 import {
   isFavourited,
   markWatched,
@@ -964,6 +965,47 @@ async function addToQueue(
   if (outcome === "invalid") return { status: 400, json: { error: "invalid magnet or info hash" } };
   const out: AddResponse = { ok: true, outcome };
   return { status: 200, json: out };
+}
+
+/**
+ * POST /api/add-torrent — queue a .torrent file dropped onto the browser.
+ *
+ * The browser half of the terminal's "drag a .torrent onto the search field".
+ * A file dropped on the page can't be turned into a magnet client-side without
+ * shipping a bencode + SHA-1 parser to static/, so the bytes are uploaded
+ * (base64, because the request-body plumbing is text) and parsed here with the
+ * very same parser the watch folder and `torlnk <file>.torrent` use — one
+ * parsing path, so a dragged torrent behaves identically in both front ends.
+ *
+ * Once it is a magnet the work is handed to addToQueue, so the debrid-vs-P2P
+ * policy, the queue call, and the added/duplicate outcome all stay in one place
+ * rather than being reimplemented with a chance to drift.
+ */
+async function addTorrentToQueue(
+  deps: WebDeps,
+  authHeader: string | undefined,
+  bodyText: string,
+): Promise<WebResponse> {
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return { status: 400, json: { error: "invalid json body" } };
+  }
+
+  const b64 = typeof body.torrent === "string" ? body.torrent : "";
+  if (!b64) return { status: 400, json: { error: "missing torrent" } };
+
+  // Buffer.from(…, "base64") is lenient (it drops non-base64 chars), and the
+  // decoded bytes are size-checked and validated by magnetFromTorrentBytes, so a
+  // junk or over-16MiB upload comes back null and is reported, never queued.
+  const parsed = await magnetFromTorrentBytes(new Uint8Array(Buffer.from(b64, "base64")));
+  if (!parsed) return { status: 400, json: { error: "couldn't read a torrent from that file" } };
+
+  // The name is the torrent's own, so the queue shows what the file says it is.
+  return addToQueue(deps, authHeader, JSON.stringify({ magnet: parsed.magnet, name: parsed.name }));
 }
 
 /**
@@ -2325,6 +2367,10 @@ export async function handleWebApi(
   // no-name/no-via shape this delegates back to.
   if (method === "POST" && urlPath === "/api/add") {
     return addToQueue(deps, authHeader, bodyText);
+  }
+
+  if (method === "POST" && urlPath === "/api/add-torrent") {
+    return addTorrentToQueue(deps, authHeader, bodyText);
   }
 
   // ---- streaming -------------------------------------------------------

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { magnetFromTorrentFile } from "./torrentFile";
+import { magnetFromTorrentFile, magnetFromTorrentBytes } from "./torrentFile";
 
 // Hand-rolled bencode, so the fixture is a real .torrent parse-torrent accepts
 // rather than a checked-in binary blob.
@@ -90,5 +90,34 @@ describe("magnetFromTorrentFile", () => {
   it("refuses a file too large to be metadata rather than reading it in", async () => {
     const big = await write("big.torrent", Buffer.alloc(17 * 1024 * 1024));
     expect(await magnetFromTorrentFile(big)).toBe(null);
+  });
+});
+
+// The browser has the bytes, not a path, so the upload route parses them
+// directly. Same core as magnetFromTorrentFile, which now reads then delegates.
+describe("magnetFromTorrentBytes", () => {
+  it("reads the info hash and name straight from the bytes", async () => {
+    const parsed = await magnetFromTorrentBytes(new Uint8Array(makeTorrent([])));
+    expect(parsed?.name).toBe("test.bin");
+    expect(parsed?.infoHash).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it("carries the torrent's own trackers, same as the file path", async () => {
+    const own = "http://private.example.org/announce?pk=xyz";
+    const parsed = await magnetFromTorrentBytes(new Uint8Array(makeTorrent([own])));
+    expect(parsed!.magnet).toContain(`&tr=${encodeURIComponent(own)}`);
+  });
+
+  it("returns null for empty, oversize, and junk bytes", async () => {
+    expect(await magnetFromTorrentBytes(new Uint8Array(0))).toBe(null);
+    expect(await magnetFromTorrentBytes(new Uint8Array(17 * 1024 * 1024))).toBe(null);
+    expect(await magnetFromTorrentBytes(new Uint8Array(Buffer.from("not a torrent")))).toBe(null);
+  });
+
+  it("rejects a bare 20-byte buffer instead of reading it as a raw infohash", async () => {
+    // parse-torrent treats any 20-byte buffer as an infohash, so without the
+    // info-dictionary guard a dropped 20-byte non-torrent file would be queued
+    // under its own bytes. It is not metadata, so it must be refused.
+    expect(await magnetFromTorrentBytes(new Uint8Array(20).fill(7))).toBe(null);
   });
 });

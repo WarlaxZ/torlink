@@ -37,7 +37,7 @@ import { HlsVerdictCache } from "../core/hlsVerdictCache";
 import { makeCheckHls, probeFetch } from "./hlsHealth";
 import { makeResolveHls } from "./hlsSource";
 import { contentTypeFor, findStaticDir, resolveAssetPath } from "./staticDir";
-import { readBody, statusPayload } from "../daemon/serve";
+import { MAX_TORRENT_BODY_BYTES, readBody, statusPayload } from "../daemon/serve";
 import { LOOPBACK_HOSTS, hostHeaderOk, isAuthorized, isCrossSiteHttpRequest } from "../daemon/auth";
 import { loadConfig, resolveCastAdvertiseHost } from "../config/config";
 import { createRemoteJWKSet, type JWTVerifyGetKey } from "jose";
@@ -598,7 +598,10 @@ export async function startWebServer(
       }
 
       if (isApiPath(urlPath)) {
-        const body = method === "POST" ? await readBody(req) : { text: "", tooLarge: false };
+        // A dropped .torrent (base64) is larger than the hard magnet cap; every
+        // other route keeps the small default so a stray body can't grow memory.
+        const cap = urlPath === "/api/add-torrent" ? MAX_TORRENT_BODY_BYTES : undefined;
+        const body = method === "POST" ? await readBody(req, cap) : { text: "", tooLarge: false };
         if (body.tooLarge) {
           // Answer on the still-live socket, then cut it: the client is mid-send
           // and will otherwise keep pushing into a half-closed connection.
