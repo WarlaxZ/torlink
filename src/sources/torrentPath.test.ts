@@ -70,3 +70,42 @@ describe("resolveTorrentPath", () => {
     expect(resolveTorrentPath('"C:\\Users\\u\\holiday.mp4"', WIN)).toBe(null);
   });
 });
+
+// Under WSL the process is Linux (windows:false) but a file dragged from
+// Windows Explorer arrives as a Windows path that is only reachable through the
+// /mnt interop mount. wsl:true routes those onto /mnt without mangling them.
+describe("resolveTorrentPath under WSL", () => {
+  const WSL = { wsl: true, windows: false, home: "/home/u" };
+
+  it("maps the quoted Windows path (trailing space) a WSL terminal drops onto /mnt", () => {
+    expect(resolveTorrentPath('"C:\\Users\\u\\Downloads\\Kestrel.2010.torrent" ', WSL)).toBe(
+      "/mnt/c/Users/u/Downloads/Kestrel.2010.torrent",
+    );
+  });
+  it("keeps a space in the name rather than reading the backslash as an escape", () => {
+    expect(resolveTorrentPath("C:\\Users\\u\\Tin Rivers (2024).torrent", WSL)).toBe(
+      "/mnt/c/Users/u/Tin Rivers (2024).torrent",
+    );
+  });
+  it("maps a file:///C:/… URI onto /mnt too", () => {
+    expect(resolveTorrentPath("file:///C:/Users/u/Kestrel%202010.torrent", WSL)).toBe(
+      "/mnt/c/Users/u/Kestrel 2010.torrent",
+    );
+  });
+  it("leaves a genuine POSIX path (already under /mnt, or ~) alone", () => {
+    expect(resolveTorrentPath("/mnt/c/Users/u/Ashfall.1999.torrent", WSL)).toBe(
+      "/mnt/c/Users/u/Ashfall.1999.torrent",
+    );
+    expect(resolveTorrentPath("~/Downloads/Ashfall.1999.torrent", WSL)).toBe(
+      "/home/u/Downloads/Ashfall.1999.torrent",
+    );
+  });
+  it("honours a custom mount root", () => {
+    expect(resolveTorrentPath("C:\\Kestrel.2010.torrent", { ...WSL, mountRoot: "/" })).toBe(
+      "/c/Kestrel.2010.torrent",
+    );
+  });
+  it("returns null for a Windows file that isn't a .torrent", () => {
+    expect(resolveTorrentPath('"C:\\Users\\u\\holiday.mp4"', WSL)).toBe(null);
+  });
+});

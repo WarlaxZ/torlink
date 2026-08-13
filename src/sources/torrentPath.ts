@@ -7,6 +7,7 @@
 import os from "node:os";
 import path from "node:path";
 import { expandHome } from "../config/folder";
+import { isWsl, wslPathFromWindows } from "../util/wsl";
 
 export interface TorrentPathOptions {
   home?: string;
@@ -15,6 +16,12 @@ export interface TorrentPathOptions {
   // host, and is passed explicitly by the tests so all three shapes are
   // checked on every OS rather than only on the one that produces them.
   windows?: boolean;
+  // Running under WSL: the process is Linux (windows:false) but a dragged file
+  // is a Windows path reachable only through the /mnt interop mount. Defaults
+  // to auto-detection; passed explicitly by the tests.
+  wsl?: boolean;
+  // Where the Windows drives are mounted under WSL (default /mnt).
+  mountRoot?: string;
 }
 
 // Strips one matching pair of surrounding quotes. Callers get a trimmed string
@@ -50,9 +57,24 @@ export function fromFileUrl(input: string, windows: boolean): string | null {
 // here; the caller reads the file and reports its own failure.
 export function resolveTorrentPath(raw: string, options: TorrentPathOptions = {}): string | null {
   const windows = options.windows ?? process.platform === "win32";
+  const wsl = options.wsl ?? isWsl();
   const home = options.home ?? os.homedir();
   const unquoted = unquote(raw);
   if (!unquoted) return null;
+
+  // Under WSL a file dragged from Windows Explorer is a Windows-shaped path
+  // (C:\… or file:///C:/…), but the process is Linux, so it must be mapped onto
+  // the /mnt interop mount before we touch the disk. A path that isn't
+  // drive-lettered — a real POSIX path typed under WSL, e.g. /mnt/c/… or ~/… —
+  // yields null here and falls through to the normal handling below.
+  if (wsl && !windows) {
+    const winUrl = fromFileUrl(unquoted, true);
+    const mounted = wslPathFromWindows(winUrl ?? unquoted, options.mountRoot);
+    if (mounted) {
+      if (!/\.torrent$/i.test(mounted)) return null;
+      return path.posix.normalize(mounted);
+    }
+  }
 
   const p = windows ? path.win32 : path.posix;
   const url = fromFileUrl(unquoted, windows);
