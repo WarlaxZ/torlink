@@ -1101,6 +1101,63 @@ Four things in there are decisions rather than defaults, and are worth knowing b
 No BitTorrent port is published. Outbound peers connect fine, so the swarm works — but nothing can dial
 in, so seeding ratios suffer. Publish the port you've configured if that matters to you.
 
+### Sharing downloads over your LAN (Samba / NFS)
+
+Finished downloads land in `/state/Downloads/torlink`. To browse or copy them from another machine — a
+laptop, or a media server like Jellyfin or Plex — there are two overlay compose files that add a
+file-share sidecar next to a torlink you're already running: `docker-compose.smb.yml` for **Samba (SMB)**
+and `docker-compose.nfs.yml` for **NFS**. Pick whichever suits the machine that'll mount it.
+
+You turn a share on by adding its `-f` to the command, and off by dropping it again — that's the whole
+enable/disable switch, nothing to edit. Each share is independent, so you can run either, both, or
+neither:
+
+```sh
+# Samba — has a username/password; friendliest for Windows and Mac:
+docker compose -f docker-compose.yml -f docker-compose.smb.yml up -d
+
+# NFS — no user auth, gated by client subnet; best for Linux or a media server:
+docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+
+# both at once — just add both overlays:
+docker compose -f docker-compose.yml -f docker-compose.smb.yml -f docker-compose.nfs.yml up -d
+```
+
+Set `SMB_USER` and `SMB_PASS` in a `.env` next to the compose files (there's deliberately no default —
+like the main compose's token, the SMB share refuses to start until you set them). The export is
+**read-only by default** — the LAN usually just reads completed files — and `SHARE_READONLY=no` turns
+writes on, where any written-back file stays owned by torlink's uid 1000 rather than root.
+
+Both sidecars mount **only** `./state/Downloads/torlink`, never `./state` — that directory holds
+`config.json` with your debrid and OMDb tokens, so sharing the whole state tree would put those tokens on
+the LAN. The overlay shares the finished files and nothing else.
+
+Three things catch people out:
+
+- **Windows already owns port 445.** Its own "Server" service binds 445 on the host, so a Samba sidecar
+  on the same machine can't. Free it (stop that service) or map a different host port in the overlay —
+  or sidestep the clash entirely by using the NFS profile, which listens on 2049.
+- **WSL2 hides the ports from the LAN.** WSL2 runs in a NAT'd VM, so a published port isn't reachable
+  from other machines by default. Turn on **mirrored networking** (`%UserProfile%\.wslconfig` →
+  `[wsl2]` `networkingMode=mirrored`, Windows 11 22H2+) so the ports appear on your real LAN address, or
+  forward each one with `netsh interface portproxy` (fiddlier — the WSL VM's IP changes on reboot, so it
+  needs a startup script). On a native Linux host neither is needed.
+- **NFS needs a kernel with `nfsd`; SMB doesn't.** The NFS sidecar runs the kernel NFS server, so it
+  wants `privileged` and a host kernel that ships the `nfsd` module. A real Linux box (NAS, seedbox) has
+  it; the **stock WSL2 kernel often doesn't**, and the container will exit saying it can't start nfsd. So
+  on WSL, **SMB is the path of least resistance** — reach for NFS when the client is Linux or a media
+  server on a Linux host.
+
+Mounting it from the other machine, once the share is up and reachable — `HOST` is the address torlink
+runs on:
+
+```sh
+# Windows (SMB):   net use Z: \\HOST\torlink /user:SMB_USER
+# macOS (SMB):     open smb://SMB_USER@HOST/torlink        (or Finder → Go → Connect to Server)
+# Linux (SMB):     sudo mount -t cifs //HOST/torlink /mnt/torlink -o username=SMB_USER
+# Linux (NFS):     sudo mount -t nfs HOST:/ /mnt/torlink
+```
+
 ### Posters
 
 Posters are fetched once and cached on disk. The browser gets the full-quality image; the TUI

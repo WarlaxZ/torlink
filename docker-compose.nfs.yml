@@ -1,0 +1,67 @@
+# Share torlink's finished downloads over the LAN via NFS.
+#
+# This is an OVERLAY. It adds an NFS sidecar next to a torlink you are already
+# running; it does not start torlink itself. You opt in by adding its `-f`, and
+# you opt out by dropping it again — that is the whole enable/disable switch,
+# with nothing here to edit. NFS suits a Linux client or a media server
+# (Jellyfin/Plex); for Windows/Mac laptops, SMB (docker-compose.smb.yml) is
+# friendlier, and on WSL it is the path of least resistance (see the kernel note
+# below).
+#
+#   # turn the share on (stack it on the plain compose, or the Access one):
+#   docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+#
+#   # run NFS and SMB together — just add both overlays:
+#   docker compose -f docker-compose.yml -f docker-compose.nfs.yml -f docker-compose.smb.yml up -d
+#
+#   # turn it off again:
+#   docker compose -f docker-compose.yml -f docker-compose.nfs.yml down
+#
+# WHAT IT SHARES, AND WHAT IT DELIBERATELY DOES NOT
+#   It mounts ONLY ./state/Downloads/torlink — the finished files. It never
+#   touches ./state itself, because that directory holds config.json with your
+#   Real-Debrid / TorBox / OMDb tokens. Sharing the whole state tree would put
+#   those tokens on the LAN; sharing the Downloads subdirectory does not.
+#
+# WSL2 USERS, READ THIS FIRST
+#   Two things stand between this and a machine on your LAN:
+#   1. WSL2 runs in a NAT'd VM, so port 2049 is NOT reachable from another
+#      machine by default. Turn on mirrored networking (%UserProfile%\.wslconfig
+#      -> [wsl2] networkingMode=mirrored, Win11 22H2+), or forward it with
+#      `netsh interface portproxy`.
+#   2. This image runs the KERNEL nfsd, so it needs `privileged: true` AND a host
+#      kernel that ships the `nfsd` module. The stock WSL2 kernel often does not
+#      — if the container exits saying it can't start nfsd, that is why, and SMB
+#      is the easier path on WSL. On a real Linux host (a NAS, a seedbox) it just
+#      works.
+#
+# Optional environment (a .env file next to this one, or a secrets manager):
+#   SHARE_READONLY / NFS_READ_ONLY - read-only export (default on); see below
+#   NFS_PERMITTED                  - client addresses allowed to mount
+
+services:
+  # itsthenetwork/nfs-server-alpine runs the kernel NFS server — simple, but see
+  # the WSL kernel caveat above.
+  torlnk-nfs:
+    image: itsthenetwork/nfs-server-alpine:latest
+    container_name: torlnk-nfs
+    restart: unless-stopped
+    privileged: true
+
+    ports:
+      - "2049:2049"
+
+    environment:
+      SHARED_DIRECTORY: /downloads
+      # NFS has no user login — mounting is gated by client address instead.
+      # Defaults to the private (RFC1918) ranges; tighten to your own subnet,
+      # e.g. NFS_PERMITTED=192.168.1.0/24, for a smaller blast radius.
+      PERMITTED: ${NFS_PERMITTED:-10.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
+      # Presence-based in this image: any non-empty value exports read-only, and
+      # it defaults to read-only here. Set NFS_READ_ONLY= (empty) in your .env to
+      # allow writes; a written-back file stays owned by torlink's uid 1000.
+      READ_ONLY: ${NFS_READ_ONLY-true}
+
+    volumes:
+      # The finished-downloads directory ONLY — never ./state (tokens live there).
+      - ./state/Downloads/torlink:/downloads
