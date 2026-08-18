@@ -31,8 +31,20 @@ describe("buildPlayedIndex + playedStateFor", () => {
 
   it("marks a later episode of a watched series played (title-level)", () => {
     const idx = buildPlayedIndex([ep("kepler|series", 2, 4)]);
-    // A different episode of the same show still counts as watched at title level.
-    expect(playedStateFor("Kepler.S02E07.1080p.WEB-DL", idx).played).toBe(true);
+    // A different episode of the same season still counts as watched at title level,
+    // and the season matches so the high-water is honestly reportable.
+    const state = playedStateFor("Kepler.S02E07.1080p.WEB-DL", idx);
+    expect(state.played).toBe(true);
+    expect(state.upTo).toEqual({ season: 2, episode: 4 });
+  });
+
+  it("does not report a high-water from a DIFFERENT season", () => {
+    const idx = buildPlayedIndex([ep("kepler|series", 2, 4)]);
+    // The show is played (title-level), but "up to E04" belongs to season 2 — it
+    // would be a false claim next to a season-3 release, so upTo is withheld.
+    const state = playedStateFor("Kepler.S03E01.1080p.WEB-DL", idx);
+    expect(state.played).toBe(true);
+    expect(state.upTo).toBeUndefined();
   });
 
   it("exposes series position by show key for the TUI's season rows", () => {

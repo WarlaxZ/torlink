@@ -51,7 +51,16 @@ export function playedStateFor(releaseName: string, index: PlayedIndex): PlayedS
   if (parsed.type === "series") {
     const showKey = stripSeries(historyKeyFor(parsed));
     const upTo = index.series.get(showKey);
-    return upTo ? { played: true, upTo } : { played: false };
+    if (!upTo) return { played: false };
+    // The show is in history, so title-level it IS played. But only surface the
+    // precise "up to E0x" when this release names the SAME season as the high-water
+    // mark: an episode number carried over from another season reads as a false
+    // claim — the exact dishonesty positionNote guards against. Different season (or
+    // a season-less reference) stays a plain "played".
+    if (parsed.season !== undefined && parsed.season === upTo.season) {
+      return { played: true, upTo };
+    }
+    return { played: true };
   }
   return index.titles.has(historyKeyFor(parsed)) ? { played: true } : { played: false };
 }

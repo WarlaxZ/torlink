@@ -1093,14 +1093,23 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                           <Text color={COLOR.good}>cached</Text>
                         </Box>
                       ) : null}
-                      {/* "▸ played" for a release you have watched. Series season
-                          rows already carry the "up to E0x" note above, so this is
-                          really the marker films and one-off rows never had. */}
-                      {!isGroup && playedStateFor(r.name, playedIndex).played ? (
-                        <Box flexShrink={0} marginLeft={1}>
-                          <Text color={COLOR.played}>{`${ICON.caretRight} played`}</Text>
-                        </Box>
-                      ) : null}
+                      {/* "▸ played" for a film, "▸ up to E0x" for an episode of a
+                          show you're part-way through (season-matched, so it never
+                          claims progress from another season). The marker films and
+                          one-off rows never had. */}
+                      {(() => {
+                        if (isGroup) return null;
+                        const p = playedStateFor(r.name, playedIndex);
+                        if (!p.played) return null;
+                        const label = p.upTo
+                          ? `up to E${String(p.upTo.episode).padStart(2, "0")}`
+                          : "played";
+                        return (
+                          <Box flexShrink={0} marginLeft={1}>
+                            <Text color={COLOR.played}>{`${ICON.caretRight} ${label}`}</Text>
+                          </Box>
+                        );
+                      })()}
                       {showStats ? (
                         <>
                           <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">
