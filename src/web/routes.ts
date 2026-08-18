@@ -100,6 +100,7 @@ import type {
   ExportTorrentResponse,
   PublicCastDevice,
   ContinueWatchingResponse,
+  DownloadedResponse,
   LibraryResponse,
   PreferencesResponse,
   PublicFavourite,
@@ -1096,6 +1097,16 @@ export function toPublicStreamHistoryItem(item: StreamHistoryItem): PublicStream
   if (item.season !== undefined) out.season = item.season;
   if (item.episode !== undefined) out.episode = item.episode;
   return out;
+}
+
+/**
+ * `GET /api/library/downloaded`: infoHashes of completed downloads, lower-cased.
+ * Reads the in-memory download history on the queue — distinct from the on-disk
+ * stream (watch) history `savedLists` serves.
+ */
+function downloadedLibrary(deps: WebDeps): WebResponse {
+  const hashes = deps.runtime.queue.getHistory().map((h) => h.id.toLowerCase());
+  return { status: 200, json: { hashes } satisfies DownloadedResponse };
 }
 
 /** `GET /api/saved`: both lists, in one round trip because the pane shows both. */
@@ -2312,6 +2323,10 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/saved") {
     return savedLists(deps, accessEmail);
+  }
+
+  if (method === "GET" && urlPath === "/api/library/downloaded") {
+    return downloadedLibrary(deps);
   }
 
   if (method === "POST" && urlPath === "/api/saved-searches") {

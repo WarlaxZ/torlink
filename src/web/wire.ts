@@ -933,6 +933,20 @@ export interface SavedResponse {
 }
 
 /**
+ * The body of `GET /api/library/downloaded`: the infoHashes of every COMPLETED
+ * download the daemon still remembers (`queue.getHistory()`, capped at 500).
+ * Lower-cased so the browser matches case-insensitively, like `cachedHashes`.
+ *
+ * Deliberately its own fetch-once route rather than a field on `StatusPayload`:
+ * that payload streams over SSE on every progress tick, and 500 hashes per frame
+ * is churn to no end. Live in-flight downloads already ride `StatusPayload.downloads`;
+ * the client unions this initial set with completions it sees stream past there.
+ */
+export interface DownloadedResponse {
+  hashes: string[];
+}
+
+/**
  * The body of `POST /api/saved-searches`.
  *
  * `toggle` mirrors the TUI's `w` key: save this query, or unsave it if it is
