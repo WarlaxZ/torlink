@@ -7,6 +7,7 @@ import {
   formatRate,
   mergeRows,
   rowsFromStatus,
+  completedDownloadHashes,
   shortName,
   type DashRow,
   type StatusPayload,
@@ -62,6 +63,23 @@ describe("rowsFromStatus", () => {
 
   it("tolerates missing arrays", () => {
     expect(rowsFromStatus({} as StatusPayload)).toEqual([]);
+  });
+});
+
+describe("completedDownloadHashes", () => {
+  it("returns lower-cased ids of downloads that have completed", () => {
+    const payload: StatusPayload = {
+      downloads: [
+        { id: "AABB", name: "Kestrel.2010.1080p", status: "completed", progress: 100, peers: 0, speed: 0 },
+        { id: "CCDD", name: "Ashfall.1999.1080p", status: "downloading", progress: 40, peers: 3, speed: 1 },
+      ],
+      seeds: [],
+    };
+    expect(completedDownloadHashes(payload)).toEqual(["aabb"]);
+  });
+
+  it("tolerates a missing downloads array", () => {
+    expect(completedDownloadHashes({} as StatusPayload)).toEqual([]);
   });
 });
 

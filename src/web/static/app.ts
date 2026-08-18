@@ -6,6 +6,7 @@
 // Bundled for the browser, so it must import nothing from node:* and nothing in
 // the repo outside this directory.
 import {
+  completedDownloadHashes,
   failureLine,
   formatBytes,
   formatRate,
@@ -17,6 +18,7 @@ import {
   type DashRow,
   type StatusPayload,
 } from "./dashboard";
+import { buildPlayedIndex, type PlayedIndex } from "../../util/playedState";
 import { abortableSleep } from "./abortableSleep";
 import { controlState, isBusy, type FlowState } from "./streamBusy";
 import {
@@ -40,6 +42,10 @@ import {
   addPlan,
   ALL_TAB,
   cachedTag,
+  downloadTag,
+  playedTag,
+  showCached,
+  downloadedCount,
   categoryTabs,
   dashRowForPlay,
   debridAddedNotice,
@@ -192,7 +198,7 @@ import {
   prefsFromWire,
   type PickState,
 } from "./pickModel";
-import type { PreferencesResponse, PublicQualityPrefs, PublicTitleSuggestions } from "../wire";
+import type { DownloadedResponse, PreferencesResponse, PublicQualityPrefs, PublicTitleSuggestions } from "../wire";
 import {
   emptyListState,
   isOpen as suggestOpen,
@@ -298,6 +304,9 @@ const sortSelect = el<HTMLSelectElement>("sort");
 const filterInput = el<HTMLInputElement>("filter");
 const aliveCheck = el<HTMLInputElement>("alive");
 const groupCheck = el<HTMLInputElement>("group");
+const hideDownloadedCheck = el<HTMLInputElement>("hide-downloaded");
+const hideDownloadedControl = el<HTMLLabelElement>("hide-downloaded-control");
+const downloadedCountEl = el<HTMLSpanElement>("downloaded-count");
 const layoutControl = el<HTMLLabelElement>("layout-control");
 const layoutSelect = el<HTMLSelectElement>("layout");
 const searchProgress = el<HTMLSpanElement>("search-progress");
@@ -1466,6 +1475,15 @@ let cachedHashes: ReadonlySet<string> = new Set();
 // search has already begun cannot paint stale badges onto this search's rows —
 // the same failure mode a marker on the wrong row would be.
 let cachedGeneration = 0;
+// Lowercase info hashes the user has ever downloaded: the completed-download
+// history from GET /api/library/downloaded, unioned live with any completion seen
+// stream past on the SSE status feed. Drives the "✓ Downloaded" badge and the
+// hide-downloaded filter. Empty until loadDownloaded() answers — a missing badge
+// is never worth blocking on.
+let downloadedHashes = new Set<string>();
+// Title-level watched index, rebuilt from savedState.continueWatching whenever the
+// saved lists load. Drives the "▸ Played" marker. See src/util/playedState.ts.
+let playedIndex: PlayedIndex = buildPlayedIndex([]);
 // The info hash of the row whose preview is showing, so a re-render can restore
 // the selection: the results list is rebuilt on every snapshot frame, and up to
 // 23 of those arrive during one search.
@@ -1711,6 +1729,27 @@ function refreshCachedHashes(): void {
     cachedHashes = new Set(body.cached.filter((h): h is string => typeof h === "string"));
     renderResults();
   })();
+}
+
+// The completed-download history, fetched once. Live in-flight state comes from the
+// SSE feed (liveDownloadItems); this is the "downloaded weeks ago and long cleared"
+// half the live feed can't know. Fails soft — a missing set just means no badges.
+async function loadDownloaded(): Promise<void> {
+  try {
+    const res = await fetch("/api/library/downloaded", { headers: authHeaders() });
+    if (!res.ok) return;
+    const body = (await readJson(res)) as unknown as DownloadedResponse;
+    downloadedHashes = new Set((body.hashes ?? []).map((h) => h.toLowerCase()));
+    renderResults();
+  } catch {
+    // leave the set as-is; a missing badge is never worth a visible error
+  }
+}
+
+// Live downloads on the client, shaped for downloadTag/downloadStateFor. Read from
+// the same `rows` the downloads pane renders, so the badge and the pane never disagree.
+function liveDownloadItems(): { id: string; status: string }[] {
+  return rows.filter((r) => r.kind === "download").map((r) => ({ id: r.id, status: r.status }));
 }
 
 function startSearch(raw: string): void {
@@ -2083,6 +2122,12 @@ aliveCheck.addEventListener("change", () => {
   renderResults();
 });
 
+hideDownloadedCheck.addEventListener("change", () => {
+  // A view change, not a search change: it hides fetched rows you already own.
+  searchView = { ...searchView, hideDownloaded: hideDownloadedCheck.checked };
+  renderResults();
+});
+
 layoutSelect.addEventListener("change", () => {
   layout = parseLayout(layoutSelect.value);
   try {
@@ -2438,13 +2483,58 @@ function appendQualityBadges(meta: HTMLElement, name: string): void {
 
 // createElement + textContent only — see the file-level rule. `cachedTag`
 // already folds in `debridCachedCheck`, so this is a straight append-or-not.
-function appendCachedBadge(meta: HTMLElement, result: PublicSearchResult): void {
-  const tag = cachedTag(result.infoHash, cachedHashes, sources?.debridCachedCheck === true);
-  if (!tag) return;
+// Your-history badges (downloaded, watched) followed by swarm news (cached). All
+// three decisions — which state, and whether cached is decluttered because you
+// already own the result — come from searchModel; this only builds the nodes.
+// createElement + textContent only: release names are attacker-controlled (file rule).
+function appendStateBadges(meta: HTMLElement, result: PublicSearchResult): void {
+  const download = downloadTag(result.infoHash, liveDownloadItems(), downloadedHashes);
+  if (download === "done") {
+    appendMarker(meta, "tag-owned", "✓ Downloaded");
+  } else if (download === "downloading") {
+    appendMarker(meta, "tag-downloading", "⤓ Downloading");
+  } else if (download === "paused") {
+    appendMarker(meta, "tag-downloading", "⤓ Paused");
+  } else if (download === "failed") {
+    appendMarker(meta, "tag-downloading", "⚠ Failed");
+  }
+
+  const played = playedTag(result.name, playedIndex);
+  if (played) appendMarker(meta, "tag-played", `▸ ${played.text}`);
+
+  const cached = cachedTag(result.infoHash, cachedHashes, sources?.debridCachedCheck === true);
+  if (showCached(download, cached)) appendMarker(meta, "tag-cached", cached!);
+}
+
+function appendMarker(meta: HTMLElement, className: string, text: string): void {
   const badge = document.createElement("span");
-  badge.className = "tag-cached";
-  badge.textContent = tag;
+  badge.className = className;
+  badge.textContent = text;
   meta.append(badge);
+}
+
+// Owned pin + watched bar on a poster card. Attached to the poster button (not the
+// frame) so a lazily-loaded image landing later cannot replaceChildren them away.
+function decorateResultPoster(posterButton: HTMLElement, result: PublicSearchResult): void {
+  const download = downloadTag(result.infoHash, liveDownloadItems(), downloadedHashes);
+  if (download === "done") {
+    posterButton.classList.add("owned");
+    const pin = document.createElement("span");
+    pin.className = "pin";
+    pin.textContent = "✓";
+    posterButton.append(pin);
+  } else if (download === "downloading") {
+    const pin = document.createElement("span");
+    pin.className = "pin dl";
+    pin.textContent = "⤓";
+    posterButton.append(pin);
+  }
+  const played = playedTag(result.name, playedIndex);
+  if (played) {
+    const bar = document.createElement("span");
+    bar.className = played.text === "Played" ? "watchbar" : "watchbar partial";
+    posterButton.append(bar);
+  }
 }
 
 /** What a row needs to also present itself as a group heading. */
@@ -2598,6 +2688,9 @@ function renderResultCard(
   // compact: false — a card's frame is poster-width, so an empty one shows its
   // note as text rather than relying on a tooltip.
   mountResultPoster(result.name, frame, false);
+  // Owned/watched overlays go on the BUTTON, not the frame: mountResultPoster
+  // replaceChildren()s the frame when the lazy image lands, which would wipe them.
+  decorateResultPoster(posterButton, result);
 
   const name = document.createElement("button");
   name.type = "button";
@@ -2613,7 +2706,7 @@ function renderResultCard(
   meta.className = "row-meta";
   meta.textContent = resultMeta(result, sources);
   appendQualityBadges(meta, result.name);
-  appendCachedBadge(meta, result);
+  appendStateBadges(meta, result);
 
   li.append(posterButton, name);
   if (group) {
@@ -2658,7 +2751,7 @@ function renderResult(
   meta.className = "result-meta";
   meta.textContent = resultMeta(result, sources);
   appendQualityBadges(meta, result.name);
-  appendCachedBadge(meta, result);
+  appendStateBadges(meta, result);
 
   const actions = resultActions(result, rowKey);
 
@@ -2731,7 +2824,7 @@ function renderGroupRow(
   meta.className = "result-meta";
   meta.textContent = resultMeta(best, sources);
   appendQualityBadges(meta, best.name);
-  appendCachedBadge(meta, best);
+  appendStateBadges(meta, best);
 
   const body = document.createElement("div");
   body.className = "group-body";
@@ -2742,7 +2835,7 @@ function renderGroupRow(
   if (row.kind === "season") {
     const positionFor = positionLookup(savedState.continueWatching);
     const plan = seasonPlayPlan(
-      visibleGroups(searchView, reportsHealthLookup(sources)),
+      visibleGroups(searchView, reportsHealthLookup(sources), downloadedHashes),
       row.key,
       positionFor,
     );
@@ -2777,7 +2870,17 @@ function renderResults(): void {
   // observer accumulates targets across all 23 snapshot frames of a search,
   // pinning detached nodes for every row that never scrolled into view.
   posterObserver?.disconnect();
-  const shown = visibleResults(searchView, reportsHealthLookup(sources));
+  const shown = visibleResults(searchView, reportsHealthLookup(sources), downloadedHashes);
+
+  // "N downloaded", counted over the WHOLE result set (not the hide-filtered one,
+  // which would read 0 the moment the filter is on). The control only earns its
+  // place when there is something to hide — otherwise it and the count stay out of
+  // the toolbar. Checkbox synced so a restored/programmatic state shows correctly.
+  const allResults = searchView.snapshot?.results ?? [];
+  const nDownloaded = downloadedCount(allResults, downloadedHashes);
+  hideDownloadedCheck.checked = searchView.hideDownloaded;
+  hideDownloadedControl.hidden = nDownloaded === 0;
+  downloadedCountEl.textContent = nDownloaded > 0 ? `${nDownloaded} downloaded` : "";
 
   // The toggle is meaningless where there is no artwork, and a grid of empty
   // frames is worse than the list it replaced — so on a Games tab, or with no
@@ -2801,7 +2904,7 @@ function renderResults(): void {
   // land, into the set the toggles already own, so collapsing it behaves like
   // collapsing anything else.
   if (!seededExpansion) {
-    const groups = visibleGroups(searchView, reportsHealthLookup(sources));
+    const groups = visibleGroups(searchView, reportsHealthLookup(sources), downloadedHashes);
     if (groups.length > 0) {
       const positionFor = positionLookup(savedState.continueWatching);
       // `running` is true between submit and the `done` frame; !running == settled.
@@ -2816,7 +2919,7 @@ function renderResults(): void {
       seededExpansion = seed.latch;
     }
   }
-  currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups);
+  currentRows = resultRowPlan(searchView, reportsHealthLookup(sources), expandedGroups, downloadedHashes);
   const rowKeys = currentRows.map((row) => row.key);
   // The selected ROW, not the selected hash: a heading's key is a group key, so
   // comparing selectedHash to it would never match.
@@ -3798,6 +3901,10 @@ async function loadSaved(): Promise<void> {
       return;
     }
     savedState = applySaved(savedState, await readJson(res));
+    // The same watch history the continue-watching pane shows also drives the
+    // "▸ Played" marker on results, so rebuild the index whenever it reloads.
+    playedIndex = buildPlayedIndex(savedState.continueWatching);
+    renderResults();
   } catch {
     savedState = { ...savedState, loaded: true, error: "Couldn't load your lists — the server is not responding." };
   }
@@ -4221,6 +4328,10 @@ function openApp(payload: StatusPayload): void {
   // savedState: without this, a hit already in the library opens reading
   // "favourite" and the first click removes it.
   void loadSaved();
+  // The completed-download set behind the "✓ Downloaded" badge and the
+  // hide-downloaded filter. Fire-and-forget like the lists above; results render
+  // fine without it and re-render when it lands.
+  void loadDownloaded();
   renderRecent();
   queryInput.focus();
   // `?prefs=1` — the player page's "Avoid this next time", from the card that
@@ -4266,6 +4377,14 @@ function connect(): void {
       return;
     }
     rows = mergeRows(rows, rowsFromStatus(payload));
+    // A download that completes mid-session leaves the live queue and would lose
+    // its badge; union any completion seen here into the "ever downloaded" set so
+    // it stays marked without re-fetching the history route.
+    const done = completedDownloadHashes(payload);
+    if (done.some((h) => !downloadedHashes.has(h))) {
+      for (const h of done) downloadedHashes.add(h);
+      renderResults();
+    }
     render();
   });
   source.addEventListener("error", () => {

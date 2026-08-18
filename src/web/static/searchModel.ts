@@ -266,6 +266,7 @@ export function downloadedCount(
 export function visibleGroups(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
+  downloaded: ReadonlySet<string> = new Set(),
 ): ResultGroup<PublicSearchResult>[] {
   // THE HINT IS NOT OPTIONAL for cross-surface agreement. The TUI groups with
   // hintForSection(section); passing nothing here would let the same feed group
@@ -273,7 +274,7 @@ export function visibleGroups(
   // parseRelease reads a name as a film or a series — and that changes the shape
   // of the key. hintForGroup is the "Movies"/"TV" → movie/series translation the
   // browser's tab names need, and it already exists for the badges.
-  return groupResults(visibleResults(view, reportsHealth), hintForGroup(view.group));
+  return groupResults(visibleResults(view, reportsHealth, downloaded), hintForGroup(view.group));
 }
 
 /**
@@ -291,8 +292,9 @@ export function resultRowPlan(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
   expanded: ReadonlySet<string>,
+  downloaded: ReadonlySet<string> = new Set(),
 ): GroupRow<PublicSearchResult>[] {
-  const shown = visibleResults(view, reportsHealth);
+  const shown = visibleResults(view, reportsHealth, downloaded);
   if (!view.grouped) {
     // Keyed on the info hash rather than a group key: this is the identity
     // selection, focus restoration and the cached-marker lookup already use.
