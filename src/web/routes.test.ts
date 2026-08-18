@@ -33,6 +33,7 @@ import type { StreamHistoryItem } from "../core/streamHistory";
 import type { Source, SourceId, TorrentResult } from "../sources/types";
 import type {
   CastDevicesResponse,
+  DownloadedResponse,
   LibraryResponse,
   PreferencesResponse,
   PublicSearchSnapshot,
@@ -2828,6 +2829,30 @@ describe("GET /api/saved — continueWatching", () => {
   it("answers an empty list when nothing has been streamed", async () => {
     const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
     expect((res.json as SavedResponse).continueWatching).toEqual([]);
+  });
+});
+
+describe("handleWebApi — GET /api/library/downloaded", () => {
+  it("returns completed-download infoHashes, lower-cased", async () => {
+    const rt = runtime();
+    rt.queue.restoreHistory([
+      { id: "AABB", name: "Kestrel.2010.1080p.BluRay.x264", sizeBytes: 1, magnet: "", dir: "/tmp/dl", completedAt: 0 },
+    ]);
+    const res = await handleWebApi(
+      deps({ runtime: rt }),
+      "GET",
+      "/api/library/downloaded",
+      new URLSearchParams(),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(200);
+    expect((res.json as DownloadedResponse).hashes).toEqual(["aabb"]);
+  });
+
+  it("answers an empty list when nothing has been downloaded", async () => {
+    const res = await handleWebApi(deps(), "GET", "/api/library/downloaded", new URLSearchParams(), undefined, "");
+    expect((res.json as DownloadedResponse).hashes).toEqual([]);
   });
 });
 

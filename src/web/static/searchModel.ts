@@ -27,6 +27,8 @@ import {
   type ResultGroup,
 } from "../../util/resultGroup";
 import { sortResults, type Sort } from "../../util/resultSort";
+import { downloadStateFor, type DownloadState } from "../../util/downloadState";
+import { playedStateFor, type PlayedIndex } from "../../util/playedState";
 import type { PositionLookup } from "../../util/resultGroup";
 import type { EpisodeRef } from "../../util/episode";
 import type { PublicStreamHistoryItem } from "../wire";
@@ -158,6 +160,14 @@ export interface SearchView {
    * fetched are presented, so toggling it never re-runs a 23-source fan-out.
    */
   grouped: boolean;
+  /**
+   * Whether results the user has already downloaded are hidden. A view
+   * preference (like {@link SearchView.grouped}), not a search parameter: it
+   * changes which fetched rows show, so toggling it never re-runs a search. Made
+   * for the "grab every release of a title" workflow — flip it and only what is
+   * left to download remains.
+   */
+  hideDownloaded: boolean;
 }
 
 export function emptyView(): SearchView {
@@ -178,6 +188,9 @@ export function emptyView(): SearchView {
     // and one measured search returned 129 results that were 21 actual things.
     // The list is the product; showing it duplicated by default is the bug.
     grouped: true,
+    // OFF: the default search shows everything, downloaded or not. The filter is
+    // opt-in, for when the user is deliberately completing a title.
+    hideDownloaded: false,
   };
 }
 
@@ -194,9 +207,52 @@ export function emptyView(): SearchView {
 export function visibleResults(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
+  downloaded: ReadonlySet<string> = new Set(),
 ): PublicSearchResult[] {
   const all = view.snapshot?.results ?? [];
-  return sortResults(filterResults(all, view.hideDead, view.textFilter, reportsHealth), view.sort);
+  const kept = view.hideDownloaded
+    ? all.filter((r) => !downloaded.has(r.infoHash.toLowerCase()))
+    : all;
+  return sortResults(filterResults(kept, view.hideDead, view.textFilter, reportsHealth), view.sort);
+}
+
+// Download state of one result, from the live queue plus the fetched "ever
+// downloaded" set — the browser's mirror of the TUI's
+// downloadStateFor(hash, items, history). Case-insensitive, like cachedTag.
+export function downloadTag(
+  infoHash: string,
+  live: readonly { id: string; status: string }[],
+  downloaded: ReadonlySet<string>,
+): DownloadState | null {
+  return downloadStateFor(
+    infoHash.toLowerCase(),
+    live.map((d) => ({ id: d.id.toLowerCase(), status: d.status })),
+    [...downloaded].map((id) => ({ id })),
+  );
+}
+
+// Watched marker for a result, title-level. Null when never played; otherwise a
+// short label — "Played" for a film, "up to E0x" for a series.
+export function playedTag(name: string, index: PlayedIndex): { text: string } | null {
+  const state = playedStateFor(name, index);
+  if (!state.played) return null;
+  if (state.upTo) return { text: `up to E${String(state.upTo.episode).padStart(2, "0")}` };
+  return { text: "Played" };
+}
+
+// The declutter rule: a result you already own does not need a "cached on debrid"
+// badge — owning it silences that swarm news. Returns whether to show the cached tag.
+export function showCached(download: DownloadState | null, cached: "cached" | null): boolean {
+  if (!cached) return false;
+  return download !== "done";
+}
+
+// How many of these results the user has already downloaded, for the toolbar count.
+export function downloadedCount(
+  results: readonly PublicSearchResult[],
+  downloaded: ReadonlySet<string>,
+): number {
+  return results.reduce((n, r) => (downloaded.has(r.infoHash.toLowerCase()) ? n + 1 : n), 0);
 }
 
 /**
@@ -210,6 +266,7 @@ export function visibleResults(
 export function visibleGroups(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
+  downloaded: ReadonlySet<string> = new Set(),
 ): ResultGroup<PublicSearchResult>[] {
   // THE HINT IS NOT OPTIONAL for cross-surface agreement. The TUI groups with
   // hintForSection(section); passing nothing here would let the same feed group
@@ -217,7 +274,7 @@ export function visibleGroups(
   // parseRelease reads a name as a film or a series — and that changes the shape
   // of the key. hintForGroup is the "Movies"/"TV" → movie/series translation the
   // browser's tab names need, and it already exists for the badges.
-  return groupResults(visibleResults(view, reportsHealth), hintForGroup(view.group));
+  return groupResults(visibleResults(view, reportsHealth, downloaded), hintForGroup(view.group));
 }
 
 /**
@@ -235,8 +292,9 @@ export function resultRowPlan(
   view: SearchView,
   reportsHealth: (source: string) => boolean,
   expanded: ReadonlySet<string>,
+  downloaded: ReadonlySet<string> = new Set(),
 ): GroupRow<PublicSearchResult>[] {
-  const shown = visibleResults(view, reportsHealth);
+  const shown = visibleResults(view, reportsHealth, downloaded);
   if (!view.grouped) {
     // Keyed on the info hash rather than a group key: this is the identity
     // selection, focus restoration and the cached-marker lookup already use.

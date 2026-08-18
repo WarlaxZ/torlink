@@ -31,7 +31,6 @@ import {
   showKeyOf,
   type PositionLookup,
 } from "../../util/resultGroup";
-import type { EpisodeRef } from "../../util/episode";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -40,6 +39,7 @@ import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../
 import { filterResults } from "../filter";
 import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
+import { buildPlayedIndex, playedStateFor, seriesPosition } from "../../util/playedState";
 import { cleanText, formatBytes, formatCount, formatRelative, stripControl, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
 import type { FetchImpl } from "../../util/net";
@@ -284,21 +284,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     [disabledSources, adultEnabled],
   );
 
-  // Where the user is in each show, by the same normalised show key the group
-  // keys use — one normaliser since titleKey.ts unified them. Memoised so the
-  // seeding effects below do not re-run every render.
-  const positionFor = useMemo<PositionLookup>(() => {
-    const byShow = new Map<string, EpisodeRef>();
-    // `?? []` is not paranoia: Results.ratePrompt.test.tsx builds a partial store
-    // with `as unknown as Store`, and a crash here takes the whole results list
-    // down. A missing convenience list must degrade to "no position known".
-    for (const item of streamHistory ?? []) {
-      if (item.type !== "series") continue;
-      if (item.season === undefined || item.episode === undefined) continue;
-      byShow.set(item.key.replace(/\|series$/, ""), { season: item.season, episode: item.episode });
-    }
-    return (showKey) => byShow.get(showKey) ?? null;
-  }, [streamHistory]);
+  // Your watch history, indexed once for both the series "up to E0x" note and the
+  // "▸ played" marker on films — the same index the web builds, in src/util so the
+  // two front ends cannot drift. `?? []` is not paranoia: Results.ratePrompt.test.tsx
+  // builds a partial store with `as unknown as Store`, and a crash here takes the
+  // whole results list down; a missing list must degrade to "nothing played".
+  const playedIndex = useMemo(() => buildPlayedIndex(streamHistory ?? []), [streamHistory]);
+  // Where the user is in each show, by the same normalised show key the group keys
+  // use. Kept as a PositionLookup so every existing consumer is untouched.
+  const positionFor = useMemo<PositionLookup>(
+    () => (showKey) => seriesPosition(showKey, playedIndex),
+    [playedIndex],
+  );
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);
@@ -307,6 +304,10 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   // `aliveOnly` is the fork's name for upstream's hideDead; `textFilter` is the
   // upstream in-memory token filter. `sort` is persisted via the store.
   const [aliveOnly, setAliveOnly] = useState(false);
+  // Hide results already downloaded, the browser's hide-downloaded toggle. Local
+  // state like aliveOnly. Only "done" is dropped — an in-flight download stays
+  // visible so its progress mark is still there to see.
+  const [hideDownloaded, setHideDownloaded] = useState(false);
   const [textFilter, setTextFilter] = useState("");
 
   const results = useMemo(() => {
@@ -314,8 +315,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const base = cat?.group
       ? search.results.filter((r) => getSource(r.source).groups?.includes(cat.group!))
       : search.results;
-    return sortResults(filterResults(base, aliveOnly, textFilter), sort);
-  }, [search.results, section, sort, aliveOnly, textFilter]);
+    const sorted = sortResults(filterResults(base, aliveOnly, textFilter), sort);
+    return hideDownloaded
+      ? sorted.filter((r) => downloadStateFor(r.infoHash, queueItems, queueHistory) !== "done")
+      : sorted;
+  }, [search.results, section, sort, aliveOnly, textFilter, hideDownloaded, queueItems, queueHistory]);
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
@@ -717,6 +721,9 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       } else if (input === "z") {
         setAliveOnly((current) => !current);
         setCursor(0);
+      } else if (input === "o") {
+        setHideDownloaded((current) => !current);
+        setCursor(0);
       } else if (input === "f") {
         setMode("filter");
       } else if (input === "w" && query.trim()) {
@@ -1086,6 +1093,23 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                           <Text color={COLOR.good}>cached</Text>
                         </Box>
                       ) : null}
+                      {/* "▸ played" for a film, "▸ up to E0x" for an episode of a
+                          show you're part-way through (season-matched, so it never
+                          claims progress from another season). The marker films and
+                          one-off rows never had. */}
+                      {(() => {
+                        if (isGroup) return null;
+                        const p = playedStateFor(r.name, playedIndex);
+                        if (!p.played) return null;
+                        const label = p.upTo
+                          ? `up to E${String(p.upTo.episode).padStart(2, "0")}`
+                          : "played";
+                        return (
+                          <Box flexShrink={0} marginLeft={1}>
+                            <Text color={COLOR.played}>{`${ICON.caretRight} ${label}`}</Text>
+                          </Box>
+                        );
+                      })()}
                       {showStats ? (
                         <>
                           <Box width={10} flexShrink={0} marginLeft={1} justifyContent="flex-end">

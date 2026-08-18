@@ -107,6 +107,16 @@ export function rowsFromStatus(payload: StatusPayload): DashRow[] {
   return [...downloads, ...seeds];
 }
 
+// InfoHashes of downloads that have reached the terminal "completed" status in this
+// status frame, lower-cased. The client unions these into its "ever downloaded" set,
+// so the badge stays right for a download that finishes mid-session and then leaves
+// the live queue — without re-fetching /api/library/downloaded.
+export function completedDownloadHashes(payload: StatusPayload): string[] {
+  return (payload.downloads ?? [])
+    .filter((d) => d.status === "completed")
+    .map((d) => d.id.toLowerCase());
+}
+
 /**
  * Fold a fresh snapshot into the displayed list without reshuffling it. The
  * server's ordering is not stable across ticks, and a list that reorders under

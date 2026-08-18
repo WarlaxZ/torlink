@@ -292,6 +292,14 @@
               <input id="group" type="checkbox" checked />
               <span>group</span>
             </label>
+            <!-- Hide results already downloaded, for completing a title without
+                 re-adding one. OFF by default (emptyView()): the default search
+                 shows everything. The count beside it says how many are hidden-able. -->
+            <label class="control control-check" id="hide-downloaded-control" for="hide-downloaded">
+              <input id="hide-downloaded" type="checkbox" />
+              <span>hide downloaded</span>
+            </label>
+            <span id="downloaded-count" class="result-count" aria-live="polite"></span>
             <!-- Shown only on the tabs that have artwork to show, by app.ts:
                  a grid of empty frames is worse than the list it replaced. -->
             <label class="control" id="layout-control" for="layout" hidden>

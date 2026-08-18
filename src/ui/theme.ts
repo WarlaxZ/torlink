@@ -8,6 +8,10 @@ export const COLOR = {
   warn: "#f0c560",
   bad: "#ee7d92",
   bright: "#d8b4fe",
+  // Watched marker on results. A teal that reads as "your history", distinct from
+  // good (download done) and accent (selection) — the TUI's side of the web's
+  // --played, in this theme's own palette.
+  played: "#5fd0c5",
 } as const;
 
 export const ICON = {

@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { PublicStreamHistoryItem } from "../wire";
+import { buildPlayedIndex } from "../../util/playedState";
 import {
   addBody,
   addPlan,
   ALL_TAB,
   cachedTag,
+  downloadedCount,
+  downloadTag,
+  playedTag,
+  showCached,
   categoryTabs,
   dashRowForPlay,
   debridAddedNotice,
@@ -685,6 +690,90 @@ describe("cachedTag", () => {
 
   it("matches case-insensitively", () => {
     expect(cachedTag("AABB", new Set(["aabb"]), true)).toBe("cached");
+  });
+});
+
+describe("downloadTag", () => {
+  it("reports the live queue state over history", () => {
+    const live = [{ id: "aabb", status: "downloading" }];
+    expect(downloadTag("aabb", live, new Set(["aabb"]))).toBe("downloading");
+  });
+
+  it("reports done when only in the downloaded set", () => {
+    expect(downloadTag("aabb", [], new Set(["aabb"]))).toBe("done");
+  });
+
+  it("matches case-insensitively", () => {
+    expect(downloadTag("AABB", [], new Set(["aabb"]))).toBe("done");
+  });
+
+  it("returns null for an untouched hash", () => {
+    expect(downloadTag("ccdd", [], new Set(["aabb"]))).toBeNull();
+  });
+});
+
+describe("playedTag", () => {
+  it("labels a played film", () => {
+    const idx = buildPlayedIndex([{ key: "kestrel|2010|movie", type: "movie" }]);
+    expect(playedTag("Kestrel.2010.1080p.BluRay.x264-GROUP", idx)).toEqual({ text: "Played" });
+  });
+
+  it("labels a series with its high-water episode", () => {
+    const idx = buildPlayedIndex([{ key: "kepler|series", type: "series", season: 2, episode: 4 }]);
+    expect(playedTag("Kepler.S02E04.1080p.WEB-DL", idx)).toEqual({ text: "up to E04" });
+  });
+
+  it("returns null when never played", () => {
+    expect(playedTag("Ashfall.1999.1080p", buildPlayedIndex([]))).toBeNull();
+  });
+});
+
+describe("showCached — declutter rule", () => {
+  it("hides the cached badge once the result is downloaded", () => {
+    expect(showCached("done", "cached")).toBe(false);
+  });
+
+  it("keeps the cached badge for a result you do not have", () => {
+    expect(showCached(null, "cached")).toBe(true);
+  });
+
+  it("keeps it while a re-download is in flight", () => {
+    expect(showCached("downloading", "cached")).toBe(true);
+  });
+
+  it("shows nothing when there is no cached claim to make", () => {
+    expect(showCached("done", null)).toBe(false);
+  });
+});
+
+describe("visibleResults — hideDownloaded", () => {
+  it("drops downloaded results when the flag is set", () => {
+    const owned = result({ infoHash: "a".repeat(40) });
+    const fresh = result({ infoHash: "b".repeat(40), name: "Ashfall.1999.1080p" });
+    const v = view({ hideDownloaded: true, snapshot: snapshot([owned, fresh]) });
+    const out = visibleResults(v, ALWAYS_HEALTHY, new Set(["a".repeat(40)]));
+    expect(out.map((r) => r.infoHash)).toEqual(["b".repeat(40)]);
+  });
+
+  it("keeps every result when the flag is off", () => {
+    const owned = result({ infoHash: "a".repeat(40) });
+    const fresh = result({ infoHash: "b".repeat(40), name: "Ashfall.1999.1080p" });
+    const v = view({ hideDownloaded: false, snapshot: snapshot([owned, fresh]) });
+    const out = visibleResults(v, ALWAYS_HEALTHY, new Set(["a".repeat(40)]));
+    expect(out).toHaveLength(2);
+  });
+});
+
+describe("downloadedCount", () => {
+  it("counts results present in the downloaded set", () => {
+    const a = result({ infoHash: "a".repeat(40) });
+    const b = result({ infoHash: "b".repeat(40), name: "Ashfall.1999.1080p" });
+    expect(downloadedCount([a, b], new Set(["a".repeat(40)]))).toBe(1);
+  });
+
+  it("is zero when nothing matches", () => {
+    const a = result({ infoHash: "a".repeat(40) });
+    expect(downloadedCount([a], new Set(["z".repeat(40)]))).toBe(0);
   });
 });
 

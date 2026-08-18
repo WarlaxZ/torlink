@@ -14,6 +14,12 @@
   --error: #f7768e;
   --sunken: #0c0d13;
   --raised: #1b1d29;
+  /* A third axis of colour, distinct from the accent budget (which is spoken for
+     by swarm news — health and cached). These mark YOUR history with a result:
+     `--done` = downloaded/owned, `--played` = watched. Both from the same Tokyo
+     Night family as --accent/--error, so they read as one palette. */
+  --done: #9ece6a;
+  --played: #73daca;
   /* The only two durations in the file, and both are short on purpose. This is
      a tool: motion here exists to make a state change legible — which button is
      under the cursor, that a row just arrived — never to be looked at. Anything
@@ -1130,6 +1136,89 @@ select:focus-visible {
   margin-left: 0.5rem;
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Your-history markers. A third axis: not dim (release facts) and not accent
+   (swarm news), but your own relationship to the result. See --done / --played. */
+.tag-owned {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--done);
+  font-weight: 700;
+}
+.tag-downloading {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+.tag-played {
+  display: inline-block;
+  margin-left: 0.5rem;
+  color: var(--played);
+  font-weight: 600;
+}
+
+/* Poster-card overlays. Attached to the poster BUTTON (.recc-poster) in app.ts,
+   never the frame — mountResultPoster replaceChildren()s the frame when the lazy
+   image lands, which would wipe a child of it. */
+.result-card .recc-poster {
+  position: relative;
+}
+.result-card .recc-poster .poster {
+  position: relative;
+}
+/* The owned scrim rides the frame's ::after so it sits OVER the poster image but
+   UNDER the pin/watchbar (later siblings of the button paint on top). */
+.result-card .recc-poster.owned .poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--sunken);
+  opacity: 0.42;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.result-card .recc-poster .pin {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.45rem;
+  z-index: 2;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--done);
+  color: #0c1207;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.result-card .recc-poster .pin.dl {
+  background: var(--accent);
+  color: #08111f;
+}
+.result-card .recc-poster .watchbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 0.28rem;
+  background: var(--played);
+}
+.result-card .recc-poster .watchbar.partial {
+  right: 40%;
+}
+
+/* "N downloaded" beside the hide-downloaded toggle. Dim, like the other toolbar
+   text, and tabular so the number does not jitter as it updates. */
+.result-count {
+  color: var(--dim);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Overrides .card's row layout: the preview is a stack, not a form. */

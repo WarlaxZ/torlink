@@ -213,6 +213,16 @@ doesn't (see [Debrid](#debrid-real-debrid-or-torbox)). Where a debrid provider i
 **add** is replaced by **add via RD** / **add via TorBox**: the browser routes every add through the
 provider and never downloads direct peer-to-peer (the terminal keeps its plain `d`, which warns first).
 
+**Every result says whether you already have it.** A result you have downloaded before — even weeks ago,
+long gone from the queue — carries a **✓ downloaded** marker, and one you have watched a **▸ played** one;
+on the poster grid the same shows as a corner check and a watched bar, and an owned poster dims so your
+eye lands on the ones you have not grabbed. Trawling every release of a title, that is the difference
+between completing it and adding the same thing twice — and the **hide downloaded** toggle collapses the
+grid to only what is left. Both markers are in the terminal too: its results list has long drawn download
+state, **`o`** hides what you have downloaded, and the played marker reads the very same continue-watching
+history the "how far you got" note above does, so the two never disagree. Once a result is downloaded the
+**cached** marker steps aside — you do not need telling that a provider has a copy of something you own.
+
 You can also **drag a `.torrent` file onto the page** — the browser's version of dropping one on the
 terminal's search field. An overlay confirms the target while you drag; on drop the file is read and
 queued through the same path as an add (so a configured debrid provider is still honoured).
