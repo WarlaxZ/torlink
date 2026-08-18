@@ -1,0 +1,77 @@
+# Share torlink's finished downloads over the LAN via Samba (SMB).
+#
+# This is an OVERLAY. It adds a Samba sidecar next to a torlink you are already
+# running; it does not start torlink itself. You opt in by adding its `-f`, and
+# you opt out by dropping it again — that is the whole enable/disable switch,
+# with nothing here to edit. SMB is the friendliest choice for Windows and Mac
+# clients, and the more WSL-friendly of the two shares (see the NFS note in
+# docker-compose.nfs.yml for why).
+#
+#   # turn the share on (stack it on the plain compose, or the Access one):
+#   docker compose -f docker-compose.yml -f docker-compose.smb.yml up -d
+#
+#   # run SMB and NFS together — just add both overlays:
+#   docker compose -f docker-compose.yml -f docker-compose.smb.yml -f docker-compose.nfs.yml up -d
+#
+#   # turn it off again:
+#   docker compose -f docker-compose.yml -f docker-compose.smb.yml down
+#
+# Because each share is its own file, its settings are only read when you include
+# it — so the credentials below are required exactly when you run this share, and
+# never force themselves on someone who only wants NFS.
+#
+# WHAT IT SHARES, AND WHAT IT DELIBERATELY DOES NOT
+#   It mounts ONLY ./state/Downloads/torlink — the finished files. It never
+#   touches ./state itself, because that directory holds config.json with your
+#   Real-Debrid / TorBox / OMDb tokens. Sharing the whole state tree would put
+#   those tokens on the LAN; sharing the Downloads subdirectory does not.
+#
+# WSL2 USERS
+#   WSL2 runs in a NAT'd VM, so a port published here is NOT reachable from
+#   another machine on the LAN by default. Turn on mirrored networking
+#   (%UserProfile%\.wslconfig -> [wsl2] networkingMode=mirrored, Win11 22H2+),
+#   or forward the port with `netsh interface portproxy`. See the README section
+#   "Sharing downloads over your LAN (Samba / NFS)".
+#
+# Secrets come from the environment — a .env file next to this one, or a secrets
+# manager. Following the repo's no-baked-secret rule, there is no default: the
+# share refuses to start until you set them.
+#   SMB_USER        - the Samba account name to log in with
+#   SMB_PASS        - its password
+# Optional:
+#   SHARE_READONLY  - "yes" (default) exports read-only; "no" allows writes
+
+services:
+  # dperson/samba is configured entirely through command args, which keeps this
+  # overlay self-contained and readable. It is stable but no longer actively
+  # updated; ghcr.io/servercontainers/samba is a maintained alternative if you
+  # prefer one (its config is env-based and more verbose).
+  torlnk-smb:
+    image: dperson/samba
+    container_name: torlnk-smb
+    restart: unless-stopped
+
+    # 445 is SMB proper; 139 is legacy NetBIOS, published for older clients.
+    # NOTE: Windows' own "Server" service already binds 445 on the host. If you
+    # run this on the same Windows machine, free 445 first (stop that service) or
+    # map a different host port here — otherwise the bind fails. That clash is a
+    # reason to reach for NFS (docker-compose.nfs.yml) instead, which uses 2049.
+    ports:
+      - "445:445"
+      - "139:139"
+
+    environment:
+      TZ: ${TZ:-UTC}
+
+    # -p        preserve permissions / run in the foreground
+    # -u        create a Samba user, pinned to uid;gid 1000 so any written file
+    #           is owned by torlink's `node` user rather than root
+    # -s        define the share: name;path;browsable;readonly;guest;users
+    command: >
+      -p
+      -u "${SMB_USER:?set SMB_USER in .env};${SMB_PASS:?set SMB_PASS in .env};1000;${SMB_USER};1000"
+      -s "torlink;/downloads;yes;${SHARE_READONLY:-yes};no;${SMB_USER}"
+
+    volumes:
+      # The finished-downloads directory ONLY — never ./state (tokens live there).
+      - ./state/Downloads/torlink:/downloads
