@@ -31,7 +31,6 @@ import {
   showKeyOf,
   type PositionLookup,
 } from "../../util/resultGroup";
-import type { EpisodeRef } from "../../util/episode";
 import { openUrl, imdbTitleUrl, imdbFindUrl } from "../../util/openUrl";
 import { getSource, enabledSources } from "../../sources/registry";
 import { getDebridProvider } from "../../integrations/debrid";
@@ -40,6 +39,7 @@ import { sortResults, nextSort, sortLabel, sortArrow, type SortField } from "../
 import { filterResults } from "../filter";
 import { COLOR, GUTTER, ICON, PAUSED, sourceStyle } from "../theme";
 import { downloadStateFor, type DownloadState } from "../downloadState";
+import { buildPlayedIndex, playedStateFor, seriesPosition } from "../../util/playedState";
 import { cleanText, formatBytes, formatCount, formatRelative, stripControl, truncate } from "../../util/format";
 import type { Source, TorrentResult } from "../../sources/types";
 import type { FetchImpl } from "../../util/net";
@@ -284,21 +284,18 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     [disabledSources, adultEnabled],
   );
 
-  // Where the user is in each show, by the same normalised show key the group
-  // keys use — one normaliser since titleKey.ts unified them. Memoised so the
-  // seeding effects below do not re-run every render.
-  const positionFor = useMemo<PositionLookup>(() => {
-    const byShow = new Map<string, EpisodeRef>();
-    // `?? []` is not paranoia: Results.ratePrompt.test.tsx builds a partial store
-    // with `as unknown as Store`, and a crash here takes the whole results list
-    // down. A missing convenience list must degrade to "no position known".
-    for (const item of streamHistory ?? []) {
-      if (item.type !== "series") continue;
-      if (item.season === undefined || item.episode === undefined) continue;
-      byShow.set(item.key.replace(/\|series$/, ""), { season: item.season, episode: item.episode });
-    }
-    return (showKey) => byShow.get(showKey) ?? null;
-  }, [streamHistory]);
+  // Your watch history, indexed once for both the series "up to E0x" note and the
+  // "▸ played" marker on films — the same index the web builds, in src/util so the
+  // two front ends cannot drift. `?? []` is not paranoia: Results.ratePrompt.test.tsx
+  // builds a partial store with `as unknown as Store`, and a crash here takes the
+  // whole results list down; a missing list must degrade to "nothing played".
+  const playedIndex = useMemo(() => buildPlayedIndex(streamHistory ?? []), [streamHistory]);
+  // Where the user is in each show, by the same normalised show key the group keys
+  // use. Kept as a PositionLookup so every existing consumer is untouched.
+  const positionFor = useMemo<PositionLookup>(
+    () => (showKey) => seriesPosition(showKey, playedIndex),
+    [playedIndex],
+  );
 
   const queueItems = useQueueItems(queue);
   const queueHistory = useQueueHistory(queue);
@@ -1084,6 +1081,14 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                       {cachedHashes.has(r.infoHash.toLowerCase()) ? (
                         <Box flexShrink={0} marginLeft={1}>
                           <Text color={COLOR.good}>cached</Text>
+                        </Box>
+                      ) : null}
+                      {/* "▸ played" for a release you have watched. Series season
+                          rows already carry the "up to E0x" note above, so this is
+                          really the marker films and one-off rows never had. */}
+                      {!isGroup && playedStateFor(r.name, playedIndex).played ? (
+                        <Box flexShrink={0} marginLeft={1}>
+                          <Text color={COLOR.played}>{`${ICON.caretRight} played`}</Text>
                         </Box>
                       ) : null}
                       {showStats ? (

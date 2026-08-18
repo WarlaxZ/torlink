@@ -378,6 +378,42 @@ describe("Results watch position", () => {
   });
 });
 
+describe("Results played marker", () => {
+  const PLAYED_FILM: StreamHistoryItem[] = [
+    {
+      key: "kestrel|2010|movie",
+      title: "Kestrel",
+      type: "movie",
+      rawName: "Kestrel.2010.1080p.BluRay.x264",
+      infoHash: "k1",
+      magnet: "magnet:?xt=urn:btih:k1",
+      startedAt: 1,
+    },
+  ];
+
+  const FILMS = [
+    t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+    t("z1", "Ashfall.1999.1080p"),
+  ];
+
+  it("marks a film you have watched", async () => {
+    const u = await mountWideWithHistory(FILMS, PLAYED_FILM, 120);
+    await vi.waitFor(() => expect(lines(u).find((l) => l.includes("Kestrel"))).toContain("played"));
+  });
+
+  it("does not mark a film you have not watched", async () => {
+    const u = await mountWideWithHistory(FILMS, PLAYED_FILM, 120);
+    await vi.waitFor(() => expect(u.frame()).toContain("Ashfall"));
+    expect(lines(u).find((l) => l.includes("Ashfall"))).not.toContain("played");
+  });
+
+  it("marks nothing when nothing has been watched", async () => {
+    const u = await mountWideWithHistory(FILMS, [], 120);
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel"));
+    expect(u.frame()).not.toContain("played");
+  });
+});
+
 describe("Results quality badges", () => {
   // ASSERTED VIA LABELS THE RELEASE NAME CANNOT PROVIDE. The name already
   // contains "2160p" and "HDR", so `toContain` on those matches whether or not a
