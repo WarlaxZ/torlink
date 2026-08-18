@@ -3,6 +3,7 @@ import { SOURCES } from "../../sources/registry";
 import { StoreContext } from "../store";
 import {
   KEY,
+  fakeQueue,
   makeTestStore,
   renderUI,
   TEST_CONTENT_WIDTH,
@@ -13,6 +14,7 @@ import type { ConcurrentSearchState } from "../hooks/useConcurrentSearch";
 import type { TorrentResult } from "../../sources/types";
 import type { FetchImpl } from "../../util/net";
 import type { StreamHistoryItem } from "../../core/streamHistory";
+import type { HistoryItem } from "../../download/history";
 
 // Captured BEFORE the fake timers installed by one describe near the bottom of
 // this file: `setImmediate` is faked too, and ink's React scheduler drains its
@@ -375,6 +377,58 @@ describe("Results watch position", () => {
     const u = await mountWideWithHistory(SHOW, [], 120);
     await vi.waitFor(() => expect(u.frame()).toContain("Harrowgate S04"));
     expect(u.frame()).not.toContain("up to");
+  });
+});
+
+describe("Results hide-downloaded toggle", () => {
+  const histItem = (id: string, name: string): HistoryItem => ({
+    id,
+    name,
+    sizeBytes: 1,
+    magnet: `magnet:?xt=urn:btih:${id}`,
+    dir: "/tmp/dl",
+    completedAt: 1,
+  });
+
+  async function mountWithDownload(
+    results: TorrentResult[],
+    downloaded: HistoryItem[],
+  ): Promise<RenderedUI> {
+    searchState.current = settled(results);
+    ui = renderUI(
+      <StoreContext.Provider
+        value={makeTestStore({ query: "kestrel", queue: fakeQueue([], downloaded) })}
+      >
+        <Results reccConfig={{}} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await vi.waitFor(() => expect(u.frame()).toContain(`Results (${results.length})`));
+    return u;
+  }
+
+  const FILMS = [
+    t("k1", "Kestrel.2010.1080p.BluRay.x264"),
+    t("z1", "Ashfall.1999.1080p"),
+  ];
+
+  it("hides a downloaded result when toggled with 'o', keeping the rest", async () => {
+    const u = await mountWithDownload(FILMS, [histItem("k1", "Kestrel.2010.1080p.BluRay.x264")]);
+    // Before: both are on screen.
+    expect(u.frame()).toContain("Kestrel");
+    expect(u.frame()).toContain("Ashfall");
+    u.press("o");
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel"));
+    // The one you have NOT downloaded stays.
+    expect(u.frame()).toContain("Ashfall");
+  });
+
+  it("shows everything again when toggled back off", async () => {
+    const u = await mountWithDownload(FILMS, [histItem("k1", "Kestrel.2010.1080p.BluRay.x264")]);
+    u.press("o");
+    await vi.waitFor(() => expect(u.frame()).not.toContain("Kestrel"));
+    u.press("o");
+    await vi.waitFor(() => expect(u.frame()).toContain("Kestrel"));
   });
 });
 

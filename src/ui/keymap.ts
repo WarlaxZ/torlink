@@ -58,6 +58,7 @@ export const HELP_GROUPS: HelpGroup[] = [
       { keys: "p", label: "Toggle poster / plot preview (needs OMDb key)" },
       { keys: "s", label: "Sort results" },
       { keys: "z", label: "Hide results with no seeders" },
+      { keys: "o", label: "Hide results you have already downloaded" },
       { keys: "g", label: "Group many releases of one title (on by default)" },
       { keys: "space", label: "Expand or collapse the group under the cursor" },
       { keys: "w", label: "Save or remove current search" },
@@ -263,6 +264,7 @@ export function footerHints(
     // than growing: the footer never advertises a key the current view ignores.
     resultFocus === "detail" ? EXPORT : { keys: "s", label: "Sort" },
     { keys: "z", label: "Alive" },
+    { keys: "o", label: "Hide dl" },
     { keys: "w", label: "Watch" },
     { keys: "/", label: "Search" },
     { keys: "f", label: "Filter" },

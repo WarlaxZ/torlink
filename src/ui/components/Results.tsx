@@ -304,6 +304,10 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   // `aliveOnly` is the fork's name for upstream's hideDead; `textFilter` is the
   // upstream in-memory token filter. `sort` is persisted via the store.
   const [aliveOnly, setAliveOnly] = useState(false);
+  // Hide results already downloaded, the browser's hide-downloaded toggle. Local
+  // state like aliveOnly. Only "done" is dropped — an in-flight download stays
+  // visible so its progress mark is still there to see.
+  const [hideDownloaded, setHideDownloaded] = useState(false);
   const [textFilter, setTextFilter] = useState("");
 
   const results = useMemo(() => {
@@ -311,8 +315,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     const base = cat?.group
       ? search.results.filter((r) => getSource(r.source).groups?.includes(cat.group!))
       : search.results;
-    return sortResults(filterResults(base, aliveOnly, textFilter), sort);
-  }, [search.results, section, sort, aliveOnly, textFilter]);
+    const sorted = sortResults(filterResults(base, aliveOnly, textFilter), sort);
+    return hideDownloaded
+      ? sorted.filter((r) => downloadStateFor(r.infoHash, queueItems, queueHistory) !== "done")
+      : sorted;
+  }, [search.results, section, sort, aliveOnly, textFilter, hideDownloaded, queueItems, queueHistory]);
 
   const focused = region === "content" && isCategory(section);
   const [mode, setMode] = useState<Mode>("list");
@@ -713,6 +720,9 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
         setSort(nextSort(sort));
       } else if (input === "z") {
         setAliveOnly((current) => !current);
+        setCursor(0);
+      } else if (input === "o") {
+        setHideDownloaded((current) => !current);
         setCursor(0);
       } else if (input === "f") {
         setMode("filter");
