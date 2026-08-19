@@ -32,6 +32,10 @@ Then check your change against the standards below. The pull request template wa
 
 ## The standards
 
+### Four categories, one curated source list
+
+Games, Movies, TV, and Anime cover the majority of real torrent traffic, and the sidebar reads at a glance because that list is short. The sources feeding those tabs are settled for the same reason: every extra index is one more thing to keep alive and more noise in the results. A pull request adding a category (ebooks, music, software) or a new source is declined however clean the code, so please open an issue before you write one. Fixes to the sources already here are always welcome.
+
 ### Match the existing grain
 
 Reuse what's there before you write something new. Cursor movement goes through `wrapStep` (`src/ui/move.ts`). Key hints live in the `Hint` / `HELP_GROUPS` / `footerHints` system (`src/ui/keymap.ts`). Shared app state is the `Store` interface (`src/ui/store.ts`).
