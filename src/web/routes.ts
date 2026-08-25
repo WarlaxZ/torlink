@@ -1,6 +1,6 @@
 import { handleApi } from "../daemon/serve";
 import { isAuthorized } from "../daemon/auth";
-import { screenshotsFor } from "../core/screenshots";
+import { cachedScreenshotsFor } from "../core/screenshotUrlCache";
 import { getScreenshot, type CachedImage } from "../core/screenshotCache";
 import { SCREENSHOT_HOSTS, type Shot } from "../util/screenshotExtract";
 import { getPoster, POSTER_HOSTS, type CachedPoster } from "../core/posterCache";
@@ -2288,7 +2288,7 @@ export async function handleWebApi(
     const source = query.get("source") ?? "";
     const ref = query.get("ref") ?? "";
     if (!source || !ref) return { status: 200, json: { images: [] } };
-    const images = await (deps.screenshotsForImpl ?? screenshotsFor)(source, ref, { limit: 4 });
+    const images = await (deps.screenshotsForImpl ?? cachedScreenshotsFor)(source, ref, { limit: 4 });
     return { status: 200, json: { images } };
   }
 

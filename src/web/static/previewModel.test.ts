@@ -358,4 +358,53 @@ describe("selectLocal — screenshots", () => {
     // Only the current row's strip renders; the first was cancelled by cancelPending.
     expect(shotsRendered).toHaveLength(1);
   });
+
+  it("renders a previously-fetched strip synchronously and does not re-fetch", async () => {
+    const shots: Shot[] = [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }];
+    const { controller, shotsAsked, shotsRendered } = harness(() => OK, () => shots);
+    controller.selectLocal("First", "Porn", "TPB", "42");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    controller.selectLocal("Second", "Porn", "TPB", "7"); // flick away
+    controller.selectLocal("First", "Porn", "TPB", "42"); // flick back to the same result
+    // No timer advance needed — a cache hit renders synchronously, no debounce.
+    expect(shotsAsked).toEqual([["TPB", "42"]]);
+    expect(shotsRendered.at(-1)).toEqual([
+      {
+        thumbSrc: "/api/screenshot?url=" + encodeURIComponent("https://h/t.jpg"),
+        fullSrc: "/api/screenshot?url=" + encodeURIComponent("https://h/f.jpg"),
+      },
+    ]);
+  });
+
+  it("caches an empty result too, so a result with no shots is not re-fetched", async () => {
+    const { controller, shotsAsked } = harness(() => OK, () => []);
+    controller.selectLocal("First", "Porn", "TPB", "42");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    controller.selectLocal("Second", "Porn", "TPB", "7");
+    controller.selectLocal("First", "Porn", "TPB", "42");
+    expect(shotsAsked).toEqual([["TPB", "42"]]);
+  });
+
+  it("distinguishes different refs from the same source", async () => {
+    const { controller, shotsAsked } = harness(
+      () => OK,
+      (source, ref) => [{ thumb: `https://h/${ref}.jpg`, full: `https://h/${ref}.jpg` }],
+    );
+    controller.selectLocal("First", "Porn", "TPB", "1");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    controller.selectLocal("Second", "Porn", "TPB", "2");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "1"], ["TPB", "2"]]);
+  });
+
+  it("clears the screenshot cache on reset, so a fresh search re-fetches", async () => {
+    const shots: Shot[] = [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }];
+    const { controller, shotsAsked } = harness(() => OK, () => shots);
+    controller.selectLocal("First", "Porn", "TPB", "42");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    controller.reset();
+    controller.selectLocal("First", "Porn", "TPB", "42");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "42"], ["TPB", "42"]]);
+  });
 });
