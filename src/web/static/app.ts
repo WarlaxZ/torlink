@@ -214,6 +214,7 @@ import { SUGGEST_DEBOUNCE_MS, shouldQueryFor } from "../../util/titleSuggest";
 import { authHeadersFor, readStoredToken, storeToken } from "./token";
 import { routeFromSearch, urlForRoute, type RouteState } from "./route";
 import { rememberReturn } from "./returnTo";
+import { clearResultsSnapshot, loadResultsSnapshot, matchesRoute, saveResultsSnapshot } from "./resultsCache";
 import { foldRecent, magnetFor, readRecent, writeRecent } from "./recentSearches";
 import { clipboardPorts, copyNotice, copyText } from "./copyText";
 import { dragHasFiles, pickTorrentFile } from "./torrentDrop";
@@ -1754,6 +1755,11 @@ function liveDownloadItems(): { id: string; status: string }[] {
 
 function startSearch(raw: string): void {
   stopSearch();
+  // A live search is starting, so any snapshot painted from a returning boot is
+  // no longer worth keeping — this run's own frames (below) replace it as they
+  // land. Cleared unconditionally, including on the boot replay itself: that
+  // replay already consumed the snapshot it needed before calling this.
+  clearResultsSnapshot();
   // Trimmed here, once, so every caller — including searchForPick, which hands
   // over an untrusted title from reccd — gets the same normalisation the server
   // applies before it decides search vs. browse (parseSearchParams).
@@ -1822,6 +1828,12 @@ function startSearch(raw: string): void {
     stopSearch();
     renderResults();
     refreshCachedHashes();
+    // Remembered here, not on every "results" frame: this is the settled answer,
+    // and it's what the next boot's back-navigation paints immediately instead
+    // of an empty list while a fresh search is still running.
+    if (searchView.snapshot) {
+      saveResultsSnapshot({ query: searchView.query, group: searchView.group, snapshot: searchView.snapshot });
+    }
   });
   source.addEventListener("error", (event) => {
     if (source !== searchStream) return;
@@ -4353,6 +4365,20 @@ function openApp(payload: StatusPayload): void {
   // because someone opened the dashboard.
   if (bootRoute.query.trim()) {
     queryInput.value = bootRoute.query;
+    // Paint the remembered results before the live search even opens its
+    // connection: this is the case a back navigation from the player hits on
+    // every load, and there is no reason to sit on an empty list for even the
+    // fraction of a second a fast, cache-served search takes.
+    const remembered = loadResultsSnapshot();
+    if (matchesRoute(remembered, bootRoute.query, bootRoute.group)) {
+      searchView = {
+        ...searchView,
+        query: bootRoute.query,
+        mode: modeForQuery(bootRoute.query),
+        snapshot: remembered.snapshot,
+      };
+      renderResults();
+    }
     startSearch(bootRoute.query);
   }
 }

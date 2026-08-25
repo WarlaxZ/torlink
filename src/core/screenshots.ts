@@ -13,7 +13,7 @@ const TPB_API = "https://apibay.org";
 // against whichever host answers.
 const X1337_HOSTS = ["1337x.to", "1337x.st", "x1337x.ws", "1337xx.to"];
 
-interface Opts {
+export interface Opts {
   fetchImpl?: FetchImpl;
   limit: number;
 }
