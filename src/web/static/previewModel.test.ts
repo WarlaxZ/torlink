@@ -408,3 +408,56 @@ describe("selectLocal — screenshots", () => {
     expect(shotsAsked).toEqual([["TPB", "42"], ["TPB", "42"]]);
   });
 });
+
+describe("prefetchNeighborShots", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("fetches each neighbor in the background after the debounce, without rendering", async () => {
+    const { controller, shotsAsked, shotsRendered, rendered } = harness(
+      () => OK,
+      () => [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }],
+    );
+    controller.prefetchNeighborShots([
+      { source: "TPB", ref: "1" },
+      { source: "TPB", ref: "2" },
+    ]);
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "1"], ["TPB", "2"]]);
+    // Cache-warming only: the pane is untouched by a prefetch nobody selected.
+    expect(shotsRendered).toEqual([]);
+    expect(rendered).toEqual([]);
+  });
+
+  it("skips a neighbor whose screenshots are already cached", async () => {
+    const { controller, shotsAsked } = harness(
+      () => OK,
+      () => [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }],
+    );
+    controller.selectLocal("First", "Porn", "TPB", "1");
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    shotsAsked.length = 0;
+
+    controller.prefetchNeighborShots([
+      { source: "TPB", ref: "1" }, // already cached from the selection above
+      { source: "TPB", ref: "2" },
+    ]);
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "2"]]);
+  });
+
+  it("cancels a still-pending neighbor prefetch when the selection moves on", async () => {
+    // Same guarantee the main lookup gives arrowing through a list: only the
+    // row (and now its neighbors) you settle on are fetched, not every row
+    // passed through on the way.
+    const { controller, shotsAsked } = harness(
+      () => OK,
+      () => [{ thumb: "https://h/t.jpg", full: "https://h/f.jpg" }],
+    );
+    controller.prefetchNeighborShots([{ source: "TPB", ref: "1" }]);
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS - 50);
+    controller.prefetchNeighborShots([{ source: "TPB", ref: "2" }]);
+    await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS);
+    expect(shotsAsked).toEqual([["TPB", "2"]]);
+  });
+});
