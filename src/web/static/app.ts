@@ -2986,6 +2986,25 @@ function renderResults(): void {
   paintSearchHint();
 }
 
+// The rows just above and below `result` in the SAME order arrow keys walk
+// (currentRows, not visibleResults — see the keydown handler's comment), each
+// reduced to what /api/screenshots needs. A row without a screenshotRef (or
+// the clamped "no neighbor" case at either end of the list, where nextRowKey
+// returns the row itself) contributes nothing.
+function neighborShotRefs(result: PublicSearchResult): Array<{ source: string; ref: string }> {
+  const rowKeys = currentRows.map((row) => row.key);
+  const at = currentRows.find((row) => resultAtRow(row)?.infoHash === result.infoHash)?.key ?? null;
+  if (at === null) return [];
+  const pairs: Array<{ source: string; ref: string }> = [];
+  for (const step of ["up", "down"] as const) {
+    const target = nextRowKey(rowKeys, at, step);
+    if (target === null || target === at) continue;
+    const neighbor = resultAtRow(currentRows.find((row) => row.key === target)!);
+    if (neighbor?.screenshotRef) pairs.push({ source: neighbor.source, ref: neighbor.screenshotRef });
+  }
+  return pairs;
+}
+
 function selectResult(result: PublicSearchResult): void {
   selectedHash = result.infoHash;
   renderResults();
@@ -3002,6 +3021,11 @@ function selectResult(result: PublicSearchResult): void {
       wantShots ? result.source : undefined,
       wantShots ? result.screenshotRef : undefined,
     );
+    // Warm the neighbors above and below in the SAME order the arrow keys
+    // walk (currentRows, not visibleResults — see the keydown handler), so
+    // that continuing to browse in either direction often finds a result
+    // already cached instead of a multi-second wait.
+    if (wantShots) preview.prefetchNeighborShots(neighborShotRefs(result));
   } else {
     preview.select(null, group);
   }
