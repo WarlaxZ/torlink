@@ -31,16 +31,16 @@ export async function magnetFromTorrentFile(path: string): Promise<ParsedMagnet 
 }
 
 async function readParsed(bytes: Uint8Array): Promise<ParsedMagnet | null> {
-    const parsed = await parseTorrent(bytes);
-    const infoHash = parsed?.infoHash?.toLowerCase();
-    if (!infoHash) return null;
-    const name = parsed.name || infoHash;
-    // Carry the file's own announce list into the magnet. Without it a torrent
-    // that isn't on the public DHT — a private tracker, a small private swarm —
-    // sits at zero peers forever, and on a private tracker the passkey that
-    // makes an announce work at all lives in that URL.
-    const announce = Array.isArray(parsed.announce)
-      ? parsed.announce.filter((url): url is string => typeof url === "string")
-      : [];
-    return { infoHash, name, magnet: buildMagnet(infoHash, name, announce) };
+  const parsed = await parseTorrent(bytes);
+  const infoHash = parsed?.infoHash?.toLowerCase();
+  if (!infoHash) return null;
+  const name = parsed.name || infoHash;
+  // Carry the file's own announce list into the magnet. Without it a torrent
+  // that isn't on the public DHT — a private tracker, a small private swarm —
+  // sits at zero peers forever, and on a private tracker the passkey that
+  // makes an announce work at all lives in that URL.
+  const announce = Array.isArray(parsed.announce)
+    ? parsed.announce.filter((url): url is string => typeof url === "string")
+    : [];
+  return { infoHash, name, magnet: buildMagnet(infoHash, name, announce) };
 }

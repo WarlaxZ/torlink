@@ -3,6 +3,11 @@ import path from "node:path";
 
 import { seedRootFor } from "./seed";
 
+// seedRootFor resolves against the running platform's path rules, so a POSIX
+// literal comes back drive-qualified on Windows ("/srv/media" -> "C:\srv\media")
+// and every assertion against one fails there. Build the fixtures natively.
+const MEDIA = path.resolve(path.join("srv", "media"));
+
 describe("seedRootFor", () => {
   /*
    * The one calculation that decides whether seeding works or silently
@@ -12,8 +17,8 @@ describe("seedRootFor", () => {
    * next to the one already on disk.
    */
   it("is the content's parent, never the content", () => {
-    expect(seedRootFor("/srv/media/album")).toBe("/srv/media");
-    expect(seedRootFor("/srv/media/film.mkv")).toBe("/srv/media");
+    expect(seedRootFor(path.join(MEDIA, "album"))).toBe(MEDIA);
+    expect(seedRootFor(path.join(MEDIA, "film.mkv"))).toBe(MEDIA);
   });
 
   it("resolves a relative path before taking the parent", () => {
@@ -24,6 +29,6 @@ describe("seedRootFor", () => {
   // A trailing slash is what tab-completion gives you for a directory, and it
   // would otherwise make dirname return the directory itself.
   it("is not fooled by a trailing slash", () => {
-    expect(seedRootFor("/srv/media/album/")).toBe("/srv/media");
+    expect(seedRootFor(path.join(MEDIA, "album") + path.sep)).toBe(MEDIA);
   });
 });

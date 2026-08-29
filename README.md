@@ -55,7 +55,7 @@ torlink also runs without the TUI, for servers and seedboxes:
 
     torlnk search "<query>" [--category games|movies|tv|anime]
                             print one JSON document of merged search results
-    torlnk seed <path>    make a torrent of files you have, and seed it
+    torlnk seed <path>    share files you already have
     torlnk watch <dir>    download anything dropped into a folder
     torlnk serve          take magnets over HTTP
     torlnk files          stream finished downloads over HTTP
@@ -65,18 +65,16 @@ Add `--daemon` to keep seed, watch, serve, or files running after you log out; `
 
 ### Sharing something of your own
 
-Every other way in starts from a torrent somebody else made. `seed` is the other direction:
+Everything else starts with a torrent someone else made. `seed` goes the other way:
 
     torlnk seed ./album
 
-It hashes the files, writes `album.torrent` beside them, prints the magnet, and starts seeding. The `.torrent` is added rather than the magnet on purpose — a magnet carries no piece hashes, so the client would have to fetch metadata from a swarm that, for a torrent nobody has seen yet, has nobody in it, and would sit at zero per cent over data already on the disk.
+It turns the folder into a torrent, saves `album.torrent` next to it, prints the magnet, and starts sharing right away. Send anyone the magnet and they pull the files from you.
 
-`serve` takes an uploaded `.torrent` as well as a magnet, for the same reason:
+`serve` takes a `.torrent` as well as a magnet, so you can hand it one you already have:
 
     POST /add {"magnet":"magnet:?xt=..."}
-    POST /add {"torrent":"<base64>"}     # or a data: URI, as FileReader gives it
-
-The bytes travel in the request rather than a path to them: torlink does not let a network caller name a local file, and "add this torrent" should not double as "read this file off your disk".
+    POST /add {"torrent":"<base64>"}
 
 ## Contributing
 

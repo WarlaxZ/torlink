@@ -18,7 +18,11 @@ export { isAuthorized } from "./auth";
 
 export const DEFAULT_API_PORT = 9161;
 
-const MAX_BODY_BYTES = 64 * 1024; // a magnet is small; cap the body hard
+// A magnet is tiny, but /add also takes an uploaded .torrent, and that is one
+// 20-byte hash per piece: a large multi-file release runs to a few hundred KB
+// before base64 adds a third on top. The old 64KB cap fit every magnet and
+// every torrent small enough to test with, then answered 413 on real content.
+const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface ApiResponse {
   status: number;

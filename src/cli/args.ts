@@ -176,7 +176,7 @@ usage
   torlnk path/to/file.torrent open a .torrent file on launch
   torlnk search <query>        headless: print search results as JSON
     [--category games|movies|tv|anime]
-  torlnk seed <path>          headless: make a torrent of <path> and seed it
+  torlnk seed <path>          headless: share files you already have
   torlnk watch <dir>          headless: download torrents dropped into <dir>
   torlnk serve                headless: HTTP add API (POST /add) on :9161
   torlnk files                headless: serve downloads over HTTP on :9160
@@ -193,12 +193,10 @@ watch mode (no TUI): drop a .torrent, or a .magnet/.txt holding a magnet or
 info hash, into <dir> and it downloads then seeds. Add --to <dir> to choose
 where files land. Handled files move to <dir>/.processed (or /.failed).
 
-seed a path (no TUI): torlnk seed ./album hashes the files, writes
-album.torrent beside them, prints the magnet, and starts seeding. It adds the
-.torrent rather than the magnet on purpose: a magnet carries no piece hashes,
-so the client would have to fetch metadata from a swarm that -- for a torrent
-nobody has seen yet -- has nobody in it, and would sit at zero per cent over
-data already on the disk. Takes --seed-time, --delete-files and --daemon.
+seed a path (no TUI): torlnk seed ./album turns the folder into a torrent,
+saves album.torrent next to it, prints the magnet, and starts sharing. Send
+anyone the magnet and they pull the files from you. Takes --seed-time,
+--delete-files and --daemon.
 
 seed expiry (seed/watch/serve): --seed-time <dur> stops seeding a torrent that long
 after it finishes (e.g. 1h, 30m, 90s, 2d); files are kept by default. Add

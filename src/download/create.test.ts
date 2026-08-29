@@ -27,9 +27,15 @@ describe("torrentOptions", () => {
 describe("torrentPathFor", () => {
   // Beside the data, not in a config dir: moving the files and leaving the
   // torrent behind is how you end up with a magnet nobody can serve.
+  // Built natively rather than from POSIX literals: torrentPathFor resolves
+  // against the running platform, so "/srv/media" comes back as "C:\srv\media"
+  // on Windows and a hardcoded expectation fails there.
   it("names the torrent after the content and puts it alongside", () => {
-    expect(torrentPathFor("/srv/media/album")).toBe("/srv/media/album.torrent");
-    expect(torrentPathFor("/srv/media/film.mkv")).toBe("/srv/media/film.mkv.torrent");
+    const media = path.resolve(path.join("srv", "media"));
+    expect(torrentPathFor(path.join(media, "album"))).toBe(path.join(media, "album.torrent"));
+    expect(torrentPathFor(path.join(media, "film.mkv"))).toBe(
+      path.join(media, "film.mkv.torrent"),
+    );
   });
 });
 

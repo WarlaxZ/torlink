@@ -71,4 +71,17 @@ export async function runSeed(target: string, options: SeedOptions = {}): Promis
   // -1` is a usable thing to write in a script.
   log(`seeding ${created.name} (${created.infoHash}) from ${root}`);
   console.log(created.magnet);
+
+  // Hold the process open and shut down cleanly, exactly as watch and serve do.
+  // Without this the mode ends here and stays alive only because webtorrent's
+  // handles do, so a SIGTERM (systemctl stop, or ctrl-c) would kill it without
+  // ever flushing state through suspend().
+  await new Promise<void>((resolve) => {
+    const shutdown = (): void => {
+      runtime.queue.suspend();
+      resolve();
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  });
 }

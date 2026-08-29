@@ -97,7 +97,10 @@ export function parseInput(input: string): ParsedMagnet | null {
   return { infoHash, name: infoHash, magnet: buildMagnet(infoHash, infoHash) };
 }
 
-function trackersOf(magnet: string): string[] | null {
+// Exported for the queue: when a download resumes from its stored .torrent the
+// magnet is no longer what reaches webtorrent, so the trackers merged onto it
+// from sibling sources have to be handed over separately.
+export function trackersOf(magnet: string): string[] | null {
   const s = magnet.trim();
   if (!/^magnet:\?/i.test(s)) return null;
   try {

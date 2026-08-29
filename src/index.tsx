@@ -63,9 +63,10 @@ if (cmd.kind === "update") {
 } else if (cmd.kind === "seed") {
   if (cmd.daemon) daemonize("seed");
   const { path: target, seedTimeMs, deleteFiles } = cmd;
-  void import("./daemon/seed").then(({ runSeed }) =>
-    runSeed(target, { seedTimeMs, deleteFiles }).catch(failHeadless),
-  );
+  void import("./daemon/seed")
+    .then(({ runSeed }) => runSeed(target, { seedTimeMs, deleteFiles }))
+    .then(() => process.exit(0))
+    .catch(failHeadless);
 } else if (cmd.kind === "serve") {
   if (cmd.daemon) daemonize("serve");
   const options = {
