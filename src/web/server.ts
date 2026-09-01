@@ -590,7 +590,11 @@ export async function startWebServer(
         }
         const wrote = await writeWebResponse(
           res,
-          { status: 200, filePath: asset, headers: { "Content-Type": contentTypeFor(asset) } },
+          {
+            status: 200,
+            filePath: asset,
+            headers: { "Content-Type": contentTypeFor(asset), "Cache-Control": "no-cache" },
+          },
           log,
         );
         log(`${method} ${urlPath} -> ${wrote}`);
@@ -667,9 +671,22 @@ export async function startWebServer(
       // directory is answered 404 in there, and logging 200 regardless made
       // every asset failure read as a success — which defeats the point of
       // warning about missing assets at all.
+      // No cache validator (ETag/Last-Modified) is generated here, so
+      // "no-cache" in practice means every request refetches — that is the
+      // point. app.js and index.html both live at fixed, unhashed paths that
+      // a deploy overwrites in place, and a downstream cache (browser or
+      // CDN) that serves either past its freshness window can pair a fresh
+      // index.html with a stale app.js. That drift is exactly what broke
+      // tl.reccd.stream: the DOM index.html expected no longer matched what
+      // the cached bundle's listeners were wired for, so an
+      // addEventListener call landed on a null element.
       const wrote = await writeWebResponse(
         res,
-        { status: 200, filePath: file, headers: { "Content-Type": contentTypeFor(file) } },
+        {
+          status: 200,
+          filePath: file,
+          headers: { "Content-Type": contentTypeFor(file), "Cache-Control": "no-cache" },
+        },
         log,
       );
       log(`${method} ${urlPath} -> ${wrote}`);

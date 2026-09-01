@@ -397,6 +397,23 @@ describe("startWebServer", () => {
       expect(res.headers.get("content-length")).toBe(String(Buffer.byteLength(body)));
     });
 
+    // /app.js and index.html ship at fixed, unhashed paths and every deploy
+    // overwrites them in place, so a cache that serves either past its
+    // freshness window can pair a new index.html with a stale app.js (or vice
+    // versa) after a deploy. That mismatch is exactly what broke
+    // tl.reccd.stream: a CDN in front cached /app.js under its default
+    // Browser Cache TTL while index.html (no explicit header) went stale too,
+    // and the two drifted apart until the cache expired. no-cache forces a
+    // revalidation (in practice a refetch, since nothing here emits an
+    // ETag/Last-Modified) on every request rather than letting an
+    // intermediary reuse a stale copy.
+    it("marks static assets no-cache so a CDN cannot pair a stale bundle with a fresh index.html", async () => {
+      const base = await start({ staticDir: assets() });
+      const [index, appJs] = await Promise.all([fetch(`${base}/`), fetch(`${base}/app.js`)]);
+      expect(index.headers.get("cache-control")).toBe("no-cache");
+      expect(appJs.headers.get("cache-control")).toBe("no-cache");
+    });
+
     // resolveAssetPath proves containment but not that the target is a file, so
     // without the isFile() check this streams a directory and dies with EISDIR
     // *after* the 200 header is out — a hang or a truncated body, not a 404.
