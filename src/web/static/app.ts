@@ -109,6 +109,7 @@ import {
   createPosterCache,
   postersApply,
   searchHint,
+  type ArtworkOutcome,
   type PosterOutcome,
 } from "./resultPosters";
 import {
@@ -198,7 +199,13 @@ import {
   prefsFromWire,
   type PickState,
 } from "./pickModel";
-import type { DownloadedResponse, PreferencesResponse, PublicQualityPrefs, PublicTitleSuggestions } from "../wire";
+import type {
+  DownloadedResponse,
+  PreferencesResponse,
+  PublicArtwork,
+  PublicQualityPrefs,
+  PublicTitleSuggestions,
+} from "../wire";
 import {
   emptyListState,
   isOpen as suggestOpen,
@@ -2213,6 +2220,21 @@ const resultPosters = createPosterCache({
     }
   },
   revoke: (url) => URL.revokeObjectURL(url),
+  async fetchArtwork(imdbId, season, episode): Promise<ArtworkOutcome | null> {
+    const params = new URLSearchParams({ imdbId, type: "series", season: String(season) });
+    if (episode !== undefined) params.set("episode", String(episode));
+    try {
+      const res = await fetch(`/api/artwork?${params.toString()}`, { headers: authHeaders() });
+      if (!res.ok) return null;
+      const body = (await res.json()) as unknown;
+      if (!body || typeof body !== "object") return null;
+      const artwork = body as PublicArtwork;
+      if (artwork.status !== "ok") return null;
+      return { posterUrl: artwork.posterUrl, stillUrl: artwork.stillUrl };
+    } catch {
+      return null;
+    }
+  },
 });
 
 /** The page's single "no OMDb key" line. The decision lives in resultPosters.ts's `searchHint`. */
@@ -2276,7 +2298,14 @@ const posterObserver: IntersectionObserver | null =
           posterObserver?.unobserve(entry.target);
           const pending = posterTargets.get(entry.target);
           if (pending) {
-            startPoster(pending.release, entry.target as HTMLElement, pending.compact, pending.group);
+            startPoster(
+              pending.release,
+              entry.target as HTMLElement,
+              pending.compact,
+              pending.group,
+              pending.season,
+              pending.episode,
+            );
           }
         }
       })
@@ -2287,15 +2316,22 @@ const posterObserver: IntersectionObserver | null =
 // design is avoiding, just spelled differently.
 const posterTargets = new WeakMap<
   Element,
-  { release: string; compact: boolean; group?: string }
+  { release: string; compact: boolean; group?: string; season?: number; episode?: number }
 >();
 
-function startPoster(release: string, host: HTMLElement, compact: boolean, group?: string): void {
+function startPoster(
+  release: string,
+  host: HTMLElement,
+  compact: boolean,
+  group?: string,
+  season?: number,
+  episode?: number,
+): void {
   // `group` is what OMDb is asked to look the title up as. It defaults to the
   // search tab because that is where posters started — but the Continue-watching
   // rows are not part of a search, and asking for a show under whatever tab the
   // user last clicked would look it up as a film.
-  const outcome = resultPosters.want(release, group ?? searchView.group);
+  const outcome = resultPosters.want(release, group ?? searchView.group, season, episode);
   if (!(outcome instanceof Promise)) {
     paintPoster(host, outcome, compact);
     return;
@@ -2327,6 +2363,8 @@ function mountResultPoster(
   host: HTMLElement,
   compact: boolean,
   group?: string,
+  season?: number,
+  episode?: number,
 ): void {
   const known = resultPosters.peek(release);
   if (known !== undefined) {
@@ -2342,10 +2380,10 @@ function mountResultPoster(
   // hole, and the row does not resize when the image lands.
   host.replaceChildren();
   if (posterObserver === null) {
-    startPoster(release, host, compact, group);
+    startPoster(release, host, compact, group, season, episode);
     return;
   }
-  posterTargets.set(host, { release, compact, group });
+  posterTargets.set(host, { release, compact, group, season, episode });
   posterObserver.observe(host);
 }
 
@@ -2924,7 +2962,14 @@ function renderGroupRow(
   // The BEST MEMBER's name, not the group title: resultPosters caches by release
   // name, so sharing the member's key means the heading and its expanded rows
   // resolve to one lookup instead of two.
-  mountResultPoster(best.name, frame, true);
+  //
+  // `row.season`/`row.episode`, not `best`'s own: `best` is a release, and a
+  // release parses no season/episode of its own worth trusting here — the row
+  // is the thing that knows what tier of the tree it stands for, which is
+  // exactly what reccd's artwork lookup needs (a season heading asks for the
+  // season poster; an episode group asks for the episode still).
+  const episode = row.kind === "group" ? row.episode : undefined;
+  mountResultPoster(best.name, frame, true, undefined, row.season, episode);
   return li;
 }
 

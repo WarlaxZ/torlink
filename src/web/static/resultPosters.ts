@@ -34,6 +34,12 @@ export type PosterOutcome =
   | { kind: "no-key" }
   | { kind: "none" };
 
+/** reccd's season/episode artwork, when there is any. Never both fields absent AND kind "poster" — see want()'s season/episode handling. */
+export interface ArtworkOutcome {
+  posterUrl: string | null;
+  stillUrl: string | null;
+}
+
 /** The two round trips and the cleanup, injected so this is testable without a DOM. */
 export interface PosterDeps {
   /** `GET /api/title?release=&group=`. Null for any failure. */
@@ -42,6 +48,16 @@ export interface PosterDeps {
   fetchBlob(posterUrl: string): Promise<string | null>;
   /** `URL.revokeObjectURL`. */
   revoke(url: string): void;
+  /**
+   * `GET /api/artwork?imdbId=&type=series&season=&episode=` — reccd's season
+   * poster / episode still, which OMDb (fetchMeta's provider) has no field
+   * for at all. OPTIONAL: a torlink build without reccd wiring, or one where
+   * reccd predates this endpoint, simply never has a result to prefer, and
+   * the series poster fetchMeta already returned stands as the answer —
+   * exactly as it did before this existed. Null for any failure, matching
+   * fetchMeta's own contract.
+   */
+  fetchArtwork?(imdbId: string, season: number, episode?: number): Promise<ArtworkOutcome | null>;
 }
 
 export interface PosterCache {
@@ -49,8 +65,20 @@ export interface PosterCache {
    * The outcome for a release: synchronously when it is already known, a promise
    * when it has to be looked up. Concurrent asks for one release share a single
    * lookup.
+   *
+   * `season`/`episode` are for a SEASON or episode-GROUP row specifically — a
+   * plain film, a show's own top-level heading, and any row without a season
+   * to name should omit them, and get exactly today's OMDb-series-poster
+   * behaviour. `release` is still what keys the cache: a season's own pack
+   * release and an episode's own release each already have a distinct name,
+   * so nothing here needs season/episode folded into the cache key too.
    */
-  want(release: string, group: string): PosterOutcome | Promise<PosterOutcome>;
+  want(
+    release: string,
+    group: string,
+    season?: number,
+    episode?: number,
+  ): PosterOutcome | Promise<PosterOutcome>;
   /** The settled outcome for a release, or undefined. No fetching. */
   peek(release: string): PosterOutcome | undefined;
   /** Drop everything and revoke every blob. Called when a new search starts. */
@@ -199,13 +227,29 @@ export function createPosterCache(deps: PosterDeps): PosterCache {
     return posterFetch;
   }
 
-  async function lookup(release: string, group: string, forGeneration: number): Promise<PosterOutcome> {
+  async function lookup(
+    release: string,
+    group: string,
+    forGeneration: number,
+    season?: number,
+    episode?: number,
+  ): Promise<PosterOutcome> {
     const meta = await deps.fetchMeta(release, group);
     if (!meta) return { kind: "none" };
     if (meta.status === "no-key") return { kind: "no-key" };
-    if (meta.status !== "ok" || !meta.posterUrl) return { kind: "none" };
+    if (meta.status !== "ok") return { kind: "none" };
 
-    const posterUrl = meta.posterUrl;
+    let posterUrl = meta.posterUrl;
+    // reccd's own season poster / episode still, preferred over OMDb's
+    // series-wide poster when there is one. `meta.imdbId` gates this: without
+    // it there is nothing to ask reccd for artwork about.
+    if (season !== undefined && meta.imdbId && deps.fetchArtwork) {
+      const art = await deps.fetchArtwork(meta.imdbId, season, episode);
+      if (art?.posterUrl) posterUrl = art.posterUrl;
+      if (episode !== undefined && art?.stillUrl) posterUrl = art.stillUrl;
+    }
+    if (!posterUrl) return { kind: "none" };
+
     const existing = blobs.get(posterUrl);
     // Only valid if it belongs to this generation — clear() emptied the map, so
     // a hit here is necessarily current.
@@ -217,14 +261,14 @@ export function createPosterCache(deps: PosterDeps): PosterCache {
   }
 
   return {
-    want(release, group) {
+    want(release, group, season, episode) {
       const hit = settled.get(release);
       if (hit !== undefined) return hit;
       const inflight = pending.get(release);
       if (inflight !== undefined) return inflight;
 
       const forGeneration = generation;
-      const promise = lookup(release, group, forGeneration)
+      const promise = lookup(release, group, forGeneration, season, episode)
         // Every failure path ends at a labelled frame. A throw here would leave
         // the frame saying "Loading" for the life of the page.
         .catch((): PosterOutcome => ({ kind: "none" }))

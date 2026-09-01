@@ -369,4 +369,7 @@ describe("POSTER_HOSTS allowlist", () => {
   it("still accepts the OMDb/Amazon hosts", () => {
     expect(POSTER_HOSTS.has("m.media-amazon.com")).toBe(true);
   });
+  it("accepts TMDB's image CDN, via reccd's GET /artwork", () => {
+    expect(POSTER_HOSTS.has("image.tmdb.org")).toBe(true);
+  });
 });

@@ -22,6 +22,9 @@ export const POSTER_HOSTS = new Set([
   "img.omdbapi.com",
   // AniList cover art (the Anime group's metadata provider).
   "s4.anilist.co",
+  // TMDB's image CDN, via reccd's GET /artwork — season posters and episode
+  // stills, which OMDb (the two hosts above) has no equivalent field for.
+  "image.tmdb.org",
 ]);
 
 // Cap the cache rather than letting it grow forever. Posters are ~50-200KB, so

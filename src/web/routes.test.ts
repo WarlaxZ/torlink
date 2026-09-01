@@ -3809,6 +3809,150 @@ describe("GET /api/title-search", () => {
   });
 });
 
+describe("GET /api/artwork", () => {
+  beforeEach(() => {
+    // Same reasoning as GET /api/title-search's own beforeEach: without this a
+    // developer with a real reccd exported would never see the not-configured
+    // path, and the "configured" tests would talk to their actual service.
+    vi.stubEnv("TORLINK_RECC_URL", "");
+    vi.stubEnv("TORLINK_RECC_TOKEN", "");
+  });
+
+  function artworkDeps(over: Partial<WebDeps> = {}): WebDeps {
+    return deps({
+      loadConfigImpl: async () => searchConfig({ reccUrl: "http://recc.local", reccToken: "t" }),
+      fetchArtworkImpl: async () => ({ ok: true, posterUrl: "https://image.tmdb.org/t/p/w500/s5.jpg", stillUrl: null }),
+      ...over,
+    });
+  }
+
+  function ask(d: WebDeps, qs = "imdbId=tt1190634&type=series&season=5"): Promise<WebResponse> {
+    return handleWebApi(d, "GET", "/api/artwork", new URLSearchParams(qs), AUTH, "");
+  }
+
+  // Same gate as GET /api/title-search: this route does not delegate to
+  // handleApi, so nothing else stands between an anonymous caller and reccd.
+  it("rejects an unauthenticated caller when a token is set", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: "https://p.jpg", stillUrl: null }));
+    const res = await handleWebApi(
+      artworkDeps({ token: "secret", fetchArtworkImpl }),
+      "GET",
+      "/api/artwork",
+      new URLSearchParams("imdbId=tt1190634&type=series&season=5"),
+      undefined,
+      "",
+    );
+    expect(res.status).toBe(401);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  it("returns reccd's artwork", async () => {
+    const res = await ask(artworkDeps());
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "ok", posterUrl: "https://image.tmdb.org/t/p/w500/s5.jpg", stillUrl: null });
+  });
+
+  // 200 with its own status, NOT a 500 — matching every other reccd-backed
+  // route (title-search, recommendations, title). Nothing is broken: the user
+  // has no reccd, and the caller needs to be able to tell that apart from the
+  // server falling over.
+  it("answers not-configured without asking reccd", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: "https://p.jpg", stillUrl: null }));
+    const res = await ask(artworkDeps({ loadConfigImpl: async () => searchConfig({}), fetchArtworkImpl }));
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "not-configured" });
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  // Covers a reccd predating this endpoint the same way: fetchArtwork turns a
+  // 404 into an ordinary {ok: false}, and the route must not turn that into a
+  // 500 either.
+  it("reports a reccd failure as a status, not a 500", async () => {
+    const res = await ask(
+      artworkDeps({ fetchArtworkImpl: async () => ({ ok: false, error: "this reccd has no artwork endpoint" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ status: "error", error: "this reccd has no artwork endpoint" });
+  });
+
+  it("leaks neither the reccd token nor its URL", async () => {
+    const res = await ask(
+      artworkDeps({
+        loadConfigImpl: async () =>
+          searchConfig({ reccUrl: "http://recc.internal:4100", reccToken: "zzq-secret-9317" }),
+      }),
+    );
+    const body = JSON.stringify(res.json);
+    expect(body).not.toContain("zzq-secret-9317");
+    expect(body).not.toContain("recc.internal");
+  });
+
+  it("400s a missing or malformed imdbId rather than asking reccd", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    const res = await ask(artworkDeps({ fetchArtworkImpl }), "type=series&season=5");
+    expect(res.status).toBe(400);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+
+    const res2 = await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=notreal&type=series&season=5");
+    expect(res2.status).toBe(400);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  it("400s an invalid type rather than asking reccd", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    const res = await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=tt1190634&type=episode&season=5");
+    expect(res.status).toBe(400);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  it("400s when neither season nor episode is given — nothing OMDb doesn't already answer", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    const res = await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=tt1190634&type=series");
+    expect(res.status).toBe(400);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  it("400s an episode given without a season", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    const res = await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=tt1190634&type=series&episode=1");
+    expect(res.status).toBe(400);
+    expect(fetchArtworkImpl).not.toHaveBeenCalled();
+  });
+
+  it("forwards imdbId, type, season and episode to reccd", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=tt1190634&type=series&season=5&episode=1");
+    expect(fetchArtworkImpl).toHaveBeenCalledWith(expect.objectContaining({ reccUrl: "http://recc.local" }), {
+      imdbId: "tt1190634",
+      type: "series",
+      season: 5,
+      episode: 1,
+    });
+  });
+
+  it("omits episode from the forwarded query when only season is given", async () => {
+    const fetchArtworkImpl = vi.fn(async () => ({ ok: true as const, posterUrl: null, stillUrl: null }));
+    await ask(artworkDeps({ fetchArtworkImpl }), "imdbId=tt1190634&type=series&season=5");
+    expect(fetchArtworkImpl).toHaveBeenCalledWith(expect.objectContaining({ reccUrl: "http://recc.local" }), {
+      imdbId: "tt1190634",
+      type: "series",
+      season: 5,
+    });
+  });
+
+  // POSTER_HOSTS enforcement, same as GET /api/title's own posterUrl — this is
+  // the route where a URL reccd invented (or a compromised reccd returned)
+  // would otherwise cross straight into the browser.
+  it("refuses a poster URL whose host is not on the allowlist", async () => {
+    const res = await ask(
+      artworkDeps({
+        fetchArtworkImpl: async () => ({ ok: true, posterUrl: "https://evil.example/p.jpg", stillUrl: null }),
+      }),
+    );
+    expect(res.json).toEqual({ status: "ok", posterUrl: null, stillUrl: null });
+  });
+});
+
 describe("GET /api/sources reccConfigured", () => {
   beforeEach(() => {
     vi.stubEnv("TORLINK_RECC_URL", "");

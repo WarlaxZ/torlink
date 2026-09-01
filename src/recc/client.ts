@@ -236,6 +236,76 @@ export async function fetchTitleSuggestions(
   }
 }
 
+export interface ArtworkQuery {
+  imdbId: string;
+  type: "movie" | "series";
+  /** A season's own poster, or (with `episode`) that episode's still. */
+  season?: number;
+  /** Meaningless without `season`. */
+  episode?: number;
+}
+
+export type FetchArtworkResult =
+  | { ok: true; posterUrl: string | null; stillUrl: string | null }
+  | { ok: false; error: string };
+
+function isArtworkBody(v: unknown): v is { posterUrl: string | null; stillUrl: string | null } {
+  if (typeof v !== "object" || v === null) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    (r.posterUrl === null || typeof r.posterUrl === "string") &&
+    (r.stillUrl === null || typeof r.stillUrl === "string")
+  );
+}
+
+/**
+ * reccd's `GET /artwork` — a season's own poster, or an episode's still,
+ * sourced from TMDB (which OMDb, this app's primary poster provider, simply
+ * has no equivalent field for). `imdbId` is what this app already resolves
+ * via OMDb for every title; `season`/`episode` are already sitting on
+ * `GroupRow` (src/util/resultGroup.ts) for a season or episode-group heading,
+ * so nothing upstream of this call needs new data — only new plumbing.
+ *
+ * Same soft-degrade shape as `fetchTitleSuggestions`: a reccd that predates
+ * this endpoint, or one with no TMDB key configured, answers 404 or with both
+ * fields null, and the caller's existing series-level OMDb poster stands as
+ * the answer, exactly as it did before this existed.
+ */
+export async function fetchArtwork(
+  config: ReccClientConfig,
+  query: ArtworkQuery,
+  opts: { fetchImpl?: FetchImpl; timeoutMs?: number } = {},
+): Promise<FetchArtworkResult> {
+  if (!config.reccUrl) return { ok: false, error: "artwork not configured" };
+  const fetchImpl = opts.fetchImpl ?? (fetch as FetchImpl);
+  const params = new URLSearchParams();
+  params.set("imdbId", query.imdbId);
+  params.set("type", query.type);
+  if (query.season !== undefined) params.set("season", String(query.season));
+  if (query.episode !== undefined) params.set("episode", String(query.episode));
+  try {
+    const res = await fetchImpl(`${config.reccUrl}/artwork?${params.toString()}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${config.reccToken ?? ""}` },
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 8000),
+    });
+    if (res.status === 401) return { ok: false, error: "reccd rejected the token — check reccToken" };
+    // A reccd older than the /artwork endpoint. Not a fault — the feature is
+    // simply unavailable, and the caller's existing series-poster fallback
+    // carries on exactly as it did before this endpoint existed.
+    if (res.status === 404) return { ok: false, error: "this reccd has no artwork endpoint" };
+    if (!res.ok) return { ok: false, error: `artwork unavailable (HTTP ${res.status})` };
+    const body: unknown = await res.json();
+    if (!isArtworkBody(body)) return { ok: false, error: "unexpected response from reccd" };
+    return { ok: true, posterUrl: body.posterUrl, stillUrl: body.stillUrl };
+  } catch (err) {
+    log.debug(
+      `recc fetchArtwork: failed to reach ${config.reccUrl}/artwork: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, error: "couldn't reach reccd" };
+  }
+}
+
 export type ClaimReccResult =
   | { ok: true; name: string }
   | {

@@ -431,4 +431,80 @@ describe("createPosterCache", () => {
     await cache.want("Harrowgate.S03", "TV");
     expect(groups).toEqual(["TV"]);
   });
+
+  it("prefers reccd's season artwork over OMDb's series poster, when a season is asked for", async () => {
+    const artworkCalls: Array<[string, number, number | undefined]> = [];
+    const { cache, blobCalls } = harness({
+      fetchArtwork: async (imdbId, season, episode) => {
+        artworkCalls.push([imdbId, season, episode]);
+        return { posterUrl: "https://image.tmdb.org/season3.jpg", stillUrl: null };
+      },
+    });
+    const outcome = await cache.want("Harrowgate.S03.1080p.WEB-DL", "TV", 3);
+    expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
+    expect(artworkCalls).toEqual([["tt3", 3, undefined]]);
+    expect(blobCalls).toEqual(["https://image.tmdb.org/season3.jpg"]);
+  });
+
+  it("prefers reccd's episode still over both the season poster and the series poster", async () => {
+    const { cache, blobCalls } = harness({
+      fetchArtwork: async () => ({
+        posterUrl: "https://image.tmdb.org/season3.jpg",
+        stillUrl: "https://image.tmdb.org/s03e04.jpg",
+      }),
+    });
+    const outcome = await cache.want("Kepler.S02E04.1080p.WEB-DL", "TV", 2, 4);
+    expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
+    expect(blobCalls).toEqual(["https://image.tmdb.org/s03e04.jpg"]);
+  });
+
+  it("falls back to the series poster when reccd has no artwork for this season", async () => {
+    const { cache, blobCalls } = harness({
+      fetchArtwork: async () => ({ posterUrl: null, stillUrl: null }),
+    });
+    const outcome = await cache.want("Harrowgate.S03.1080p.WEB-DL", "TV", 3);
+    expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
+  });
+
+  it("falls back to the series poster when reccd's artwork lookup itself fails", async () => {
+    const { cache, blobCalls } = harness({
+      fetchArtwork: async () => null,
+    });
+    const outcome = await cache.want("Harrowgate.S03.1080p.WEB-DL", "TV", 3);
+    expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
+  });
+
+  it("never asks reccd for artwork when no season is given — a plain film or a show's own heading", async () => {
+    let asked = false;
+    const { cache } = harness({
+      fetchArtwork: async () => {
+        asked = true;
+        return null;
+      },
+    });
+    await cache.want("Kestrel.2010.1080p.BluRay.x264", "Movies");
+    expect(asked).toBe(false);
+  });
+
+  it("never asks reccd for artwork when the deps do not provide it — a build without reccd wiring", async () => {
+    const { cache, blobCalls } = harness();
+    const outcome = await cache.want("Harrowgate.S03.1080p.WEB-DL", "TV", 3);
+    expect(outcome).toEqual({ kind: "poster", url: "blob:1" });
+    expect(blobCalls).toEqual(["https://m.media-amazon.com/tinrivers.jpg"]);
+  });
+
+  it("never asks reccd for artwork when OMDb found no imdbId to ask about", async () => {
+    let asked = false;
+    const { cache } = harness({
+      fetchMeta: async () => ({ status: "ok", imdbId: null, plot: null, posterUrl: "https://m.media-amazon.com/x.jpg" }),
+      fetchArtwork: async () => {
+        asked = true;
+        return null;
+      },
+    });
+    await cache.want("Harrowgate.S03.1080p.WEB-DL", "TV", 3);
+    expect(asked).toBe(false);
+  });
 });
