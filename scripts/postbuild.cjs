@@ -29,6 +29,14 @@ for (const file of [
   copyFileSync(resolve(root, 'src/web/static', file), resolve(webOut, file));
 }
 
+// The self-hosted Space Grotesk file styles.css references at /fonts/...,
+// same reasoning as the flat files above.
+mkdirSync(resolve(webOut, 'fonts'), { recursive: true });
+copyFileSync(
+  resolve(root, 'src/web/static/fonts/space-grotesk-variable.woff2'),
+  resolve(webOut, 'fonts/space-grotesk-variable.woff2'),
+);
+
 // Nothing in a browser bundle may keep an unresolved import. tsup externalises
 // everything in `dependencies` by default, so a `src/web/static` module that
 // imports an npm package builds "successfully" and then dies on load with a

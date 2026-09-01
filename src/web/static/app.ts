@@ -308,8 +308,9 @@ const groupCheck = el<HTMLInputElement>("group");
 const hideDownloadedCheck = el<HTMLInputElement>("hide-downloaded");
 const hideDownloadedControl = el<HTMLLabelElement>("hide-downloaded-control");
 const downloadedCountEl = el<HTMLSpanElement>("downloaded-count");
-const layoutControl = el<HTMLLabelElement>("layout-control");
-const layoutSelect = el<HTMLSelectElement>("layout");
+const layoutControl = el<HTMLDivElement>("layout-control");
+const layoutListButton = el<HTMLButtonElement>("layout-list");
+const layoutGridButton = el<HTMLButtonElement>("layout-grid");
 const searchProgress = el<HTMLSpanElement>("search-progress");
 const searchStatusLine = el<HTMLParagraphElement>("search-status");
 const searchHintLine = el<HTMLParagraphElement>("search-hint");
@@ -663,6 +664,9 @@ function renderRow(row: DashRow): HTMLLIElement {
 
   const bar = document.createElement("div");
   bar.className = "bar";
+  // Styling hook only (styles.css keys the glow/dim treatment off it) — the
+  // string itself is still row.status, untouched.
+  bar.dataset.status = row.status;
   const fill = document.createElement("span");
   // percent is already clamped to 0..100 by dashboard.ts, so this cannot smuggle
   // anything into the style attribute.
@@ -1639,6 +1643,10 @@ function renderTabs(): void {
       button.type = "button";
       button.className = "tab";
       button.textContent = group;
+      // Purely a styling hook (styles.css keys each category's dot/active
+      // colour off it) — no decision lives here, group is still the string the
+      // click handler below sends to the server.
+      button.dataset.group = group.toLowerCase();
       // aria-pressed, matching #views: this is a toggle button, not a tab. See
       // the comment on #tabs in index.html for why the tablist role went.
       button.setAttribute("aria-pressed", String(group === searchView.group));
@@ -2140,8 +2148,14 @@ hideDownloadedCheck.addEventListener("change", () => {
   renderResults();
 });
 
-layoutSelect.addEventListener("change", () => {
-  layout = parseLayout(layoutSelect.value);
+// Shared by both buttons rather than duplicated per click handler, so the two
+// cannot drift on what "select this layout" means — set the state, persist
+// it, sync aria-pressed on both buttons (a click is also a deselect of the
+// other one), and repaint.
+function selectLayout(next: ResultLayout): void {
+  layout = next;
+  layoutListButton.setAttribute("aria-pressed", String(layout === "list"));
+  layoutGridButton.setAttribute("aria-pressed", String(layout === "grid"));
   try {
     localStorage.setItem(LAYOUT_KEY, layout);
   } catch {
@@ -2150,7 +2164,10 @@ layoutSelect.addEventListener("change", () => {
   // No refetch: both layouts render from the same visibleResults output and the
   // same poster cache, so a toggle costs nothing.
   renderResults();
-});
+}
+
+layoutListButton.addEventListener("click", () => selectLayout("list"));
+layoutGridButton.addEventListener("click", () => selectLayout("grid"));
 
 groupCheck.addEventListener("change", () => {
   searchView = { ...searchView, grouped: groupCheck.checked };
@@ -2214,6 +2231,9 @@ function paintSearchHint(): void {
  * so it shows the note as text the way the For You cards do.
  */
 function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean): void {
+  // Settling one way or the other — the spinner startPoster added below is
+  // always stale by the time this runs.
+  host.classList.remove("poster-loading");
   if (outcome.kind === "poster") {
     const img = document.createElement("img");
     img.src = outcome.url;
@@ -2280,6 +2300,12 @@ function startPoster(release: string, host: HTMLElement, compact: boolean, group
     paintPoster(host, outcome, compact);
     return;
   }
+  // An OMDb lookup that has not settled yet used to leave the frame blank —
+  // indistinguishable from "loading" and "there will never be a poster here",
+  // which reads as broken when a category has enough rows queued behind the
+  // rate limit that several sit blank for seconds at a time.
+  host.replaceChildren();
+  host.classList.add("poster-loading");
   void outcome.then((settledOutcome) => {
     // The row may have been re-rendered or filtered away during the two round
     // trips; a detached node is not worth painting.
@@ -3283,8 +3309,9 @@ function releasePoster(): void {
   }
 }
 
-function posterPlaceholder(note: string): void {
+function posterPlaceholder(note: string, loading = false): void {
   releasePoster();
+  previewPoster.classList.toggle("poster-loading", loading);
   const span = document.createElement("span");
   span.className = "poster-note";
   span.textContent = note;
@@ -3460,7 +3487,7 @@ function renderPreview(state: PreviewState): void {
     previewSub.textContent = "";
     previewBody.textContent = "Looking this up…";
     previewImdb.hidden = true;
-    posterPlaceholder("Loading");
+    posterPlaceholder("Loading", true);
     return;
   }
 
@@ -3485,7 +3512,7 @@ function renderPreview(state: PreviewState): void {
     previewImdb.hidden = true;
   }
   if (copy.posterUrl) {
-    posterPlaceholder("Loading");
+    posterPlaceholder("Loading", true);
     void loadPoster(copy.posterUrl, previewGeneration);
   } else {
     posterPlaceholder(copy.posterNote);
@@ -3630,7 +3657,8 @@ async function fetchReccPoster(imdbId: string): Promise<ReccPosterLookup> {
   }
 }
 
-function paintPosterNote(host: HTMLElement, note: string): void {
+function paintPosterNote(host: HTMLElement, note: string, loading = false): void {
+  host.classList.toggle("poster-loading", loading);
   const span = document.createElement("span");
   span.className = "poster-note";
   span.textContent = note;
@@ -3638,6 +3666,7 @@ function paintPosterNote(host: HTMLElement, note: string): void {
 }
 
 function paintReccPoster(host: HTMLElement, outcome: ReccPosterOutcome): void {
+  host.classList.remove("poster-loading");
   if (outcome.kind !== "poster") {
     // The wording is the model's: "No OMDb key" for the config gap, "No poster"
     // for a title that simply has none.
@@ -3656,7 +3685,7 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
     paintReccPoster(host, cached.poster);
     return;
   }
-  paintPosterNote(host, "Loading");
+  paintPosterNote(host, "Loading", true);
   let inflight = reccPosterPending.get(imdbId);
   if (!inflight) {
     inflight = fetchReccPoster(imdbId).then((outcome) => {
@@ -4340,7 +4369,8 @@ function openApp(payload: StatusPayload): void {
   searchView = { ...searchView, group: bootRoute.group };
   showView(view);
   renderTabs();
-  layoutSelect.value = layout;
+  layoutListButton.setAttribute("aria-pressed", String(layout === "list"));
+  layoutGridButton.setAttribute("aria-pressed", String(layout === "grid"));
   // The remembered grouping preference, into both the control and the view state
   // — the checkbox is `checked` in the markup to match emptyView()'s default, so
   // without this an opted-out user sees a ticked box over a grouped list.
