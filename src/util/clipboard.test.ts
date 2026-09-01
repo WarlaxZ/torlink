@@ -107,6 +107,10 @@ describe("writeClipboard OSC 52 fallback", () => {
         vi.stubEnv("SSH_TTY", "");
         vi.stubEnv("SSH_CONNECTION", "");
         vi.stubEnv("TMUX", "");
+        // Plain Linux, not WSL: this test pins the non-WSL writer list, so it
+        // must not pick up clip.exe from a host that happens to be WSL itself
+        // (e.g. this suite running inside WSL).
+        vi.stubEnv("WSL_DISTRO_NAME", "");
         mockSpawn(1);
         const { writeClipboard } = await import("./clipboard");
 
