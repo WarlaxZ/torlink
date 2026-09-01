@@ -43,13 +43,25 @@ export interface ResultGroup<T> {
 }
 
 /**
- * One line of the rendered list: a season heading, a group heading, or a release.
+ * One line of the rendered list: a show heading, a season heading, a group
+ * heading, or a release.
  *
- * `depth` is how far the row is indented — 0 top level, 1 inside an open season,
- * 2 a release inside an episode group inside an open season. Both front ends
- * read it rather than deriving indent themselves.
+ * `depth` is how far the row is indented. For a show with more than one
+ * season: 0 the show, 1 an open season inside it, 2 an open episode group
+ * inside that season, 3 a release inside that group. For anything NOT nested
+ * under a show (a lone season, a film, a group with no season) the whole
+ * scale shifts down by one — a lone season is depth 0, same as before this
+ * existed. Both front ends read it rather than deriving indent themselves.
  */
 export type GroupRow<T> =
+  | {
+      kind: "show";
+      key: string;
+      title: string;
+      members: T[];
+      expanded: boolean;
+      depth: number;
+    }
   | {
       kind: "season";
       key: string;
@@ -243,12 +255,37 @@ export interface SeasonNode<T> {
   members: T[];
 }
 
-/** A top-level node: a season of a show, or a group with no season to sit under. */
-export type TreeNode<T> = SeasonNode<T> | ResultGroup<T>;
+/**
+ * A show with more than one season in the result set, holding them newest
+ * first.
+ *
+ * ONLY built for a show that HAS more than one season here — a show with
+ * exactly one stays a bare `SeasonNode` at the top level, the same "a group of
+ * one adds no wrapper" rule `pushGroupRows` already applies one level down.
+ * Without it, the overwhelmingly common case (a search that surfaces one
+ * season of a show) would gain a heading over a heading for no reason.
+ */
+export interface ShowNode<T> {
+  kind: "show";
+  key: string;
+  title: string;
+  /** Newest first. Always 2 or more — see the doc comment above. */
+  seasons: SeasonNode<T>[];
+  /** Every season's members concatenated, newest season first. Never empty. */
+  members: T[];
+}
 
-/** True for a `SeasonNode`. `ResultGroup` has no `kind`, which is the discriminator. */
+/** A top-level node: a show, a lone season, or a group with no season to sit under. */
+export type TreeNode<T> = ShowNode<T> | SeasonNode<T> | ResultGroup<T>;
+
+/** True for a `SeasonNode` specifically — NOT a `ShowNode`, which also has a `kind`. */
 export function isSeasonNode<T>(node: TreeNode<T>): node is SeasonNode<T> {
-  return "kind" in node;
+  return "kind" in node && node.kind === "season";
+}
+
+/** True for a `ShowNode`. */
+export function isShowNode<T>(node: TreeNode<T>): node is ShowNode<T> {
+  return "kind" in node && node.kind === "show";
 }
 
 /**
@@ -312,12 +349,15 @@ function compareSeasonChild<T>(a: ResultGroup<T>, b: ResultGroup<T>): number {
 }
 
 /**
- * Fold a show's single-season groups under season nodes.
+ * Fold a show's single-season groups under season nodes, and a show's seasons
+ * under one show node when it has more than one.
  *
- * ORDER IS PRESERVED at the top level: a show's whole season block is emitted at
- * the position of its FIRST group, so `groupResults`' promise that groups sit
- * where their best member sits — which every sort depends on — still holds.
- * Within a show, seasons are newest first.
+ * ORDER IS PRESERVED at the top level: a show's whole block — one show node,
+ * or its seasons individually — is emitted at the position of its FIRST
+ * group, so `groupResults`' promise that groups sit where their best member
+ * sits — which every sort depends on — still holds. Within a show, seasons
+ * are newest first, both as `ShowNode.seasons` and, for a show with only one,
+ * as the plain top-level order.
  *
  * The sort control therefore orders releases INSIDE a group, and orders
  * unrelated results against each other. A series' internal structure is
@@ -352,17 +392,30 @@ export function seasonTree<T extends GroupableResult>(
     if (done.has(show)) continue;
     done.add(show);
     const seasons = byShow.get(show)!;
-    for (const season of [...seasons.keys()].sort((a, b) => b - a)) {
-      const children = [...seasons.get(season)!].sort(compareSeasonChild);
-      out.push({
-        kind: "season",
-        key: `${show}|series|s${season}`,
-        title: children[0]!.title,
-        season,
-        children,
-        members: children.flatMap((child) => child.members),
+    const seasonNodes: SeasonNode<T>[] = [...seasons.keys()]
+      .sort((a, b) => b - a)
+      .map((season) => {
+        const children = [...seasons.get(season)!].sort(compareSeasonChild);
+        return {
+          kind: "season" as const,
+          key: `${show}|series|s${season}`,
+          title: children[0]!.title,
+          season,
+          children,
+          members: children.flatMap((child) => child.members),
+        };
       });
+    if (seasonNodes.length === 1) {
+      out.push(seasonNodes[0]!);
+      continue;
     }
+    out.push({
+      kind: "show",
+      key: show,
+      title: seasonNodes[0]!.title,
+      seasons: seasonNodes,
+      members: seasonNodes.flatMap((node) => node.members),
+    });
   }
   return out;
 }
@@ -379,37 +432,66 @@ export function seasonTree<T extends GroupableResult>(
  * one decision, and this codebase records four bugs caused by copying one
  * instead of moving it down here.
  */
+/**
+ * One season's row(s), at a given depth — 0 for a lone season sitting at the
+ * top level, 1 for a season nested inside an open show. Split out of
+ * `groupRowPlan` so both callers (the plain top-level loop and the show
+ * branch below) apply the same "one child needs no wrapper" rule.
+ */
+function pushSeasonRows<T extends GroupableResult>(
+  rows: GroupRow<T>[],
+  node: SeasonNode<T>,
+  expanded: ReadonlySet<string>,
+  depth: number,
+): void {
+  // A season node holding a SINGLE child is dropped and its child emitted in
+  // its place: wrapping one episode in a season row is the same noise as a
+  // disclosure over "1 release", and without this a search returning one
+  // release of one show would grow a heading it never had.
+  const only = node.children.length === 1 ? node.children[0] : undefined;
+  if (only) {
+    pushGroupRows(rows, only, expanded, depth);
+    return;
+  }
+  const isOpen = expanded.has(node.key);
+  rows.push({
+    kind: "season",
+    key: node.key,
+    title: node.title,
+    season: node.season,
+    members: node.members,
+    expanded: isOpen,
+    depth,
+  });
+  if (!isOpen) return;
+  for (const child of node.children) pushGroupRows(rows, child, expanded, depth + 1);
+}
+
 export function groupRowPlan<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
   expanded: ReadonlySet<string>,
 ): GroupRow<T>[] {
   const rows: GroupRow<T>[] = [];
   for (const node of seasonTree(groups)) {
-    if (!isSeasonNode(node)) {
-      pushGroupRows(rows, node, expanded, 0);
+    if (isShowNode(node)) {
+      const isOpen = expanded.has(node.key);
+      rows.push({
+        kind: "show",
+        key: node.key,
+        title: node.title,
+        members: node.members,
+        expanded: isOpen,
+        depth: 0,
+      });
+      if (!isOpen) continue;
+      for (const season of node.seasons) pushSeasonRows(rows, season, expanded, 1);
       continue;
     }
-    // A season node holding a SINGLE child is dropped and its child emitted in
-    // its place: wrapping one episode in a season row is the same noise as a
-    // disclosure over "1 release", and without this a search returning one
-    // release of one show would grow a heading it never had.
-    const only = node.children.length === 1 ? node.children[0] : undefined;
-    if (only) {
-      pushGroupRows(rows, only, expanded, 0);
+    if (isSeasonNode(node)) {
+      pushSeasonRows(rows, node, expanded, 0);
       continue;
     }
-    const isOpen = expanded.has(node.key);
-    rows.push({
-      kind: "season",
-      key: node.key,
-      title: node.title,
-      season: node.season,
-      members: node.members,
-      expanded: isOpen,
-      depth: 0,
-    });
-    if (!isOpen) continue;
-    for (const child of node.children) pushGroupRows(rows, child, expanded, 1);
+    pushGroupRows(rows, node, expanded, 0);
   }
   return rows;
 }
@@ -441,6 +523,35 @@ export function groupRowPlan<T extends GroupableResult>(
  * already owns, so collapsing one behaves like collapsing anything else.
  */
 /**
+ * Every season in the tree, paired with its parent show node — null when the
+ * season sits at the top level on its own (a show with exactly one season).
+ *
+ * The one place that knows how to find a season regardless of whether
+ * `seasonTree` wrapped it in a show: `positionExpandedKey`, the ranked
+ * fallback below, and `seasonPlayPlan` would otherwise each re-derive "is
+ * this nested" their own way, which is exactly the copy-then-drift pattern
+ * this file already exists to avoid.
+ */
+function seasonEntries<T extends GroupableResult>(
+  nodes: readonly TreeNode<T>[],
+): { show: ShowNode<T> | null; season: SeasonNode<T> }[] {
+  const entries: { show: ShowNode<T> | null; season: SeasonNode<T> }[] = [];
+  for (const node of nodes) {
+    if (isShowNode(node)) {
+      for (const season of node.seasons) entries.push({ show: node, season });
+    } else if (isSeasonNode(node)) {
+      entries.push({ show: null, season: node });
+    }
+  }
+  return entries;
+}
+
+/** [show.key, season.key] when nested, or just [season.key] at the top level. */
+function expandKeysFor<T>(entry: { show: ShowNode<T> | null; season: SeasonNode<T> }): string[] {
+  return entry.show ? [entry.show.key, entry.season.key] : [entry.season.key];
+}
+
+/**
  * The position branch of {@link defaultExpandedKeys}, isolated so
  * `expansionSeed` can gate the order-dependent ranked fallback on
  * `searchSettled` without also delaying this one — it names an exact show by
@@ -450,13 +561,13 @@ export function groupRowPlan<T extends GroupableResult>(
 function positionExpandedKey<T extends GroupableResult>(
   nodes: readonly TreeNode<T>[],
   positionFor: PositionLookup,
-): string | null {
-  for (const node of nodes) {
-    if (!isSeasonNode(node) || node.children.length <= 1) continue;
-    const at = positionFor(showKeyOf(node.key));
-    if (at && nextOf(at).season === node.season) return node.key;
+): string[] {
+  for (const entry of seasonEntries(nodes)) {
+    if (entry.season.children.length <= 1) continue;
+    const at = positionFor(showKeyOf(entry.season.key));
+    if (at && nextOf(at).season === entry.season.season) return expandKeysFor(entry);
   }
-  return null;
+  return [];
 }
 
 export function defaultExpandedKeys<T extends GroupableResult>(
@@ -466,14 +577,14 @@ export function defaultExpandedKeys<T extends GroupableResult>(
 ): string[] {
   const nodes = seasonTree(groups);
   // WITH a position: the season holding the next episode, which is the whole
-  // point — you searched a show to carry on watching it.
+  // point — you searched a show to carry on watching it. Its parent show (if
+  // any) opens with it, or the season row it names would be nested inside a
+  // heading that never got the memo to expand.
   if (positionFor) {
-    const key = positionExpandedKey(nodes, positionFor);
-    if (key) return [key];
+    const keys = positionExpandedKey(nodes, positionFor);
+    if (keys.length > 0) return keys;
   }
-  const candidates = nodes.filter(
-    (node): node is SeasonNode<T> => isSeasonNode(node) && node.children.length > 1,
-  );
+  const candidates = seasonEntries(nodes).filter((entry) => entry.season.children.length > 1);
   if (candidates.length === 0) return [];
   // Prefer the season whose SHOW TITLE the query named exactly — "the boys"
   // normalises the same way "The Boys" does — over "highest-ranked", which is
@@ -484,10 +595,10 @@ export function defaultExpandedKeys<T extends GroupableResult>(
   // seeded, best-answering source wins the slot regardless of title.
   if (query) {
     const wanted = normaliseTitle(query);
-    const exact = candidates.find((node) => normaliseTitle(node.title) === wanted);
-    if (exact) return [exact.key];
+    const exact = candidates.find((entry) => normaliseTitle(entry.season.title) === wanted);
+    if (exact) return expandKeysFor(exact);
   }
-  return [candidates[0]!.key];
+  return expandKeysFor(candidates[0]!);
 }
 
 /**
@@ -566,21 +677,32 @@ export function resultAtRow<T>(row: GroupRow<T>): T | null {
  */
 export type SeasonPlayPlan<T> =
   | { kind: "resolve"; result: T | null }
-  | { kind: "reveal"; expandKey: string; selectKey: string | null; select: T | null };
+  | { kind: "reveal"; expandKeys: string[]; selectKey: string | null; select: T | null };
 
 export function seasonPlayPlan<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
   seasonKey: string,
   positionFor?: PositionLookup,
 ): SeasonPlayPlan<T> {
-  const node = seasonTree(groups).find(
-    (n): n is SeasonNode<T> => isSeasonNode(n) && n.key === seasonKey,
-  );
-  // Not a season row (a film, a single-episode group) or gone: behave as play
-  // does today — resolve the first member.
-  if (!node) {
+  const nodes = seasonTree(groups);
+  const show = nodes.find((n): n is ShowNode<T> => isShowNode(n) && n.key === seasonKey);
+  // A show row's Play acts on its newest season — the heading is a wrapper
+  // around it, not a thing with a torrent of its own — and if that season
+  // reveals rather than resolves, the show has to open alongside it or the
+  // revealed row would sit inside a heading nobody told to expand.
+  if (show) {
+    const plan = seasonPlayPlan(groups, show.seasons[0]!.key, positionFor);
+    return plan.kind === "reveal" ? { ...plan, expandKeys: [show.key, ...plan.expandKeys] } : plan;
+  }
+  const entry = seasonEntries(nodes).find(({ season }) => season.key === seasonKey);
+  // Not a season or show row (a film, a single-episode group) or gone: behave
+  // as play does today — resolve the first member. A season NESTED inside a
+  // show needs no extra key here: reaching its Play button at all means the
+  // show is already expanded, so only the season itself needs to open.
+  if (!entry) {
     return { kind: "resolve", result: groups.find((g) => g.key === seasonKey)?.members[0] ?? null };
   }
+  const node = entry.season;
   // A child with no episode number is a pack: the whole season in one torrent.
   if (node.children.some((c) => c.episode === undefined)) {
     return { kind: "resolve", result: node.members[0] ?? null };
@@ -594,7 +716,7 @@ export function seasonPlayPlan<T extends GroupableResult>(
     node.children[0]!;
   return {
     kind: "reveal",
-    expandKey: node.key,
+    expandKeys: [node.key],
     selectKey: target.key,
     select: target.members[0] ?? null,
   };
@@ -637,11 +759,11 @@ export function expansionSeed<T extends GroupableResult>(
   query = "",
 ): ExpansionSeed {
   const nodes = seasonTree(groups);
-  const positioned = positionFor ? positionExpandedKey(nodes, positionFor) : null;
-  if (!positioned && !searchSettled) {
+  const positioned = positionFor ? positionExpandedKey(nodes, positionFor) : [];
+  if (positioned.length === 0 && !searchSettled) {
     return { expandKeys: [], selectKey: null, latch: false };
   }
-  const expandKeys = positioned ? [positioned] : defaultExpandedKeys(groups, undefined, query);
+  const expandKeys = positioned.length > 0 ? positioned : defaultExpandedKeys(groups, undefined, query);
   return {
     expandKeys,
     selectKey: positionFor ? nextUpRowKey(groups, positionFor) : null,
