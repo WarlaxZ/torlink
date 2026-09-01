@@ -308,8 +308,9 @@ const groupCheck = el<HTMLInputElement>("group");
 const hideDownloadedCheck = el<HTMLInputElement>("hide-downloaded");
 const hideDownloadedControl = el<HTMLLabelElement>("hide-downloaded-control");
 const downloadedCountEl = el<HTMLSpanElement>("downloaded-count");
-const layoutControl = el<HTMLLabelElement>("layout-control");
-const layoutSelect = el<HTMLSelectElement>("layout");
+const layoutControl = el<HTMLDivElement>("layout-control");
+const layoutListButton = el<HTMLButtonElement>("layout-list");
+const layoutGridButton = el<HTMLButtonElement>("layout-grid");
 const searchProgress = el<HTMLSpanElement>("search-progress");
 const searchStatusLine = el<HTMLParagraphElement>("search-status");
 const searchHintLine = el<HTMLParagraphElement>("search-hint");
@@ -2147,8 +2148,14 @@ hideDownloadedCheck.addEventListener("change", () => {
   renderResults();
 });
 
-layoutSelect.addEventListener("change", () => {
-  layout = parseLayout(layoutSelect.value);
+// Shared by both buttons rather than duplicated per click handler, so the two
+// cannot drift on what "select this layout" means — set the state, persist
+// it, sync aria-pressed on both buttons (a click is also a deselect of the
+// other one), and repaint.
+function selectLayout(next: ResultLayout): void {
+  layout = next;
+  layoutListButton.setAttribute("aria-pressed", String(layout === "list"));
+  layoutGridButton.setAttribute("aria-pressed", String(layout === "grid"));
   try {
     localStorage.setItem(LAYOUT_KEY, layout);
   } catch {
@@ -2157,7 +2164,10 @@ layoutSelect.addEventListener("change", () => {
   // No refetch: both layouts render from the same visibleResults output and the
   // same poster cache, so a toggle costs nothing.
   renderResults();
-});
+}
+
+layoutListButton.addEventListener("click", () => selectLayout("list"));
+layoutGridButton.addEventListener("click", () => selectLayout("grid"));
 
 groupCheck.addEventListener("change", () => {
   searchView = { ...searchView, grouped: groupCheck.checked };
@@ -4359,7 +4369,8 @@ function openApp(payload: StatusPayload): void {
   searchView = { ...searchView, group: bootRoute.group };
   showView(view);
   renderTabs();
-  layoutSelect.value = layout;
+  layoutListButton.setAttribute("aria-pressed", String(layout === "list"));
+  layoutGridButton.setAttribute("aria-pressed", String(layout === "grid"));
   // The remembered grouping preference, into both the control and the view state
   // — the checkbox is `checked` in the markup to match emptyView()'s default, so
   // without this an opted-out user sees a ticked box over a grouped list.

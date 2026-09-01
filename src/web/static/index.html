@@ -9,13 +9,16 @@
   </head>
   <body>
     <header id="page-header">
-      <h1>
+      <h1 aria-label="torlnk">
         <svg class="wordmark-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" focusable="false">
           <path class="magnet-body" d="M7.6 3 V12.5 A4.4 4.4 0 0 0 16.4 12.5 V3" />
           <rect class="magnet-tip magnet-tip-a" x="5.6" y="0.5" width="4" height="4.5" rx="0.8" />
           <rect class="magnet-tip magnet-tip-b" x="14.4" y="0.5" width="4" height="4.5" rx="0.8" />
         </svg>
-        torlnk
+        <!-- aria-label on the heading, not just on the icon: below 34rem the
+             text hides (CSS only — the DOM node stays, screen readers still
+             get "torlnk") to give the nav room to sit on the same row. -->
+        <span class="wordmark-text">torlnk</span>
       </h1>
       <!-- Search / For You / Saved / Queue. Buttons rather than links: it is one
            page with four panes, and there is no route to navigate to.
@@ -34,12 +37,44 @@
            queries) and the library (favourited torrents) — in one pane rather
            than two tabs. Five tabs across the top of a phone is where this nav
            stops working. -->
+      <!-- Each button carries an icon AND a text label always — below 34rem
+           the label hides visually (same technique as .wordmark-text) so the
+           four still fit on the wordmark's row, but aria-label keeps them
+           correct for a screen reader at every width without depending on
+           which text node happens to be visible. -->
       <nav id="views" class="views" hidden>
-        <button id="view-search" type="button" class="view-tab" aria-pressed="true">search</button>
-        <button id="view-recc" type="button" class="view-tab" aria-pressed="false">for you</button>
-        <button id="view-saved" type="button" class="view-tab" aria-pressed="false">saved</button>
-        <button id="view-queue" type="button" class="view-tab" aria-pressed="false">
-          queue<span id="queue-count" class="badge" hidden></span>
+        <button id="view-search" type="button" class="view-tab" aria-pressed="true" aria-label="Search">
+          <svg class="view-tab-icon" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" focusable="false">
+            <circle cx="8.5" cy="8.5" r="5.3" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <line x1="12.6" y1="12.6" x2="17.2" y2="17.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <span class="view-tab-label">search</span>
+        </button>
+        <button id="view-recc" type="button" class="view-tab" aria-pressed="false" aria-label="For you">
+          <svg class="view-tab-icon" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" focusable="false">
+            <path
+              d="M10 2.2 L11.6 8.1 L17.5 10 L11.6 11.9 L10 17.8 L8.4 11.9 L2.5 10 L8.4 8.1 Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="view-tab-label">for you</span>
+        </button>
+        <button id="view-saved" type="button" class="view-tab" aria-pressed="false" aria-label="Saved">
+          <svg class="view-tab-icon" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" focusable="false">
+            <path d="M5.5 3 H14.5 V17 L10 13.3 L5.5 17 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          </svg>
+          <span class="view-tab-label">saved</span>
+        </button>
+        <button id="view-queue" type="button" class="view-tab" aria-pressed="false" aria-label="Queue">
+          <svg class="view-tab-icon" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true" focusable="false">
+            <line x1="3" y1="6" x2="17" y2="6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="3" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <span class="view-tab-label">queue</span><span id="queue-count" class="badge" hidden></span>
         </button>
       </nav>
       <!-- Settings. A gear, not a fifth nav tab: the nav caps at four (see the
@@ -286,19 +321,21 @@
               <span>filter</span>
               <input id="filter" type="text" placeholder="narrow these results" autocomplete="off" />
             </label>
-            <label class="control control-check" for="alive">
-              <span>alive only</span>
-              <input id="alive" type="checkbox" />
-            </label>
-            <!-- Many uploads of one film collapse to one row. CHECKED by default,
-                 matching emptyView(): a browse routinely returns four of
-                 everything, and one measured search returned 129 results that
-                 were 21 actual things. Remembered in localStorage, read back
-                 through parseGrouping. -->
-            <label class="control control-check" for="group">
-              <span>group</span>
-              <input id="group" type="checkbox" checked />
-            </label>
+            <div class="controls-pair">
+              <label class="control control-check" for="alive">
+                <span>alive only</span>
+                <input id="alive" type="checkbox" />
+              </label>
+              <!-- Many uploads of one film collapse to one row. CHECKED by
+                   default, matching emptyView(): a browse routinely returns
+                   four of everything, and one measured search returned 129
+                   results that were 21 actual things. Remembered in
+                   localStorage, read back through parseGrouping. -->
+              <label class="control control-check" for="group">
+                <span>group</span>
+                <input id="group" type="checkbox" checked />
+              </label>
+            </div>
             <!-- Hide results already downloaded, for completing a title without
                  re-adding one. OFF by default (emptyView()): the default search
                  shows everything. The count beside it says how many are hidden-able. -->
@@ -307,16 +344,21 @@
               <input id="hide-downloaded" type="checkbox" />
             </label>
             <span id="downloaded-count" class="result-count" aria-live="polite"></span>
-            <!-- Shown only on the tabs that have artwork to show, by app.ts:
-                 a grid of empty frames is worse than the list it replaced. -->
-            <label class="control" id="layout-control" for="layout" hidden>
-              <span>layout</span>
-              <select id="layout">
-                <option value="list" selected>list</option>
-                <option value="grid">grid</option>
-              </select>
-            </label>
-            <span id="search-progress" class="progress"></span>
+            <div class="controls-footer">
+              <!-- Shown only on the tabs that have artwork to show, by app.ts:
+                   a grid of empty frames is worse than the list it replaced.
+                   Two icon toggles rather than the <select> this used to be —
+                   aria-pressed, matching every other toggle button on the
+                   page, so it needs no new interaction pattern. -->
+              <div class="layout-toggle" id="layout-control" hidden>
+                <span id="layout-label">layout</span>
+                <div class="layout-buttons" role="group" aria-labelledby="layout-label">
+                  <button type="button" id="layout-list" class="icon-toggle" aria-pressed="true" aria-label="List layout">☰</button>
+                  <button type="button" id="layout-grid" class="icon-toggle" aria-pressed="false" aria-label="Grid layout">▦</button>
+                </div>
+              </div>
+              <span id="search-progress" class="progress"></span>
+            </div>
           </div>
         </div>
 

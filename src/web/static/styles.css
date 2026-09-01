@@ -190,25 +190,50 @@ header {
   margin-bottom: 0.5rem;
 }
 
-/* The header's row does not fit a phone: wordmark + four nav buttons + the
-   connection state need ~447px, so at 400 the state indicator sat off-screen and
-   the document carried a horizontal scrollbar. Longstanding, but it matters more
-   now the bar is pinned — an indicator you can never see is not an indicator.
-   Wrapping is the fix that holds whatever the labels say. */
+/* The header's row does not fit a phone at full size: wordmark text + four
+   labelled nav buttons + the connection state need ~447px. Text labels alone
+   (nav shrunk as far as legibility allows) don't get there either — "for
+   you" and "queue" are still ~75-90px each. What DOES fit in one row:
+   - The connection state drops entirely (not just its text — a "will I lose
+     my connection" dot is not worth the width here). Still shown above 34rem.
+   - The wordmark loses its TEXT, not the magnet icon — the icon alone is
+     the thing that's on the favicon and the tab title anyway, and losing
+     "torlnk" recovers ~85px a phone header cannot spare. aria-label on the
+     <h1> (index.html) keeps a screen reader's announcement unchanged.
+   - The four nav buttons go icon-only, each with its label text hidden the
+     same way and an aria-label carrying it instead. Four ~30px icon buttons
+     fit easily where four text pills could not. */
 @media (max-width: 34rem) {
   header {
-    flex-wrap: wrap;
-    row-gap: 0.4rem;
+    flex-wrap: nowrap;
   }
 
-  /* Two rows, not three. Left to wrap on its own the three children take a line
-     each; giving the nav the full width puts the wordmark and the connection
-     state together on the first row, where space-between already pushes them to
-     opposite ends. Saves ~35px of a pinned bar on a phone. */
+  .conn {
+    display: none;
+  }
+
+  .wordmark-text {
+    display: none;
+  }
+
   .views {
-    order: 1;
-    flex-basis: 100%;
-    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-left: 0.5rem;
+  }
+
+  .view-tab {
+    gap: 0;
+    padding: 0.4rem;
+  }
+
+  .view-tab-label {
+    display: none;
+  }
+
+  /* The badge normally trails the word "queue" with a small left margin
+     (.badge below); icon-only, it sits directly against the icon instead. */
+  .view-tab .badge {
+    margin-left: 0.2rem;
   }
 }
 
@@ -891,11 +916,18 @@ button:hover {
 }
 
 .view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 0.25rem 0.6rem;
   color: var(--dim);
+}
+
+.view-tab-icon {
+  flex: 0 0 auto;
 }
 
 /* aria-pressed is the selected state, not a class: the attribute has to be
@@ -997,6 +1029,24 @@ button:hover {
   margin-bottom: 0.75rem;
 }
 
+/* A hairline before the first control of each logical cluster — sort | filter
+   | alive+group | layout — so the toolbar reads as four separate controls
+   instead of one run-on line where "default" (sort's value) sits right next
+   to "FILTER" with nothing but a column-gap to say a new control started.
+   Targeted by attribute/class rather than nth-child: .controls-pair and
+   .controls-footer are `display: contents` at this width (mobile-only grid
+   wrappers), so their first real child is what the flexbox actually sees,
+   and what needs the divider. Harmless on mobile too — .control's `display:
+   contents` there means a bare label.control[for] has no box to put a
+   border on, and .layout-toggle's own mobile rule cancels it explicitly
+   below so the icon row doesn't pick up a stray line at its start. */
+label.control[for="filter"],
+label.control[for="alive"],
+.layout-toggle {
+  border-left: 1px solid var(--line);
+  padding-left: 0.75rem;
+}
+
 .control {
   display: flex;
   align-items: center;
@@ -1005,6 +1055,53 @@ button:hover {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+/* Wrappers around a pair of otherwise-standalone .controls children, so the
+   mobile column grid below (which unwraps each .control into two grid items)
+   can treat "alive only + group" and "layout icons + source count" as ONE
+   grid cell it lays out internally, instead of four/five cells competing for
+   the same two columns. `display: contents` above 46rem: unwrapped, its
+   children behave exactly as if they were direct children of .controls,
+   which is what they always were before these wrappers existed. */
+.controls-pair,
+.controls-footer {
+  display: contents;
+}
+
+.layout-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.layout-buttons {
+  display: flex;
+  gap: 0.3rem;
+}
+
+/* Two of these (list/grid) replace what used to be a <select> with two
+   options — a control this small is more click than a dropdown needs, and
+   aria-pressed matches every other toggle button on the page rather than
+   inventing a new interaction for one control. */
+.icon-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.icon-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .control input[type="text"] {
@@ -1260,15 +1357,15 @@ select:focus-visible {
 
   /* Equal-width cells rather than flex-wrap's left-packed, text-width-sized
      pills — "ALL" and "MOVIES" made visibly different-sized buttons that
-     wrapped into a ragged 4-then-3 grid. Grid columns are all the same width,
-     so both rows line up under each other. Desktop keeps the flex version:
-     eight equal-width columns stretched across a 1400px toolbar would be a
-     much worse result than compact left-packed pills — this is a narrow-
-     viewport fix specifically, not a "grid is better" one. */
+     wrapped into a ragged 4-then-3 grid. FOUR columns specifically: eight
+     pills (All + seven categories) fills exactly two even rows, no orphan
+     dangling on a third. Desktop keeps the flex version: equal-width columns
+     stretched across a 1400px toolbar would be a much worse result than
+     compact left-packed pills there. */
   .tabs {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
-    row-gap: 0.65rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.35rem;
   }
 
   /* SORT/FILTER/ALIVE ONLY/GROUP/LAYOUT each had a differently-wide label
@@ -1278,8 +1375,9 @@ select:focus-visible {
      the label so its two children (the text, the actual control) become grid
      items in their own right, landing in column 1 / column 2 wherever they
      fall in DOM order. That only works cleanly because every .control has
-     EXACTLY two children — the two standalone spans below are the exception,
-     and span both columns rather than desyncing the column that follows. */
+     EXACTLY two children — .controls-pair, .controls-footer and
+     #downloaded-count are the exceptions, and each spans both columns rather
+     than desyncing the column that follows. */
   .controls {
     display: grid;
     grid-template-columns: 6.5rem 1fr;
@@ -1297,18 +1395,66 @@ select:focus-visible {
     display: contents;
   }
 
-  #downloaded-count,
-  #search-progress {
+  /* Alive/group share one row instead of one each — two toggles are narrow
+     enough that giving each its own full-width row like sort/filter/layout
+     wasted the row entirely. */
+  .controls-pair {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 1.5rem;
+  }
+
+  /* Overrides the bare .control rule above (two classes beats one, so this
+     wins regardless of source order): inside the pair, a .control needs to
+     actually be a box — label then switch, side by side — not unwrap into
+     the parent grid the way a standalone .control does. */
+  .controls-pair .control {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  /* Layout icons + the "N/N sources" line share their row the same way. */
+  .controls-footer {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+  }
+
+  /* Cancels the desktop divider (styles.css, near .controls) that separates
+     the layout cluster from the toggle pair on a single row — on mobile
+     they're already on separate rows, so the line would just be a stray
+     mark at the start of the icon row instead of doing its job. */
+  .layout-toggle {
+    border-left: none;
+    padding-left: 0;
+  }
+
+  /* "layout" as a word only earns its place when there's room to spell it
+     out — the icons plus aria-label already say what they do. */
+  #layout-label {
+    display: none;
+  }
+
+  #downloaded-count {
     grid-column: 1 / -1;
   }
 
-  /* Both are plain text nodes app.ts fills in or empties out (never `hidden`)
-     — on the flex layout above 46rem an empty span is invisible for free
-     (zero width, no line of its own), but here grid-auto-rows' 44px minimum
-     would turn an EMPTY one into a blank full-width row between two real
-     controls. :empty is exactly "app.ts has nothing to say right now". */
-  #downloaded-count:empty,
-  #search-progress:empty {
+  /* A plain text node app.ts fills in or empties out (never `hidden`) — on
+     the flex layout above 46rem an empty span is invisible for free (zero
+     width, no line of its own), but here it would otherwise be a blank
+     full-width row between two real controls. :empty is exactly "app.ts has
+     nothing to say right now". */
+  #downloaded-count:empty {
+    display: none;
+  }
+
+  /* The footer row itself, when NEITHER of its two children has anything to
+     show: no poster category selected (layout-control stays [hidden]) and no
+     source-count text yet (before a search has run). Without this the row's
+     own gap still shows as an empty beat between group/alive and the results
+     below. */
+  .controls-footer:has(#layout-control[hidden]):has(#search-progress:empty) {
     display: none;
   }
 }
