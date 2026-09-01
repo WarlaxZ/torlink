@@ -25,6 +25,7 @@ import { log } from "../util/logger";
 import { pickStreamFile } from "../util/player";
 import { deleteSeedData } from "./delete-data";
 import { disarmBootMarker } from "./bootguard";
+import { trackersOf } from "../sources/magnet";
 import type { QueueItem, SeedItem } from "./types";
 import type { SourceId } from "../sources/types";
 
@@ -249,12 +250,27 @@ export class DownloadQueue extends EventEmitter {
       return;
     }
     try {
+      // Prefer the stored .torrent over the magnet, exactly as startSeeding
+      // does. A magnet carries no piece hashes, so the client cannot verify a
+      // single byte until the swarm serves it metadata, which is merely slow
+      // for a popular torrent and terminal for one that nobody else has yet.
+      // With the metadata on disk it verifies the local files immediately, so
+      // a re-add of something already downloaded, and a torrent created from
+      // local content, both go straight to complete instead of waiting on
+      // peers that may not exist.
+      const source = torrentMetaExists(item.id) ? torrentMetaPath(item.id) : item.magnet;
+      // The magnet's own trackers ride along regardless of which source won.
+      // A row merged from several sources carries all of their announce URLs
+      // (see mergeMagnetTrackers), and a stored .torrent only knows the list it
+      // shipped with, so passing them explicitly is what keeps that merge from
+      // being undone on resume. webtorrent dedupes announce internally.
+      const announce = [...(trackersOf(item.magnet) ?? []), ...this.trackers];
       this.engine.add(
         item.id,
-        item.magnet,
+        source,
         item.dir,
         this.engineHandlers(item.id),
-        this.trackers,
+        announce,
         item.selectedFileIndices,
       );
     } catch (e) {

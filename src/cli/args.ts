@@ -2,6 +2,8 @@ import { logFile } from "../config/paths";
 import { isInfoHash } from "../sources/magnet";
 import { parseDuration } from "../util/duration";
 
+export type SearchCategory = "games" | "movies" | "tv" | "anime";
+
 export type CliCommand =
   | { kind: "version" }
   | { kind: "help" }
@@ -45,11 +47,19 @@ export type CliCommand =
        */
       headless?: boolean;
     }
+  | {
+      kind: "seed";
+      path: string;
+      seedTimeMs?: number;
+      deleteFiles?: boolean;
+      daemon?: boolean;
+    }
   | { kind: "files"; port?: number; host?: string; token?: string; dir?: string; daemon?: boolean }
   | { kind: "attach" }
   | { kind: "update"; force?: boolean }
   | { kind: "import-netflix"; file: string }
   | { kind: "import-trakt" }
+  | { kind: "search"; query: string; category?: SearchCategory }
   | { kind: "invalid"; arg: string; hint?: string };
 
 /**
@@ -120,6 +130,8 @@ const SERVE_FLAGS: FlagSpec = {
   bools: ["delete-files", "daemon", "web", "headless"],
 };
 const FILES_FLAGS: FlagSpec = { values: ["port", "host", "token"], bools: ["daemon"] };
+const SEED_FLAGS: FlagSpec = { values: ["seed-time"], bools: ["delete-files", "daemon"] };
+const SEARCH_FLAGS: FlagSpec = { values: ["category"], bools: [] };
 
 function parsePort(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
@@ -150,6 +162,25 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return { kind: "import-netflix", file };
   }
   if (a === "import-trakt") return { kind: "import-trakt" };
+  if (a === "search") {
+    const scan = scanFlags(args.slice(1), SEARCH_FLAGS);
+    if (!scan.ok) return scan.error;
+
+    const query = scan.rest.join(" ").trim();
+    if (!query) return { kind: "invalid", arg: "search (missing query)" };
+
+    const category = scan.flags.category;
+    if (category === undefined) return { kind: "search", query };
+    if (
+      category === "games" ||
+      category === "movies" ||
+      category === "tv" ||
+      category === "anime"
+    ) {
+      return { kind: "search", query, category };
+    }
+    return { kind: "invalid", arg: `search (invalid category '${category}')` };
+  }
   if (a === "watch") {
     const scan = scanFlags(args.slice(1), WATCH_FLAGS);
     if (!scan.ok) return scan.error;
@@ -193,6 +224,20 @@ export function parseCliArgs(argv: string[]): CliCommand {
       daemon: scan.bools.has("daemon"),
       web: scan.bools.has("web"),
       headless: scan.bools.has("headless"),
+    };
+  }
+  if (a === "seed") {
+    const scan = scanFlags(args.slice(1), SEED_FLAGS);
+    if (!scan.ok) return scan.error;
+    const target = scan.rest[0];
+    if (!target) return { kind: "invalid", arg: "seed (missing path)" };
+    if (scan.rest.length > 1) return { kind: "invalid", arg: scan.rest[1]! };
+    return {
+      kind: "seed",
+      path: target,
+      seedTimeMs: seedTimeFrom(scan.flags["seed-time"]),
+      deleteFiles: scan.bools.has("delete-files"),
+      daemon: scan.bools.has("daemon"),
     };
   }
   if (a === "files") {
@@ -253,6 +298,9 @@ usage
   torlnk "magnet:?xt=..."     start a download on launch
   torlnk path/to/file.torrent open a .torrent file on launch
   torlnk --web                open the TUI and serve the browser UI on :9162
+  torlnk search <query>        no TUI: print search results as JSON
+    [--category games|movies|tv|anime]
+  torlnk seed <path>          no TUI: share files you already have
   torlnk watch <dir>          no TUI: download torrents dropped into <dir>
   torlnk serve                no TUI: HTTP add API (POST /add) on :9161
   torlnk serve --web          no TUI: the add API plus the browser UI on :9161
@@ -281,7 +329,12 @@ watch mode (no TUI): drop a .torrent, or a .magnet/.txt holding a magnet or
 info hash, into <dir> and it downloads then seeds. Add --to <dir> to choose
 where files land. Handled files move to <dir>/.processed (or /.failed).
 
-seed mode (watch/serve): --seed-time <dur> stops seeding a torrent that long
+seed a path (no TUI): torlnk seed ./album turns the folder into a torrent,
+saves album.torrent next to it, prints the magnet, and starts sharing. Send
+anyone the magnet and they pull the files from you. Takes --seed-time,
+--delete-files and --daemon.
+
+seed expiry (seed/watch/serve): --seed-time <dur> stops seeding a torrent that long
 after it finishes (e.g. 1h, 30m, 90s, 2d); files are kept by default. Add
 --delete-files to also remove the downloaded data when the timer expires.
 
@@ -294,6 +347,7 @@ left off. Downloads and seeds keep running while detached.
 
 serve mode (no TUI): a small HTTP API for handing torlink a magnet.
   POST /add {"magnet":"..."}   queue a magnet or info hash
+  POST /add {"torrent":"<b64>"} queue an uploaded .torrent (base64 or data: URI)
   GET  /downloads              list active downloads and seeds
   GET  /health                 liveness (no auth)
 flags: --port <n> (default 9161), --host <addr>, --token <secret> (required
