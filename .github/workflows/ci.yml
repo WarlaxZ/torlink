@@ -8,10 +8,13 @@ on:
 permissions:
   contents: read
 
-# A new push to the same branch supersedes the run in flight.
+# On a pull request a new push supersedes the run in flight: only the branch's
+# latest commit needs a verdict. Pushes to main are never cancelled, because the
+# ref is the same for every commit there, so a batch of stacked merges would
+# otherwise leave each commit but the last with no result of its own.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:

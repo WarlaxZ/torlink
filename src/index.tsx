@@ -32,7 +32,15 @@ if (cmd.kind === "invalid") {
 // try/catch or error event can reach (see util/crashlog.ts). Contained and
 // logged for every mode; no-TUI runs also echo one line to their log.
 containUnhandledRejections({
-  echo: cmd.kind === "update" || cmd.kind === "watch" || cmd.kind === "serve" || cmd.kind === "files" || cmd.kind === "import-netflix" || cmd.kind === "import-trakt",
+  echo:
+    cmd.kind === "update" ||
+    cmd.kind === "search" ||
+    cmd.kind === "watch" ||
+    cmd.kind === "seed" ||
+    cmd.kind === "serve" ||
+    cmd.kind === "files" ||
+    cmd.kind === "import-netflix" ||
+    cmd.kind === "import-trakt",
 });
 
 // Run/reattach the TUI inside a persistent tmux session (execs tmux, then exits).
@@ -57,6 +65,13 @@ if (cmd.kind === "update") {
   void import("./daemon/watch").then(({ runWatch }) =>
     runWatch(dir, downloadDir, { seedTimeMs, deleteFiles }).catch(failHeadless),
   );
+} else if (cmd.kind === "seed") {
+  if (cmd.daemon) daemonize("seed");
+  const { path: target, seedTimeMs, deleteFiles } = cmd;
+  void import("./daemon/seed")
+    .then(({ runSeed }) => runSeed(target, { seedTimeMs, deleteFiles }))
+    .then(() => process.exit(0))
+    .catch(failHeadless);
 } else if (cmd.kind === "serve") {
   if (cmd.daemon) daemonize("serve");
   const options = {
@@ -70,7 +85,10 @@ if (cmd.kind === "update") {
     headless: cmd.headless,
     daemon: cmd.daemon,
   };
-  void import("./daemon/serve").then(({ runServe }) => runServe(options).catch(failHeadless));
+  void import("./daemon/serve")
+    .then(({ runServe }) => runServe(options))
+    .then(() => process.exit(0))
+    .catch(failHeadless);
 } else if (cmd.kind === "files") {
   if (cmd.daemon) daemonize("files");
   const options = {
@@ -92,6 +110,17 @@ if (cmd.kind === "update") {
   // Like import-netflix: no forced exit(0) on success, so the summary/titles
   // aren't truncated when stdout is a pipe. Errors exit non-zero via failHeadless.
   void import("./cli/runImportTrakt").then(({ runImportTrakt }) => runImportTrakt().catch(failHeadless));
+} else if (cmd.kind === "search") {
+  // One JSON document on stdout, then exit: the shape a script can pipe into
+  // jq. Exit 1 only when every source failed, so an empty-but-healthy search
+  // is still a success.
+  void import("./cli/search")
+    .then(({ runSearch }) => runSearch({ query: cmd.query, category: cmd.category }))
+    .then(({ document, exitCode }) => {
+      process.exitCode = exitCode;
+      process.stdout.write(`${JSON.stringify(document)}\n`);
+    })
+    .catch(failHeadless);
 } else {
 
 // Enter the alt-screen and hide the hardware cursor: the TUI draws its own

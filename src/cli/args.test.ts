@@ -57,6 +57,34 @@ describe("parseCliArgs", () => {
   it("parses import-trakt", () => {
     expect(parseCliArgs(["import-trakt"])).toEqual({ kind: "import-trakt" });
   });
+  it("parses headless searches", () => {
+    expect(parseCliArgs(["search", "ubuntu"])).toEqual({ kind: "search", query: "ubuntu" });
+    expect(parseCliArgs(["search", "example", "movie", "--category", "movies"])).toEqual({
+      kind: "search",
+      query: "example movie",
+      category: "movies",
+    });
+    expect(parseCliArgs(["search", "--category", "games", "ubuntu"])).toEqual({
+      kind: "search",
+      query: "ubuntu",
+      category: "games",
+    });
+  });
+  it("rejects invalid headless searches", () => {
+    expect(parseCliArgs(["search"])).toEqual({ kind: "invalid", arg: "search (missing query)" });
+    expect(parseCliArgs(["search", "ubuntu", "--category", "books"])).toEqual({
+      kind: "invalid",
+      arg: "search (invalid category 'books')",
+    });
+    expect(parseCliArgs(["search", "ubuntu", "--limit", "10"])).toEqual({
+      kind: "invalid",
+      arg: "--limit",
+    });
+    expect(parseCliArgs(["search", "ubuntu", "--category"])).toEqual({
+      kind: "invalid",
+      arg: "--category (missing value)",
+    });
+  });
   it("parses watch with a directory", () => {
     expect(parseCliArgs(["watch", "/srv/blackhole"])).toEqual({
       kind: "watch",
@@ -416,5 +444,30 @@ describe("HELP_TEXT", () => {
   });
   it("shows the files folder as a positional", () => {
     expect(HELP_TEXT).toContain("torlnk files [dir]");
+  });
+});
+
+describe("seed", () => {
+  it("takes the path, and the flags the other headless modes take", () => {
+    expect(parseCliArgs(["seed", "./album"])).toEqual({
+      kind: "seed",
+      path: "./album",
+      seedTimeMs: undefined,
+      deleteFiles: false,
+      daemon: false,
+    });
+    expect(parseCliArgs(["seed", "--seed-time", "2h", "--daemon", "./album"])).toEqual({
+      kind: "seed",
+      path: "./album",
+      seedTimeMs: 2 * 60 * 60 * 1000,
+      deleteFiles: false,
+      daemon: true,
+    });
+  });
+
+  // Without a path there is nothing to hash, and defaulting to the cwd would
+  // make a bare `torlnk seed` start hashing a home directory.
+  it("is invalid with no path", () => {
+    expect(parseCliArgs(["seed"])).toEqual({ kind: "invalid", arg: "seed (missing path)" });
   });
 });

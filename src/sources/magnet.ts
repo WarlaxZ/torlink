@@ -96,3 +96,39 @@ export function parseInput(input: string): ParsedMagnet | null {
   const infoHash = normalizeInfoHash(s);
   return { infoHash, name: infoHash, magnet: buildMagnet(infoHash, infoHash) };
 }
+
+// Exported for the queue: when a download resumes from its stored .torrent the
+// magnet is no longer what reaches webtorrent, so the trackers merged onto it
+// from sibling sources have to be handed over separately.
+export function trackersOf(magnet: string): string[] | null {
+  const s = magnet.trim();
+  if (!/^magnet:\?/i.test(s)) return null;
+  try {
+    return new URL(s).searchParams.getAll("tr").map((t) => t.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+// A magnet's announce list is part of what a source knows about the torrent, so
+// when the same infohash arrives from several sources their lists get folded
+// together rather than the extras thrown away. `primary` is returned byte for
+// byte with only the trackers it is missing appended, which keeps every other
+// parameter it carries (xl, ws, so) intact — unlike rebuilding through
+// buildMagnet(). Order does not matter to a client: every tr in a magnet ends up
+// in one announce list and all of them are contacted.
+export function mergeMagnetTrackers(primary: string, others: string[]): string {
+  const own = trackersOf(primary);
+  if (!own) return primary;
+  const seen = new Set(own);
+  const extra: string[] = [];
+  for (const other of others) {
+    for (const url of trackersOf(other) ?? []) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      extra.push(url);
+    }
+  }
+  if (extra.length === 0) return primary;
+  return primary.trim() + extra.map((t) => `&tr=${encodeURIComponent(t)}`).join("");
+}

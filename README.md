@@ -1063,6 +1063,9 @@ TORLINK_DNS=cloudflare npm start
 
 torlink also runs with no terminal UI at all, for servers and seedboxes:
 
+    torlnk search "<query>" [--category games|movies|tv|anime]
+                            print one JSON document of merged search results
+    torlnk seed <path>    share files you already have
     torlnk watch <dir>    download anything dropped into a folder
     torlnk serve          take magnets over HTTP
     torlnk files [dir]    stream finished downloads over HTTP
@@ -1070,9 +1073,22 @@ torlink also runs with no terminal UI at all, for servers and seedboxes:
     torlnk import-netflix <csv>   send a Netflix viewing-activity CSV to reccd
     torlnk import-trakt           connect Trakt and import your history into reccd
 
-Add `--daemon` to keep watch, serve, or files running after you log out, or `--web` to `serve` for the
-[browser dashboard](#in-your-browser) on the same port as the add API; `torlnk --help` has the full list
-of modes and flags.
+Add `--daemon` to keep seed, watch, serve, or files running after you log out, or `--web` to `serve` for
+the [browser dashboard](#in-your-browser) on the same port as the add API; `torlnk --help` has the full
+list of modes and flags.
+
+### Sharing something of your own
+
+Everything else starts with a torrent someone else made. `seed` goes the other way:
+
+    torlnk seed ./album
+
+It turns the folder into a torrent, saves `album.torrent` next to it, prints the magnet, and starts sharing right away. Send anyone the magnet and they pull the files from you.
+
+`serve` takes a `.torrent` as well as a magnet, so you can hand it one you already have:
+
+    POST /add {"magnet":"magnet:?xt=..."}
+    POST /add {"torrent":"<base64>"}
 
 ### In a container
 

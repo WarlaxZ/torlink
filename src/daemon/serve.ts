@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { startRuntime, addInput, type Runtime } from "./runtime";
 import { displayHosts, webUrl, type NetInterfaces } from "../web/links";
 import { disarmBootMarker } from "../download/bootguard";
+import { magnetFromTorrentBytes } from "../sources/torrentFile";
 import { startSeedReaper } from "./seed-reaper";
 import { LOOPBACK_HOSTS, isAuthorized, hostHeaderOk, isCrossSiteHttpRequest } from "./auth";
 import { startWebServer, type WebServerHandle } from "../web/server";
@@ -27,7 +28,11 @@ export { isAuthorized } from "./auth";
 
 export const DEFAULT_API_PORT = 9161;
 
-const MAX_BODY_BYTES = 64 * 1024; // a magnet is small; cap the body hard
+// A magnet is tiny, but /add also takes an uploaded .torrent, and that is one
+// 20-byte hash per piece: a large multi-file release runs to a few hundred KB
+// before base64 adds a third on top. The old 64KB cap fit every magnet and
+// every torrent small enough to test with, then answered 413 on real content.
+const MAX_BODY_BYTES = 1024 * 1024;
 
 // The /api/add-torrent upload carries a base64'd .torrent, which is metadata
 // (capped at 16 MiB by torrentFile). Base64 inflates by ~4/3, plus JSON, so the
@@ -85,6 +90,40 @@ export interface ServeOptions {
 // Pull a magnet / info hash out of a request body. Accepts JSON ({ magnet } or
 // { infohash }) or a raw body that is itself a magnet or info hash — forgiving,
 // so callers don't have to guess the exact envelope.
+// A base64 .torrent from the request body, or null.
+//
+// The bytes travel in the JSON rather than the path to them: torlink already
+// refuses to let a network caller name a local file (runtime.ts's
+// allowTorrentPath), and that refusal is worth keeping -- "add this torrent"
+// and "read this file off your disk and tell me about it" must not be the same
+// request. Uploading the content sidesteps it entirely.
+export function extractTorrentBytes(bodyText: string): Uint8Array | null {
+  const raw = bodyText.trim();
+  if (!raw.startsWith("{")) return null;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const value = obj.torrent ?? obj.torrentFile ?? obj.file;
+  if (typeof value !== "string" || !value.trim()) return null;
+  // A data: URI is what a browser's FileReader hands you, and stripping the
+  // prefix here is cheaper than making every caller remember to.
+  const b64 = value.replace(/^data:[^,]*,/, "").trim();
+  try {
+    const bytes = Buffer.from(b64, "base64");
+    // Buffer.from ignores anything it cannot decode rather than throwing, so a
+    // non-base64 string yields a short buffer instead of an error. Every
+    // torrent starts with a bencoded dictionary, which is the cheap check that
+    // this is one.
+    if (bytes.length === 0 || bytes[0] !== 0x64) return null;
+    return new Uint8Array(bytes);
+  } catch {
+    return null;
+  }
+}
+
 export function extractMagnet(bodyText: string): string | null {
   const raw = bodyText.trim();
   if (!raw) return null;
@@ -246,8 +285,19 @@ export async function handleApi(
     return { status: 200, body: { ...statusPayload(runtime) } };
   }
   if (method === "POST" && urlPath === "/add") {
+    // A .torrent is tried first because it is strictly more information: it
+    // carries the piece hashes, so data already on disk verifies locally
+    // instead of waiting on a swarm to serve metadata back.
+    const bytes = extractTorrentBytes(bodyText);
+    if (bytes) {
+      const parsed = await magnetFromTorrentBytes(bytes);
+      if (!parsed) return { status: 400, body: { error: "invalid .torrent" } };
+      const outcome = await addInput(runtime, parsed.magnet);
+      if (outcome === "invalid") return { status: 400, body: { error: "invalid .torrent" } };
+      return { status: 200, body: { ok: true, outcome, infoHash: parsed.infoHash } };
+    }
     const magnet = extractMagnet(bodyText);
-    if (!magnet) return { status: 400, body: { error: "missing magnet or info hash" } };
+    if (!magnet) return { status: 400, body: { error: "missing magnet, info hash or .torrent" } };
     const outcome = await addInput(runtime, magnet);
     if (outcome === "invalid") return { status: 400, body: { error: "invalid magnet or info hash" } };
     return { status: 200, body: { ok: true, outcome } };

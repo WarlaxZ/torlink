@@ -356,9 +356,13 @@ describe("startWebServer", () => {
     });
   });
 
-  it("caps the request body at 64KB with a 413", async () => {
+  it("caps the request body at 1MB with a 413", async () => {
     const base = await start();
-    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(64 * 1024 + 1) });
+    // /api/add now also accepts a base64 .torrent body directly (see
+    // daemon/serve.ts's extractTorrentBytes handling on POST /add), so the
+    // default cap is sized for a real multi-file release rather than a bare
+    // magnet.
+    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(1024 * 1024 + 1) });
     expect(res.status).toBe(413);
     await expect(res.json()).resolves.toMatchObject({ error: "body too large" });
   });
@@ -366,7 +370,7 @@ describe("startWebServer", () => {
   it("accepts a body just under the cap", async () => {
     const base = await start();
     // Not a magnet, so 400 — the point is that it was read rather than refused.
-    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(64 * 1024) });
+    const res = await fetch(`${base}/api/add`, { method: "POST", body: "x".repeat(1024 * 1024) });
     expect(res.status).toBe(400);
   });
 

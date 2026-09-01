@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mergeDuplicateResults, runSearch, shouldBench, type SearchSnapshot } from "./search";
+import { defaultOrder, mergeDuplicateResults, runSearch, shouldBench, type SearchSnapshot } from "./search";
 import { AuthRequiredError } from "../sources/rutracker";
 import { HttpError } from "../util/net";
 import type { Health } from "../sources/sourceHealth";
@@ -319,5 +319,28 @@ describe("mergeDuplicateResults", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]).toMatchObject({ source: "x1337-movies", seeders: 8 });
     expect(merged[0]!.sources).toEqual(["tpb-movies", "x1337-movies"]);
+  });
+});
+
+describe("defaultOrder", () => {
+  function withAdded(infoHash: string, seeders: number, added?: number): TorrentResult {
+    return { ...result(infoHash, "tpb-movies", seeders), added };
+  }
+
+  it("orders by seeders, then newest first", () => {
+    const ordered = defaultOrder([
+      withAdded("few", 2, 300),
+      withAdded("older", 8, 100),
+      withAdded("newer", 8, 200),
+      withAdded("undated", 8),
+    ]);
+    expect(ordered.map((r) => r.infoHash)).toEqual(["newer", "older", "undated", "few"]);
+  });
+
+  // The TUI and the headless `search` command both order through this, so a
+  // change here has to stay one change rather than two that drift.
+  it("puts a missing added last among equal seeders", () => {
+    const ordered = defaultOrder([withAdded("undated", 5), withAdded("dated", 5, 1)]);
+    expect(ordered.map((r) => r.infoHash)).toEqual(["dated", "undated"]);
   });
 });
