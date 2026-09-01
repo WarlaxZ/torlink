@@ -18,7 +18,14 @@ copyFileSync(resolve(root, 'scripts/webrtc-stub.mjs'), resolve(root, 'dist/webrt
 // nothing loading it.
 const webOut = resolve(root, 'dist/web');
 mkdirSync(webOut, { recursive: true });
-for (const file of ['index.html', 'player.html', 'styles.css']) {
+for (const file of [
+  'index.html',
+  'player.html',
+  'styles.css',
+  'favicon.ico',
+  'favicon-32.png',
+  'apple-touch-icon.png',
+]) {
   copyFileSync(resolve(root, 'src/web/static', file), resolve(webOut, file));
 }
 
