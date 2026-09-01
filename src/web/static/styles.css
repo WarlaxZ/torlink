@@ -925,7 +925,7 @@ button:hover {
 .tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
 
@@ -1256,6 +1256,60 @@ select:focus-visible {
     display: inline-flex;
     align-items: center;
     min-height: 44px;
+  }
+
+  /* Equal-width cells rather than flex-wrap's left-packed, text-width-sized
+     pills — "ALL" and "MOVIES" made visibly different-sized buttons that
+     wrapped into a ragged 4-then-3 grid. Grid columns are all the same width,
+     so both rows line up under each other. Desktop keeps the flex version:
+     eight equal-width columns stretched across a 1400px toolbar would be a
+     much worse result than compact left-packed pills — this is a narrow-
+     viewport fix specifically, not a "grid is better" one. */
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+    row-gap: 0.65rem;
+  }
+
+  /* SORT/FILTER/ALIVE ONLY/GROUP/LAYOUT each had a differently-wide label
+     ("sort" vs "alive only"), so their dropdowns and inputs started at
+     different x positions — nothing on the page said these five were a set.
+     A two-column grid fixes that: `display: contents` on .control unwraps
+     the label so its two children (the text, the actual control) become grid
+     items in their own right, landing in column 1 / column 2 wherever they
+     fall in DOM order. That only works cleanly because every .control has
+     EXACTLY two children — the two standalone spans below are the exception,
+     and span both columns rather than desyncing the column that follows. */
+  .controls {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    /* NOT a 44px touch-target minimum here (tried it — six rows at 44px plus
+       gaps ran to ~330px, pushing every result below the fold on a phone,
+       which is a worse problem than a slightly tight tap target on a
+       secondary control). Natural content height, snug gaps: this toolbar's
+       job is to get out of the way of the results under it. */
+    align-items: center;
+    row-gap: 0.4rem;
+    column-gap: 0.75rem;
+  }
+
+  .control {
+    display: contents;
+  }
+
+  #downloaded-count,
+  #search-progress {
+    grid-column: 1 / -1;
+  }
+
+  /* Both are plain text nodes app.ts fills in or empties out (never `hidden`)
+     — on the flex layout above 46rem an empty span is invisible for free
+     (zero width, no line of its own), but here grid-auto-rows' 44px minimum
+     would turn an EMPTY one into a blank full-width row between two real
+     controls. :empty is exactly "app.ts has nothing to say right now". */
+  #downloaded-count:empty,
+  #search-progress:empty {
+    display: none;
   }
 }
 
