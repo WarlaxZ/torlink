@@ -96,8 +96,19 @@ export async function fetchTitleMetaByName(
   } = {},
 ): Promise<FetchTitleMetaResult> {
   if (!title.trim()) return { ok: false, error: "no title" };
+  // A film's OMDb year IS its identity — "Ashfall" 1999 and "Ashfall" 2024 are
+  // different films, and `y=` is what tells OMDb which one. A SERIES release's
+  // year is not the same kind of fact: it is usually when the release's own
+  // season aired, not when the show debuted, and OMDb keys a series by the
+  // latter. "The Boys S05 Season 5 2026 1080p..." parses year 2026 — the
+  // season's air year — and OMDb has no "The Boys" answering to that year, so
+  // an exact-match search comes back empty and falls back to an unrelated
+  // title that does. Every season of a show would carry a different embedded
+  // year and searching wrongly narrowed on each one, so the correct fix is not
+  // sending y= for a series at all — the title alone is the disambiguator here.
+  const seriesSafeYear = opts.type !== "series" ? opts.year : undefined;
   const params = new URLSearchParams({ t: title.trim() });
-  if (opts.year) params.set("y", String(opts.year));
+  if (seriesSafeYear) params.set("y", String(seriesSafeYear));
   if (opts.type) params.set("type", opts.type);
   const wantsEpisode = opts.season !== undefined && opts.episode !== undefined;
   if (opts.season !== undefined) params.set("Season", String(opts.season));
@@ -114,7 +125,7 @@ export async function fetchTitleMetaByName(
   // function — the terminal directly, the browser via `/api/title` — and a
   // fallback written twice is the copy-then-drift this codebase keeps recording.
   const seriesParams = new URLSearchParams({ t: title.trim() });
-  if (opts.year) seriesParams.set("y", String(opts.year));
+  if (seriesSafeYear) seriesParams.set("y", String(seriesSafeYear));
   if (opts.type) seriesParams.set("type", opts.type);
   const series = await request(seriesParams, apiKey, opts, `by name ${title} (poster)`);
   // A failed fallback leaves the episode answer exactly as it was: no poster is

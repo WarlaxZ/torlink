@@ -66,13 +66,35 @@ describe("fetchTitleMeta (by id)", () => {
 });
 
 describe("fetchTitleMetaByName", () => {
-  it("builds a title lookup with year and type", async () => {
+  it("builds a title lookup with year and type, for a film", async () => {
+    // A film's OMDb year IS its identity — Ashfall 1999 and Ashfall 2024 are
+    // different films — so unlike a series (below), it is sent unconditionally.
     const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt2", Plot: "P", Poster: "https://p.jpg" });
-    const res = await fetchTitleMetaByName("Harrowgate", "KEY", { year: 2022, type: "series", fetchImpl: impl });
+    const res = await fetchTitleMetaByName("Ashfall", "KEY", { year: 1999, type: "movie", fetchImpl: impl });
     expect(res).toEqual({ ok: true, type: null, imdbId: "tt2", plot: "P", posterUrl: "https://p.jpg" });
     const u = urls[0]!;
-    expect(u).toContain("t=Harrowgate");
-    expect(u).toContain("y=2022");
+    expect(u).toContain("t=Ashfall");
+    expect(u).toContain("y=1999");
+    expect(u).toContain("type=movie");
+  });
+
+  it("drops the year for a series — it names the release's own air date, not the show's debut", async () => {
+    // "The Boys S05 Season 5 2026 1080p..." parses year 2026, the season's own
+    // air year. OMDb keys a series by when it DEBUTED (2019 here), so sending
+    // y=2026 finds no match and OMDb falls back to an unrelated title that
+    // happens to answer to that year — a real bug this protects against.
+    const { impl, urls } = jsonImpl(200, { Response: "True", imdbID: "tt1190634", Plot: "P", Poster: "https://p.jpg" });
+    const res = await fetchTitleMetaByName("The Boys", "KEY", { year: 2026, type: "series", fetchImpl: impl });
+    expect(res).toEqual({
+      ok: true,
+      type: null,
+      imdbId: "tt1190634",
+      plot: "P",
+      posterUrl: "https://p.jpg",
+    });
+    const u = urls[0]!;
+    expect(u).toContain("t=The+Boys");
+    expect(u).not.toContain("y=2026");
     expect(u).toContain("type=series");
   });
 
