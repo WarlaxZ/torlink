@@ -421,8 +421,9 @@ a:focus-visible,
 summary:focus-visible,
 input:focus-visible,
 button:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 button {
@@ -537,6 +538,28 @@ button:hover {
    what gets read at a glance, so the bar is what has to be honest. */
 .bar > span.is-failed {
   background: var(--error);
+}
+
+/* A quiet glow on the one bar actually moving right now, and a dimmed fill on
+   the one that isn't — the queue used to give an active download and a
+   deliberately-paused one the exact same flat blue line. */
+.bar[data-status="downloading"] > span:not(.is-failed) {
+  box-shadow: 0 0 6px 1px rgba(122, 162, 247, 0.55);
+  animation: bar-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes bar-glow {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.bar[data-status="paused"] > span:not(.is-failed) {
+  opacity: 0.45;
 }
 
 .row-actions {
@@ -758,10 +781,13 @@ button:hover {
   color: var(--dim);
 }
 
-/* The on/off pill. aria-pressed carries the state; colour follows it. */
+/* The on/off pill. aria-pressed carries the state; colour follows it. Filled
+   rather than outlined, matching Play/Search — "on" is a state, not a link. */
 .settings-toggle[aria-pressed="true"] {
-  color: var(--accent);
+  color: var(--sunken);
+  background: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 .settings-toggle:disabled {
@@ -812,6 +838,15 @@ button:hover {
   padding-left: 0.6rem;
 }
 
+/* Same marker language as .notice, one shade quieter (--line, not --accent):
+   these are not news, just "nothing here yet" — but forty of them were plain
+   unindented prose sitting flush with the page, indistinguishable from a
+   layout that failed to load. */
+.empty {
+  border-left: 2px solid var(--line);
+  padding-left: 0.6rem;
+}
+
 .error {
   color: var(--error);
 }
@@ -820,6 +855,7 @@ button:hover {
    honest failure message reads as an error rather than as "queue is empty". */
 .empty.error {
   color: var(--error);
+  border-left-color: var(--error);
 }
 
 /* ---------------------------------------------------------------------------
@@ -965,10 +1001,48 @@ button:hover {
   cursor: pointer;
 }
 
+/* A pill switch rather than the native accent-coloured box: "alive only",
+   "group" and "hide downloaded" are all persistent preferences a visitor
+   flips once and forgets, and a switch reads as "state" the way a checkbox
+   reads as "form field". Semantics are untouched — it is still a real
+   <input type="checkbox">, still keyboard-operable, still gets the same
+   focus-visible ring as every other control below. */
 .control-check input {
   flex: 0 0 auto;
   min-width: 0;
-  accent-color: var(--accent);
+  appearance: none;
+  width: 1.9rem;
+  height: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--sunken);
+  position: relative;
+  cursor: pointer;
+  transition: background-color var(--tap) ease-out, border-color var(--tap) ease-out;
+}
+
+.control-check input::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: var(--dim);
+  transition:
+    transform var(--settle) ease-out,
+    background-color var(--settle) ease-out;
+}
+
+.control-check input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.control-check input:checked::before {
+  transform: translateX(0.8rem);
+  background: var(--sunken);
 }
 
 select {
@@ -1402,11 +1476,14 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-/* Overrides .card's row layout: the preview is a stack, not a form. */
+/* Overrides .card's row layout: the preview is a stack, not a form. --raised
+   for the same reason #search is: it's a panel with real content, not a bare
+   .card like the auth/add forms. */
 .preview {
   display: block;
-  padding: 0.75rem;
+  padding: 0.9rem;
   margin-bottom: 0;
+  background: var(--raised);
 }
 
 /* A fixed 2:3 frame whether or not a poster loads, so the pane doesn't jump
@@ -1429,6 +1506,31 @@ select:focus-visible {
   overflow: hidden;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   transition: transform var(--settle) ease-out;
+}
+
+/* The compact row thumbnail with no art leaves .poster-note EMPTY on purpose
+   (see paintPoster's comment in app.ts) — the note lives in `title` instead,
+   because there's no room for text at 3.5rem wide. That left a flat black
+   square, which reads as a broken image rather than as "no artwork for this
+   one". The same magnet mark from the wordmark/favicon, very quiet, says the
+   box is empty on purpose. Only :has(.poster-note:empty) — a grid card or the
+   preview pane, which both have room, already show that same note as text and
+   don't need the icon too. */
+.poster:has(.poster-note:empty)::after {
+  content: "";
+  width: 40%;
+  aspect-ratio: 1;
+  max-width: 1.6rem;
+  opacity: 0.3;
+  background-color: var(--dim);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.6 3V12.5A4.4 4.4 0 0 0 16.4 12.5V3' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round'/%3E%3Crect x='5.6' y='0.5' width='4' height='4.5' rx='0.8'/%3E%3Crect x='14.4' y='0.5' width='4' height='4.5' rx='0.8'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7.6 3V12.5A4.4 4.4 0 0 0 16.4 12.5V3' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round'/%3E%3Crect x='5.6' y='0.5' width='4' height='4.5' rx='0.8'/%3E%3Crect x='14.4' y='0.5' width='4' height='4.5' rx='0.8'/%3E%3C/svg%3E");
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
 }
 
 /* Only where the poster is the click target (For You, grouped results), not

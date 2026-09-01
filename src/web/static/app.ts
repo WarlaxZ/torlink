@@ -663,6 +663,9 @@ function renderRow(row: DashRow): HTMLLIElement {
 
   const bar = document.createElement("div");
   bar.className = "bar";
+  // Styling hook only (styles.css keys the glow/dim treatment off it) — the
+  // string itself is still row.status, untouched.
+  bar.dataset.status = row.status;
   const fill = document.createElement("span");
   // percent is already clamped to 0..100 by dashboard.ts, so this cannot smuggle
   // anything into the style attribute.
