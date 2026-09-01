@@ -1639,6 +1639,10 @@ function renderTabs(): void {
       button.type = "button";
       button.className = "tab";
       button.textContent = group;
+      // Purely a styling hook (styles.css keys each category's dot/active
+      // colour off it) — no decision lives here, group is still the string the
+      // click handler below sends to the server.
+      button.dataset.group = group.toLowerCase();
       // aria-pressed, matching #views: this is a toggle button, not a tab. See
       // the comment on #tabs in index.html for why the tablist role went.
       button.setAttribute("aria-pressed", String(group === searchView.group));

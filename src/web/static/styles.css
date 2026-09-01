@@ -20,6 +20,17 @@
      Night family as --accent/--error, so they read as one palette. */
   --done: #9ece6a;
   --played: #73daca;
+  /* Category tabs, one muted hue each — real colour variety, but it encodes
+     something (which category you're in) rather than decorating. --cat-porn is
+     deliberately the most desaturated of the set: a quiet tab by design, not a
+     bright one. */
+  --cat-games: #bb9af7;
+  --cat-movies: #7aa2f7;
+  --cat-tv: #7dcfff;
+  --cat-anime: #ff9e64;
+  --cat-music: #2ac3de;
+  --cat-books: #e0af68;
+  --cat-porn: #565a6e;
   /* The only two durations in the file, and both are short on purpose. This is
      a tool: motion here exists to make a state change legible — which button is
      under the cursor, that a row just arrived — never to be looked at. Anything
@@ -27,6 +38,22 @@
   --tap: 90ms;
   --settle: 160ms;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* For the wordmark and section headings only — everything data-dense (results,
+     filenames, anything tabular) stays on the monospace stack above. */
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Self-hosted rather than a Google Fonts <link>: this app already keeps
+   Real-Debrid/TorBox tokens and a VPN interface out of the browser's hands, so
+   a font request that hands a viewer's IP to a third party on every page load
+   would be an odd exception. One variable-font file (latin subset, ~22KB)
+   covers weights 500-700, which is all the wordmark and headings use. */
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-variable.woff2") format("woff2");
 }
 
 * {
@@ -176,10 +203,37 @@ header {
 }
 
 h1 {
-  font-size: 1.1rem;
-  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
   margin: 0;
   text-transform: uppercase;
+}
+
+/* The magnet mark beside the wordmark, echoing the favicon: same U-shape, same
+   two-tone tips. Reuses --error/--played rather than new tokens, so the icon,
+   the favicon and the rest of the palette all read as one decision. */
+.wordmark-icon {
+  flex: 0 0 auto;
+}
+
+.wordmark-icon .magnet-body {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.wordmark-icon .magnet-tip-a {
+  fill: var(--error);
+}
+
+.wordmark-icon .magnet-tip-b {
+  fill: var(--played);
 }
 
 /* Connection state. The dot is a text glyph rather than a pseudo-element shape
@@ -199,6 +253,24 @@ h1 {
   color: var(--accent);
 }
 
+/* A slow, calm breathing pulse on the dot itself — "the swarm is alive" — never
+   the word beside it, and gentle enough to sit in a pinned header without being
+   distracting. prefers-reduced-motion is handled globally, above. */
+.conn[data-state="live"]::before {
+  display: inline-block;
+  animation: conn-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes conn-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .conn[data-state="lost"] {
   color: var(--error);
 }
@@ -212,6 +284,23 @@ h1 {
   border-radius: 0.5rem;
   padding: 1rem;
   margin-bottom: 1.5rem;
+}
+
+/* The search form specifically, not every .card: this is the one thing every
+   visitor does first, so it gets more weight than the auth/add forms that
+   share the class. --raised (not --sunken) so the query input, which is
+   already --sunken, reads as recessed INTO this panel rather than flush with
+   it — the emphasis comes from depth and scale, not from spending colour the
+   calm theme doesn't have to give. */
+#search {
+  background: var(--raised);
+  border-color: var(--line);
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+#search #query {
+  font-size: 1.05rem;
+  padding: 0.7rem 0.85rem;
 }
 
 .card label {
@@ -746,6 +835,9 @@ button:hover {
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -753,11 +845,53 @@ button:hover {
   color: var(--dim);
 }
 
+/* One dot per category, in --cat-tab (set by app.ts from data-group below) —
+   visible even when the tab isn't the active one, so the strip carries its
+   colour system at a glance rather than only on selection. "All" gets none: it
+   isn't one category, so it shouldn't borrow one. */
+.tab[data-group]:not([data-group="all"])::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--cat-tab, var(--dim));
+  flex: 0 0 auto;
+}
+
+.tab[data-group="games"] {
+  --cat-tab: var(--cat-games);
+}
+
+.tab[data-group="movies"] {
+  --cat-tab: var(--cat-movies);
+}
+
+.tab[data-group="tv"] {
+  --cat-tab: var(--cat-tv);
+}
+
+.tab[data-group="anime"] {
+  --cat-tab: var(--cat-anime);
+}
+
+.tab[data-group="music"] {
+  --cat-tab: var(--cat-music);
+}
+
+.tab[data-group="books"] {
+  --cat-tab: var(--cat-books);
+}
+
+.tab[data-group="porn"] {
+  --cat-tab: var(--cat-porn);
+}
+
 /* aria-pressed, matching .view-tab — these are toggle buttons, not tabs. See
-   the comment on #tabs in index.html. */
+   the comment on #tabs in index.html. The active tab takes its category's own
+   colour (falling back to --accent for "All", which sets no --cat-tab). */
 .tab[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--cat-tab, var(--accent));
+  border-color: var(--cat-tab, var(--accent));
 }
 
 .controls {
