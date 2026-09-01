@@ -2967,9 +2967,12 @@ function renderGroupRow(
   // release parses no season/episode of its own worth trusting here — the row
   // is the thing that knows what tier of the tree it stands for, which is
   // exactly what reccd's artwork lookup needs (a season heading asks for the
-  // season poster; an episode group asks for the episode still).
+  // season poster; an episode group asks for the episode still). A show row
+  // spans every season, so it has neither — reccd has no single artwork to
+  // return for that, and it keeps the series poster fetchMeta already gives it.
+  const season = row.kind === "show" ? undefined : row.season;
   const episode = row.kind === "group" ? row.episode : undefined;
-  mountResultPoster(best.name, frame, true, undefined, row.season, episode);
+  mountResultPoster(best.name, frame, true, undefined, season, episode);
   return li;
 }
 
