@@ -472,6 +472,23 @@ describe("defaultExpandedKeys", () => {
     );
     expect(defaultExpandedKeys(groups)).toEqual([]);
   });
+
+  it("prefers the show the query actually named over a higher-ranked stray", () => {
+    const groups = groupResults(
+      [
+        // Higher-ranked (first in the list) but not what was searched for.
+        r("Kepler.S02E01.1080p.WEB-DL"),
+        r("Kepler.S02E02.1080p.WEB-DL"),
+        // What the query named — ranked lower, would lose without the tie-break.
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    expect(defaultExpandedKeys(groups, undefined, "harrowgate")).toEqual(["harrowgate|series|s3"]);
+    // No query: rank alone still wins — this is a tie-break, not a replacement.
+    expect(defaultExpandedKeys(groups)).toEqual(["kepler|series|s2"]);
+  });
 });
 
 describe("defaultExpandedKeys with a watch position", () => {
@@ -655,6 +672,35 @@ describe("expansionSeed", () => {
   it("latches once the search has settled even with nothing to open", () => {
     const oneEpisode = groupResults([r("Kepler.S02E01.1080p.WEB-DL")]);
     const seed = expansionSeed(oneEpisode, upTo1, true);
+    expect(seed.latch).toBe(true);
+  });
+
+  it("does not latch on a fully-formed stray season while the search still runs, with no position", () => {
+    // A search for "harrowgate" that so far only has a different show's season
+    // fully formed — the OLD behaviour opened this immediately because it was
+    // "the first candidate", which is exactly the bug: whichever show's
+    // sources answered first won the slot, not the one actually searched for.
+    const strayOnly = groupResults(
+      [r("Kepler.S02E01.1080p.WEB-DL"), r("Kepler.S02E02.1080p.WEB-DL")],
+      "series",
+    );
+    const seed = expansionSeed(strayOnly, undefined, false, "harrowgate");
+    expect(seed.expandKeys).toEqual([]);
+    expect(seed.latch).toBe(false);
+  });
+
+  it("opens the query's own show once settled, not the stray that formed first", () => {
+    const groups = groupResults(
+      [
+        r("Kepler.S02E01.1080p.WEB-DL"),
+        r("Kepler.S02E02.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    const seed = expansionSeed(groups, undefined, true, "harrowgate");
+    expect(seed.expandKeys).toEqual(["harrowgate|series|s3"]);
     expect(seed.latch).toBe(true);
   });
 });

@@ -409,6 +409,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       groupResults(results, hintForSection(section)),
       positionFor,
       !search.loading,
+      query,
     );
     if (seed.expandKeys.length > 0) setExpanded(new Set(seed.expandKeys));
     if (seed.latch) {
@@ -416,7 +417,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       // Arm the cursor "land" only when there is somewhere to land.
       landed.current = seed.selectKey !== null;
     }
-  }, [results, section, positionFor, search.loading]);
+  }, [results, section, positionFor, search.loading, query]);
 
 
   useEffect(() => {

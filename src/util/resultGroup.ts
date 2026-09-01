@@ -419,38 +419,75 @@ export function groupRowPlan<T extends GroupableResult>(
  *
  * WITH a position: the season holding the next episode.
  *
- * WITHOUT one: the highest-ranked season node, and only that one. Without it a search for one
- * season collapses to a single line, which reads as the list having failed.
+ * WITHOUT one: whichever candidate's TITLE matches `query`, when given one and
+ * it matches; otherwise the highest-ranked season node. Without opening
+ * something, a search for one season collapses to a single line, which reads
+ * as the list having failed.
  *
  * "Highest-ranked" rather than "the only one": a real search for one season of
  * one show also returned a different show's season and two unrelated episodes,
  * so a rule asking whether the season is alone would have left it shut on the
  * very query that motivated this. Ranking needs no counting and strays cannot
- * defeat it.
+ * defeat it. But "highest-ranked" is "first in the list this function was
+ * handed" — meaningful once that list is fully sorted, not mid-search, when
+ * it is source-answer-order and a same-named different show can easily
+ * out-race the one actually searched for. `query` is the tie-break for
+ * exactly that: `expansionSeed` only supplies it once results have settled,
+ * specifically so this never has to guess from a partial list.
  *
  * A season the row plan DROPS (one child) is skipped — there is no row to open.
  *
  * A SEED, not a running rule: the caller puts these into the expansion set it
  * already owns, so collapsing one behaves like collapsing anything else.
  */
+/**
+ * The position branch of {@link defaultExpandedKeys}, isolated so
+ * `expansionSeed` can gate the order-dependent ranked fallback on
+ * `searchSettled` without also delaying this one — it names an exact show by
+ * ID, so unlike the fallback it cannot lock onto the wrong one and needs no
+ * waiting.
+ */
+function positionExpandedKey<T extends GroupableResult>(
+  nodes: readonly TreeNode<T>[],
+  positionFor: PositionLookup,
+): string | null {
+  for (const node of nodes) {
+    if (!isSeasonNode(node) || node.children.length <= 1) continue;
+    const at = positionFor(showKeyOf(node.key));
+    if (at && nextOf(at).season === node.season) return node.key;
+  }
+  return null;
+}
+
 export function defaultExpandedKeys<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
   positionFor?: PositionLookup,
+  query?: string,
 ): string[] {
   const nodes = seasonTree(groups);
   // WITH a position: the season holding the next episode, which is the whole
   // point — you searched a show to carry on watching it.
   if (positionFor) {
-    for (const node of nodes) {
-      if (!isSeasonNode(node) || node.children.length <= 1) continue;
-      const at = positionFor(showKeyOf(node.key));
-      if (at && nextOf(at).season === node.season) return [node.key];
-    }
+    const key = positionExpandedKey(nodes, positionFor);
+    if (key) return [key];
   }
-  for (const node of nodes) {
-    if (isSeasonNode(node) && node.children.length > 1) return [node.key];
+  const candidates = nodes.filter(
+    (node): node is SeasonNode<T> => isSeasonNode(node) && node.children.length > 1,
+  );
+  if (candidates.length === 0) return [];
+  // Prefer the season whose SHOW TITLE the query named exactly — "the boys"
+  // normalises the same way "The Boys" does — over "highest-ranked", which is
+  // really just "first in list order" and says nothing about which show that
+  // is. A search for one show routinely also returns a same-named or
+  // similarly-titled other one ("My Life With the Walter Boys" for "the
+  // boys"), and without this, whichever of the two happened to have the most
+  // seeded, best-answering source wins the slot regardless of title.
+  if (query) {
+    const wanted = normaliseTitle(query);
+    const exact = candidates.find((node) => normaliseTitle(node.title) === wanted);
+    if (exact) return [exact.key];
   }
-  return [];
+  return [candidates[0]!.key];
 }
 
 /**
@@ -572,6 +609,17 @@ export function seasonPlayPlan<T extends GroupableResult>(
  * retried, so a search for a show you are part-way through rendered collapsed
  * with no episode selected. Retry until either an expansion is applied or the
  * search settles — never latch on a frame that produced neither.
+ *
+ * THE RANKED FALLBACK WAITS FOR `searchSettled`; the position branch does not.
+ * A position names an exact show, so it is safe to act on the moment it
+ * appears. The fallback's "highest-ranked season" only means what it says
+ * once the list behind it is the final sorted one — mid-search it is
+ * source-answer order, so seeding from it opened whichever season had
+ * answered fastest, not the one actually searched for. A query for "the
+ * boys" that also matches "My Life With the Walter Boys" could latch onto
+ * the wrong show for the rest of the search if that one's sources answered
+ * first. Waiting costs one thing: the fallback case opens nothing until the
+ * search finishes, instead of guessing early and sometimes guessing wrong.
  */
 export interface ExpansionSeed {
   /** Season keys to open. */
@@ -586,12 +634,18 @@ export function expansionSeed<T extends GroupableResult>(
   groups: readonly ResultGroup<T>[],
   positionFor: PositionLookup | undefined,
   searchSettled: boolean,
+  query = "",
 ): ExpansionSeed {
-  const expandKeys = defaultExpandedKeys(groups, positionFor);
+  const nodes = seasonTree(groups);
+  const positioned = positionFor ? positionExpandedKey(nodes, positionFor) : null;
+  if (!positioned && !searchSettled) {
+    return { expandKeys: [], selectKey: null, latch: false };
+  }
+  const expandKeys = positioned ? [positioned] : defaultExpandedKeys(groups, undefined, query);
   return {
     expandKeys,
     selectKey: positionFor ? nextUpRowKey(groups, positionFor) : null,
-    latch: expandKeys.length > 0 || searchSettled,
+    latch: true,
   };
 }
 

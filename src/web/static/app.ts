@@ -2920,7 +2920,7 @@ function renderResults(): void {
     if (groups.length > 0) {
       const positionFor = positionLookup(savedState.continueWatching);
       // `running` is true between submit and the `done` frame; !running == settled.
-      const seed = expansionSeed(groups, positionFor, !searchView.running);
+      const seed = expansionSeed(groups, positionFor, !searchView.running, searchView.query);
       for (const key of seed.expandKeys) expandedGroups.add(key);
       // Select the episode you are up to, resolved from the GROUPS (rows do not
       // exist yet). Null when the results do not have it — nothing phantom.
