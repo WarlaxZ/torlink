@@ -2585,8 +2585,25 @@ interface GroupFacts {
   episode?: number;
   count: number;
   expanded: boolean;
-  /** 0 top level, 1 inside an open season. Chooses the heading's form. */
+  /**
+   * How far the row is nested. Used to size the row/card, not to pick the
+   * heading's form — a season can now sit at depth 0 (top level) OR depth 1
+   * (inside an open show), and its heading reads the same either way. Only
+   * `seasonRow` decides that.
+   */
   depth: number;
+  /**
+   * True for a "season" kind row specifically — never for "group" or "show".
+   * A season's own heading ALWAYS uses the full "Title S03" form, at any
+   * depth; the short "S03E01" / "Season pack" form is for a GROUP nested
+   * under an open season, which is the only other row that can have depth
+   * > 0. Without this flag, `groupHeadingText` had one signal (depth > 0) for
+   * two different questions — "is this nested" and "is this a group under a
+   * season" — and a season nested under a show (depth 1, exactly like a
+   * group under a season) answered the first question the same way a group
+   * does, so it rendered as "Season pack" instead of "The Boys S05".
+   */
+  seasonRow?: boolean;
   /** "up to E07" on a season you are part-way through, else absent. */
   note?: string;
 }
@@ -2599,7 +2616,7 @@ interface GroupFacts {
  * and two front ends deciding that separately is how they drift apart.
  */
 function groupHeadingText(facts: GroupFacts): string {
-  return groupHeading(facts, { underSeason: facts.depth > 0 });
+  return groupHeading(facts, { underSeason: facts.depth > 0 && !facts.seasonRow });
 }
 
 /**
@@ -2629,9 +2646,9 @@ function groupToggleButton(facts: GroupFacts): HTMLButtonElement {
   return toggle;
 }
 
-/** The heading facts for a season or group row, so the row and the card agree. */
+/** The heading facts for a show, season or group row, so the row and the card agree. */
 function groupFactsFor(
-  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" }>,
+  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" } | { kind: "show" }>,
 ): GroupFacts {
   const facts: GroupFacts = {
     key: row.key,
@@ -2642,12 +2659,16 @@ function groupFactsFor(
   };
   if (row.kind === "season") {
     facts.season = row.season;
+    facts.seasonRow = true;
     // How far through this season you are — "up to E07", never "watched": the
     // store is a high-water mark and cannot honestly claim the episodes below it
     // were all seen.
     facts.note = positionNote(row.season, positionLookup(savedState.continueWatching)(showKeyOf(row.key)));
     return facts;
   }
+  // A show heading names no season/year/episode of its own — just the title
+  // and the count, same as `facts` already has.
+  if (row.kind === "show") return facts;
   if (row.year !== undefined) facts.year = row.year;
   if (row.season !== undefined) facts.season = row.season;
   if (row.seasonEnd !== undefined) facts.seasonEnd = row.seasonEnd;
@@ -2689,11 +2710,12 @@ function groupCountChip(count: number): HTMLSpanElement {
 /**
  * Marks a row nested under a heading. Purely structural — the CSS indents it and
  * draws a spine rather than recolouring it: a nested row must still read as the
- * same kind of row it was before grouping existed. Capped at 2, which is as deep
- * as the plan goes (season > episode > release).
+ * same kind of row it was before grouping existed. Capped at 3, which is as deep
+ * as the plan goes for a show with more than one season (show > season >
+ * episode > release) — anything else tops out at 2, same as before.
  */
 function applyDepth(li: HTMLElement, depth: number): void {
-  if (depth > 0) li.classList.add(`result-depth-${Math.min(depth, 2)}`);
+  if (depth > 0) li.classList.add(`result-depth-${Math.min(depth, 3)}`);
 }
 
 function renderResultCard(
@@ -2824,7 +2846,7 @@ function renderResult(
  * under the current sort is its best one. No new picking logic.
  */
 function renderGroupRow(
-  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" }>,
+  row: Extract<GroupRow<PublicSearchResult>, { kind: "group" } | { kind: "season" } | { kind: "show" }>,
 ): HTMLLIElement {
   const best = row.members[0]!;
   const li = document.createElement("li");
@@ -2869,8 +2891,11 @@ function renderGroupRow(
   // A season made of loose episodes plays nothing on click: it reveals the
   // episodes and lands on the one you are up to. The decision is seasonPlayPlan
   // (pure); this is only the wiring. A pack season / any other row keeps play.
+  // A show row runs the same decision — seasonPlayPlan treats it as "play the
+  // newest season" and folds the show's own key into expandKeys when that
+  // season also needs revealing.
   let onPlay: (() => void) | undefined;
-  if (row.kind === "season") {
+  if (row.kind === "season" || row.kind === "show") {
     const positionFor = positionLookup(savedState.continueWatching);
     const plan = seasonPlayPlan(
       visibleGroups(searchView, reportsHealthLookup(sources), downloadedHashes),
@@ -2880,7 +2905,7 @@ function renderGroupRow(
     if (plan.kind === "reveal") {
       const target = plan.select;
       onPlay = () => {
-        expandedGroups.add(plan.expandKey);
+        for (const key of plan.expandKeys) expandedGroups.add(key);
         if (target) selectResult(target);
         else renderResults();
       };
@@ -2946,7 +2971,7 @@ function renderResults(): void {
     if (groups.length > 0) {
       const positionFor = positionLookup(savedState.continueWatching);
       // `running` is true between submit and the `done` frame; !running == settled.
-      const seed = expansionSeed(groups, positionFor, !searchView.running);
+      const seed = expansionSeed(groups, positionFor, !searchView.running, searchView.query);
       for (const key of seed.expandKeys) expandedGroups.add(key);
       // Select the episode you are up to, resolved from the GROUPS (rows do not
       // exist yet). Null when the results do not have it — nothing phantom.
@@ -2969,7 +2994,7 @@ function renderResults(): void {
   const selectedRowKey =
     currentRows.find(
       (row) =>
-        !((row.kind === "group" || row.kind === "season") && row.expanded) &&
+        !((row.kind === "group" || row.kind === "season" || row.kind === "show") && row.expanded) &&
         resultAtRow(row)?.infoHash === selectedHash,
     )?.key ?? null;
 
@@ -2978,7 +3003,7 @@ function renderResults(): void {
   const focusBefore = captureRowFocus(resultsList);
   resultsList.replaceChildren(
     ...currentRows.map((row) => {
-      if (row.kind === "group" || row.kind === "season") {
+      if (row.kind === "group" || row.kind === "season" || row.kind === "show") {
         // Grid layout keeps a heading as a CARD — it exists to show artwork, and
         // a list-shaped heading in there turns a poster wall back into a list.
         return effective === "grid"

@@ -1598,11 +1598,22 @@ select:focus-visible {
   box-shadow: none;
 }
 
+/* A third level, only reached inside a show with more than one season: a
+   release inside an open episode group inside an open season inside an open
+   show. */
+.result-depth-3 {
+  margin-left: 3.75rem;
+  border-left: 2px solid var(--line);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
 /* The indent and spine are a LIST idiom. In the grid every card is the same size
    by definition, so an indented one just breaks the columns — belonging is shown
    there by the member cards following their group card instead. */
 .results-grid .result-depth-1,
-.results-grid .result-depth-2 {
+.results-grid .result-depth-2,
+.results-grid .result-depth-3 {
   margin-left: 0;
   border-left: 1px solid var(--line);
   border-radius: 0.5rem;

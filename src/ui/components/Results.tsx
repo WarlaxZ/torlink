@@ -409,6 +409,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       groupResults(results, hintForSection(section)),
       positionFor,
       !search.loading,
+      query,
     );
     if (seed.expandKeys.length > 0) setExpanded(new Set(seed.expandKeys));
     if (seed.latch) {
@@ -416,7 +417,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       // Arm the cursor "land" only when there is somewhere to land.
       landed.current = seed.selectKey !== null;
     }
-  }, [results, section, positionFor, search.loading]);
+  }, [results, section, positionFor, search.loading, query]);
 
 
   useEffect(() => {
@@ -769,7 +770,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
         if (r) openDebrid(r);
       } else if (input === "v") {
         const row = rows[clamped];
-        if (row?.kind === "season") {
+        if (row?.kind === "season" || row?.kind === "show") {
           const plan = seasonPlayPlan(
             groupResults(results, hintForSection(section)),
             row.key,
@@ -779,7 +780,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
             // Reveal the episodes and land the cursor on the next-up one. selRef
             // moves the cursor to the row once the rebuilt rows include it.
             if (plan.select) selRef.current = { key: plan.selectKey!, hash: plan.select.infoHash };
-            setExpanded((current) => new Set(current).add(plan.expandKey));
+            setExpanded((current) => {
+              const next = new Set(current);
+              for (const key of plan.expandKeys) next.add(key);
+              return next;
+            });
           } else if (plan.result) {
             openStream(plan.result);
           }
@@ -1025,7 +1030,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                   // from the release the row would act on if you pressed `v`.
                   // Never null: groupRowPlan does not emit empty groups.
                   const r = resultAtRow(row)!;
-                  const isGroup = row.kind === "group" || row.kind === "season";
+                  const isGroup = row.kind === "group" || row.kind === "season" || row.kind === "show";
                   const ss = sourceStyle(r.source);
                   // The disclosure arrow and the member indent live INSIDE the
                   // name cell rather than in columns of their own. At 80 columns
@@ -1047,9 +1052,11 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
                   const label =
                     row.kind === "season"
                       ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}${note ? ` ${ICON.dot} ${note}` : ""}`
-                      : row.kind === "group"
-                        ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row, { underSeason: row.depth > 0 })}`
-                        : `${indent}${cleanText(r.name)}`;
+                      : row.kind === "show"
+                        ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row)}`
+                        : row.kind === "group"
+                          ? `${indent}${row.expanded ? ICON.caretDown : ICON.caretRight} ${groupHeading(row, { underSeason: row.depth > 0 })}`
+                          : `${indent}${cleanText(r.name)}`;
                   return (
                     <Box key={row.key}>
                       <Box width={GUTTER} flexShrink={0}>

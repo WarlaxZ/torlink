@@ -8,6 +8,7 @@ import {
   defaultExpandedKeys,
   expansionSeed,
   isSeasonNode,
+  isShowNode,
   nextUpRowKey,
   positionNote,
   showKeyOf,
@@ -269,7 +270,9 @@ describe("seasonTree", () => {
     expect(node.children.map((c) => c.episode)).toEqual([undefined, 1, 2]);
   });
 
-  it("orders seasons newest first", () => {
+  it("orders seasons newest first, inside the show node that wraps them", () => {
+    // Two seasons means a ShowNode wraps them — see "wraps more than one
+    // season of a show in a show node" below — so this checks ITS order.
     const tree = seasonTree(
       groupResults(
         [
@@ -281,10 +284,12 @@ describe("seasonTree", () => {
         "series",
       ),
     );
-    expect(tree.map((n) => (isSeasonNode(n) ? n.season : null))).toEqual([3, 1]);
+    const node = tree[0]!;
+    if (!isShowNode(node)) throw new Error("expected a show node");
+    expect(node.seasons.map((s) => s.season)).toEqual([3, 1]);
   });
 
-  it("emits a show's whole season block where its first group sat", () => {
+  it("emits a show's whole block — one show node — where its first group sat", () => {
     // Kestrel comes between the two Harrowgate groups in input order. The show's
     // seasons must stay contiguous, at the position of its FIRST group, so every
     // existing sort still means what it means.
@@ -301,11 +306,10 @@ describe("seasonTree", () => {
         "series",
       ),
     );
-    expect(tree.map((n) => (isSeasonNode(n) ? `s${n.season}` : "film"))).toEqual([
-      "s3",
-      "s1",
-      "film",
-    ]);
+    expect(tree.map((n) => (isShowNode(n) ? "show" : "film"))).toEqual(["show", "film"]);
+    const show = tree[0]!;
+    if (!isShowNode(show)) throw new Error("expected a show node");
+    expect(show.seasons.map((s) => s.season)).toEqual([3, 1]);
   });
 
   it("leaves a film alone", () => {
@@ -335,6 +339,45 @@ describe("seasonTree", () => {
       ),
     );
     expect(isSeasonNode(tree[0]!)).toBe(false);
+  });
+});
+
+describe("seasonTree wraps more than one season of a show in a show node", () => {
+  it("stays a bare season node when the show has exactly one season", () => {
+    // The overwhelmingly common case — a search that surfaces one season of a
+    // show — must not gain a heading over a heading.
+    const tree = seasonTree(
+      groupResults(
+        [r("Harrowgate.S03E01.1080p.WEB-DL"), r("Harrowgate.S03E02.1080p.WEB-DL")],
+        "series",
+      ),
+    );
+    expect(tree).toHaveLength(1);
+    expect(isSeasonNode(tree[0]!)).toBe(true);
+    expect(isShowNode(tree[0]!)).toBe(false);
+  });
+
+  it("wraps two or more seasons in one show node", () => {
+    const tree = seasonTree(
+      groupResults(
+        [
+          r("Harrowgate.S03E01.1080p.WEB-DL"),
+          r("Harrowgate.S03E02.1080p.WEB-DL"),
+          r("Harrowgate.S04E01.1080p.WEB-DL"),
+          r("Harrowgate.S04E02.1080p.WEB-DL"),
+        ],
+        "series",
+      ),
+    );
+    expect(tree).toHaveLength(1);
+    const node = tree[0]!;
+    if (!isShowNode(node)) throw new Error("expected a show node");
+    expect(node.key).toBe("harrowgate");
+    expect(node.title).toBe("Harrowgate");
+    expect(node.seasons.map((s) => s.season)).toEqual([4, 3]);
+    // Every season's members, newest season first — the same concatenation
+    // rule a SeasonNode's own `members` already follows one level down.
+    expect(node.members).toHaveLength(4);
   });
 });
 
@@ -420,6 +463,58 @@ describe("groupRowPlan with seasons", () => {
   });
 });
 
+describe("groupRowPlan with a show wrapping more than one season", () => {
+  const SHOW = [
+    r("Harrowgate.S04.1080p.WEB-DL"),
+    r("Harrowgate.S04.2160p.WEB-DL"),
+    r("Harrowgate.S03.1080p.WEB-DL"),
+    r("Harrowgate.S03.2160p.WEB-DL"),
+    r("Harrowgate.S03E01.1080p.WEB-DL"),
+    r("Harrowgate.S03E01.2160p.WEB-DL"),
+  ];
+
+  it("collapses the show to one row", () => {
+    const rows = groupRowPlan(groupResults(SHOW, "series"), new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("show");
+    expect(rows[0]!.depth).toBe(0);
+  });
+
+  it("acts on the newest season's best release when the show row is collapsed", () => {
+    // S04 is a pack only (one child), S03 has a pack and an episode — newest
+    // season wins regardless of which has more members.
+    const rows = groupRowPlan(groupResults(SHOW, "series"), new Set());
+    expect(resultAtRow(rows[0]!)?.name).toBe("Harrowgate.S04.1080p.WEB-DL");
+  });
+
+  it("reveals its seasons at depth 1 when open, one of them collapsed to its lone pack", () => {
+    const rows = groupRowPlan(groupResults(SHOW, "series"), new Set(["harrowgate"]));
+    // S04 has a single child (its pack, two quality releases), so it drops its
+    // own season row and renders that pack's group directly — the same rule a
+    // season with one episode group already follows, one level up.
+    expect(rows.map((row) => `${row.kind}@${row.depth}`)).toEqual(["show@0", "group@1", "season@1"]);
+  });
+
+  it("puts a season's episodes at depth 2 and their releases at depth 3", () => {
+    const rows = groupRowPlan(
+      groupResults(SHOW, "series"),
+      new Set(["harrowgate", "harrowgate|series|s3", "harrowgate|series|s3|e1"]),
+    );
+    const s3 = rows.find((row) => row.kind === "season" && row.season === 3);
+    expect(s3?.depth).toBe(1);
+    const releases = rows.filter((row) => row.kind === "release" && row.depth === 3);
+    expect(releases.length).toBeGreaterThan(0);
+  });
+
+  it("gives every row a unique key across all four levels", () => {
+    const rows = groupRowPlan(
+      groupResults(SHOW, "series"),
+      new Set(["harrowgate", "harrowgate|series|s3", "harrowgate|series|s3|e1"]),
+    );
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+  });
+});
+
 describe("groupHeading under a season", () => {
   it("drops the show name a season row already states", () => {
     const [group] = groupResults([r("Kepler.S02E04.1080p.WEB-DL")], "series");
@@ -472,6 +567,23 @@ describe("defaultExpandedKeys", () => {
     );
     expect(defaultExpandedKeys(groups)).toEqual([]);
   });
+
+  it("prefers the show the query actually named over a higher-ranked stray", () => {
+    const groups = groupResults(
+      [
+        // Higher-ranked (first in the list) but not what was searched for.
+        r("Kepler.S02E01.1080p.WEB-DL"),
+        r("Kepler.S02E02.1080p.WEB-DL"),
+        // What the query named — ranked lower, would lose without the tie-break.
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    expect(defaultExpandedKeys(groups, undefined, "harrowgate")).toEqual(["harrowgate|series|s3"]);
+    // No query: rank alone still wins — this is a tie-break, not a replacement.
+    expect(defaultExpandedKeys(groups)).toEqual(["kepler|series|s2"]);
+  });
 });
 
 describe("defaultExpandedKeys with a watch position", () => {
@@ -489,8 +601,11 @@ describe("defaultExpandedKeys with a watch position", () => {
   it("opens the season holding the next episode, not the highest-ranked one", () => {
     const groups = groupResults(SHOW, "series");
     // Seasons sort newest first, so S04 is the highest-ranked node. This only
-    // passes if the POSITION is what chose S03.
+    // passes if the POSITION is what chose S03. The show has two seasons here,
+    // so it wraps in a show node — both its key and the season's are returned,
+    // or the season row would sit inside a heading nobody opened.
     expect(defaultExpandedKeys(groups, () => ({ season: 3, episode: 0 }))).toEqual([
+      "harrowgate",
       "harrowgate|series|s3",
     ]);
   });
@@ -502,7 +617,9 @@ describe("defaultExpandedKeys with a watch position", () => {
 
   it("is unchanged when no lookup is given, so Piece A's behaviour is intact", () => {
     const groups = groupResults(SHOW, "series");
-    expect(defaultExpandedKeys(groups)).toHaveLength(1);
+    // [show key, season key] — this show has two seasons, so it wraps in a
+    // show node that also needs opening.
+    expect(defaultExpandedKeys(groups)).toHaveLength(2);
   });
 
   it("falls back when the position names a season the results do not have", () => {
@@ -582,7 +699,7 @@ describe("seasonPlayPlan", () => {
     const plan = seasonPlayPlan(looseSeason(), seasonKey, upTo(1));
     expect(plan.kind).toBe("reveal");
     if (plan.kind !== "reveal") throw new Error("expected reveal");
-    expect(plan.expandKey).toBe(seasonKey);
+    expect(plan.expandKeys).toEqual([seasonKey]);
     expect(plan.selectKey).toBe("kepler|series|s2|e2");
     expect(plan.select?.name).toBe("Kepler.S02E02.1080p.WEB-DL");
   });
@@ -627,6 +744,44 @@ describe("seasonPlayPlan", () => {
     if (plan.kind !== "resolve") throw new Error("expected resolve");
     expect(plan.result).toBeNull();
   });
+
+  it("acts on the newest season's pack when the show row is played, folding the show's key in", () => {
+    const groups = groupResults(
+      [
+        r("Harrowgate.S04.1080p.WEB-DL"),
+        r("Harrowgate.S03.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    // S04 (newest) is a pack, so this resolves rather than reveals — but the
+    // reveal case below is where a show's Play button actually has to expand
+    // two levels at once, which is the behaviour this test protects.
+    const plan = seasonPlayPlan(groups, "harrowgate", upTo(1));
+    expect(plan.kind).toBe("resolve");
+    if (plan.kind !== "resolve") throw new Error("expected resolve");
+    expect(plan.result?.name).toBe("Harrowgate.S04.1080p.WEB-DL");
+  });
+
+  it("reveals both the show and its newest season when that season has loose episodes", () => {
+    const groups = groupResults(
+      [
+        r("Harrowgate.S04E01.1080p.WEB-DL"),
+        r("Harrowgate.S04E02.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    const plan = seasonPlayPlan(groups, "harrowgate");
+    expect(plan.kind).toBe("reveal");
+    if (plan.kind !== "reveal") throw new Error("expected reveal");
+    // The show first, then the season it redirected to — in that order, so a
+    // caller adding both to an expanded-keys set opens the show before it
+    // needs the season inside it to already be visible.
+    expect(plan.expandKeys).toEqual(["harrowgate", "harrowgate|series|s4"]);
+    expect(plan.selectKey).toBe("harrowgate|series|s4|e1");
+  });
 });
 
 describe("expansionSeed", () => {
@@ -655,6 +810,35 @@ describe("expansionSeed", () => {
   it("latches once the search has settled even with nothing to open", () => {
     const oneEpisode = groupResults([r("Kepler.S02E01.1080p.WEB-DL")]);
     const seed = expansionSeed(oneEpisode, upTo1, true);
+    expect(seed.latch).toBe(true);
+  });
+
+  it("does not latch on a fully-formed stray season while the search still runs, with no position", () => {
+    // A search for "harrowgate" that so far only has a different show's season
+    // fully formed — the OLD behaviour opened this immediately because it was
+    // "the first candidate", which is exactly the bug: whichever show's
+    // sources answered first won the slot, not the one actually searched for.
+    const strayOnly = groupResults(
+      [r("Kepler.S02E01.1080p.WEB-DL"), r("Kepler.S02E02.1080p.WEB-DL")],
+      "series",
+    );
+    const seed = expansionSeed(strayOnly, undefined, false, "harrowgate");
+    expect(seed.expandKeys).toEqual([]);
+    expect(seed.latch).toBe(false);
+  });
+
+  it("opens the query's own show once settled, not the stray that formed first", () => {
+    const groups = groupResults(
+      [
+        r("Kepler.S02E01.1080p.WEB-DL"),
+        r("Kepler.S02E02.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E02.1080p.WEB-DL"),
+      ],
+      "series",
+    );
+    const seed = expansionSeed(groups, undefined, true, "harrowgate");
+    expect(seed.expandKeys).toEqual(["harrowgate|series|s3"]);
     expect(seed.latch).toBe(true);
   });
 });

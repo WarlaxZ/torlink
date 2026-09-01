@@ -375,7 +375,11 @@ describe("Results watch position", () => {
 
   it("marks nothing and opens the newest season when the show is unwatched", async () => {
     const u = await mountWideWithHistory(SHOW, [], 120);
-    await vi.waitFor(() => expect(u.frame()).toContain("Harrowgate S04"));
+    // S04 has one episode group (two releases of E01 only), so it renders
+    // directly with no season heading of its own once the show wrapping it
+    // opens — same "a group of one adds no wrapper" rule a season itself
+    // follows one level down.
+    await vi.waitFor(() => expect(u.frame()).toContain("S04E01"));
     expect(u.frame()).not.toContain("up to");
   });
 });
