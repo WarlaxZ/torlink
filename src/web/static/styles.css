@@ -60,6 +60,16 @@
   box-sizing: border-box;
 }
 
+/* color-scheme: dark above already themes native scrollbars and form controls
+   — this is the one native chrome it doesn't reach. Without it, selecting any
+   text on the page (a release name, a magnet link) highlights in the
+   browser's default blue, which is a different blue from --accent and the
+   only place on the page that colour would appear unstyled. */
+::selection {
+  background: var(--accent);
+  color: var(--sunken);
+}
+
 /* ---- motion -------------------------------------------------------------- *
 
    There was none: 1500 lines of CSS with no transition, no animation and no
@@ -632,6 +642,8 @@ button:hover {
   max-height: min(80vh, 40rem);
   max-width: min(46rem, calc(100vw - 2rem));
   overflow-y: auto;
+  background: var(--raised);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
 
 /* Dim rather than opaque: the list behind is context — which release this is a
@@ -711,6 +723,12 @@ button:hover {
   max-height: min(85vh, 48rem);
   max-width: min(40rem, calc(100vw - 2rem));
   overflow-y: auto;
+  /* Explicit rather than the UA's canvas-keyword default (which color-scheme:
+     dark already resolves correctly, but only by convention, not this file's
+     own tokens) — and a dialog floating over a backdrop earns a stronger lift
+     than a card sitting in normal flow. */
+  background: var(--raised);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
 
 .settings::backdrop {
@@ -1262,17 +1280,24 @@ select:focus-visible {
 }
 
 .group-toggle {
-  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid transparent;
+  border-radius: 50%;
   background: none;
-  padding: 0;
   color: var(--dim);
-  font-size: 0.8rem;
-  line-height: 1.4;
+  font-size: 0.85rem;
+  line-height: 1;
+  margin-top: 0.1rem;
 }
 
 .group-toggle:hover {
   color: var(--accent);
-  border-color: transparent;
+  background: var(--sunken);
+  border-color: var(--line);
 }
 
 /* The title, not a release name: bolder than a member row's, because it is the
@@ -1284,11 +1309,16 @@ select:focus-visible {
 
 .group-count {
   flex: 0 0 auto;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
 }
 
 /* A group in GRID layout: still a poster card, with the count and the disclosure
@@ -1333,20 +1363,39 @@ select:focus-visible {
 
 /* A release inside an open group. Indented with a spine so the belonging is
    visible without a second colour — and the name keeps the weight it always had,
-   so an expanded group looks like the list it is. */
+   so an expanded group looks like the list it is.
+
+   Three more moves on top of the indent, added once real use showed the indent
+   alone reads as "a slightly different row" rather than "inside the row
+   above" to anyone not already looking for it:
+   - --sunken, not --raised, and no shadow: every top-level .row got a lifted,
+     floating treatment earlier in this file, which made a nested row look
+     like ANOTHER floating card rather than content recessed into its parent.
+   - A negative margin-top eats most of .rows' 0.5rem grid gap, so consecutive
+     rows in the same group sit close together while two different top-level
+     results (or two different groups) keep the full gap between them.
+   - The spine itself is --accent at low opacity, not --line — the same grey
+     as every other hairline on the page was nearly invisible against a row
+     that already has a --line border of its own. */
 .result-depth-1 {
   margin-left: 1.25rem;
-  border-left: 2px solid var(--line);
+  margin-top: -0.3rem;
+  border-left: 3px solid rgba(122, 162, 247, 0.4);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+  background: var(--sunken);
+  box-shadow: none;
 }
 
 /* One step further in: an episode's releases, inside an open season. */
 .result-depth-2 {
   margin-left: 2.5rem;
-  border-left: 2px solid var(--line);
+  margin-top: -0.3rem;
+  border-left: 3px solid rgba(122, 162, 247, 0.4);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
+  background: var(--sunken);
+  box-shadow: none;
 }
 
 /* The indent and spine are a LIST idiom. In the grid every card is the same size
@@ -1531,6 +1580,35 @@ select:focus-visible {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
+}
+
+/* An OMDb lookup in flight, on every poster frame that fetches one: search
+   rows, grid cards, For You, and the preview pane. Previously nothing painted
+   here until the fetch settled, so a slow category (Porn in particular — the
+   one source with the most lookups queued behind OMDb's rate limit) sat with
+   several blank boxes at once, indistinguishable from "there is no artwork".
+   Column layout so a frame with room for the "Loading" text (grid, preview)
+   stacks it under the spinner; a compact row thumbnail has no text node at
+   all, so the spinner sits centred alone. */
+.poster-loading {
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.poster-loading::before {
+  content: "";
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: poster-spin 0.8s linear infinite;
+}
+
+@keyframes poster-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Only where the poster is the click target (For You, grouped results), not
@@ -2427,6 +2505,7 @@ select:focus-visible {
   border-radius: 0.5rem;
   background: var(--raised);
   font-size: 0.75rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* The error banner. Deliberately the same object as .prepare — same corner, same
@@ -2451,6 +2530,7 @@ select:focus-visible {
   border-radius: 0.5rem;
   background: var(--raised);
   font-size: 0.75rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .alert:not([hidden]) ~ .prepare {

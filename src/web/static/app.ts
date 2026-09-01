@@ -2221,6 +2221,9 @@ function paintSearchHint(): void {
  * so it shows the note as text the way the For You cards do.
  */
 function paintPoster(host: HTMLElement, outcome: PosterOutcome, compact: boolean): void {
+  // Settling one way or the other — the spinner startPoster added below is
+  // always stale by the time this runs.
+  host.classList.remove("poster-loading");
   if (outcome.kind === "poster") {
     const img = document.createElement("img");
     img.src = outcome.url;
@@ -2287,6 +2290,12 @@ function startPoster(release: string, host: HTMLElement, compact: boolean, group
     paintPoster(host, outcome, compact);
     return;
   }
+  // An OMDb lookup that has not settled yet used to leave the frame blank —
+  // indistinguishable from "loading" and "there will never be a poster here",
+  // which reads as broken when a category has enough rows queued behind the
+  // rate limit that several sit blank for seconds at a time.
+  host.replaceChildren();
+  host.classList.add("poster-loading");
   void outcome.then((settledOutcome) => {
     // The row may have been re-rendered or filtered away during the two round
     // trips; a detached node is not worth painting.
@@ -3290,8 +3299,9 @@ function releasePoster(): void {
   }
 }
 
-function posterPlaceholder(note: string): void {
+function posterPlaceholder(note: string, loading = false): void {
   releasePoster();
+  previewPoster.classList.toggle("poster-loading", loading);
   const span = document.createElement("span");
   span.className = "poster-note";
   span.textContent = note;
@@ -3467,7 +3477,7 @@ function renderPreview(state: PreviewState): void {
     previewSub.textContent = "";
     previewBody.textContent = "Looking this up…";
     previewImdb.hidden = true;
-    posterPlaceholder("Loading");
+    posterPlaceholder("Loading", true);
     return;
   }
 
@@ -3492,7 +3502,7 @@ function renderPreview(state: PreviewState): void {
     previewImdb.hidden = true;
   }
   if (copy.posterUrl) {
-    posterPlaceholder("Loading");
+    posterPlaceholder("Loading", true);
     void loadPoster(copy.posterUrl, previewGeneration);
   } else {
     posterPlaceholder(copy.posterNote);
@@ -3637,7 +3647,8 @@ async function fetchReccPoster(imdbId: string): Promise<ReccPosterLookup> {
   }
 }
 
-function paintPosterNote(host: HTMLElement, note: string): void {
+function paintPosterNote(host: HTMLElement, note: string, loading = false): void {
+  host.classList.toggle("poster-loading", loading);
   const span = document.createElement("span");
   span.className = "poster-note";
   span.textContent = note;
@@ -3645,6 +3656,7 @@ function paintPosterNote(host: HTMLElement, note: string): void {
 }
 
 function paintReccPoster(host: HTMLElement, outcome: ReccPosterOutcome): void {
+  host.classList.remove("poster-loading");
   if (outcome.kind !== "poster") {
     // The wording is the model's: "No OMDb key" for the config gap, "No poster"
     // for a title that simply has none.
@@ -3663,7 +3675,7 @@ function mountReccPoster(imdbId: string, host: HTMLElement): void {
     paintReccPoster(host, cached.poster);
     return;
   }
-  paintPosterNote(host, "Loading");
+  paintPosterNote(host, "Loading", true);
   let inflight = reccPosterPending.get(imdbId);
   if (!inflight) {
     inflight = fetchReccPoster(imdbId).then((outcome) => {
