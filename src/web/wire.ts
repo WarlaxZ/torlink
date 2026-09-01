@@ -826,6 +826,19 @@ export type PublicTitleSuggestions =
   | { status: "error"; error: string };
 
 /**
+ * The body of `GET /api/artwork?imdbId=&type=&season=&episode=`.
+ *
+ * Same three-way shape as `PublicTitleSuggestions`, for the same reason: "no
+ * reccd" and "reccd doesn't have this endpoint yet" both have to be things the
+ * poster cache can tell apart from "checked, and there is nothing here" —
+ * `"ok"` with both fields null IS the last one, and is not an error.
+ */
+export type PublicArtwork =
+  | { status: "ok"; posterUrl: string | null; stillUrl: string | null }
+  | { status: "not-configured" }
+  | { status: "error"; error: string };
+
+/**
  * The event types `POST /api/recc-event` will forward.
  *
  * A deliberate SUBSET of `ReccEventType` (src/recc/client.ts): `"started"` is

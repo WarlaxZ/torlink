@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { postEvent, fetchRecommendations, fetchTitleSuggestions, claimReccAccount } from "./client.js";
+import { postEvent, fetchRecommendations, fetchTitleSuggestions, fetchArtwork, claimReccAccount } from "./client.js";
 import type { FetchImpl } from "../util/net";
 
 function jsonRes(status: number, body: unknown = {}) {
@@ -369,6 +369,88 @@ describe("fetchTitleSuggestions", () => {
     await fetchTitleSuggestions({ reccUrl: "http://r" }, { q: "kes" }, { fetchImpl });
     const [, init] = fetchImpl.mock.calls[0] as [string, { headers: Record<string, string> }];
     expect(init.headers.authorization).toBe("Bearer ");
+  });
+});
+
+describe("fetchArtwork", () => {
+  it("gets {reccUrl}/artwork with imdbId, type and a bearer token", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { posterUrl: "https://p.jpg", stillUrl: null }));
+    const res = await fetchArtwork(
+      { reccUrl: "http://localhost:4100", reccToken: "dev-token" },
+      { imdbId: "tt1190634", type: "series" },
+      { fetchImpl },
+    );
+    expect(res).toEqual({ ok: true, posterUrl: "https://p.jpg", stillUrl: null });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, { method: string; headers: Record<string, string> }];
+    expect(url).toBe("http://localhost:4100/artwork?imdbId=tt1190634&type=series");
+    expect(init.method).toBe("GET");
+    expect(init.headers.authorization).toBe("Bearer dev-token");
+  });
+
+  it("adds season and episode to the query when given", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { posterUrl: "https://s5.jpg", stillUrl: "https://e1.jpg" }));
+    const res = await fetchArtwork(
+      { reccUrl: "http://r", reccToken: "t" },
+      { imdbId: "tt1190634", type: "series", season: 5, episode: 1 },
+      { fetchImpl },
+    );
+    expect(res).toEqual({ ok: true, posterUrl: "https://s5.jpg", stillUrl: "https://e1.jpg" });
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe("http://r/artwork?imdbId=tt1190634&type=series&season=5&episode=1");
+  });
+
+  it("omits episode when only season is given — a season poster with no episode still", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { posterUrl: "https://s5.jpg", stillUrl: null }));
+    await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt1", type: "series", season: 5 }, { fetchImpl });
+    const [url] = fetchImpl.mock.calls[0] as [string];
+    expect(url).toBe("http://r/artwork?imdbId=tt1&type=series&season=5");
+  });
+
+  // Both fields null, still a 200 — reccd found no TMDB match. Ordinary, not
+  // an error: the caller's existing OMDb series poster is the answer either way.
+  it("treats both fields null as an ordinary miss, not an error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { posterUrl: null, stillUrl: null }));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt9", type: "movie" }, { fetchImpl });
+    expect(res).toEqual({ ok: true, posterUrl: null, stillUrl: null });
+  });
+
+  it("does not call fetch at all when reccUrl is not configured", async () => {
+    const fetchImpl = vi.fn();
+    const res = await fetchArtwork({}, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected token", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: "unauthorized" }));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "bad" }, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "reccd rejected the token — check reccToken" });
+  });
+
+  // A reccd predating GET /artwork 404s. That is "this feature is unavailable",
+  // not a fault — the caller's existing series-poster fallback carries on.
+  it("treats a 404 as an older reccd without the endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(404, { error: "not found" }));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "this reccd has no artwork endpoint" });
+  });
+
+  it("reports any other non-ok status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(500, {}));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res).toEqual({ ok: false, error: "artwork unavailable (HTTP 500)" });
+  });
+
+  it("rejects a body whose fields are the wrong shape", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, { posterUrl: 12, stillUrl: null }));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res.ok).toBe(false);
+  });
+
+  it("never throws on a network error", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    const res = await fetchArtwork({ reccUrl: "http://r", reccToken: "t" }, { imdbId: "tt1", type: "movie" }, { fetchImpl });
+    expect(res.ok).toBe(false);
   });
 });
 

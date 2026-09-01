@@ -44,9 +44,12 @@ import {
 import { resolveProfileId, isOwnerProfile } from "../core/profile";
 import { ensureReccAccount } from "../recc/provision";
 import {
+  fetchArtwork,
   fetchRecommendations,
   fetchTitleSuggestions,
   postEvent,
+  type ArtworkQuery,
+  type FetchArtworkResult,
   type FetchRecommendationsResult,
   type FetchTitleSuggestionsResult,
   type ReccClientConfig,
@@ -112,6 +115,7 @@ import type {
   PublicStreamFile,
   PublicStreamHistoryItem,
   PublicReccEventAck,
+  PublicArtwork,
   PublicReccEventType,
   PublicRecommendations,
   PublicStreamSession,
@@ -241,6 +245,8 @@ export interface WebDeps {
     config: ReccClientConfig,
     query: { q: string; limit?: number },
   ) => Promise<FetchTitleSuggestionsResult>;
+  /** reccd's season/episode artwork, for `/api/artwork`. Injected to keep tests off the network. */
+  fetchArtworkImpl?: (config: ReccClientConfig, query: ArtworkQuery) => Promise<FetchArtworkResult>;
   /**
    * How `/api/recc-event` reaches reccd. Injected for the same reason, and
    * typed as returning void rather than a promise the route waits on — see the
@@ -1925,6 +1931,84 @@ async function titleSearch(
   return { status: 200, json: out };
 }
 
+/**
+ * `season` alone: that season's poster. `season` and `episode` together:
+ * additionally that episode's still. Neither: the route has nothing to ask
+ * reccd that OMDb doesn't already answer, so this is a 400 rather than a
+ * silent "ok, nothing" — a caller reaching this route with neither is a bug,
+ * not an ordinary miss the way an unmatched imdbId is.
+ */
+function seasonEpisodeFromQuery(
+  query: URLSearchParams,
+): { season?: number; episode?: number; error?: undefined } | { error: string } {
+  const rawSeason = (query.get("season") ?? "").trim();
+  const rawEpisode = (query.get("episode") ?? "").trim();
+  if (!rawSeason) {
+    if (rawEpisode) return { error: "episode given without season" };
+    return { error: "missing season" };
+  }
+  const season = Number(rawSeason);
+  if (!Number.isInteger(season) || season < 0) return { error: "invalid season" };
+  if (!rawEpisode) return { season };
+  const episode = Number(rawEpisode);
+  if (!Number.isInteger(episode) || episode < 0) return { error: "invalid episode" };
+  return { season, episode };
+}
+
+/**
+ * `GET /api/artwork?imdbId=&type=&season=&episode=` — reccd's season/episode
+ * artwork, proxied for the same reason `/api/title-search` is: the browser
+ * must never see `reccToken`.
+ *
+ * `loadConfig()` per request, not a boot snapshot, for the same reason
+ * `titleSearch` does it: a reccd URL can be pasted into the Accounts pane at
+ * any moment, and `serve --web` is a separate process from any running TUI.
+ */
+async function artwork(deps: WebDeps, query: URLSearchParams, accessEmail?: string): Promise<WebResponse> {
+  const imdbId = (query.get("imdbId") ?? "").trim();
+  // Anchored, matching parseTitleLookup's own `imdb` check above: this is
+  // interpolated into reccd's own query string, and an id shape is cheap to
+  // insist on before it gets there.
+  if (!/^tt\d{7,}$/.test(imdbId)) return { status: 400, json: { error: "invalid or missing imdbId" } };
+  const type = query.get("type");
+  if (type !== "movie" && type !== "series") {
+    return { status: 400, json: { error: "type must be movie or series" } };
+  }
+  const se = seasonEpisodeFromQuery(query);
+  if (se.error !== undefined) return { status: 400, json: { error: se.error } };
+
+  const config = await (deps.loadConfigImpl ?? loadConfig)();
+  const reccConfig = resolveReccConfig(config, resolveProfileId(accessEmail, resolveOwnerEmail(config)));
+  if (!reccConfig.reccUrl) {
+    const out: PublicArtwork = { status: "not-configured" };
+    return { status: 200, json: out };
+  }
+
+  // `fetchArtwork` never throws and bounds itself with its own timeout, so a
+  // reccd that is down, hanging, or simply older than this endpoint costs
+  // this request that timeout and nothing else.
+  const result = await (deps.fetchArtworkImpl ?? fetchArtwork)(reccConfig, {
+    imdbId,
+    type,
+    ...(se.season !== undefined ? { season: se.season } : {}),
+    ...(se.episode !== undefined ? { episode: se.episode } : {}),
+  });
+  if (!result.ok) {
+    const out: PublicArtwork = { status: "error", error: result.error };
+    return { status: 200, json: out };
+  }
+  // Same reasoning as /api/title's own posterUrl: downstream enforcement
+  // alone is not enough for a URL that is about to cross into the browser as
+  // an <img>-bound fetch target, so it is checked against POSTER_HOSTS here
+  // too, not just wherever the fetch itself eventually happens.
+  const out: PublicArtwork = {
+    status: "ok",
+    posterUrl: allowedPosterUrl(result.posterUrl),
+    stillUrl: allowedPosterUrl(result.stillUrl),
+  };
+  return { status: 200, json: out };
+}
+
 /** The event types this route will forward, as a set for the body check. */
 const RECC_EVENTS: ReadonlySet<string> = new Set<PublicReccEventType>([
   "watched",
@@ -2372,6 +2456,10 @@ export async function handleWebApi(
 
   if (method === "GET" && urlPath === "/api/title-search") {
     return titleSearch(deps, query, accessEmail);
+  }
+
+  if (method === "GET" && urlPath === "/api/artwork") {
+    return artwork(deps, query, accessEmail);
   }
 
   if (method === "POST" && urlPath === "/api/recc-event") {
