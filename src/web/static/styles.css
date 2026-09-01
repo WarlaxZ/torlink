@@ -303,6 +303,30 @@ h1 {
   padding: 0.7rem 0.85rem;
 }
 
+#search > label {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+/* The one action on the page that always does something ("save search" is
+   secondary, everything else on this pane is a filter) — filled, so the
+   hierarchy is visible before anyone reads a label. */
+#search button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--sunken);
+  font-weight: 600;
+  padding: 0.7rem 1.1rem;
+}
+
+#search button[type="submit"]:hover {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--sunken);
+}
+
 .card label {
   flex: 1 0 100%;
   font-size: 0.75rem;
@@ -436,6 +460,13 @@ button:hover {
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
+  /* Lifted off --bg rather than sitting flush with the page — every list on the
+     site (results, queue, recommendations, saved) was one flat plane with only
+     a hairline to separate a row from the page behind it. background-color is
+     already in the global transition allowlist, so this animates for free when
+     JS toggles a state class on a row. */
+  background: var(--raised);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .row-head {
@@ -530,8 +561,16 @@ button:hover {
    also the safety argument: the destructive buttons sit millimetres away on a
    phone and should not compete for the thumb. */
 .row-actions button.play {
-  color: var(--accent);
+  color: var(--sunken);
+  background: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
+}
+
+.row-actions button.play:hover {
+  color: var(--sunken);
+  background: var(--fg);
+  border-color: var(--fg);
 }
 
 /* The stream file picker. Overrides .card's row layout — it is a heading above
@@ -665,10 +704,12 @@ button:hover {
 
 .settings-title {
   margin: 0;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--dim);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  color: var(--fg);
 }
 
 /* A titled block of controls (Playback, Content, Downloads, …). The rule from
@@ -1013,9 +1054,15 @@ select:focus-visible {
 
 .result-source {
   flex: 0 0 auto;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  font-weight: 600;
   letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--accent);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
 }
 
 .result-meta {
@@ -1377,9 +1424,19 @@ select:focus-visible {
   aspect-ratio: 2 / 3;
   margin-bottom: 0.6rem;
   border: 1px solid var(--line);
-  border-radius: 0.35rem;
+  border-radius: 0.6rem;
   background: var(--sunken);
   overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: transform var(--settle) ease-out;
+}
+
+/* Only where the poster is the click target (For You, grouped results), not
+   the read-only preview pane — a scale on something you can't interact with
+   would just read as a glitch. */
+.recc-poster:hover .poster,
+.result-card .recc-poster:hover .poster {
+  transform: scale(1.015);
 }
 
 .poster img {
@@ -1655,6 +1712,15 @@ select:focus-visible {
   flex-direction: column;
   gap: 0.1rem;
   padding: 0.6rem;
+  transition:
+    transform var(--settle) ease-out,
+    box-shadow var(--settle) ease-out,
+    border-color var(--settle) ease-out;
+}
+
+.recc-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
 /* The poster is the card's primary target (it selects the pick and offers the
@@ -2059,12 +2125,26 @@ select:focus-visible {
 }
 
 .saved-heading {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--dim);
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--fg);
+}
+
+/* A short accent rule rather than a bullet or icon — same job the category
+   dot does on the search tabs, at section-heading scale. */
+.saved-heading::before {
+  content: "";
+  width: 0.9rem;
+  height: 2px;
+  background: var(--accent);
+  flex: 0 0 auto;
 }
 
 /* A saved-search row is a button spanning the row: the whole thing re-runs that
