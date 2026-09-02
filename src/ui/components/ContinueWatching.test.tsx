@@ -3,6 +3,7 @@ import { render } from "ink-testing-library";
 import { ContinueWatching } from "./ContinueWatching";
 import { makeTestStore } from "../testHarness";
 import type { StreamHistoryItem } from "../../core/streamHistory";
+import type { SourceId } from "../../sources/types";
 
 const item = (over: Partial<StreamHistoryItem>): StreamHistoryItem => ({
   key: "k", title: "Kepler", rawName: "Kepler.S02E04.1080p.WEB-DL",
@@ -107,5 +108,61 @@ describe("ContinueWatching Enter", () => {
     expect(played).toEqual([]);
     expect(searched).toEqual(["Kepler"]);
     expect(sections).toEqual(["all"]);
+  });
+});
+
+describe("ContinueWatching category tabs", () => {
+  it("shows an All tab alongside the one category present, even when every item shares it", async () => {
+    const { lastFrame } = renderWith({
+      streamHistory: [item({ source: "eztv" as SourceId }), item({ key: "k2", source: "eztv" as SourceId })],
+    });
+    await flush();
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("All");
+    expect(frame).toContain("TV");
+  });
+
+  it("[ and ] cycle tabs and filter the list, wrapping at the ends", async () => {
+    const { stdin, lastFrame } = renderWith({
+      streamHistory: [
+        item({ key: "tv", title: "Kepler", source: "eztv" as SourceId }),
+        item({ key: "movie", title: "Ashfall", type: "movie", season: undefined, episode: undefined, source: "yts" as SourceId }),
+      ],
+    });
+    await flush();
+    // Tab order is All, Movies, TV — see CATEGORY_ORDER in registry.ts.
+    expect(lastFrame()).toContain("All");
+    expect(lastFrame()).toContain("Kepler");
+    expect(lastFrame()).toContain("Ashfall");
+
+    stdin.write("]");
+    await flush();
+    expect(lastFrame()).toContain("Ashfall");
+    expect(lastFrame()).not.toContain("Kepler");
+
+    stdin.write("]");
+    await flush();
+    expect(lastFrame()).toContain("Kepler");
+    expect(lastFrame()).not.toContain("Ashfall");
+
+    // Wraps back to All.
+    stdin.write("]");
+    await flush();
+    expect(lastFrame()).toContain("Kepler");
+    expect(lastFrame()).toContain("Ashfall");
+  });
+
+  it("tabs whatever categories are present in streamHistory, including Porn — adult filtering happens upstream in App.tsx, not here", async () => {
+    // This component has no adult-specific logic: App.tsx filters adult items
+    // out of the Store's streamHistory field before this component ever sees
+    // it (gated by adultHistoryVisible). A Porn item reaching this component at
+    // all means the setting was on, in which case it gets a tab like any other
+    // category — pinned here so a future refactor can't quietly duplicate the
+    // filter (or its absence) at this layer.
+    const { lastFrame } = renderWith({
+      streamHistory: [item({ source: "eztv" as SourceId }), item({ key: "k2", source: "tpb-porn" as SourceId })],
+    });
+    await flush();
+    expect(lastFrame()).toContain("Porn");
   });
 });

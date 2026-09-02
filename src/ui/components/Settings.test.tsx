@@ -6,7 +6,7 @@ import type { ReccStatus } from "../../recc/status";
 import type { DebridStatus } from "../../integrations/debrid/types";
 import { defaultConfig, type Config } from "../../config/config";
 
-function storeStub(config: Partial<Config> = {}, adultEnabled = false): Store {
+function storeStub(config: Partial<Config> = {}, adultEnabled = false, adultHistoryVisible = false): Store {
   return {
     region: "content",
     section: "settings",
@@ -14,8 +14,9 @@ function storeStub(config: Partial<Config> = {}, adultEnabled = false): Store {
     // the windowing itself is exercised by the Accounts scroll behaviour this
     // pane inherited; here we just want to assert on the full list.
     contentWidth: 76,
-    listRows: 60,
+    listRows: 70,
     adultEnabled,
+    adultHistoryVisible,
     config: { ...defaultConfig, ...config },
   } as unknown as Store;
 }
@@ -73,6 +74,7 @@ const baseProps = {
   onToggleAdult: noop,
   onToggleProxy: noop,
   onToggleAdultScreenshots: noop,
+  onToggleAdultHistoryVisible: noop,
   dnsEnvOverride: false,
   playerEnvOverride: false,
   adultEnvOverride: false,
@@ -84,9 +86,14 @@ function props(over: Partial<typeof baseProps> = {}) {
   return { ...baseProps, ...over };
 }
 
-function renderSettings(over: Partial<typeof baseProps> = {}, config: Partial<Config> = {}, adultEnabled = false) {
+function renderSettings(
+  over: Partial<typeof baseProps> = {},
+  config: Partial<Config> = {},
+  adultEnabled = false,
+  adultHistoryVisible = false,
+) {
   return render(
-    <StoreContext.Provider value={storeStub(config, adultEnabled)}>
+    <StoreContext.Provider value={storeStub(config, adultEnabled, adultHistoryVisible)}>
       <Settings {...props(over)} />
     </StoreContext.Provider>,
   );
@@ -107,6 +114,7 @@ describe("Settings", () => {
     expect(frame).toContain("Cast host");
     expect(frame).toContain("Media player");
     expect(frame).toContain("Adult content");
+    expect(frame).toContain("Adult history");
     expect(frame).toContain("Relay debrid streams");
   });
 
@@ -172,6 +180,20 @@ describe("Settings", () => {
     expect(on).toContain("on");
     const locked = renderSettings({ adultEnvOverride: true }).lastFrame() ?? "";
     expect(locked).toContain("env");
+  });
+
+  it("shows the adult history toggle state, independent of adult content", () => {
+    // The value renders on the line below the label, so check the pair — not
+    // just "off"/"on" anywhere in the frame, which several other rows also say.
+    const valueAfter = (frame: string, label: string): string | undefined => {
+      const lines = frame.split("\n");
+      const i = lines.findIndex((l) => l.includes(label));
+      return i >= 0 ? lines[i + 1] : undefined;
+    };
+    const off = renderSettings({}, {}, true, false).lastFrame() ?? "";
+    expect(valueAfter(off, "Adult history")).toContain("off");
+    const on = renderSettings({}, {}, false, true).lastFrame() ?? "";
+    expect(valueAfter(on, "Adult history")).toContain("on");
   });
 
   it("shows the media player as auto-detect when unset", () => {
