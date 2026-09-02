@@ -157,6 +157,7 @@ function makeStore(
     omdbApiKey: "",
     adultEnabled: false,
     adultScreenshots: true,
+    adultHistoryVisible: false,
     streamActive: false,
     castStatus: null,
     debridStatus: null,
@@ -447,6 +448,7 @@ save(
           onToggleAdult={() => {}}
           onToggleProxy={() => {}}
         onToggleAdultScreenshots={() => {}}
+        onToggleAdultHistoryVisible={() => {}}
         />
       </Box>
     </Box>

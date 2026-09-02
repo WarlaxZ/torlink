@@ -14,6 +14,7 @@ import {
   resolveOmdbApiKey,
   resolveAdultContent,
   resolveAdultScreenshots,
+  resolveAdultHistoryVisible,
   resolveCloudflareAccess,
   isCloudflareAccessHalfConfigured,
   qualityPrefsFrom,
@@ -102,7 +103,7 @@ import {
   watchedFor,
   markWatched,
 } from "../util/favouriteList";
-import { toggleDisabledSource } from "../sources/registry";
+import { toggleDisabledSource, visibleWithAdultHistory } from "../sources/registry";
 import { Logo } from "./components/Logo";
 import { DebridBadge } from "./components/DebridBadge";
 import { Sidebar, RAIL_WIDTH } from "./components/Sidebar";
@@ -2259,6 +2260,14 @@ export function App({
     setNotice(enabled ? "Adult screenshots enabled." : "Adult screenshots disabled.");
   }, [config, persistConfig]);
 
+  const toggleAdultHistoryVisible = useCallback(() => {
+    setShowHelp(false);
+    // Default is OFF (absent === hidden), so the first toggle turns it ON.
+    const enabled = config?.adultHistoryVisible !== true;
+    persistConfig({ adultHistoryVisible: enabled });
+    setNotice(enabled ? "Adult history enabled." : "Adult history disabled.");
+  }, [config, persistConfig]);
+
   // Persist a custom DNS spec and apply it immediately, so the next search uses
   // it without a restart. An empty value falls back to the system resolver.
   const setDns = useCallback(
@@ -2627,6 +2636,16 @@ export function App({
 
   const store: Store | null = useMemo(() => {
     if (!queue || !config) return null;
+    // Adult items are filtered out of Favourites/Continue Watching here, at the
+    // one place both lists reach the Store, rather than in each component —
+    // the same choke-point discipline as enabledSources() for search. Neither
+    // field is read anywhere else EXCEPT Results.tsx's playedIndex (built from
+    // streamHistory for the "▸ Played" marker), which loses that marker for a
+    // hidden adult item too — matching the web UI, whose equivalent marker is
+    // built from the same already-filtered GET /api/saved response.
+    const adultHistoryVisible = resolveAdultHistoryVisible(config);
+    const visibleFavourites = visibleWithAdultHistory(config.favourites ?? [], adultHistoryVisible);
+    const visibleStreamHistory = visibleWithAdultHistory(streamHistory, adultHistoryVisible);
     return {
       config,
       setConfig,
@@ -2638,12 +2657,12 @@ export function App({
       searchHistory: config.searchHistory ?? [],
       savedSearches: config.savedSearches ?? [],
       toggleSavedSearch,
-      favourites: config.favourites ?? [],
+      favourites: visibleFavourites,
       toggleFavourite,
       removeFavourite,
       openFavourite,
       isFavourited,
-      streamHistory,
+      streamHistory: visibleStreamHistory,
       openStreamHistory,
       removeStreamHistory: removeStreamHistoryEntry,
       autoPlayTitle,
@@ -2678,6 +2697,7 @@ export function App({
       omdbApiKey: resolveOmdbApiKey(config),
       adultEnabled: resolveAdultContent(config),
       adultScreenshots: resolveAdultScreenshots(config),
+      adultHistoryVisible: resolveAdultHistoryVisible(config),
       streamActive: activeStream !== null,
     castStatus,
       debridStatus,
@@ -3582,6 +3602,7 @@ export function App({
                 onToggleAdult={toggleAdult}
                 onToggleProxy={toggleProxy}
                 onToggleAdultScreenshots={toggleAdultScreenshots}
+                onToggleAdultHistoryVisible={toggleAdultHistoryVisible}
                 dnsEnvOverride={process.env["TORLINK_DNS"] !== undefined}
                 playerEnvOverride={Boolean(process.env["TORLINK_PLAYER"]?.trim())}
                 adultEnvOverride={process.env["TORLINK_ADULT"] !== undefined}

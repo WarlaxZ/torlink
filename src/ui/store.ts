@@ -212,6 +212,9 @@ export interface Store {
   // True when adult-result screenshots are enabled (default on). Gates the
   // screenshot fetch + half-block render in the search preview pane.
   adultScreenshots: boolean;
+  // True when adult items are shown in Library/Continue Watching (default
+  // off). Independent of adultEnabled, which gates search-time results only.
+  adultHistoryVisible: boolean;
   // True while a torrent-stream session is live. While true, "x" is reserved
   // globally for stopping the stream, so components with their own "x"
   // handler (clear history, sign out) must ignore it.

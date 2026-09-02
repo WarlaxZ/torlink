@@ -61,6 +61,7 @@ interface SettingsProps {
   onEditCastHost: () => void;
   onToggleAdult: () => void;
   onToggleAdultScreenshots: () => void;
+  onToggleAdultHistoryVisible: () => void;
   onToggleProxy: () => void;
   dnsEnvOverride?: boolean;
   playerEnvOverride?: boolean;
@@ -103,7 +104,7 @@ function withEnv(value: string, env: boolean | undefined): string {
 }
 
 export function Settings(props: SettingsProps) {
-  const { region, section, contentWidth, listRows, config, adultEnabled } = useStore();
+  const { region, section, contentWidth, listRows, config, adultEnabled, adultHistoryVisible } = useStore();
   const focused = region === "content" && section === "settings";
   const [cursor, setCursor] = useState(0);
 
@@ -215,6 +216,14 @@ export function Settings(props: SettingsProps) {
       // Default ON: absent means enabled, only an explicit false is off.
       config.adultScreenshots === false ? "off" : "on",
       props.onToggleAdultScreenshots,
+      "toggle",
+    ),
+    setting(
+      "HST",
+      "Adult history",
+      "show adult items in Library and Continue Watching",
+      adultHistoryVisible ? "on" : "off",
+      props.onToggleAdultHistoryVisible,
       "toggle",
     ),
     setting(
