@@ -372,6 +372,7 @@ describe("wantedEpisodeFor", () => {
     rawName: "Harrowgate.S03E04.1080p.WEB-DL",
     infoHash: "a".repeat(40),
     startedAt: 1,
+    category: "Unknown",
   });
 
   // The divergence this closes: the terminal preselects from EVERY play path,

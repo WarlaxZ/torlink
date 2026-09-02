@@ -95,6 +95,12 @@ export interface Config {
   // Screenshots pulled from adult torrent descriptions in the preview. Absent =
   // ON (adult content is already an explicit opt-in); false turns them off.
   adultScreenshots?: boolean;
+  // Whether adult ("Porn") items appear in the Library and Continue Watching
+  // lists. Absent/false = OFF (hidden), independent of adultContent (which
+  // gates search-time results) — a user can search adult content without
+  // wanting it mixed into their watch history, and items saved before this
+  // setting existed had no way to be hidden at all.
+  adultHistoryVisible?: boolean;
   // Remembered UI preferences, so torlink reopens the way you left it. Stored
   // as opaque strings validated by the UI layer (parseSort/parseSection) so a
   // hand-edited or stale value degrades gracefully to the default.
@@ -263,6 +269,7 @@ export interface RawSettingsPatch {
   mediaPlayer?: unknown;
   adultContent?: unknown;
   adultScreenshots?: unknown;
+  adultHistoryVisible?: unknown;
   proxyDebridStreams?: unknown;
   downloadLimitKbps?: unknown;
   uploadLimitKbps?: unknown;
@@ -302,6 +309,8 @@ export function sanitiseSettingsPatch(raw: RawSettingsPatch): Partial<Config> {
   }
   if (raw.adultContent !== undefined) out.adultContent = raw.adultContent === true;
   if (raw.adultScreenshots !== undefined) out.adultScreenshots = raw.adultScreenshots === true;
+  if (raw.adultHistoryVisible !== undefined)
+    out.adultHistoryVisible = raw.adultHistoryVisible === true;
   if (raw.proxyDebridStreams !== undefined) out.proxyDebridStreams = raw.proxyDebridStreams === true;
   if (raw.downloadLimitKbps !== undefined) out.downloadLimitKbps = positiveInt(raw.downloadLimitKbps);
   if (raw.uploadLimitKbps !== undefined) out.uploadLimitKbps = positiveInt(raw.uploadLimitKbps);
@@ -424,6 +433,16 @@ export function resolveAdultContent(config: Config): boolean {
 // turns them off. No env override: it is a plain preference, not host config.
 export function resolveAdultScreenshots(config: Config): boolean {
   return config.adultScreenshots !== false;
+}
+
+// Whether adult items show in Library/Continue Watching. Default OFF: unlike
+// adultScreenshots (which only ever appears once adultContent is already an
+// explicit opt-in), history items can predate the user ever having touched
+// adultContent, so this must not surprise anyone browsing history for the
+// first time after this feature ships. No env override: a plain preference,
+// not host config.
+export function resolveAdultHistoryVisible(config: Config): boolean {
+  return config.adultHistoryVisible === true;
 }
 
 const RECC_URL_ENV = "TORLINK_RECC_URL";

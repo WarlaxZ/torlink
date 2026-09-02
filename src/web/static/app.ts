@@ -149,11 +149,13 @@ import {
   continueWatchingFallbackQuery,
   continueWatchingStatus,
   continueWatchingSub,
+  continueWatchingForCategory,
   emptySaved,
   favouriteLabel,
   favouriteMeta,
   isInLibrary,
   libraryBody,
+  libraryForCategory,
   libraryStatus,
   libraryToggleNotice,
   savedSearchesBody,
@@ -285,8 +287,10 @@ const savedSearchesStatusLine = el<HTMLParagraphElement>("saved-searches-status"
 const savedSearchesRows = el<HTMLUListElement>("saved-searches-rows");
 const libraryStatusLine = el<HTMLParagraphElement>("library-status");
 const libraryRows = el<HTMLUListElement>("library-rows");
+const libraryTabsBar = el<HTMLDivElement>("library-tabs");
 const continueStatusLine = el<HTMLParagraphElement>("continue-status");
 const continueRows = el<HTMLUListElement>("continue-rows");
+const continueTabsBar = el<HTMLDivElement>("continue-tabs");
 
 const reccTypeSelect = el<HTMLSelectElement>("recc-type");
 const reccGenreInput = el<HTMLInputElement>("recc-genre");
@@ -1335,6 +1339,12 @@ async function saveSettings(patch: Partial<PublicWritableSettings>): Promise<voi
   renderTabs();
   renderPrefs();
   renderSettings();
+  // adultHistoryVisible reshapes the Library/Continue-watching tab strips and
+  // their data the same way — the browser was never SENT the adult items/tabs
+  // to begin with when the setting was off, so a re-render of the stale
+  // in-memory savedState cannot make them appear or disappear; only a fresh
+  // GET /api/saved can.
+  void loadSaved();
 }
 
 function renderSettings(): void {
@@ -4339,10 +4349,56 @@ function renderContinueRow(item: PublicStreamHistoryItem): HTMLLIElement {
   return li;
 }
 
+// The two saved-pane tab strips. Unlike the search strip's renderTabs(), these
+// read tabs the SERVER already computed (SavedResponse.*Categories) rather
+// than deriving them here — the Porn tab must never even exist client-side
+// when adultHistoryVisible is off, and the server is the one place that
+// knows the answer (same "server decides, browser just isn't sent it"
+// pattern as the adult search category itself).
+function renderContinueTabs(): void {
+  continueTabsBar.replaceChildren(
+    ...savedState.continueWatchingCategories.map((cat) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tab";
+      button.textContent = cat;
+      button.dataset.group = cat.toLowerCase();
+      button.setAttribute("aria-pressed", String(cat === savedState.continueWatchingCategory));
+      button.addEventListener("click", () => {
+        if (cat === savedState.continueWatchingCategory) return;
+        savedState = { ...savedState, continueWatchingCategory: cat };
+        renderSaved();
+      });
+      return button;
+    }),
+  );
+}
+
+function renderLibraryTabs(): void {
+  libraryTabsBar.replaceChildren(
+    ...savedState.libraryCategories.map((cat) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tab";
+      button.textContent = cat;
+      button.dataset.group = cat.toLowerCase();
+      button.setAttribute("aria-pressed", String(cat === savedState.libraryCategory));
+      button.addEventListener("click", () => {
+        if (cat === savedState.libraryCategory) return;
+        savedState = { ...savedState, libraryCategory: cat };
+        renderSaved();
+      });
+      return button;
+    }),
+  );
+}
+
 function renderSaved(): void {
-  continueRows.replaceChildren(...savedState.continueWatching.map(renderContinueRow));
+  renderContinueTabs();
+  renderLibraryTabs();
+  continueRows.replaceChildren(...continueWatchingForCategory(savedState).map(renderContinueRow));
   savedSearchesRows.replaceChildren(...savedState.savedSearches.map(renderSavedSearchRow));
-  libraryRows.replaceChildren(...savedState.library.map(renderLibraryRow));
+  libraryRows.replaceChildren(...libraryForCategory(savedState).map(renderLibraryRow));
   // Continue-watching and library rows both carry Play buttons.
   paintPlayBusy();
 

@@ -574,6 +574,8 @@ export interface PublicWritableSettings {
   adultContent: boolean;
   /** Whether screenshots are pulled from adult torrent descriptions. */
   adultScreenshots: boolean;
+  /** Whether adult items appear in the Library and Continue Watching lists. */
+  adultHistoryVisible: boolean;
   proxyDebridStreams: boolean;
   downloadLimitKbps: number | null;
   uploadLimitKbps: number | null;
@@ -895,6 +897,10 @@ export interface PublicFavourite {
   name: string;
   sizeBytes?: number;
   source?: string;
+  /** The category tab this item belongs to: a SourceGroup, or "Unknown" when
+   *  `source` is absent or unrecognised. Computed server-side (categoryForSource)
+   *  so the source→group/adult mapping never has to live in the client bundle. */
+  category: string;
   /** Epoch ms. */
   addedAt: number;
   /** How many episodes have been streamed, NOT which ones. */
@@ -922,6 +928,8 @@ export interface PublicStreamHistoryItem {
   rawName: string;
   infoHash: string;
   startedAt: number;
+  /** The category tab this item belongs to — see PublicFavourite.category. */
+  category: string;
 }
 
 /**
@@ -943,6 +951,12 @@ export interface SavedResponse {
   savedSearches: string[];
   library: PublicFavourite[];
   continueWatching: PublicStreamHistoryItem[];
+  /** Non-empty category tabs for `library`, in a fixed display order, "All"
+   *  always first. "Porn" is absent whenever adultHistoryVisible is off, even
+   *  if the unfiltered data would have had Porn items. */
+  libraryCategories: string[];
+  /** Same as `libraryCategories`, for `continueWatching`. */
+  continueWatchingCategories: string[];
 }
 
 /**
@@ -1015,6 +1029,8 @@ export interface LibraryResponse {
   /** Whether THIS torrent is in the library afterwards. */
   favourited: boolean;
   library: PublicFavourite[];
+  /** Same as `SavedResponse.libraryCategories`. */
+  libraryCategories: string[];
 }
 
 /**
@@ -1035,6 +1051,8 @@ export interface ContinueWatchingRequest {
 /** The 200 body of `POST /api/continue-watching`. Same contract as `LibraryResponse`: the caller renders what comes back. */
 export interface ContinueWatchingResponse {
   continueWatching: PublicStreamHistoryItem[];
+  /** Same as `SavedResponse.continueWatchingCategories`. */
+  continueWatchingCategories: string[];
 }
 
 /**

@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { SOURCES, enabledSources, sourcesByGroup, toggleDisabledSource } from "./registry";
+import {
+  SOURCES,
+  enabledSources,
+  sourcesByGroup,
+  toggleDisabledSource,
+  categoryForSource,
+  isAdultSource,
+  visibleWithAdultHistory,
+  nonEmptyCategories,
+} from "./registry";
 
 // Adult sources are hidden unless the adult flag is passed, so the default
 // enabled set is the non-adult subset.
@@ -57,6 +66,69 @@ describe("toggleDisabledSource", () => {
     const input = ["yts"] as const;
     toggleDisabledSource([...input], "nyaa");
     expect(input).toEqual(["yts"]);
+  });
+});
+
+describe("categoryForSource", () => {
+  it("returns the source's first group", () => {
+    expect(categoryForSource("yts")).toBe("Movies");
+    expect(categoryForSource("tpb-porn")).toBe("Porn");
+    // bittorrented has multiple groups; the first is the documented pick.
+    expect(categoryForSource("bittorrented")).toBe("Movies");
+  });
+
+  it("returns Unknown for an unrecognised or missing source id", () => {
+    expect(categoryForSource("not-a-source" as never)).toBe("Unknown");
+    expect(categoryForSource(undefined)).toBe("Unknown");
+  });
+});
+
+describe("isAdultSource", () => {
+  it("is true only for adult sources", () => {
+    expect(isAdultSource("tpb-porn")).toBe(true);
+    expect(isAdultSource("x1337-porn")).toBe(true);
+    expect(isAdultSource("yts")).toBe(false);
+  });
+
+  it("treats an unrecognised or missing source id as non-adult", () => {
+    expect(isAdultSource("not-a-source" as never)).toBe(false);
+    expect(isAdultSource(undefined)).toBe(false);
+  });
+});
+
+describe("visibleWithAdultHistory", () => {
+  const items = [{ source: "yts" as const }, { source: "tpb-porn" as const }, { source: undefined }];
+
+  it("drops adult items when the flag is off", () => {
+    expect(visibleWithAdultHistory(items, false)).toEqual([
+      { source: "yts" },
+      { source: undefined },
+    ]);
+  });
+
+  it("keeps every item when the flag is on", () => {
+    expect(visibleWithAdultHistory(items, true)).toEqual(items);
+  });
+
+  it("does not mutate the input", () => {
+    const input = [...items];
+    visibleWithAdultHistory(input, false);
+    expect(input).toEqual(items);
+  });
+});
+
+describe("nonEmptyCategories", () => {
+  it("always keeps All first, even with no items", () => {
+    expect(nonEmptyCategories([])).toEqual(["All"]);
+  });
+
+  it("keeps only categories that are present, in fixed order", () => {
+    expect(nonEmptyCategories(["Porn", "TV", "TV", "Movies"])).toEqual([
+      "All",
+      "Movies",
+      "TV",
+      "Porn",
+    ]);
   });
 });
 

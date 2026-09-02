@@ -32,6 +32,14 @@ export interface SavedState {
    * the store's own order, a silent divergence from the TUI's list.
    */
   continueWatching: PublicStreamHistoryItem[];
+  /** The active category tab for `library` — "All" or one of `libraryCategories`. */
+  libraryCategory: string;
+  /** The active category tab for `continueWatching` — "All" or one of `continueWatchingCategories`. */
+  continueWatchingCategory: string;
+  /** Non-empty category tabs for `library`, "All" always first, from the server. */
+  libraryCategories: string[];
+  /** Non-empty category tabs for `continueWatching`, "All" always first, from the server. */
+  continueWatchingCategories: string[];
   /**
    * Whether a response has ever arrived.
    *
@@ -46,7 +54,36 @@ export interface SavedState {
 }
 
 export function emptySaved(): SavedState {
-  return { savedSearches: [], library: [], continueWatching: [], loaded: false, error: null };
+  return {
+    savedSearches: [],
+    library: [],
+    continueWatching: [],
+    libraryCategory: "All",
+    continueWatchingCategory: "All",
+    libraryCategories: ["All"],
+    continueWatchingCategories: ["All"],
+    loaded: false,
+    error: null,
+  };
+}
+
+/** The item's own category matches the active tab, or the active tab is "All". */
+export function libraryForCategory(state: SavedState): PublicFavourite[] {
+  return state.libraryCategory === "All"
+    ? state.library
+    : state.library.filter((f) => f.category === state.libraryCategory);
+}
+
+/** Same as {@link libraryForCategory}, for `continueWatching`. */
+export function continueWatchingForCategory(state: SavedState): PublicStreamHistoryItem[] {
+  return state.continueWatchingCategory === "All"
+    ? state.continueWatching
+    : state.continueWatching.filter((c) => c.category === state.continueWatchingCategory);
+}
+
+/** Falls back to "All" once the active tab is no longer among the available ones — e.g. the last item in it was just removed. */
+function clampCategory(current: string, available: readonly string[]): string {
+  return available.includes(current) ? current : "All";
 }
 
 /** The `POST /api/saved-searches` body. Trimmed here so the box's stray spaces cannot create a second entry. */
@@ -166,18 +203,23 @@ export function libraryStatus(state: SavedState): SavedStatus {
  * error line, which is what those guards are for.
  */
 export function applySaved(state: SavedState, body: unknown): SavedState {
-  const savedSearches =
-    body && typeof body === "object" ? (body as { savedSearches?: unknown }).savedSearches : undefined;
-  const library = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
-  const continueWatching =
-    body && typeof body === "object"
-      ? (body as { continueWatching?: unknown }).continueWatching
-      : undefined;
+  const obj = body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+  const savedSearches = obj?.savedSearches;
+  const library = obj?.library;
+  const continueWatching = obj?.continueWatching;
+  const libraryCategories = Array.isArray(obj?.libraryCategories) ? (obj.libraryCategories as string[]) : ["All"];
+  const continueWatchingCategories = Array.isArray(obj?.continueWatchingCategories)
+    ? (obj.continueWatchingCategories as string[])
+    : ["All"];
   return {
     ...state,
     savedSearches: Array.isArray(savedSearches) ? (savedSearches as string[]) : [],
     library: Array.isArray(library) ? (library as PublicFavourite[]) : [],
     continueWatching: Array.isArray(continueWatching) ? (continueWatching as PublicStreamHistoryItem[]) : [],
+    libraryCategories,
+    continueWatchingCategories,
+    libraryCategory: clampCategory(state.libraryCategory, libraryCategories),
+    continueWatchingCategory: clampCategory(state.continueWatchingCategory, continueWatchingCategories),
     loaded: true,
     error: null,
   };
@@ -206,10 +248,16 @@ export function applySavedSearchesResponse(state: SavedState, body: unknown): Sa
 
 /** The same fold as {@link applySavedSearchesResponse}, for `POST /api/library`. */
 export function applyLibraryResponse(state: SavedState, body: unknown): SavedState {
-  const list = body && typeof body === "object" ? (body as { library?: unknown }).library : undefined;
+  const obj = body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+  const list = obj?.library;
+  const libraryCategories = Array.isArray(obj?.libraryCategories)
+    ? (obj.libraryCategories as string[])
+    : state.libraryCategories;
   return {
     ...state,
     library: Array.isArray(list) ? (list as PublicFavourite[]) : state.library,
+    libraryCategories,
+    libraryCategory: clampCategory(state.libraryCategory, libraryCategories),
     loaded: true,
     error: null,
   };
@@ -217,11 +265,16 @@ export function applyLibraryResponse(state: SavedState, body: unknown): SavedSta
 
 /** The same fold as {@link applySavedSearchesResponse}, for `POST /api/continue-watching`. */
 export function applyContinueWatchingResponse(state: SavedState, body: unknown): SavedState {
-  const list =
-    body && typeof body === "object" ? (body as { continueWatching?: unknown }).continueWatching : undefined;
+  const obj = body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+  const list = obj?.continueWatching;
+  const continueWatchingCategories = Array.isArray(obj?.continueWatchingCategories)
+    ? (obj.continueWatchingCategories as string[])
+    : state.continueWatchingCategories;
   return {
     ...state,
     continueWatching: Array.isArray(list) ? (list as PublicStreamHistoryItem[]) : state.continueWatching,
+    continueWatchingCategories,
+    continueWatchingCategory: clampCategory(state.continueWatchingCategory, continueWatchingCategories),
     loaded: true,
     error: null,
   };

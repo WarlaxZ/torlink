@@ -17,7 +17,7 @@ import type { PublicWritableSettings, SettingsAccounts, SettingsResponse } from 
 // one redeclares a producer's payload shape in the browser bundle.
 export type { PublicWritableSettings, SettingsAccounts, SettingsEnvLocks, SettingsResponse } from "../wire";
 
-export type ToggleKey = "adultContent" | "adultScreenshots" | "proxyDebridStreams";
+export type ToggleKey = "adultContent" | "adultScreenshots" | "adultHistoryVisible" | "proxyDebridStreams";
 export type NumberKey = "downloadLimitKbps" | "uploadLimitKbps" | "seedRatio" | "seedMinutes";
 export type TextKey = "downloadDir" | "mediaPlayer";
 
@@ -78,6 +78,15 @@ export function settingsSections(res: SettingsResponse): SettingsSection[] {
           label: "Adult screenshots",
           hint: "Show screenshots pulled from adult torrent descriptions in the preview.",
           value: s.adultScreenshots,
+          locked: false,
+          lockNote: null,
+        },
+        {
+          kind: "toggle",
+          key: "adultHistoryVisible",
+          label: "Adult history",
+          hint: "Show adult items in Library and Continue Watching.",
+          value: s.adultHistoryVisible,
           locked: false,
           lockNote: null,
         },

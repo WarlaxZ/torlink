@@ -16,6 +16,7 @@ function response(over: Partial<SettingsResponse["settings"]> = {}, envOver: Par
       mediaPlayer: "",
       adultContent: false,
       adultScreenshots: true,
+      adultHistoryVisible: false,
       proxyDebridStreams: false,
       downloadLimitKbps: null,
       uploadLimitKbps: null,
@@ -48,6 +49,7 @@ describe("settingsSections", () => {
   it("reflects the stored values in each control", () => {
     const res = response({
       adultContent: true,
+      adultHistoryVisible: true,
       proxyDebridStreams: true,
       downloadDir: "/media/dl",
       mediaPlayer: "mpv",
@@ -56,6 +58,7 @@ describe("settingsSections", () => {
     });
     expect(controlFor(res, "adultContent")).toMatchObject({ kind: "toggle", value: true, locked: false });
     expect(controlFor(res, "adultScreenshots")).toMatchObject({ kind: "toggle", value: true, locked: false });
+    expect(controlFor(res, "adultHistoryVisible")).toMatchObject({ kind: "toggle", value: true, locked: false });
     expect(controlFor(res, "proxyDebridStreams")).toMatchObject({ kind: "toggle", value: true });
     expect(controlFor(res, "downloadDir")).toMatchObject({ kind: "text", value: "/media/dl" });
     expect(controlFor(res, "mediaPlayer")).toMatchObject({ kind: "text", value: "mpv" });

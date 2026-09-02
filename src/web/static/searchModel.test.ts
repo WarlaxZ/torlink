@@ -887,6 +887,7 @@ describe("positionLookup", () => {
     rawName: "Harrowgate.S03E07.1080p.WEB-DL",
     infoHash: "a1",
     startedAt: 1,
+    category: "Unknown",
     ...over,
   });
 
