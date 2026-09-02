@@ -455,15 +455,23 @@ describe("rowForPlay", () => {
   });
 });
 
+// None of these exercise the debrid stuck-add guard, so seeders/health/cache
+// are fixed at values that never trigger it: plenty of seeders on a
+// health-reporting source, not cached.
+const NOT_STUCK = [10, true, false] as const;
+
 describe("addPlan", () => {
   it("adds straight away when Real-Debrid is not configured", () => {
-    expect(addPlan("p2p", false, "Kestrel", undefined)).toEqual({ kind: "add", via: "p2p" });
+    expect(addPlan("p2p", false, "Kestrel", undefined, ...NOT_STUCK)).toEqual({
+      kind: "add",
+      via: "p2p",
+    });
   });
 
   it("prompts before a P2P add when Real-Debrid is configured", () => {
-    const plan = addPlan("p2p", true, "Kestrel", "realdebrid");
+    const plan = addPlan("p2p", true, "Kestrel", "realdebrid", ...NOT_STUCK);
     expect(plan.kind).toBe("confirm");
-    expect(plan.via).toBe("p2p");
+    expect(plan.kind === "confirm" && plan.via).toBe("p2p");
     if (plan.kind !== "confirm") throw new Error("unreachable");
     // The consequence is spelled out. "Continue anyway?" is not informed
     // consent when the thing consented to is publishing your IP.
@@ -475,14 +483,46 @@ describe("addPlan", () => {
   });
 
   it("never prompts for an explicit Real-Debrid add", () => {
-    expect(addPlan("debrid", true, "Kestrel", "realdebrid")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Kestrel", "realdebrid", ...NOT_STUCK)).toEqual({
+      kind: "add",
+      via: "debrid",
+    });
   });
 
   it("clips a very long release name out of the prompt", () => {
-    const plan = addPlan("p2p", true, "x".repeat(200), "realdebrid");
+    const plan = addPlan("p2p", true, "x".repeat(200), "realdebrid", ...NOT_STUCK);
     if (plan.kind !== "confirm") throw new Error("unreachable");
     expect(plan.message).toContain("…");
     expect(plan.message).not.toContain("x".repeat(70));
+  });
+
+  it("blocks an explicit debrid add with no seeders and no cache entry", () => {
+    const plan = addPlan("debrid", true, "Kestrel", "torbox", 0, true, false);
+    expect(plan.kind).toBe("blocked");
+    if (plan.kind !== "blocked") throw new Error("unreachable");
+    expect(plan.message).toContain("no seeders");
+    expect(plan.message).not.toContain("undefined");
+  });
+
+  it("does not block a debrid add that is already cached, even with no seeders", () => {
+    expect(addPlan("debrid", true, "Kestrel", "torbox", 0, true, true)).toEqual({
+      kind: "add",
+      via: "debrid",
+    });
+  });
+
+  it("does not block a debrid add from a source that reports no swarm health", () => {
+    expect(addPlan("debrid", true, "Kestrel", "torbox", 0, false, false)).toEqual({
+      kind: "add",
+      via: "debrid",
+    });
+  });
+
+  it("does not block a P2P add even with no seeders — the guard only applies to debrid", () => {
+    expect(addPlan("p2p", false, "Kestrel", undefined, 0, true, false)).toEqual({
+      kind: "add",
+      via: "p2p",
+    });
   });
 });
 
@@ -498,17 +538,23 @@ describe("debrid copy", () => {
   });
 
   it("names the provider in the swarm-exposure prompt", () => {
-    const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", "torbox");
+    const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", "torbox", ...NOT_STUCK);
     expect(plan.kind).toBe("confirm");
     expect(plan.kind === "confirm" && plan.message).toContain("TorBox");
   });
 
   it("still never prompts for an explicit debrid add", () => {
-    expect(addPlan("debrid", true, "Ashfall.1999.1080p", "torbox")).toEqual({ kind: "add", via: "debrid" });
+    expect(addPlan("debrid", true, "Ashfall.1999.1080p", "torbox", ...NOT_STUCK)).toEqual({
+      kind: "add",
+      via: "debrid",
+    });
   });
 
   it("still never prompts when no debrid is configured", () => {
-    expect(addPlan("p2p", false, "Ashfall.1999.1080p", undefined)).toEqual({ kind: "add", via: "p2p" });
+    expect(addPlan("p2p", false, "Ashfall.1999.1080p", undefined, ...NOT_STUCK)).toEqual({
+      kind: "add",
+      via: "p2p",
+    });
   });
 
   // This is the assertion that makes the two-sources-for-one-fact bug
@@ -517,7 +563,7 @@ describe("debrid copy", () => {
   // match one of them.
   it("names the exact button text on screen, for every provider", () => {
     for (const provider of ["realdebrid", "torbox"] as const) {
-      const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", provider);
+      const plan = addPlan("p2p", true, "Kestrel.2010.1080p.BluRay.x264", provider, ...NOT_STUCK);
       if (plan.kind !== "confirm") throw new Error("unreachable");
       expect(plan.message).toContain(`“${debridAddLabel(provider)}”`);
       expect(plan.message).toContain(debridProviderLabel(provider));
