@@ -8,6 +8,7 @@ import {
   resolveReccConfig,
   resolveAdultContent,
   resolveAdultScreenshots,
+  resolveAdultHistoryVisible,
   defaultConfig,
   resolveActiveDebrid,
   resolveDebridTokenFor,
@@ -217,6 +218,32 @@ describe("sanitiseSettingsPatch — adultScreenshots", () => {
     expect(sanitiseSettingsPatch({ adultScreenshots: false })).toEqual({ adultScreenshots: false });
     expect(sanitiseSettingsPatch({ adultScreenshots: true })).toEqual({ adultScreenshots: true });
     expect(sanitiseSettingsPatch({ adultScreenshots: "yes" })).toEqual({ adultScreenshots: false });
+  });
+});
+
+describe("resolveAdultHistoryVisible", () => {
+  it("defaults to OFF when absent and honours an explicit true", () => {
+    expect(resolveAdultHistoryVisible({ downloadDir: "/d", trackers: [] })).toBe(false);
+    expect(
+      resolveAdultHistoryVisible({ downloadDir: "/d", trackers: [], adultHistoryVisible: false }),
+    ).toBe(false);
+    expect(
+      resolveAdultHistoryVisible({ downloadDir: "/d", trackers: [], adultHistoryVisible: true }),
+    ).toBe(true);
+  });
+});
+
+describe("sanitiseSettingsPatch — adultHistoryVisible", () => {
+  it("coerces to a strict boolean", () => {
+    expect(sanitiseSettingsPatch({ adultHistoryVisible: false })).toEqual({
+      adultHistoryVisible: false,
+    });
+    expect(sanitiseSettingsPatch({ adultHistoryVisible: true })).toEqual({
+      adultHistoryVisible: true,
+    });
+    expect(sanitiseSettingsPatch({ adultHistoryVisible: "yes" })).toEqual({
+      adultHistoryVisible: false,
+    });
   });
 });
 

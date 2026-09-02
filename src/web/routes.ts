@@ -27,6 +27,7 @@ import {
   qualityPrefsFrom,
   resolveAdultContent,
   resolveAdultScreenshots,
+  resolveAdultHistoryVisible,
   resolveMediaPlayer,
   resolveOmdbApiKey,
   resolveOwnerEmail,
@@ -67,7 +68,14 @@ import {
   removeFavourite as removeFromFavourites,
   toggleFavourite as toggleInFavourites,
 } from "../util/favouriteList";
-import { enabledSources, sourcesByGroup, SOURCES } from "../sources/registry";
+import {
+  enabledSources,
+  sourcesByGroup,
+  SOURCES,
+  categoryForSource,
+  visibleWithAdultHistory,
+  nonEmptyCategories,
+} from "../sources/registry";
 import { isSkipped, sourceHealth, type Health } from "../sources/sourceHealth";
 import { blankPerSource, runSearch, type SearchImpl, type SearchSnapshot } from "../core/search";
 import { cachedHashesFor } from "../core/cachedHashes";
@@ -1086,6 +1094,7 @@ export function toPublicFavourite(f: FavouriteItem): PublicFavourite {
     name: f.name,
     addedAt: f.addedAt,
     watched: f.watched?.length ?? 0,
+    category: categoryForSource(f.source),
   };
   if (f.sizeBytes !== undefined && f.sizeBytes > 0) out.sizeBytes = f.sizeBytes;
   if (f.source !== undefined) out.source = f.source;
@@ -1097,6 +1106,7 @@ export function toPublicStreamHistoryItem(item: StreamHistoryItem): PublicStream
   const out: PublicStreamHistoryItem = {
     key: item.key, title: item.title, rawName: item.rawName,
     infoHash: item.infoHash, startedAt: item.startedAt, next: nextEpisode(item),
+    category: categoryForSource(item.source),
   };
   if (item.year !== undefined) out.year = item.year;
   if (item.type !== undefined) out.type = item.type;
@@ -1120,12 +1130,21 @@ async function savedLists(deps: WebDeps, accessEmail?: string): Promise<WebRespo
   const config = await (deps.loadConfigImpl ?? loadConfig)();
   const profileId = resolveProfileId(accessEmail, resolveOwnerEmail(config));
   const history = await (deps.loadStreamHistoryImpl ?? (() => loadStreamHistory(profileId)))();
+  const adultHistoryVisible = resolveAdultHistoryVisible(config);
+  const library = visibleWithAdultHistory(profileFavourites(config, profileId), adultHistoryVisible).map(
+    toPublicFavourite,
+  );
+  const continueWatching = visibleWithAdultHistory(history, adultHistoryVisible).map(
+    toPublicStreamHistoryItem,
+  );
   const out: SavedResponse = {
     // loadConfig already normalises both (junk dropped, caps applied), so these
     // coalesces are for a config object built in a test, not for disk data.
     savedSearches: profileSavedSearches(config, profileId),
-    library: profileFavourites(config, profileId).map(toPublicFavourite),
-    continueWatching: history.map(toPublicStreamHistoryItem),
+    library,
+    continueWatching,
+    libraryCategories: nonEmptyCategories(library.map((f) => f.category)),
+    continueWatchingCategories: nonEmptyCategories(continueWatching.map((c) => c.category)),
   };
   return { status: 200, json: out };
 }
@@ -1210,7 +1229,13 @@ async function continueWatchingAction(
     await (deps.saveStreamHistoryImpl ?? ((items) => saveStreamHistory(items, profileId)))(next);
   }
 
-  const out: ContinueWatchingResponse = { continueWatching: next.map(toPublicStreamHistoryItem) };
+  const continueWatching = visibleWithAdultHistory(next, resolveAdultHistoryVisible(config)).map(
+    toPublicStreamHistoryItem,
+  );
+  const out: ContinueWatchingResponse = {
+    continueWatching,
+    continueWatchingCategories: nonEmptyCategories(continueWatching.map((c) => c.category)),
+  };
   return { status: 200, json: out };
 }
 
@@ -1278,11 +1303,15 @@ async function libraryAction(
     } catch {
       // A convenience list must never fail a play the user already started.
     }
+    const library = visibleWithAdultHistory(favourites, resolveAdultHistoryVisible(config)).map(
+      toPublicFavourite,
+    );
     const out: LibraryResponse = {
       // Not an error when absent: the browser fires this after a successful
       // play and must not be told off for playing something unfavourited.
       favourited: isFavourited(favourites, infoHash),
-      library: favourites.map(toPublicFavourite),
+      library,
+      libraryCategories: nonEmptyCategories(library.map((f) => f.category)),
     };
     return { status: 200, json: out };
   }
@@ -1330,9 +1359,13 @@ async function libraryAction(
     }
   }
 
+  const library = visibleWithAdultHistory(favourites, resolveAdultHistoryVisible(config)).map(
+    toPublicFavourite,
+  );
   const out: LibraryResponse = {
     favourited: isFavourited(favourites, infoHash),
-    library: favourites.map(toPublicFavourite),
+    library,
+    libraryCategories: nonEmptyCategories(library.map((f) => f.category)),
   };
   return { status: 200, json: out };
 }
@@ -1411,6 +1444,7 @@ function toPublicWritableSettings(config: Config): PublicWritableSettings {
     mediaPlayer: resolveMediaPlayer(config),
     adultContent: resolveAdultContent(config),
     adultScreenshots: resolveAdultScreenshots(config),
+    adultHistoryVisible: resolveAdultHistoryVisible(config),
     proxyDebridStreams: config.proxyDebridStreams === true,
     downloadLimitKbps: config.downloadLimitKbps ?? null,
     uploadLimitKbps: config.uploadLimitKbps ?? null,

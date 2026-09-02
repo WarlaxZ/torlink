@@ -5,7 +5,7 @@ import type { PickableResult } from "../../util/releasePick";
 
 const row = (over: Partial<PublicStreamHistoryItem>): PublicStreamHistoryItem => ({
   key: "k", title: "Kepler", rawName: "Kepler.S02E04.1080p.WEB-DL",
-  infoHash: "abc", startedAt: 0, next: { season: 2, episode: 5 }, ...over,
+  infoHash: "abc", startedAt: 0, next: { season: 2, episode: 5 }, category: "Unknown", ...over,
 });
 
 describe("prefs round-trip", () => {

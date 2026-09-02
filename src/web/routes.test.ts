@@ -1567,6 +1567,7 @@ describe("GET /api/settings", () => {
     expect(body.settings.downloadDir).toBe("/media/dl");
     expect(body.settings.mediaPlayer).toBe("mpv");
     expect(body.settings.adultContent).toBe(true);
+    expect(body.settings.adultHistoryVisible).toBe(false);
     expect(body.settings.proxyDebridStreams).toBe(true);
     expect(body.settings.downloadLimitKbps).toBe(1500);
     expect(body.settings.uploadLimitKbps).toBeNull();
@@ -1633,6 +1634,17 @@ describe("POST /api/settings", () => {
     const out = res.json as SettingsResponse;
     expect(out.settings.adultContent).toBe(true);
     expect(out.settings.downloadLimitKbps).toBe(2000);
+  });
+
+  it("writes and echoes adultHistoryVisible independently of adultContent", async () => {
+    let saved: Config | null = null;
+    const res = await post(
+      { action: "set", settings: { adultHistoryVisible: true } },
+      { loadConfigImpl: async () => searchConfig(), saveConfigImpl: async (c) => { saved = c; } },
+    );
+    expect(saved!.adultHistoryVisible).toBe(true);
+    expect(saved!.adultContent).toBeUndefined();
+    expect((res.json as SettingsResponse).settings.adultHistoryVisible).toBe(true);
   });
 
   it("clears a limit sent as null", async () => {
@@ -2696,6 +2708,7 @@ describe("handleWebApi — GET /api/saved", () => {
         id: "a".repeat(40),
         name: "Kepler.S02.1080p.WEB-DL",
         source: "eztv",
+        category: "TV",
         sizeBytes: 24_000_000_000,
         addedAt: 1_700_000_000_000,
         watched: 3,
@@ -2750,7 +2763,13 @@ describe("handleWebApi — GET /api/saved", () => {
       "",
     );
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ savedSearches: [], library: [], continueWatching: [] });
+    expect(res.json).toEqual({
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      libraryCategories: ["All"],
+      continueWatchingCategories: ["All"],
+    });
   });
 
   it("requires the token when one is configured", async () => {
@@ -2788,7 +2807,7 @@ describe("GET /api/saved — continueWatching", () => {
       key: "kepler||series", title: "Kepler", type: "series",
       season: 2, episode: 4, next: { season: 2, episode: 5 },
       rawName: "Kepler.S02E04.1080p", infoHash: "a".repeat(40),
-      startedAt: 1_700_000_000_000,
+      startedAt: 1_700_000_000_000, category: "Unknown",
     });
     // A season pack names no episode, so there is no honest next to offer.
     expect(body.continueWatching[1]?.next).toBeNull();
@@ -2829,6 +2848,59 @@ describe("GET /api/saved — continueWatching", () => {
   it("answers an empty list when nothing has been streamed", async () => {
     const res = await handleWebApi(deps(), "GET", "/api/saved", new URLSearchParams(), undefined, "");
     expect((res.json as SavedResponse).continueWatching).toEqual([]);
+  });
+});
+
+describe("GET /api/saved — adultHistoryVisible filtering", () => {
+  const withAdultData = (adultHistoryVisible?: boolean) =>
+    deps({
+      loadConfigImpl: async () => ({
+        ...defaultConfig,
+        downloadDir: "/tmp/dl",
+        ...(adultHistoryVisible !== undefined ? { adultHistoryVisible } : {}),
+        favourites: [
+          { id: "a".repeat(40), name: "Kepler", magnet: `magnet:?xt=urn:btih:${"a".repeat(40)}`,
+            source: "tpb-porn" as SourceId, addedAt: 1_700_000_000_000 },
+          { id: "b".repeat(40), name: "Ashfall", magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`,
+            source: "yts" as SourceId, addedAt: 1_600_000_000_000 },
+        ],
+      }),
+      loadStreamHistoryImpl: async () => [
+        { key: "kepler|porn", title: "Kepler", rawName: "Kepler.1080p", infoHash: "c".repeat(40),
+          magnet: `magnet:?xt=urn:btih:${"c".repeat(40)}`, source: "tpb-porn" as SourceId,
+          startedAt: 1_700_000_000_000 },
+        { key: "ashfall|movie", title: "Ashfall", type: "movie" as const, year: 1999,
+          rawName: "Ashfall.1999.1080p", infoHash: "d".repeat(40),
+          magnet: `magnet:?xt=urn:btih:${"d".repeat(40)}`, source: "yts" as SourceId,
+          startedAt: 1_600_000_000_000 },
+      ],
+    });
+
+  it("excludes adult items and the Porn tab entirely when the setting is absent/off", async () => {
+    for (const adultHistoryVisible of [undefined, false] as const) {
+      const res = await handleWebApi(
+        withAdultData(adultHistoryVisible),
+        "GET", "/api/saved", new URLSearchParams(), undefined, "",
+      );
+      const body = res.json as SavedResponse;
+      expect(body.library.map((f) => f.id)).toEqual(["b".repeat(40)]);
+      expect(body.continueWatching.map((c) => c.key)).toEqual(["ashfall|movie"]);
+      expect(body.libraryCategories).not.toContain("Porn");
+      expect(body.continueWatchingCategories).not.toContain("Porn");
+      expect(JSON.stringify(body)).not.toContain("tpb-porn");
+    }
+  });
+
+  it("includes adult items and the Porn tab once the setting is on", async () => {
+    const res = await handleWebApi(
+      withAdultData(true),
+      "GET", "/api/saved", new URLSearchParams(), undefined, "",
+    );
+    const body = res.json as SavedResponse;
+    expect(body.library.map((f) => f.id)).toEqual(["a".repeat(40), "b".repeat(40)]);
+    expect(body.continueWatching.map((c) => c.key)).toEqual(["kepler|porn", "ashfall|movie"]);
+    expect(body.libraryCategories).toEqual(["All", "Movies", "Porn"]);
+    expect(body.continueWatchingCategories).toEqual(["All", "Movies", "Porn"]);
   });
 });
 
@@ -2890,6 +2962,21 @@ describe("handleWebApi — POST /api/continue-watching", () => {
     expect(body.continueWatching[0]?.key).toBe("harrowgate||series");
     expect(JSON.stringify(body)).not.toContain("magnet:");
     expect(saved[0]).toHaveLength(1);
+  });
+
+  it("keeps an adult item out of the response when the setting is off, even after removing an unrelated item", async () => {
+    const d = deps({
+      loadConfigImpl: async () => ({ ...defaultConfig, downloadDir: "/tmp/dl" }),
+      loadStreamHistoryImpl: async () => [
+        item({ key: "kepler||series", source: "tpb-porn" as SourceId }),
+        item({ key: "harrowgate||series", title: "Harrowgate", source: "yts" as SourceId }),
+      ],
+      saveStreamHistoryImpl: async () => {},
+    });
+    const res = await post(d, { key: "harrowgate||series", action: "remove" });
+    const body = res.json as { continueWatching: PublicStreamHistoryItem[]; continueWatchingCategories: string[] };
+    expect(body.continueWatching).toEqual([]);
+    expect(body.continueWatchingCategories).toEqual(["All"]);
   });
 
   it("is idempotent — removing a key that is not there changes nothing", async () => {
@@ -3096,6 +3183,19 @@ describe("handleWebApi — POST /api/library", () => {
     expect(stored?.magnet).toContain(`xt=urn:btih:${HASH}`);
     expect(stored?.magnet).toContain("dn=Kepler.S02.1080p.WEB-DL");
     expect(stored?.magnet).toContain("tr=");
+  });
+
+  it("excludes a pre-existing adult favourite from the response when adultHistoryVisible is off", async () => {
+    const { deps: d } = capture({
+      favourites: [fav({ id: HASH, source: "tpb-porn" as SourceId })],
+    });
+    // Toggling a DIFFERENT (non-adult) favourite must not resurrect the
+    // pre-existing adult one into the response.
+    const other = "c".repeat(40);
+    const res = await post(d, { infoHash: other, name: "Ashfall", source: "yts", action: "toggle" });
+    const body = res.json as LibraryResponse;
+    expect(body.library.map((f) => f.id)).toEqual([other]);
+    expect(body.libraryCategories).not.toContain("Porn");
   });
 
   it("omits a zero sizeBytes rather than storing it as a known-and-empty size", async () => {
@@ -3351,6 +3451,17 @@ describe("handleWebApi — POST /api/library", () => {
     expect(res.status).toBe(200);
     expect((res.json as LibraryResponse).favourited).toBe(false);
     expect(absent.saved).toHaveLength(0);
+  });
+
+  it("excludes an adult favourite from the watched-branch response when adultHistoryVisible is off", async () => {
+    const adultHash = "c".repeat(40);
+    const { deps: d } = capture({
+      favourites: [fav({ source: "yts" as SourceId }), fav({ id: adultHash, source: "tpb-porn" as SourceId })],
+    });
+    const res = await post(d, { infoHash: HASH, name: "Kepler", action: "watched", filename: "ep1.mkv" });
+    const body = res.json as LibraryResponse;
+    expect(body.library.map((f) => f.id)).toEqual([HASH]);
+    expect(body.libraryCategories).not.toContain("Porn");
   });
 
   it("rejects watched without a filename", async () => {

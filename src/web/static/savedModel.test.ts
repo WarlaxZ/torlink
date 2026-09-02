@@ -14,6 +14,8 @@ import {
   favouriteMeta,
   isInLibrary,
   libraryBody,
+  libraryForCategory,
+  continueWatchingForCategory,
   libraryStatus,
   libraryToggleNotice,
   relativeAge,
@@ -33,7 +35,14 @@ import { nextEpisode, nextLabel, type StreamHistoryItem } from "../../core/strea
 const HASH = "b".repeat(40);
 
 function favourite(over: Partial<PublicFavourite> = {}): PublicFavourite {
-  return { id: HASH, name: "Kepler.S02.1080p", addedAt: 1_700_000_000_000, watched: 0, ...over };
+  return {
+    id: HASH,
+    name: "Kepler.S02.1080p",
+    addedAt: 1_700_000_000_000,
+    watched: 0,
+    category: "Unknown",
+    ...over,
+  };
 }
 
 function loaded(over: Partial<SavedState> = {}): SavedState {
@@ -50,6 +59,7 @@ const base: PublicStreamHistoryItem = {
   rawName: "Kepler.S02E04.1080p",
   infoHash: "a".repeat(40),
   startedAt: 1_700_000_000_000,
+  category: "Unknown",
 };
 // Exactly 86,400,000 ms after `base.startedAt`, so "1 day ago" is arithmetic
 // rather than a guess about how the formatter rounds.
@@ -63,6 +73,10 @@ describe("emptySaved", () => {
       savedSearches: [],
       library: [],
       continueWatching: [],
+      libraryCategory: "All",
+      continueWatchingCategory: "All",
+      libraryCategories: ["All"],
+      continueWatchingCategories: ["All"],
       loaded: false,
       error: null,
     });
@@ -229,10 +243,14 @@ describe("applySaved", () => {
       savedSearches: ["tin rivers"],
       library: [favourite()],
       continueWatching: [base],
+      libraryCategories: ["All", "TV"],
+      continueWatchingCategories: ["All", "Movies"],
     });
     expect(next.savedSearches).toEqual(["tin rivers"]);
     expect(next.library).toHaveLength(1);
     expect(next.continueWatching).toEqual([base]);
+    expect(next.libraryCategories).toEqual(["All", "TV"]);
+    expect(next.continueWatchingCategories).toEqual(["All", "Movies"]);
     expect(next.loaded).toBe(true);
     expect(next.error).toBeNull();
   });
@@ -245,6 +263,10 @@ describe("applySaved", () => {
       savedSearches: [],
       library: [],
       continueWatching: [],
+      libraryCategory: "All",
+      continueWatchingCategory: "All",
+      libraryCategories: ["All"],
+      continueWatchingCategories: ["All"],
       loaded: true,
       error: null,
     });
@@ -256,9 +278,38 @@ describe("applySaved", () => {
       savedSearches: [],
       library: [],
       continueWatching: [],
+      libraryCategory: "All",
+      continueWatchingCategory: "All",
+      libraryCategories: ["All"],
+      continueWatchingCategories: ["All"],
       loaded: true,
       error: null,
     });
+  });
+
+  it("clamps the active tab back to All when it is no longer in the new category list", () => {
+    const state = loaded({ libraryCategory: "TV", continueWatchingCategory: "Porn" });
+    const next = applySaved(state, {
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      libraryCategories: ["All", "Movies"],
+      continueWatchingCategories: ["All"],
+    });
+    expect(next.libraryCategory).toBe("All");
+    expect(next.continueWatchingCategory).toBe("All");
+  });
+
+  it("keeps the active tab when it is still present in the new category list", () => {
+    const state = loaded({ libraryCategory: "TV" });
+    const next = applySaved(state, {
+      savedSearches: [],
+      library: [],
+      continueWatching: [],
+      libraryCategories: ["All", "TV"],
+      continueWatchingCategories: ["All"],
+    });
+    expect(next.libraryCategory).toBe("TV");
   });
 });
 
@@ -269,6 +320,10 @@ describe("applySavedSearchesResponse", () => {
       savedSearches: ["tin rivers"],
       library: [],
       continueWatching: [],
+      libraryCategory: "All",
+      continueWatchingCategory: "All",
+      libraryCategories: ["All"],
+      continueWatchingCategories: ["All"],
       loaded: true,
       error: null,
     });
@@ -310,6 +365,13 @@ describe("applyLibraryResponse", () => {
     const state = loaded({ library: [favourite()] });
     expect(applyLibraryResponse(state, {})).toEqual(state);
     expect(applyLibraryResponse(state, { library: "nope" })).toEqual(state);
+  });
+
+  it("updates libraryCategories and clamps the active tab", () => {
+    const state = loaded({ libraryCategory: "Porn" });
+    const next = applyLibraryResponse(state, { library: [], libraryCategories: ["All", "TV"] });
+    expect(next.libraryCategories).toEqual(["All", "TV"]);
+    expect(next.libraryCategory).toBe("All");
   });
 });
 
@@ -359,6 +421,42 @@ describe("applyContinueWatchingResponse", () => {
     const state = loaded({ continueWatching: [base] });
     expect(applyContinueWatchingResponse(state, {})).toEqual(state);
     expect(applyContinueWatchingResponse(state, { continueWatching: "nope" })).toEqual(state);
+  });
+
+  it("updates continueWatchingCategories and clamps the active tab", () => {
+    const state = loaded({ continueWatchingCategory: "Porn" });
+    const next = applyContinueWatchingResponse(state, {
+      continueWatching: [],
+      continueWatchingCategories: ["All", "Movies"],
+    });
+    expect(next.continueWatchingCategories).toEqual(["All", "Movies"]);
+    expect(next.continueWatchingCategory).toBe("All");
+  });
+});
+
+describe("libraryForCategory / continueWatchingForCategory", () => {
+  const tv = favourite({ id: "c".repeat(40), category: "TV" });
+  const movie = favourite({ id: "d".repeat(40), category: "Movies" });
+  const tvShow = { ...base, key: "tv-show", category: "TV" };
+  const film = { ...base, key: "film", category: "Movies" };
+
+  it("returns every item on the All tab", () => {
+    const state = loaded({ library: [tv, movie], libraryCategory: "All" });
+    expect(libraryForCategory(state)).toEqual([tv, movie]);
+    const cwState = loaded({ continueWatching: [tvShow, film], continueWatchingCategory: "All" });
+    expect(continueWatchingForCategory(cwState)).toEqual([tvShow, film]);
+  });
+
+  it("returns only items matching the active tab", () => {
+    const state = loaded({ library: [tv, movie], libraryCategory: "TV" });
+    expect(libraryForCategory(state)).toEqual([tv]);
+    const cwState = loaded({ continueWatching: [tvShow, film], continueWatchingCategory: "Movies" });
+    expect(continueWatchingForCategory(cwState)).toEqual([film]);
+  });
+
+  it("returns an empty list for a tab with no matching items", () => {
+    const state = loaded({ library: [tv], libraryCategory: "Porn" });
+    expect(libraryForCategory(state)).toEqual([]);
   });
 });
 
@@ -502,6 +600,7 @@ describe("continueWatchingGroup", () => {
     rawName: "Harrowgate.S03.1080p.WEB-DL",
     infoHash: "a".repeat(40),
     startedAt: 0,
+    category: "Unknown",
     ...over,
   });
 
