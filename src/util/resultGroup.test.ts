@@ -550,12 +550,18 @@ describe("defaultExpandedKeys", () => {
       ],
       "series",
     );
-    expect(defaultExpandedKeys(groups)).toEqual(["harrowgate|series|s3"]);
+    // "1080p" is a real query (a real search happened) that names no title, so
+    // this exercises the ranked fallback rather than the exact-title branch.
+    expect(defaultExpandedKeys(groups, undefined, "1080p")).toEqual(["harrowgate|series|s3"]);
   });
 
   it("opens nothing when there is no season to open", () => {
     expect(
-      defaultExpandedKeys(groupResults([r("Kestrel.2010.1080p"), r("Kestrel.2010.2160p")])),
+      defaultExpandedKeys(
+        groupResults([r("Kestrel.2010.1080p"), r("Kestrel.2010.2160p")]),
+        undefined,
+        "kestrel",
+      ),
     ).toEqual([]);
   });
 
@@ -565,7 +571,7 @@ describe("defaultExpandedKeys", () => {
       [r("Harrowgate.S03E01.1080p.WEB-DL"), r("Harrowgate.S03E01.2160p.WEB-DL")],
       "series",
     );
-    expect(defaultExpandedKeys(groups)).toEqual([]);
+    expect(defaultExpandedKeys(groups, undefined, "harrowgate")).toEqual([]);
   });
 
   it("prefers the show the query actually named over a higher-ranked stray", () => {
@@ -581,8 +587,27 @@ describe("defaultExpandedKeys", () => {
       "series",
     );
     expect(defaultExpandedKeys(groups, undefined, "harrowgate")).toEqual(["harrowgate|series|s3"]);
-    // No query: rank alone still wins — this is a tie-break, not a replacement.
-    expect(defaultExpandedKeys(groups)).toEqual(["kepler|series|s2"]);
+    // A real query that names neither show: rank alone wins — this is a
+    // tie-break, not a replacement.
+    expect(defaultExpandedKeys(groups, undefined, "1080p")).toEqual(["kepler|series|s2"]);
+  });
+
+  it("opens nothing when there is no query and no watch position — a browse listing, not a search", () => {
+    // The "All" tab landing with nothing typed: no position to seed from and
+    // no query naming a show, so "highest-ranked" would just mean "first in
+    // whatever order the sources happened to answer" — nothing a user would
+    // recognise as a reason that group opened. Leave every group closed.
+    const groups = groupResults(
+      [
+        r("Harrowgate.S03E01.1080p.WEB-DL"),
+        r("Harrowgate.S03E01.2160p.WEB-DL"),
+        r("Harrowgate.S03.1080p.WEB-DL"),
+        r("Harrowgate.S03.2160p.WEB-DL"),
+      ],
+      "series",
+    );
+    expect(defaultExpandedKeys(groups)).toEqual([]);
+    expect(defaultExpandedKeys(groups, undefined, "")).toEqual([]);
   });
 });
 
@@ -611,21 +636,25 @@ describe("defaultExpandedKeys with a watch position", () => {
   });
 
   it("falls back to the highest-ranked season when the show has no position", () => {
+    // A position implies the show was actually searched for, so the fallback
+    // is exercised with the query that would realistically accompany it.
     const groups = groupResults(SHOW, "series");
-    expect(defaultExpandedKeys(groups, () => null)).toEqual(defaultExpandedKeys(groups));
+    expect(defaultExpandedKeys(groups, () => null, "harrowgate")).toEqual(
+      defaultExpandedKeys(groups, undefined, "harrowgate"),
+    );
   });
 
   it("is unchanged when no lookup is given, so Piece A's behaviour is intact", () => {
     const groups = groupResults(SHOW, "series");
     // [show key, season key] — this show has two seasons, so it wraps in a
     // show node that also needs opening.
-    expect(defaultExpandedKeys(groups)).toHaveLength(2);
+    expect(defaultExpandedKeys(groups, undefined, "harrowgate")).toHaveLength(2);
   });
 
   it("falls back when the position names a season the results do not have", () => {
     const groups = groupResults(SHOW, "series");
-    expect(defaultExpandedKeys(groups, () => ({ season: 9, episode: 1 }))).toEqual(
-      defaultExpandedKeys(groups),
+    expect(defaultExpandedKeys(groups, () => ({ season: 9, episode: 1 }), "harrowgate")).toEqual(
+      defaultExpandedKeys(groups, undefined, "harrowgate"),
     );
   });
 });
@@ -839,6 +868,18 @@ describe("expansionSeed", () => {
     );
     const seed = expansionSeed(groups, undefined, true, "harrowgate");
     expect(seed.expandKeys).toEqual(["harrowgate|series|s3"]);
+    expect(seed.latch).toBe(true);
+  });
+
+  it("opens nothing for a settled browse listing with no query and no position", () => {
+    // The "All" tab landing with nothing typed — not a search, so nothing
+    // should pop open on its own.
+    const groups = groupResults(
+      [r("Harrowgate.S03E01.1080p.WEB-DL"), r("Harrowgate.S03E02.1080p.WEB-DL")],
+      "series",
+    );
+    const seed = expansionSeed(groups, undefined, true);
+    expect(seed.expandKeys).toEqual([]);
     expect(seed.latch).toBe(true);
   });
 });

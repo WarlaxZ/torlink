@@ -597,8 +597,13 @@ export function defaultExpandedKeys<T extends GroupableResult>(
     const wanted = normaliseTitle(query);
     const exact = candidates.find((entry) => normaliseTitle(entry.season.title) === wanted);
     if (exact) return expandKeysFor(exact);
+    return expandKeysFor(candidates[0]!);
   }
-  return expandKeysFor(candidates[0]!);
+  // No query and no position to seed from: this is the default/browse listing
+  // (e.g. the "All" tab with nothing typed), not a search for a particular
+  // show. Opening "whichever season happens to rank first" there has no
+  // rationale a user would recognise, so leave every group closed.
+  return [];
 }
 
 /**
