@@ -199,7 +199,7 @@ header {
    - The wordmark loses its TEXT, not the magnet icon — the icon alone is
      the thing that's on the favicon and the tab title anyway, and losing
      "torlnk" recovers ~85px a phone header cannot spare. aria-label on the
-     <h1> (index.html) keeps a screen reader's announcement unchanged.
+     button (index.html) keeps a screen reader's announcement unchanged.
    - The four nav buttons go icon-only, each with its label text hidden the
      same way and an aria-label carrying it instead. Four ~30px icon buttons
      fit easily where four text pills could not. */
@@ -240,12 +240,27 @@ header {
 h1 {
   display: flex;
   align-items: center;
+  margin: 0;
+}
+
+/* Resets the <button> back to looking exactly like the plain text/icon row it
+   replaced — the wordmark is a nav control now (click goes home), not just a
+   heading, but it must not look like one. */
+.wordmark-button {
+  display: flex;
+  align-items: center;
   gap: 0.4rem;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 1.35rem;
   letter-spacing: 0.02em;
-  margin: 0;
   text-transform: uppercase;
 }
 
@@ -617,15 +632,21 @@ button:hover {
 /* Play is the one control in a row that isn't queue housekeeping, so it carries
    the accent at rest while pause/remove/delete stay dim until hovered. That is
    also the safety argument: the destructive buttons sit millimetres away on a
-   phone and should not compete for the thumb. */
-.row-actions button.play {
+   phone and should not compete for the thumb.
+   `.primary` carries the same treatment for whichever button stands in for
+   play where play doesn't apply — the debrid-add (or plain add) button on the
+   Games/Books tabs, so those rows still point at one obvious next step
+   instead of five buttons that all read as equally optional. */
+.row-actions button.play,
+.row-actions button.primary {
   color: var(--sunken);
   background: var(--accent);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.row-actions button.play:hover {
+.row-actions button.play:hover,
+.row-actions button.primary:hover {
   color: var(--sunken);
   background: var(--fg);
   border-color: var(--fg);

@@ -521,6 +521,41 @@ const GROUPABLE = [
   t("a1", "Ashfall.1999.1080p"),
 ];
 
+describe("Results play gating", () => {
+  // Games and Books releases are installers/archives/documents, not video —
+  // `v` has nothing sensible to stream, so it's a no-op there. See playSection
+  // in Results.tsx and playApplies in the web UI's searchModel.ts.
+  it("does not stream on 'v' for a Games result", async () => {
+    const streamResult = vi.fn();
+    const gamesList: TorrentResult[] = [{ ...LIST[0]!, source: "fitgirl" }];
+    searchState.current = settled(gamesList);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "linux iso", section: "games", streamResult })}>
+        <Results reccConfig={{}} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await vi.waitFor(() => expect(u.frame()).toContain(`Results (${gamesList.length})`));
+    u.press("v");
+    await new Promise<void>((r) => yieldToLoop(() => r()));
+    expect(streamResult).not.toHaveBeenCalled();
+  });
+
+  it("still streams on 'v' outside Games/Books", async () => {
+    const streamResult = vi.fn();
+    searchState.current = settled(LIST);
+    ui = renderUI(
+      <StoreContext.Provider value={makeTestStore({ query: "linux iso", streamResult })}>
+        <Results reccConfig={{}} />
+      </StoreContext.Provider>,
+    );
+    const u = ui;
+    await vi.waitFor(() => expect(u.frame()).toContain(`Results (${LIST.length})`));
+    u.press("v");
+    await vi.waitFor(() => expect(streamResult).toHaveBeenCalled());
+  });
+});
+
 describe("Results grouping", () => {
   // At a WIDE content width throughout. At 80 columns the list has ~61 and
   // "Kestrel (2010)" renders as "Kestrel (…", so every assertion here would be

@@ -12,16 +12,22 @@
   </head>
   <body>
     <header id="page-header">
-      <h1 aria-label="torlnk">
-        <svg class="wordmark-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" focusable="false">
-          <path class="magnet-body" d="M7.6 3 V12.5 A4.4 4.4 0 0 0 16.4 12.5 V3" />
-          <rect class="magnet-tip magnet-tip-a" x="5.6" y="0.5" width="4" height="4.5" rx="0.8" />
-          <rect class="magnet-tip magnet-tip-b" x="14.4" y="0.5" width="4" height="4.5" rx="0.8" />
-        </svg>
-        <!-- aria-label on the heading, not just on the icon: below 34rem the
-             text hides (CSS only — the DOM node stays, screen readers still
-             get "torlnk") to give the nav room to sit on the same row. -->
-        <span class="wordmark-text">torlnk</span>
+      <h1>
+        <!-- A real button, not a clickable <h1>: it needs to be reachable by
+             keyboard and to fire on Enter/Space, and a plain heading gives
+             neither for free. aria-label carries "torlnk" here rather than on
+             the heading, for the same reason it used to sit on the heading:
+             below 34rem the text hides (CSS only — the DOM node stays, screen
+             readers still get "torlnk") to give the nav room to sit on the
+             same row. -->
+        <button type="button" id="logo-home" class="wordmark-button" aria-label="torlnk">
+          <svg class="wordmark-icon" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" focusable="false">
+            <path class="magnet-body" d="M7.6 3 V12.5 A4.4 4.4 0 0 0 16.4 12.5 V3" />
+            <rect class="magnet-tip magnet-tip-a" x="5.6" y="0.5" width="4" height="4.5" rx="0.8" />
+            <rect class="magnet-tip magnet-tip-b" x="14.4" y="0.5" width="4" height="4.5" rx="0.8" />
+          </svg>
+          <span class="wordmark-text">torlnk</span>
+        </button>
       </h1>
       <!-- Search / For You / Saved / Queue. Buttons rather than links: it is one
            page with four panes, and there is no route to navigate to.

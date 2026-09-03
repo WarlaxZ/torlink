@@ -646,6 +646,18 @@ export function previewApplies(group: string): boolean {
 }
 
 /**
+ * Whether "play" is a sensible primary action for this tab.
+ *
+ * Games and Books results are installers, archives, and documents — the file
+ * picker's video-extension heuristic (`streamCandidates`) has nothing to latch
+ * onto, so play falls back to "every file" and streams whatever's first,
+ * which is never right. Every other tab, including "All", is mostly video.
+ */
+export function playApplies(group: string): boolean {
+  return group !== "Games" && group !== "Books";
+}
+
+/**
  * Whether a group gets the LOCAL detail pane instead of the OMDb one.
  *
  * The adult ("Porn") group has no OMDb metadata, so its pane is built entirely
