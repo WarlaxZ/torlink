@@ -2412,8 +2412,11 @@ function resultActions(
   actions.className = "row-actions";
 
   // Games and Books results have no video file for `play` to land on — see
-  // `playApplies`. Add / debrid-add remain as the primary actions on those tabs.
-  if (playApplies(searchView.group)) {
+  // `playApplies`. Add / debrid-add remain as the primary actions on those
+  // tabs, and one of them takes over play's accent styling below so the row
+  // still has one obvious next step.
+  const showPlay = playApplies(searchView.group);
+  if (showPlay) {
     const playButton = document.createElement("button");
     playButton.type = "button";
     playButton.className = "play";
@@ -2439,6 +2442,9 @@ function resultActions(
   if (!debridAddAvailable) {
     const addButton = document.createElement("button");
     addButton.type = "button";
+    // Only the primary action where play is not shown at all — with play
+    // shown, plain P2P add is a secondary option next to it.
+    if (!showPlay) addButton.className = "primary";
     addButton.textContent = "add";
     tagControl(addButton, rowKey, "add");
     addButton.addEventListener("click", () => void addResult(result, "p2p"));
@@ -2470,6 +2476,9 @@ function resultActions(
   if (debridAddAvailable && sources?.debridProvider) {
     const debridButton = document.createElement("button");
     debridButton.type = "button";
+    // Only the primary action where play is not shown at all — with play
+    // shown, debrid-add is a secondary option next to it.
+    if (!showPlay) debridButton.className = "primary";
     debridButton.textContent = debridAddLabel(sources.debridProvider);
     tagControl(debridButton, rowKey, "debrid");
     debridButton.addEventListener("click", () => void addResult(result, "debrid"));

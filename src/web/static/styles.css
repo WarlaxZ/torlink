@@ -632,15 +632,21 @@ button:hover {
 /* Play is the one control in a row that isn't queue housekeeping, so it carries
    the accent at rest while pause/remove/delete stay dim until hovered. That is
    also the safety argument: the destructive buttons sit millimetres away on a
-   phone and should not compete for the thumb. */
-.row-actions button.play {
+   phone and should not compete for the thumb.
+   `.primary` carries the same treatment for whichever button stands in for
+   play where play doesn't apply — the debrid-add (or plain add) button on the
+   Games/Books tabs, so those rows still point at one obvious next step
+   instead of five buttons that all read as equally optional. */
+.row-actions button.play,
+.row-actions button.primary {
   color: var(--sunken);
   background: var(--accent);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.row-actions button.play:hover {
+.row-actions button.play:hover,
+.row-actions button.primary:hover {
   color: var(--sunken);
   background: var(--fg);
   border-color: var(--fg);
