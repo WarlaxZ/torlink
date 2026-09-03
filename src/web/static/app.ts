@@ -3339,7 +3339,14 @@ async function addResult(result: PublicSearchResult, via: AddVia): Promise<void>
     sources?.debridConfigured === true,
     result.name,
     sources?.debridProvider ?? undefined,
+    result.seeders,
+    reportsHealthLookup(sources)(result.source),
+    cachedHashes.has(result.infoHash.toLowerCase()),
   );
+  if (plan.kind === "blocked") {
+    showNotice(plan.message);
+    return;
+  }
   if (plan.kind === "confirm" && !confirm(plan.message)) {
     showNotice("Nothing was added.");
     return;

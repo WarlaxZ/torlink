@@ -6,7 +6,7 @@
 //
 // Bundled for the browser: no node:* imports, direct or transitive.
 //
-// FOUR IMPORTS LEAVE THIS DIRECTORY, all deliberate. `../wire` is types-only
+// FIVE IMPORTS LEAVE THIS DIRECTORY, all deliberate. `../wire` is types-only
 // and erased at build time. `../../util/resultSort` and
 // `../../util/resultFilter` are *value* imports of the TUI's own sort and
 // filter — they were `src/ui/sort.ts` and `src/ui/filter.ts` until this file
@@ -14,11 +14,15 @@
 // codebase has hit four times (uploadSpeed, the byte formatter, the progress
 // unit, the API path table). `../../util/resultGroup` is the same arrangement
 // for title grouping, and the TUI's results list renders the same rows from the
-// same `groupRowPlan`. All three are dependency-light and `platform: "browser"`
-// in tsup.web.config.ts fails the build if that ever stops being true —
-// resultGroup reaches `parse-torrent-title` through util/release.ts, which the
-// bundle already carries for streamFlow.ts.
+// same `groupRowPlan`. `../../util/debridAddGuard` is the same arrangement for
+// the pre-add stuck-download check (see `addPlan` below) — the TUI's
+// `startDebridDownload` calls the same predicate. All four value imports are
+// dependency-light and `platform: "browser"` in tsup.web.config.ts fails the
+// build if that ever stops being true — resultGroup reaches
+// `parse-torrent-title` through util/release.ts, which the bundle already
+// carries for streamFlow.ts.
 import { hintForGroup } from "../../util/release";
+import { shouldBlockDebridAdd } from "../../util/debridAddGuard";
 import { filterResults } from "../../util/resultFilter";
 import {
   groupResults,
@@ -485,7 +489,13 @@ export type AddPlan =
    * paying for something that keeps it out of one — the same prompt the TUI
    * shows.
    */
-  | { kind: "confirm"; via: AddVia; message: string };
+  | { kind: "confirm"; via: AddVia; message: string }
+  /**
+   * Refuse outright. A debrid add of a zero-seed, not-yet-cached result never
+   * completes — it just occupies one of the provider's few concurrent slots
+   * until the user finds and cancels it. See `shouldBlockDebridAdd`.
+   */
+  | { kind: "blocked"; message: string };
 
 /**
  * A debrid provider id as it crosses the wire. Mirrors `DebridProviderId`.
@@ -532,14 +542,35 @@ export function debridAddedNotice(provider: WireDebridProvider): string {
  * message come from the same {@link DEBRID_LABELS} table the button itself
  * reads, via {@link debridProviderLabel} and {@link debridAddLabel}, so the
  * prompt can never name a button label that is not the one on screen.
+ *
+ * `seeders`/`sourceReportsHealth`/`isCached` only matter for `via === "debrid"`
+ * — an explicit debrid add is where `shouldBlockDebridAdd` applies, mirroring
+ * the TUI's `startDebridDownload`. `sourceReportsHealth` must already be
+ * resolved for this result's source (see `reportsHealthLookup`): a source with
+ * no swarm data reports `seeders: 0` for everything, which is "unknown", not
+ * "dead".
  */
 export function addPlan(
   via: AddVia,
   debridConfigured: boolean,
   name: string,
   provider: WireDebridProvider | undefined,
+  seeders: number,
+  sourceReportsHealth: boolean,
+  isCached: boolean,
 ): AddPlan {
-  if (via === "debrid" || !debridConfigured) return { kind: "add", via };
+  if (via === "debrid") {
+    if (shouldBlockDebridAdd(seeders, isCached, sourceReportsHealth)) {
+      return {
+        kind: "blocked",
+        message:
+          `“${clip(name)}” has no seeders and isn't already cached — adding it ` +
+          `via debrid would just sit stuck. Not added.`,
+      };
+    }
+    return { kind: "add", via };
+  }
+  if (!debridConfigured) return { kind: "add", via };
   const label = provider ? debridProviderLabel(provider) : "your debrid provider";
   const addLabel = provider ? debridAddLabel(provider) : "the debrid add button";
   return {

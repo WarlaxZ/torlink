@@ -632,6 +632,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
     magnet: r.magnet,
     source: r.source,
     sizeBytes: r.sizeBytes,
+    seeders: r.seeders,
   });
 
   const openDownload = (r: TorrentResult): void => requestP2PDownload(inputFor(r));

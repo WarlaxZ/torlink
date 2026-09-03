@@ -31,7 +31,7 @@ import {
   type MaxResolution,
 } from "../util/releasePick";
 import { runSearch } from "../core/search";
-import { enabledSources } from "../sources/registry";
+import { enabledSources, getSource } from "../sources/registry";
 import { setDnsServers } from "../util/dns";
 import { expandHome, normalizeDownloadDir } from "../config/folder";
 import type { DebridProviderId, DebridStatus } from "../integrations/debrid/types";
@@ -168,6 +168,7 @@ import { displayHosts, webUrl, withoutToken } from "../web/links";
 import { startWebServer, type WebServerHandle, type WebServerOptions } from "../web/server";
 import type { Runtime } from "../daemon/runtime";
 import { log } from "../util/logger";
+import { shouldBlockDebridAdd } from "../util/debridAddGuard";
 
 export interface DownloadInput {
   id: string;
@@ -175,6 +176,7 @@ export interface DownloadInput {
   magnet: string;
   source?: SourceId;
   sizeBytes?: number;
+  seeders?: number;
 }
 
 /**
@@ -1488,12 +1490,23 @@ export function App({
         setNotice("Set a Real-Debrid or TorBox token first — open the Settings tab.");
         return;
       }
+      if (
+        input.seeders !== undefined &&
+        shouldBlockDebridAdd(
+          input.seeders,
+          cachedHashes.has(input.id.toLowerCase()),
+          input.source !== undefined && getSource(input.source).reportsHealth,
+        )
+      ) {
+        setNotice("No seeders and not already cached — this would just sit stuck. Skipped.");
+        return;
+      }
       const meta = getDebridProvider(active.provider);
       void fs.mkdir(config.downloadDir, { recursive: true }).catch(() => {});
       void queue.addDebrid(input, config.downloadDir, active.provider, active.token);
       setNotice(`${meta.label}: ${truncate(cleanText(input.name), 40)}`);
     },
-    [config, queue],
+    [config, queue, cachedHashes],
   );
 
   // Try to play a resolved stream URL: use the configured/detected player, else
