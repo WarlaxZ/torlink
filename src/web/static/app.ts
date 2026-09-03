@@ -64,6 +64,7 @@ import {
   parseGrouping,
   parseLayout,
   parseSort,
+  playApplies,
   previewApplies,
   adultPreviewApplies,
   reportsHealthLookup,
@@ -272,6 +273,7 @@ const settingsSourcesBox = el<HTMLDivElement>("settings-sources");
 const settingsAccountsBox = el<HTMLDivElement>("settings-accounts");
 const settingsAccountsHint = el<HTMLParagraphElement>("settings-accounts-hint");
 
+const logoHome = el<HTMLButtonElement>("logo-home");
 const viewsNav = el<HTMLElement>("views");
 const viewSearchTab = el<HTMLButtonElement>("view-search");
 const viewReccTab = el<HTMLButtonElement>("view-recc");
@@ -1644,6 +1646,7 @@ function showView(next: ViewName): void {
   syncUrl();
 }
 
+logoHome.addEventListener("click", () => showView("search"));
 viewSearchTab.addEventListener("click", () => showView("search"));
 viewReccTab.addEventListener("click", () => showView("recc"));
 viewSavedTab.addEventListener("click", () => showView("saved"));
@@ -2408,20 +2411,24 @@ function resultActions(
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
-  const playButton = document.createElement("button");
-  playButton.type = "button";
-  playButton.className = "play";
-  playButton.textContent = "play";
-  tagControl(playButton, rowKey, "play");
-  // `result.infoHash`, NOT `rowKey`: rowKey is the group key (this row may nest
-  // several releases of one title), while play() is handed rowForPlay(result),
-  // whose id is the hash. See tagPlayKey for why the two identities are separate.
-  tagPlayKey(playButton, result.infoHash, "play");
-  playButton.addEventListener("click", () => {
-    if (onPlay) onPlay();
-    else void play(rowForPlay(result));
-  });
-  actions.append(playButton);
+  // Games and Books results have no video file for `play` to land on — see
+  // `playApplies`. Add / debrid-add remain as the primary actions on those tabs.
+  if (playApplies(searchView.group)) {
+    const playButton = document.createElement("button");
+    playButton.type = "button";
+    playButton.className = "play";
+    playButton.textContent = "play";
+    tagControl(playButton, rowKey, "play");
+    // `result.infoHash`, NOT `rowKey`: rowKey is the group key (this row may nest
+    // several releases of one title), while play() is handed rowForPlay(result),
+    // whose id is the hash. See tagPlayKey for why the two identities are separate.
+    tagPlayKey(playButton, result.infoHash, "play");
+    playButton.addEventListener("click", () => {
+      if (onPlay) onPlay();
+      else void play(rowForPlay(result));
+    });
+    actions.append(playButton);
+  }
 
   // A labelled debrid add button replaces the plain (P2P) "add" whenever a
   // provider is configured — the server forces debrid in that case (it never

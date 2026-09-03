@@ -540,6 +540,10 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
   const previewSection = !previewGroup || previewGroup === "Movies" || previewGroup === "TV" || previewGroup === "Anime";
   // Anime previews from AniList, so it needs no OMDb key.
   const sectionIsAnime = section === "anime";
+  // Games and Books results are installers, archives, and documents — there is
+  // no video file for `v` to land on, so it's a no-op there. See the web UI's
+  // `playApplies` (searchModel.ts) for the same gate on the other front end.
+  const playSection = previewGroup !== "Games" && previewGroup !== "Books";
   // Local pane: the adult group has no OMDb metadata, so it is built from the
   // release name — no key, no lookup.
   const adultSection = previewGroup === "Porn";
@@ -769,7 +773,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       } else if (input === "r") {
         const r = resultAt(clamped);
         if (r) openDebrid(r);
-      } else if (input === "v") {
+      } else if (input === "v" && playSection) {
         const row = rows[clamped];
         if (row?.kind === "season" || row?.kind === "show") {
           const plan = seasonPlayPlan(
@@ -812,7 +816,7 @@ export function Results({ reccConfig, fetchImpl }: ResultsProps) {
       } else if (input === "d" && detail) openDownload(detail);
       else if (input === "D" && detail) openDownloadTo(detail);
       else if (input === "r" && detail) openDebrid(detail);
-      else if (input === "v" && detail) openStream(detail);
+      else if (input === "v" && detail && playSection) openStream(detail);
       else if (input === "y" && detail) copyResultMagnet(detail);
       else if (input === "i" && detail) openImdbFor(detail.name);
       else if (input === "b" && detail && canFavourite(detail)) toggleFavourite(favInput(detail));

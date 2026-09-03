@@ -22,6 +22,7 @@ import {
   modeForQuery,
   parseGrouping,
   parseLayout,
+  playApplies,
   previewApplies,
   adultPreviewApplies,
   progressLabel,
@@ -638,6 +639,22 @@ describe("previewApplies", () => {
     expect(previewApplies("Games")).toBe(false);
     expect(previewApplies("Music")).toBe(false);
     expect(previewApplies("Books")).toBe(false);
+  });
+});
+
+describe("playApplies", () => {
+  it("is false for Games and Books, which have no video file to play", () => {
+    expect(playApplies("Games")).toBe(false);
+    expect(playApplies("Books")).toBe(false);
+  });
+
+  it("is true everywhere else, including All", () => {
+    expect(playApplies(ALL_TAB)).toBe(true);
+    expect(playApplies("Movies")).toBe(true);
+    expect(playApplies("TV")).toBe(true);
+    expect(playApplies("Anime")).toBe(true);
+    expect(playApplies("Music")).toBe(true);
+    expect(playApplies("Porn")).toBe(true);
   });
 });
 
