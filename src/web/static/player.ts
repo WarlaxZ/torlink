@@ -780,19 +780,35 @@ function listHeading(text: string): HTMLParagraphElement {
   return p;
 }
 
+/** The show/film name over the whole list — "The Boys" atop its own filenames. */
+function seriesTitle(text: string): HTMLHeadingElement {
+  const h = document.createElement("h2");
+  h.className = "episodes-title";
+  h.textContent = text;
+  return h;
+}
+
 /**
  * One row: a link to the same page for a different file.
  *
  * `textContent`, as everywhere on this page — a filename comes out of a torrent,
  * i.e. from whoever uploaded it. The `href` is a property assignment built by
- * `playerPath`, not markup.
+ * `playerPath`, not markup. The badge is a separate `<span>` (rather than part
+ * of the same text node) purely so CSS can colour it without touching the rest
+ * of the line.
  */
 function episodeRow(row: EpisodeRow): HTMLAnchorElement {
   const a = document.createElement("a");
   a.className = row.current ? "episode-row is-current" : "episode-row";
   a.href = row.href;
-  a.textContent = row.label;
   a.title = row.file.filename;
+  if (row.badge) {
+    const badge = document.createElement("span");
+    badge.className = "episode-badge";
+    badge.textContent = row.badge;
+    a.append(badge);
+  }
+  a.append(document.createTextNode(row.text));
   if (row.current) {
     // The page you are already on. Announced rather than merely styled, so the
     // list reads the same to a screen reader as it looks.
@@ -842,6 +858,9 @@ function renderEpisodes(body: StreamFilesResponse, target: PlayerTarget): void {
   }
 
   const nodes: HTMLElement[] = [];
+  // The show/film's own name, so the list reads as "The Boys, episode by
+  // episode" rather than sixty near-identical filenames with no header.
+  if (view.title) nodes.push(seriesTitle(view.title));
   // "Up next" sits ABOVE the full list on purpose: it is the one action this
   // page exists to offer, and it must not depend on scrolling past sixty rows.
   if (view.next) nodes.push(listHeading("up next"), episodeRow(view.next));
