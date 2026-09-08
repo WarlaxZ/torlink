@@ -108,6 +108,11 @@ describe("upNextView — the list", () => {
     expect(first?.label).toBe("Harrowgate.S03E01.1080p.WEB-DL.mkv · 1.00 GB");
   });
 
+  it("badges each row with its season and episode", () => {
+    const [first] = upNextView(HARROWGATE, SID, 0, CAP).rows;
+    expect(first?.badge).toBe("S03E01");
+  });
+
   /**
    * A film has nothing to list, and an "all episodes" heading over one row that
    * is the row you are already on is noise. Empty rows means "render nothing".
@@ -123,6 +128,48 @@ describe("upNextView — the list", () => {
     const view = upNextView(HARROWGATE, SID, 99, CAP);
     expect(view.rows.some((r) => r.current)).toBe(false);
     expect(view.next).toBeNull();
+  });
+});
+
+describe("upNextView — badges and episode titles", () => {
+  const WITH_TITLES: StreamFilesResponse = {
+    name: "Kepler.S02.2160p.WEB-DL",
+    infoHash: "a".repeat(40),
+    files: [
+      file(0, "Kepler.S02E04.The.Long.Way.Home.2160p.10bit.WEB-DL.DDP5.1.HEVC-GROUP.mkv"),
+      file(1, "Kepler.S02E05.Signal.Loss.2160p.10bit.WEB-DL.DDP5.1.HEVC-GROUP.mkv"),
+    ],
+  };
+
+  it("pulls the episode's own title out from between the marker and its quality tags", () => {
+    const [first] = upNextView(WITH_TITLES, SID, 1, CAP).rows;
+    expect(first?.text).toBe("The Long Way Home · 1.00 GB");
+  });
+
+  it("falls back to the full filename when no episode title survives", () => {
+    // Harrowgate's fixture names nothing between S03E01 and 1080p.
+    const [first] = upNextView(HARROWGATE, SID, 3, CAP).rows;
+    expect(first?.text).toBe(first?.label);
+  });
+
+  it("badges a season-pack file with just its season, and a file with neither as null", () => {
+    const seasonPack: StreamFilesResponse = {
+      name: "Harrowgate.S03.1080p.WEB-DL",
+      infoHash: "a".repeat(40),
+      files: [file(0, "Harrowgate.S03.1080p.WEB-DL.mkv"), file(1, "Harrowgate.Extras.mkv")],
+    };
+    const view = upNextView(seasonPack, SID, 0, CAP);
+    expect(view.rows.map((r) => r.badge)).toEqual([null, "S03"]);
+    // No episode number means episode-title extraction is never attempted.
+    expect(view.rows.map((r) => r.text)).toEqual(view.rows.map((r) => r.label));
+  });
+
+  it("names the show for a heading over the whole list", () => {
+    expect(upNextView(WITH_TITLES, SID, 0, CAP).title).toBe("Kepler");
+  });
+
+  it("has no title for a single-file session", () => {
+    expect(upNextView(KESTREL, SID, 0, CAP).title).toBeNull();
   });
 });
 

@@ -14,17 +14,33 @@
  * here. `player.ts` turns the rows below into elements and does nothing else
  * with them.
  */
-import { parseRelease } from "../../util/release";
+import { parseRelease, type ParsedRelease } from "../../util/release";
 import { restPlaylist, type RestKind } from "../../util/restPlaylist";
 import { sortStreamFiles } from "../../util/streamFileSort";
 import { fileLabel, playerPath } from "./streamFlow";
+import { formatBytes } from "./dashboard";
 import { searchForRoute, DEFAULT_ROUTE } from "./route";
 import type { PublicStreamFile, StreamFilesResponse } from "../wire";
 
 export interface EpisodeRow {
   file: PublicStreamFile;
-  /** `fileLabel`'s line, so this list and the picker read identically. */
+  /** `fileLabel`'s line — the fallback shown when nothing more specific parses out. */
   label: string;
+  /**
+   * `S05E04`, `S03` for a season-pack file that names no episode, `E04` for the
+   * rarer case of an episode with no season, or null when the filename names
+   * neither. Meant to sit at the START of the row in its own colour — the thing
+   * that actually distinguishes one row from the next in a sixty-file list,
+   * rather than being buried in the middle of a filename.
+   */
+  badge: string | null;
+  /**
+   * What to show after the badge: the episode's own title when the filename
+   * commits to one ("King of Hell"), plus its size — or `label` when nothing
+   * survives extraction. Composed here, not in player.ts, for the same reason
+   * `label` always was: CLAUDE.md keeps "what to show" out of the DOM-wiring file.
+   */
+  text: string;
   /** `/play/:sid/:idx?k=…&n=…` — the same page, a different file. */
   href: string;
   /** True for the one file this player page is for. */
@@ -68,6 +84,13 @@ export interface UpNextView {
   next: EpisodeRow | null;
   /** The show or film this session is, and a search that finds it. Never null. */
   breadcrumb: Breadcrumb;
+  /**
+   * The show or film's own name, for a heading over the list — "The Boys" atop
+   * sixty rows of its own filenames. Null when the release name parses to
+   * nothing, in which case there is nothing honest to put in a heading and
+   * `player.ts` renders none, same as `breadcrumb`'s dashboard fallback.
+   */
+  title: string | null;
   /**
    * The text for the "play on from here" download, or null for no button.
    *
@@ -145,10 +168,54 @@ export function escapeRoutes(filename: string): Breadcrumb[] {
   ];
 }
 
-/** The season a file's own name commits to, or null. Season packs name none. */
-function seasonOf(filename: string): number | null {
-  const parsed = parseRelease(filename);
-  return parsed?.season ?? null;
+const pad = (n: number): string => String(n).padStart(2, "0");
+
+/** "S05E04", "S03" for a season pack, "E04" for episode-with-no-season, or null. */
+function badgeFor(parsed: ParsedRelease | null): string | null {
+  if (!parsed) return null;
+  const { season, episode } = parsed;
+  if (season != null && episode != null) return `S${pad(season)}E${pad(episode)}`;
+  if (season != null) return `S${pad(season)}`;
+  if (episode != null) return `E${pad(episode)}`;
+  return null;
+}
+
+/**
+ * Where a release's own quality/source/codec tagging starts, once the episode
+ * marker is behind it — "2160p" in "King.of.Hell.2160p.10bit.AMZN...". This is
+ * NOT `parseRelease`: that answers "what does this release say", not "which
+ * substring said it", and `parse-torrent-title` gives no match positions to
+ * work from. A short, deliberately generic word list rather than every format
+ * in the wild, because a marker this function fails to recognise just means the
+ * fallback (the full filename) is shown — never a wrong guess.
+ */
+const QUALITY_MARKER =
+  /\b(\d{3,4}[ip]|web[-.]?dl|webrip|web|bluray|bdrip|brrip|hdtv|dvdrip|remux|hdr|sdr|dv|hevc|avc|x264|x265|h264|h265|aac|ac3|dts|atmos|ddp?\d(\.\d)?|proper|repack|limited|extended|unrated|\d{1,2}bit)\b/i;
+
+/**
+ * The text between an episode's own `SxxEyy` marker and its quality tagging —
+ * "King of Hell" out of "The.Boys.S05E04.King.of.Hell.2160p...HEVC-Vyndros.mkv"
+ * — or null when nothing worth showing survives. Only ever called for a file
+ * `parseRelease` has already said names an episode, on the theory that a season
+ * pack's own filename ("Harrowgate.S03E01...") never carries a per-episode
+ * title worth pulling out separately from the season/episode badge.
+ *
+ * Operates on the BASENAME: `file.filename` can carry the torrent's folder
+ * ("Show (2019)/Show.S05E04....mkv"), and a folder name is not part of any one
+ * episode's title.
+ */
+function episodeTitleOf(filename: string): string | null {
+  const base = filename.slice(filename.lastIndexOf("/") + 1).replace(/\.[A-Za-z0-9]{2,4}$/, "");
+  const marker = base.match(/[Ss]\d{1,2}[Ee]\d{1,3}/);
+  if (!marker || marker.index === undefined) return null;
+  const rest = base.slice(marker.index + marker[0].length).replace(/[._]+/g, " ").trim();
+  if (!rest) return null;
+  const quality = rest.match(QUALITY_MARKER);
+  const candidate = (quality ? rest.slice(0, quality.index) : rest)
+    .trim()
+    .replace(/[.,;:\-\s]+$/, "");
+  // No letters at all means it parsed to a stray number or separator, not a title.
+  return candidate && /[A-Za-z]/.test(candidate) ? candidate : null;
 }
 
 /**
@@ -168,13 +235,15 @@ export function upNextView(
   capability: string,
 ): UpNextView {
   const breadcrumb = breadcrumbFor(body.name);
-  if (body.files.length < 2) return { rows: [], next: null, breadcrumb, restLabel: null };
+  const title = parseRelease(body.name)?.title ?? null;
+  if (body.files.length < 2) return { rows: [], next: null, breadcrumb, title: null, restLabel: null };
 
   // "name", the picker's default: a season pack listed in whatever order the
   // torrent named its files is the bug `sortStreamFiles` was extracted to fix,
   // and the two lists must not disagree about episode order.
   const sorted = sortStreamFiles(body.files, "name");
-  const seasons = sorted.map((f) => seasonOf(f.filename));
+  const parsed = sorted.map((f) => parseRelease(f.filename));
+  const seasons = parsed.map((p) => p?.season ?? null);
   // Headings only when they DISTINGUISH something. Multi-season packs exist and
   // sixty ungrouped rows is a wall, but a lone "Season 3" over a list that is
   // entirely season 3 says nothing the page has not already said — and a
@@ -187,9 +256,13 @@ export function upNextView(
       ? `Season ${season}`
       : null;
     if (season !== null) lastSeason = season;
+    const label = fileLabel(file);
+    const episodeTitle = parsed[at]?.episode != null ? episodeTitleOf(file.filename) : null;
     return {
       file,
-      label: fileLabel(file),
+      label,
+      badge: badgeFor(parsed[at] ?? null),
+      text: episodeTitle ? `${episodeTitle} · ${formatBytes(file.bytes)}` : label,
       href: playerPath(sessionId, file, capability),
       current: file.index === index,
       heading,
@@ -204,7 +277,7 @@ export function upNextView(
   const restLabel = rest.indexes.length > 1 ? restLabelFor(rest.kind) : null;
 
   const at = rows.findIndex((row) => row.current);
-  return { rows, next: at >= 0 ? (rows[at + 1] ?? null) : null, breadcrumb, restLabel };
+  return { rows, next: at >= 0 ? (rows[at + 1] ?? null) : null, breadcrumb, title, restLabel };
 }
 
 /**
