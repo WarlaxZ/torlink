@@ -36,6 +36,8 @@ Downloads run in the background while you keep searching, so you can queue up as
   <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
+When a download comes with several videos or tracks, torlink drops a `playlist.m3u` into each folder holding more than one, so a course split into modules plays straight through in order. Run `torlnk --no-playlist` if you'd rather it didn't.
+
 ## What it searches
 
 A short, hand-picked list of trusted sources:

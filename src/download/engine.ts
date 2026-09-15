@@ -126,6 +126,12 @@ export class TorrentEngine {
     return this.client?.torrentPort ?? null;
   }
 
+  // A torrent's file paths relative to its download dir, top-level folder
+  // included; empty before metadata arrives or once the torrent is gone.
+  filePaths(id: string): string[] {
+    return (this.torrents.get(id)?.files ?? []).map((file) => file.path);
+  }
+
   stats(id: string): TorrentProgress | null {
     const t = this.torrents.get(id);
     if (!t) return null;
