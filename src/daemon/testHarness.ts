@@ -34,6 +34,7 @@ export function fakeRuntime(downloadDir: string): Fake {
       off: vi.fn(),
       getItems: () => [],
       getSeeds: () => [],
+      getHistory: () => [],
     } as unknown as Runtime["queue"],
     downloadDir,
     sessions: { stopAll } as unknown as Runtime["sessions"],

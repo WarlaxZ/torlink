@@ -127,6 +127,7 @@ describe("handleApi", () => {
       getSeeds: () => [
         { id: "s1", name: "S", status: "seeding", peers: 2, uploaded: 2048, uploadSpeed: 128, x: 1 },
       ],
+      getHistory: () => [],
     } as unknown as Runtime["queue"];
     const res = await handleApi(runtime, null, "GET", "/status", undefined, "");
     expect(res.status).toBe(200);
