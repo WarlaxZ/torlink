@@ -85,6 +85,7 @@ const POLL_MS = 2000;
 // fs.watch is unreliable across platforms (misses events, fires twice, no
 // recursion guarantees), so we poll — dead simple and identical on every OS.
 export interface WatchOptions {
+  playlist?: boolean;
   seedTimeMs?: number;
   deleteFiles?: boolean;
 }
@@ -97,12 +98,12 @@ export async function runWatch(
   const dir = path.resolve(watchDir);
   await fs.mkdir(dir, { recursive: true }).catch(() => {});
 
-  const runtime = await startRuntime(downloadDir);
+  const runtime = await startRuntime(downloadDir, { playlist: options.playlist });
   runtime.queue.on("completed", (name: string) => log(`done, now seeding: ${name}`));
 
-  if (options.seedTimeMs && options.seedTimeMs > 0) {
-    startSeedReaper(runtime.queue, options.seedTimeMs, { deleteFiles: options.deleteFiles, log });
-  }
+  // Always on: with no --seed-time it only acts on torrents that carry their
+  // own limit (set over the API), and does nothing at all otherwise.
+  startSeedReaper(runtime.queue, options.seedTimeMs ?? 0, { deleteFiles: options.deleteFiles, log });
 
   log(`watching ${dir}`);
   log(`downloads -> ${runtime.downloadDir}`);

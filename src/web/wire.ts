@@ -70,6 +70,12 @@ export interface StatusDownload {
    * row you can fix and a row you can only delete.
    */
   error?: string;
+  /**
+   * This torrent's own seed-time override in ms, set over the control API
+   * (`POST /control` action `seed-time`). Absent means it inherits the
+   * daemon-wide `--seed-time`; `0` means never stop seeding it.
+   */
+  seedTimeMs?: number;
 }
 
 /** One torrent being seeded. `uploaded` is bytes; `uploadSpeed` is bytes/sec. */
@@ -82,6 +88,10 @@ export interface StatusSeed {
   uploaded: number;
   /** Bytes per second. */
   uploadSpeed: number;
+  /** Same override as `StatusDownload.seedTimeMs`, reported once seeding starts. */
+  seedTimeMs?: number;
+  /** When `seedTimeMs` falls due (epoch ms); `null` when it is set to never stop. */
+  seedUntil?: number | null;
 }
 
 /** The body of GET /status, GET /downloads, GET /api/status and each SSE frame. */

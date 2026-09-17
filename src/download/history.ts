@@ -22,6 +22,10 @@ export interface HistoryItem {
   magnet: string;
   dir: string;
   completedAt: number;
+  // Per-torrent seed limit (ms after completedAt), set through the headless
+  // API. Overrides the daemon-wide --seed-time; 0 means never stop seeding
+  // this one. Absent = inherit whatever the daemon was started with.
+  seedTimeMs?: number;
 }
 
 const write = serializeWrites();

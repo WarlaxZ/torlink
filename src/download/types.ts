@@ -89,4 +89,6 @@ export interface QueueItem {
   // For debrid items: the destination file paths on disk, recorded when the
   // download starts, so a cancel of a paused item can delete its partials.
   paths?: string[];
+  // Carried from add() into the history entry on completion (see HistoryItem).
+  seedTimeMs?: number;
 }

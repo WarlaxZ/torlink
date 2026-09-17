@@ -60,9 +60,9 @@ export function policySummary(cfg: Config): string {
 // Build a queue and restore persisted state, matching the TUI's boot order
 // (history before seeds — seeds resolve against history). `downloadDir` falls
 // back to the saved config's dir when the caller doesn't override it.
-export async function startRuntime(overrideDir?: string): Promise<Runtime> {
+export async function startRuntime(overrideDir?: string, options: { playlist?: boolean } = {}): Promise<Runtime> {
   const cfg = await loadConfig();
-  const queue = new DownloadQueue();
+  const queue = new DownloadQueue({ playlist: options.playlist });
   queue.setTrackers(cfg.trackers);
   // Everything below matches App.tsx's boot: without it a headless run ignores
   // the configured transfer limits, never auto-stops a seed, and fails a
@@ -150,6 +150,9 @@ export interface AddInputOptions {
   debridProvider?: DebridProviderId;
   /** Total size in bytes when the caller knows it; seeds the row's progress total. */
   sizeBytes?: number;
+  // Per-torrent seed limit (ms after completion; 0 = never stop). Unset
+  // inherits the daemon-wide --seed-time.
+  seedTimeMs?: number;
 }
 
 export async function addInput(
@@ -173,6 +176,7 @@ export async function addInput(
     name: options.name?.trim() || parsed.name,
     magnet: parsed.magnet,
     ...(options.sizeBytes !== undefined ? { sizeBytes: options.sizeBytes } : {}),
+    ...(options.seedTimeMs !== undefined ? { seedTimeMs: options.seedTimeMs } : {}),
   };
   if (options.debridToken) {
     // Not awaited, exactly as the TUI does it: addDebrid's promise resolves
