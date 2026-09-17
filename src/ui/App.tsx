@@ -220,6 +220,7 @@ const RECC_ENV_VAR_NOTICE = "reccd is set via TORLINK_RECC_* env vars — unset 
 export function App({
   initialMagnet,
   initialTorrent,
+  playlist,
   onQuit,
   // The TUI hosts the browser UI in-process, sharing this component's own
   // in-memory DownloadQueue and stream registry: what the terminal sees, the
@@ -232,6 +233,7 @@ export function App({
 }: {
   initialMagnet?: string;
   initialTorrent?: string;
+  playlist?: boolean;
   onQuit?: () => void;
   web?: boolean;
   webPort?: number;
@@ -478,7 +480,7 @@ export function App({
     let alive = true;
     void (async () => {
       const cfg = await loadConfig();
-      const q = new DownloadQueue();
+      const q = new DownloadQueue({ playlist });
       q.setTrackers(cfg.trackers);
       q.setTransferPolicy(cfg);
       // Crash-boot breaker: a marker left behind by the previous boot means it
@@ -554,7 +556,7 @@ export function App({
     return () => {
       alive = false;
     };
-  }, [initialMagnet, initialTorrent]);
+  }, [initialMagnet, initialTorrent, playlist]);
 
   // Best-effort, once per launch, off the hot path: if a newer release exists,
   // surface a quiet banner. Any failure (offline, opt-out) just leaves it hidden.

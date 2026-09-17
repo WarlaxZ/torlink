@@ -48,7 +48,23 @@ export class TorrentEngine {
       // the app the moment a download starts. NAT-PMP can never succeed
       // on macOS because the port is permanently taken, so disable it
       // and let UPnP handle NAT traversal instead.
-      const opts = process.platform === "darwin" ? { natPmp: false } : {};
+      //
+      // TORLINK_NO_UTP turns uTP off. It stays on by default, the way every
+      // major client ships it, but webtorrent can exhaust the socket pool with
+      // it: `utp-native` multiplexes perfectly well (UTP.prototype.connect
+      // reuses an existing binding) and webtorrent already holds a bound uTP
+      // socket on the TCP port, yet lib/torrent.js dials through the
+      // module-level `UTP.connect`, which allocates a fresh UDP socket per
+      // outgoing peer. Sockets then scale with peer count until the ephemeral
+      // port pool or buffer space runs out (WSAENOBUFS on Windows, EMFILE
+      // against the fd limit elsewhere), and a failed bind is re-emitted on an
+      // emitter nothing listens to, so it arrives as an uncaughtException and
+      // kills the process. The opt-out is a workaround until that dial path is
+      // fixed upstream.
+      const opts = {
+        ...(process.env.TORLINK_NO_UTP ? { utp: false } : {}),
+        ...(process.platform === "darwin" ? { natPmp: false } : {}),
+      };
       this.client = new WebTorrent(opts);
       this.client.on("error", () => {});
       this.client.throttleDownload(this.downloadLimit);
@@ -144,6 +160,12 @@ export class TorrentEngine {
   // The TCP port the client accepts incoming peers on (diagnostics / tests).
   listenPort(): number | null {
     return this.client?.torrentPort ?? null;
+  }
+
+  // A torrent's file paths relative to its download dir, top-level folder
+  // included; empty before metadata arrives or once the torrent is gone.
+  filePaths(id: string): string[] {
+    return (this.torrents.get(id)?.files ?? []).map((file) => file.path);
   }
 
   stats(id: string): TorrentProgress | null {

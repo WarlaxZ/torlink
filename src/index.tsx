@@ -61,9 +61,9 @@ if (cmd.kind === "update") {
   void import("./update/run").then(({ runUpdate }) => runUpdate({ force: cmd.force }).catch(failHeadless));
 } else if (cmd.kind === "watch") {
   if (cmd.daemon) daemonize("watch"); // parent exits here; the detached child continues
-  const { dir, downloadDir, seedTimeMs, deleteFiles } = cmd;
+  const { dir, downloadDir, seedTimeMs, deleteFiles, playlist } = cmd;
   void import("./daemon/watch").then(({ runWatch }) =>
-    runWatch(dir, downloadDir, { seedTimeMs, deleteFiles }).catch(failHeadless),
+    runWatch(dir, downloadDir, { seedTimeMs, deleteFiles, playlist }).catch(failHeadless),
   );
 } else if (cmd.kind === "seed") {
   if (cmd.daemon) daemonize("seed");
@@ -79,6 +79,7 @@ if (cmd.kind === "update") {
     host: cmd.host,
     token: cmd.token ?? process.env.TORLINK_API_TOKEN,
     downloadDir: cmd.downloadDir,
+    playlist: cmd.playlist,
     seedTimeMs: cmd.seedTimeMs,
     deleteFiles: cmd.deleteFiles,
     web: cmd.web,
@@ -160,6 +161,7 @@ const app = render(
   <App
     initialMagnet={cmd.initialMagnet}
     initialTorrent={cmd.initialTorrent}
+    playlist={cmd.playlist}
     onQuit={() => forceExit(0)}
     web={cmd.web}
     webPort={cmd.port}
