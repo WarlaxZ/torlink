@@ -170,3 +170,24 @@ describe("TorrentEngine uTP opt-out (TORLINK_NO_UTP)", () => {
     expect(constructorCalls[0]).toMatchObject({ utp: false });
   });
 });
+
+describe("TorrentEngine ready handler", () => {
+  it("calls onReady once webtorrent has checked the pieces on disk", async () => {
+    const { TorrentEngine } = await import("./engine");
+    const engine = new TorrentEngine();
+    const onReady = vi.fn();
+    engine.add(
+      "test-id",
+      "magnet:?xt=urn:btih:0000000000000000000000000000000000000000",
+      "/downloads",
+      { onReady },
+    );
+    // The queue starts a restored seed's missing-file watch from this, so a
+    // dropped listener would leave those seeds unwatched.
+    const torrent = (engine as unknown as { torrents: Map<string, EventEmitter> }).torrents.get("test-id");
+    expect(onReady).not.toHaveBeenCalled();
+    torrent?.emit("ready");
+    expect(onReady).toHaveBeenCalledTimes(1);
+    engine.destroy();
+  });
+});
