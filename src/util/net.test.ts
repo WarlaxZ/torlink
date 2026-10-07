@@ -98,6 +98,7 @@ describe("fetchResilient", () => {
     const seen: Array<{ status: number; attempt: number; willRetry: boolean; retryAfterMs?: number }> = [];
     const res = await fetchResilient("http://x", {
       ...opts,
+      capMs: 20_000,
       retries: 3,
       onAttempt: (i) => seen.push({ status: i.status, attempt: i.attempt, willRetry: i.willRetry, retryAfterMs: i.retryAfterMs }),
       fetchImpl: async () => (++n === 1 ? fakeRes(503, { "retry-after": "2" }) : fakeRes(200)),
@@ -151,7 +152,7 @@ describe("fetchResilient", () => {
     let n = 0;
     await fetchResilient("http://x", {
       baseMs: 1,
-      capMs: 1,
+      capMs: 20_000,
       retries: 3,
       minBackoffMs: 1000,
       sleepImpl: async (ms: number) => {
@@ -272,6 +273,46 @@ describe("fetchResilient", () => {
       }),
     ).rejects.toBeInstanceOf(HttpError);
     expect(seen).toEqual([ctrl.signal]);
+  });
+
+  // A source that went invite-only answered 503 with Retry-After: 86400, and
+  // waiting that out held its search for a day.
+  it("fails at once when Retry-After asks for longer than the backoff cap", async () => {
+    let calls = 0;
+    const slept: number[] = [];
+    const attempt = fetchResilient("http://x", {
+      retries: 3,
+      baseMs: 500,
+      capMs: 20_000,
+      sleepImpl: async (ms) => {
+        slept.push(ms);
+      },
+      fetchImpl: async () => (++calls, fakeRes(503, { "retry-after": "86400" })),
+    });
+    await expect(attempt).rejects.toMatchObject({
+      name: "HttpError",
+      status: 503,
+      message: "Request to http://x was told to retry in 86400s (HTTP 503).",
+    });
+    expect(calls).toBe(1);
+    expect(slept).toEqual([]);
+  });
+
+  it("still waits out a Retry-After within the backoff cap", async () => {
+    let calls = 0;
+    const slept: number[] = [];
+    const res = await fetchResilient("http://x", {
+      retries: 3,
+      baseMs: 500,
+      capMs: 20_000,
+      sleepImpl: async (ms) => {
+        slept.push(ms);
+      },
+      fetchImpl: async () => (++calls === 1 ? fakeRes(429, { "retry-after": "20" }) : fakeRes(200)),
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toBe(2);
+    expect(slept).toEqual([20_000]);
   });
 
   it("cuts a backoff sleep short when the signal aborts", async () => {

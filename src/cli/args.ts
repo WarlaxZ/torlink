@@ -62,7 +62,7 @@ export type CliCommand =
   | { kind: "update"; force?: boolean }
   | { kind: "import-netflix"; file: string }
   | { kind: "import-trakt" }
-  | { kind: "search"; query: string; category?: SearchCategory }
+  | { kind: "search"; query: string; category?: SearchCategory; timeoutMs?: number }
   | { kind: "invalid"; arg: string; hint?: string };
 
 /**
@@ -134,7 +134,7 @@ const SERVE_FLAGS: FlagSpec = {
 };
 const FILES_FLAGS: FlagSpec = { values: ["port", "host", "token"], bools: ["daemon"] };
 const SEED_FLAGS: FlagSpec = { values: ["seed-time"], bools: ["delete-files", "daemon"] };
-const SEARCH_FLAGS: FlagSpec = { values: ["category"], bools: [] };
+const SEARCH_FLAGS: FlagSpec = { values: ["category", "timeout"], bools: [] };
 
 function parsePort(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
@@ -182,15 +182,24 @@ function parseCommand(argv: string[]): CliCommand {
     const query = scan.rest.join(" ").trim();
     if (!query) return { kind: "invalid", arg: "search (missing query)" };
 
+    // Unlike --seed-time, 0 is refused rather than read as "no limit": a
+    // caller passing down what is left of its own budget should get an error
+    // when that reaches zero, not a search that never gives up.
+    const timeoutMs =
+      scan.flags.timeout === undefined ? undefined : parseDuration(scan.flags.timeout);
+    if (timeoutMs === null || timeoutMs === 0) {
+      return { kind: "invalid", arg: `search (invalid timeout '${scan.flags.timeout}')` };
+    }
+
     const category = scan.flags.category;
-    if (category === undefined) return { kind: "search", query };
+    if (category === undefined) return { kind: "search", query, timeoutMs };
     if (
       category === "games" ||
       category === "movies" ||
       category === "tv" ||
       category === "anime"
     ) {
-      return { kind: "search", query, category };
+      return { kind: "search", query, category, timeoutMs };
     }
     return { kind: "invalid", arg: `search (invalid category '${category}')` };
   }
@@ -312,7 +321,7 @@ usage
   torlnk path/to/file.torrent open a .torrent file on launch
   torlnk --web                open the TUI and serve the browser UI on :9162
   torlnk search <query>        no TUI: print search results as JSON
-    [--category games|movies|tv|anime]
+    [--category games|movies|tv|anime] [--timeout <dur>]
   torlnk seed <path>          no TUI: share files you already have
   torlnk watch <dir>          no TUI: download torrents dropped into <dir>
   torlnk serve                no TUI: HTTP add API (POST /add) on :9161
@@ -343,6 +352,11 @@ playlist.m3u in each folder containing 2+ audio/video files, including nested
 folders, in natural filename order. Single-file folders are skipped and
 existing playlists are kept. Pass --no-playlist (or set TORLINK_NO_PLAYLIST=1)
 to disable creation; existing playlists remain on disk.
+
+search (no TUI): one JSON document on stdout, with a per-source report under
+"sources". --timeout <dur> caps the whole search (default 25s; e.g. 20s, 2m).
+A source that has not answered by then is reported with code "timeout" and
+the results from the others still print. Exit 1 only when no source answered.
 
 watch mode (no TUI): drop a .torrent, or a .magnet/.txt holding a magnet or
 info hash, into <dir> and it downloads then seeds. Add --to <dir> to choose
