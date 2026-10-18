@@ -3,6 +3,7 @@
   stdenv,
   buildNpmPackage,
   fetchFromGitHub,
+  fetchzip,
   # dependencies
   nodejs_22,
   wl-clipboard,
@@ -49,10 +50,8 @@ in
 buildNpmPackage (finalAttrs: {
   pname = "torlink";
   version = "1.9.1";
-  src = fetchFromGitHub {
-    owner = "baairon";
-    repo = "torlink";
-    tag = "v${finalAttrs.version}";
+  src = fetchzip {
+    url = "https://git.bairon.dev/baairon/torlink/archive/v${finalAttrs.version}.tar.gz";
     hash = "sha256-p95bNiXhuV7D5dp3PTPxWb5XWZMOtEHkQHRAGUW/lsk=";
   };
   __structuredAttrs = true;
@@ -109,8 +108,8 @@ buildNpmPackage (finalAttrs: {
 
   meta = {
     description = "Torlink is a torrent finder that lives in your terminal, with zero setup and nothing to configure.";
-    homepage = "https://github.com/baairon/torlink";
-    changelog = "https://github.com/baairon/torlink/releases/tag/${finalAttrs.src.tag}";
+    homepage = "https://git.bairon.dev/baairon/torlink";
+    changelog = "https://git.bairon.dev/baairon/torlink/releases/tag/v${finalAttrs.version}";
     license = lib.licenses.mit;
     maintainers = with lib.maintainers; [ ghastrum ];
     mainProgram = "torlnk";

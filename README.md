@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="preview/splash.svg" alt="torlink, curated torrents straight from your terminal" style="max-width: 832px; width: 100%; height: auto;">
+  <img src="https://git.bairon.dev/baairon/torlink/raw/branch/main/preview/splash.svg" alt="torlink, curated torrents straight from your terminal" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
 Finding a torrent these days sucks. One site is a minefield of fake download buttons. Another hides the real link under a popup that spawns two more tabs. And after all that, half the results are dead, zero seeders.
@@ -20,20 +20,20 @@ That's the only thing you'll type. torlink opens straight to a search bar: searc
 
 ## Finding something
 
-Type what you're looking for and press Enter. Results stream in from every source as they answer, tagged with size and how many people are sharing each one, so you can see what'll come down fast. Arrow to what you want and press `d` to save it, or `shift+d` to pick a different folder for just that download.
+Type what you're looking for and press Enter. Results stream in from every source as they answer, tagged with size and how many people are sharing each one, so you can see what'll come down fast. Arrow to a result and press `d` to save it, or press space on several rows and then `d` to download them together. `shift+d` picks a folder for the current result or marked batch.
 
 <p align="center">
-  <img src="preview/browse.svg" alt="torlink's browse view: the sidebar, the search bar, and merged results from every source" style="max-width: 832px; width: 100%; height: auto;">
+  <img src="https://git.bairon.dev/baairon/torlink/raw/branch/main/preview/browse.svg?v=1.10.0" alt="torlink's browse view with two results marked for a batch download" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
 ## Your downloads
 
 Active downloads sit up top with their progress, speed, and time left; when one finishes it drops into Recently downloaded just below, so the list stays tidy. Everything's still there when you come back, and anything interrupted picks up where it left off.
 
-Downloads run in the background while you keep searching, so you can queue up as many as you want. They save to your downloads folder, and the Downloads pane keeps tabs on each one; press `o` anytime to change where that is, or grab one result with `shift+d` to send it somewhere else without touching the default. When something finishes it keeps seeding automatically so the next person can find it too, and the Seeding tab lets you pause or stop that anytime.
+Downloads run in the background while you keep searching, so you can queue up as many as you want. They save to your downloads folder, and the Downloads pane keeps tabs on each one; press `o` anytime to change where that is, or use `shift+d` to send a result or marked batch somewhere else without changing the default. When something finishes it keeps seeding automatically so the next person can find it too, and the Seeding tab lets you pause or stop that anytime.
 
 <p align="center">
-  <img src="preview/downloads.svg" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
+  <img src="https://git.bairon.dev/baairon/torlink/raw/branch/main/preview/downloads.svg?v=1.10.0" alt="torlink's Downloads pane: live progress on top, recently downloaded below" style="max-width: 832px; width: 100%; height: auto;">
 </p>
 
 When a download comes with several videos or tracks, torlink drops a `playlist.m3u` into each folder holding more than one, so a course split into modules plays straight through in order. Run `torlnk --no-playlist` if you'd rather it didn't.
@@ -88,7 +88,7 @@ Either can carry a `seedTime` for that one torrent, in the same grammar as `--se
 
 To run or work on torlink locally:
 
-1. Clone the repository and open the folder.
+1. Clone the [repository](https://git.bairon.dev/baairon/torlink) and open the folder.
 2. Install dependencies:
    ```sh
    npm install

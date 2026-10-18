@@ -5,7 +5,7 @@ import React from "react";
 import { render } from "ink-testing-library";
 import { Box, Text } from "ink";
 import { StoreContext, type Store } from "../src/ui/store";
-import { COLOR, ICON, SOURCE_STYLE } from "../src/ui/theme";
+import { COLOR, GUTTER, ICON, SOURCE_STYLE } from "../src/ui/theme";
 import { Logo } from "../src/ui/components/Logo";
 import { Rule } from "../src/ui/components/Rule";
 import { Footer } from "../src/ui/components/Footer";
@@ -172,6 +172,7 @@ save(
 );
 
 const browseResults = RESULTS.slice(0, 5);
+const markedPreview = new Set(["b2", "c3"]);
 const showStats = browseResults.some((r) => r.sizeBytes > 0 || r.seeders > 0);
 const numW = Math.max(2, String(browseResults.length).length);
 
@@ -192,6 +193,7 @@ save(
             <Box><Text dimColor>newest across all sources</Text></Box>
             <Box flexDirection="column" marginTop={1}>
               <Box>
+                <Box width={GUTTER} flexShrink={0} />
                 <Box width={2} flexShrink={0} />
                 <Box width={numW} flexShrink={0} justifyContent="flex-end"><Text bold dimColor>#</Text></Box>
                 <Box flexGrow={1} minWidth={0} marginLeft={1}><Text bold dimColor>Name</Text></Box>
@@ -204,8 +206,11 @@ save(
                 const ss = SOURCE_STYLE[r.source];
                 return (
                   <Box key={r.infoHash}>
-                    <Box width={2} flexShrink={0}>
+                    <Box width={GUTTER} flexShrink={0}>
                       <Text color={COLOR.accent}>{here ? ICON.pointer : ""}</Text>
+                    </Box>
+                    <Box width={2} flexShrink={0}>
+                      <Text color={COLOR.good}>{markedPreview.has(r.infoHash) ? ICON.done : ""}</Text>
                     </Box>
                     <Box width={numW} flexShrink={0} justifyContent="flex-end">
                       <Text dimColor>{i + 1}</Text>
