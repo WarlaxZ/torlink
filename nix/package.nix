@@ -49,16 +49,16 @@ in
 
 buildNpmPackage (finalAttrs: {
   pname = "torlink";
-  version = "1.9.1";
+  version = "1.10.0";
   src = fetchzip {
     url = "https://git.bairon.dev/baairon/torlink/archive/v${finalAttrs.version}.tar.gz";
-    hash = "sha256-p95bNiXhuV7D5dp3PTPxWb5XWZMOtEHkQHRAGUW/lsk=";
+    hash = "sha256-PS2CYr/5XTCcmxhAxVH3MXkCKNzFiXvNhjhp8hXPbKk=";
   };
   __structuredAttrs = true;
   strictDeps = true;
 
   nodejs = nodejs_22;
-  npmDepsHash = "sha256-qmEy9hBhbad9NX8cTdRWN3JM/Y+ezkewW2AvnqzfiPw=";
+  npmDepsHash = "sha256-cdpgmNsc0T2q0Cu1gXo0biMaUTR8VNAIFPkx572TsQ0=";
   npmFlags = [ "--ignore-scripts" ]; # ignore-scripts for ip-set broken preinstall
 
   nativeBuildInputs = [ cmake ];
