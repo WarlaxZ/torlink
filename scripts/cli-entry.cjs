@@ -59,7 +59,7 @@ if (process.env.TORLINK_NO_WEBRTC) {
     if (useWebrtcStub()) {
       process.stderr.write(
         'torlnk: WebRTC peers unavailable (native module not installed); ' +
-          'TCP/UDP peers still work. https://git.bairon.dev/baairon/torlink/issues\n'
+          'TCP/UDP peers still work. https://github.com/baairon/torlink/issues/60\n'
       );
     } else {
       // Node 22.0 to 22.14 has no module.registerHooks, so the eager import
@@ -73,7 +73,7 @@ if (process.env.TORLINK_NO_WEBRTC) {
           '  macOS:   xcode-select --install\n' +
           '  Windows: install CMake and Visual Studio Build Tools\n' +
           'On npm 12, also allow install scripts: npm approve-scripts\n\n' +
-          'https://git.bairon.dev/baairon/torlink/issues\n\n'
+          'https://github.com/baairon/torlink/issues/60\n\n'
       );
       process.exit(1);
     }

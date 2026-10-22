@@ -1,17 +1,17 @@
 # Contributing to torlink
 
-torlink stays small on purpose. The best way in is to read the code you're about to touch, match how it already works, and keep your change tight. Three merged pull requests set the bar, and this guide points to their commits throughout:
+torlink stays small on purpose. The best way in is to read the code you're about to touch, match how it already works, and keep your change tight. Three recent pull requests set the bar, and this guide points back at them throughout:
 
-- [#4](https://git.bairon.dev/baairon/torlink/commit/9069ba5e9ccbd8ed05dbc3378e684016aa6d152d) gave the arrow keys spatial pane navigation without breaking a single existing shortcut.
-- [#5](https://git.bairon.dev/baairon/torlink/commit/9eaa63afc70503545cde1328ee305f233d0b54a3) turned a cryptic crash on old Node into a one-line "upgrade me" message.
-- [#6](https://git.bairon.dev/baairon/torlink/commit/ca3ceda1b7340909f32d0046f58ee797b78f3eb8) added copy-magnet, cross-platform, with tests.
+- [#4](https://github.com/baairon/torlink/pull/4) gave the arrow keys spatial pane navigation without breaking a single existing shortcut.
+- [#5](https://github.com/baairon/torlink/pull/5) turned a cryptic crash on old Node into a one-line "upgrade me" message.
+- [#6](https://github.com/baairon/torlink/pull/6) added copy-magnet, cross-platform, with tests.
 
 None of them were big. All of them fit the grain. That's the whole idea.
 
 ## Set up
 
 ```sh
-git clone https://git.bairon.dev/baairon/torlink.git
+git clone https://github.com/baairon/torlink
 cd torlink
 npm install
 npm run dev

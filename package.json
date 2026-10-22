@@ -48,11 +48,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://git.bairon.dev/baairon/torlink.git"
+    "url": "git+https://github.com/baairon/torlink.git"
   },
   "homepage": "https://torlink.bairon.dev",
   "bugs": {
-    "url": "https://git.bairon.dev/baairon/torlink/issues"
+    "url": "https://github.com/baairon/torlink/issues"
   },
   "publishConfig": {
     "access": "public"

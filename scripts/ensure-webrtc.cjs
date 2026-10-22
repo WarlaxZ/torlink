@@ -50,6 +50,6 @@ try {
   console.error('  macOS:   xcode-select --install');
   console.error('  Windows: install CMake and Visual Studio Build Tools');
   console.error('');
-  console.error('https://git.bairon.dev/baairon/torlink/issues');
+  console.error('https://github.com/baairon/torlink/issues/60');
 }
 process.exit(0);

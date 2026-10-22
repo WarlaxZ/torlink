@@ -88,7 +88,7 @@ Either can carry a `seedTime` for that one torrent, in the same grammar as `--se
 
 To run or work on torlink locally:
 
-1. Clone the [repository](https://git.bairon.dev/baairon/torlink) and open the folder.
+1. Clone the repository and open the folder.
 2. Install dependencies:
    ```sh
    npm install
