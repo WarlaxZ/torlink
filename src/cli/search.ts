@@ -43,6 +43,7 @@ function selectSources(category: OutputCategory): readonly Source[] {
 export async function runSearch(options: {
   query: string;
   category?: SearchCategory;
+  timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<SearchExecution> {
   const category = options.category ?? "all";
@@ -52,6 +53,7 @@ export async function runSearch(options: {
   // session.
   const snapshot = await runConcurrentSearch(options.query, selectSources(category), {
     signal: options.signal,
+    timeoutMs: options.timeoutMs,
     health: new Map(),
   });
 

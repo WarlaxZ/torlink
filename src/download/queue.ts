@@ -68,10 +68,14 @@ export function strayDownload(s: { total: number; progress: number; speed: numbe
 
 const STRAY_TICKS = 2; // consecutive stray polls before flagging missing (~1s)
 
-// How long (ms) to let webtorrent verify on-disk pieces before the stray-download
-// detector starts watching. Verification reads the disk and can briefly report
-// downloadSpeed > 0 / progress < 1, which is indistinguishable from a truly
-// missing file. 10 s covers most single-torrent verifications comfortably.
+// How long (ms) the stray-download detector keeps ignoring a restored seed once
+// webtorrent has checked its on-disk pieces. Nothing is downloaded during the
+// check, but the moment it ends any piece that failed it is fetched from peers,
+// which reads the same as a missing file. The check grows with the torrent: on
+// a 24 GB seed a window counted from add time ran out long before the check
+// did, and the repair that followed got a seed with its data on disk flagged
+// missing. So the clock starts when the check ends (the engine's onReady), and
+// the grace only has to cover that repair.
 const SEED_GRACE_MS = 10_000;
 
 // A magnet with no peers never fires onMetadata or onError, so a metadata-only
@@ -131,7 +135,9 @@ export class DownloadQueue extends EventEmitter {
   private history: HistoryItem[] = [];
   private seeds = new Map<string, SeedItem>();
   private strayHits = new Map<string, number>();
-  private seedStartedAt = new Map<string, number>();
+  // When each seed's grace began; null while webtorrent is still checking a
+  // restored seed's files on disk, before the clock has started.
+  private seedStartedAt = new Map<string, number | null>();
   // Debrid bookkeeping: an abort handle per in-flight debrid download, the
   // current provider + token (kept fresh by the app so a retry can re-run),
   // and the deps used to drive the pipeline (overridable in tests).
@@ -585,6 +591,10 @@ export class DownloadQueue extends EventEmitter {
         this.changed();
         void this.persist();
       },
+      onReady: () => {
+        // A restored seed's on-disk check just finished: start its grace clock.
+        if (this.seedStartedAt.get(id) === null) this.seedStartedAt.set(id, Date.now());
+      },
       onDone: () => {
         const it = this.items.get(id);
         if (it) {
@@ -696,10 +706,11 @@ export class DownloadQueue extends EventEmitter {
       // it a couple of ticks (ignore a one-piece repair blip), then stop it and
       // flag missing, never re-download the whole thing.
       //
-      // Skip seeds still inside the grace period: webtorrent needs time to
-      // hash-verify on-disk pieces, and during that window progress < 1 with
-      // downloadSpeed > 0 is perfectly normal.
-      const age = now - (this.seedStartedAt.get(sd.id) ?? 0);
+      // Skip seeds webtorrent is still checking (a null start) and seeds still
+      // inside the grace after it: until then progress < 1 with downloadSpeed > 0
+      // is perfectly normal.
+      const started = this.seedStartedAt.get(sd.id);
+      const age = started === null ? 0 : now - (started ?? 0);
       if (seedPolicyReached(s.uploaded, sd.sizeBytes, age, this.seedRatio, this.seedMinutes)) {
         this.engine.remove(sd.id);
         this.seedStartedAt.delete(sd.id);
@@ -1071,7 +1082,9 @@ export class DownloadQueue extends EventEmitter {
 
     this.seeds.set(h.id, base);
     this.strayHits.set(h.id, 0);
-    this.seedStartedAt.set(h.id, Date.now());
+    // No clock yet: the grace starts at onReady, after webtorrent has checked the
+    // files on disk, however long a large torrent takes to get through that.
+    this.seedStartedAt.set(h.id, null);
     // Seed from the stored .torrent metadata when we have it (verifies the local
     // file immediately, no swarm needed); fall back to the magnet otherwise.
     const source = torrentMetaExists(h.id) ? torrentMetaPath(h.id) : h.magnet;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cachedSearch } from "../sources/cache";
 import { sourcesByGroup } from "../sources/registry";
 import type { TorrentResult } from "../sources/types";
@@ -29,6 +29,10 @@ function result(
 
 beforeEach(() => {
   searchMock.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("runSearch", () => {
@@ -85,6 +89,28 @@ describe("runSearch", () => {
       count: 0,
       error: "offline",
       code: "no response",
+    });
+  });
+});
+
+describe("runSearch timeout", () => {
+  it("aborts a stalled source at timeoutMs and reports it as a timeout", async () => {
+    searchMock.mockImplementation(async (source, _query, opts) => {
+      if (source.id === "yts") return [result("answered", 5, 100, source.id)];
+      await new Promise<void>((resolve) => {
+        opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("aborted");
+    });
+
+    const execution = await runSearch({ query: "q", category: "movies", timeoutMs: 20 });
+
+    expect(execution.exitCode).toBe(0);
+    expect(execution.document.sources.yts?.ok).toBe(true);
+    expect(execution.document.sources["tpb-movies"]).toMatchObject({
+      ok: false,
+      error: "timed out",
+      code: "timed out",
     });
   });
 });
