@@ -6,7 +6,7 @@
  * wired straight to our seeder via addPeer("127.0.0.1:<port>"), so the ONLY
  * possible source of data is the TorrentEngine under test.
  *
- *   npx tsx scripts/verify-seeding.ts
+ *   pnpm exec tsx scripts/verify-seeding.ts
  */
 import WebTorrent from "webtorrent";
 import { promises as fs } from "node:fs";

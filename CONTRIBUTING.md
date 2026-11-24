@@ -13,19 +13,19 @@ None of them were big. All of them fit the grain. That's the whole idea.
 ```sh
 git clone https://github.com/baairon/torlink
 cd torlink
-npm install
-npm run dev
+pnpm install   # needs pnpm: `corepack enable`, or https://pnpm.io/installation
+pnpm run dev
 ```
 
-`npm run dev` runs the live TUI through tsx, no build step. The README's [Contributing](README.md#contributing) section has the build variant if you want it.
+`pnpm run dev` runs the live TUI through tsx, no build step. The README's [Contributing](README.md#contributing) section has the build variant if you want it.
 
 ## Before you open a PR
 
 Run these and make sure they're clean:
 
 ```sh
-npm run typecheck   # tsc --noEmit, zero errors
-npm test            # vitest, all green
+pnpm run typecheck   # tsc --noEmit, zero errors
+pnpm test            # vitest, all green
 ```
 
 Then check your change against the standards below. The pull request template walks you through the same list.
@@ -56,7 +56,7 @@ When something the user can't control goes wrong, degrade gracefully and say so.
 
 ### Test the logic
 
-Non-trivial logic gets a vitest test. Pure functions are easy, see `src/util/format.test.ts`. For code that shells out or leans on a platform, mock the node built-in, see `src/util/clipboard.test.ts` from #6 mocking `node:child_process`. Run the suite with `npm test`.
+Non-trivial logic gets a vitest test. Pure functions are easy, see `src/util/format.test.ts`. For code that shells out or leans on a platform, mock the node built-in, see `src/util/clipboard.test.ts` from #6 mocking `node:child_process`. Run the suite with `pnpm test`.
 
 ### A feature ships in both front ends
 
@@ -71,8 +71,8 @@ Two reasons genuinely excuse one surface, and they go in the PR body: **configur
 torlink shows one contextual footer plus a `?` cheatsheet, never a wall of commands. Three rules when you add to it:
 
 - A new key means updating both halves of `src/ui/keymap.ts`: `HELP_GROUPS` (the `?` sheet) and `footerHints` (the footer). #6 did both for `y`.
-- A new `Store` field means adding a matching entry to `makeStore` in `scripts/render-previews-impl.tsx`, or `npm run previews` (the README screenshots) breaks. #6's `copyMagnet` sits in there as a noop for exactly this reason.
-- On the browser side there is no jsdom, deliberately. So decisions live in pure modules beside `src/web/static/app.ts` (`searchModel.ts`, `savedModel.ts`, `resultPosters.ts`, …) where a vitest test can reach them, and `app.ts` stays DOM wiring. If you're writing a conditional in `app.ts` that decides *what to show* or *what to send*, it belongs in a pure module. `npm run build` is the only thing that checks `static/` imports no `node:*` — run it.
+- A new `Store` field means adding a matching entry to `makeStore` in `scripts/render-previews-impl.tsx`, or `pnpm run previews` (the README screenshots) breaks. #6's `copyMagnet` sits in there as a noop for exactly this reason.
+- On the browser side there is no jsdom, deliberately. So decisions live in pure modules beside `src/web/static/app.ts` (`searchModel.ts`, `savedModel.ts`, `resultPosters.ts`, …) where a vitest test can reach them, and `app.ts` stays DOM wiring. If you're writing a conditional in `app.ts` that decides *what to show* or *what to send*, it belongs in a pure module. `pnpm run build` is the only thing that checks `static/` imports no `node:*` — run it.
 
 ### Respect the calm theme
 

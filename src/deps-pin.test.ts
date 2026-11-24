@@ -15,20 +15,58 @@ import { arr2hex } from "uint8-util";
 // upstream call site or arr2hex handles strings again.
 const KNOWN_GOOD = "2.2.6";
 
+function readText(rel: string): string {
+  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+}
+
 function readJson(rel: string): Record<string, any> {
-  return JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8"));
+  return JSON.parse(readText(rel));
+}
+
+// The project uses pnpm: overrides live in pnpm-workspace.yaml (pnpm does not
+// read npm's `overrides` field) and the resolved tree is in pnpm-lock.yaml.
+// Both are plain, regular YAML, so the few values these tests need are read
+// with a line match rather than pulling in a YAML dependency just for a test.
+
+/** The `overrides:` block of pnpm-workspace.yaml as name -> range. */
+function readOverrides(): Record<string, string> {
+  const out: Record<string, string> = {};
+  let inBlock = false;
+  for (const line of readText("../pnpm-workspace.yaml").split("\n")) {
+    if (/^overrides:\s*$/.test(line)) {
+      inBlock = true;
+    } else if (inBlock && /^\S/.test(line)) {
+      inBlock = false;
+    } else if (inBlock) {
+      const m = /^\s+["']?([^"':]+?)["']?:\s*["']?([^"'\s]+)["']?\s*$/.exec(line);
+      const [, key, value] = m ?? [];
+      if (key !== undefined && value !== undefined) out[key] = value;
+    }
+  }
+  return out;
+}
+
+/** Every version of `name` that pnpm-lock.yaml resolved, from its `packages:` section. */
+function lockedVersions(name: string): string[] {
+  const lock = readText("../pnpm-lock.yaml");
+  // pnpm-lock.yaml starts with a short document describing the pinned pnpm
+  // itself, so take the LAST `packages:` section, which is the project's.
+  const sections = lock.split(/^packages:\s*$/m);
+  const packages = (sections[sections.length - 1] ?? "").split(/^snapshots:\s*$/m)[0] ?? "";
+  const escaped = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const re = new RegExp(`^  '?${escaped}@([^':\\s]+)'?:\\s*$`, "gm");
+  return [...packages.matchAll(re)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
 }
 
 describe("uint8-util quarantine pin", () => {
-  it("package.json pins the exact version as a dependency and an override", () => {
+  it("package.json pins the exact version as a dependency, and pnpm-workspace.yaml as an override", () => {
     const pkg = readJson("../package.json");
     expect(pkg.dependencies["uint8-util"]).toBe(KNOWN_GOOD);
-    expect(pkg.overrides["uint8-util"]).toBe(KNOWN_GOOD);
+    expect(readOverrides()["uint8-util"]).toBe(KNOWN_GOOD);
   });
 
   it("the lockfile resolved the pinned version", () => {
-    const lock = readJson("../package-lock.json");
-    expect(lock.packages["node_modules/uint8-util"].version).toBe(KNOWN_GOOD);
+    expect(lockedVersions("uint8-util")).toEqual([KNOWN_GOOD]);
   });
 
   it("the resolved arr2hex tolerates webtorrent's string infoHash call", () => {
@@ -63,15 +101,14 @@ function atLeast(version: string, min: string): boolean {
 }
 
 describe("node-datachannel prebuilt binaries", () => {
-  it("package.json overrides the transitive range onto the prebuilt line", () => {
-    const pkg = readJson("../package.json");
-    expect(pkg.overrides["node-datachannel"]).toBe(PREBUILT_LINE);
+  it("pnpm-workspace.yaml overrides the transitive range onto the prebuilt line", () => {
+    expect(readOverrides()["node-datachannel"]).toBe(PREBUILT_LINE);
   });
 
   it("the lockfile resolved a version that ships prebuilt binaries", () => {
-    const lock = readJson("../package-lock.json");
-    const resolved = lock.packages["node_modules/node-datachannel"].version;
-    expect(atLeast(resolved, "0.33.1")).toBe(true);
+    const resolved = lockedVersions("node-datachannel");
+    expect(resolved.length).toBeGreaterThan(0);
+    for (const version of resolved) expect(atLeast(version, "0.33.1")).toBe(true);
   });
 
   it("the installed copy carries no install script and declares platform packages", () => {
@@ -100,23 +137,17 @@ describe("node-datachannel prebuilt binaries", () => {
   // Android binary is the same one either way. Drop this once upstream
   // publishes the missing package.
   it("pins the platform package upstream declares but never published", () => {
-    const pkg = readJson("../package.json");
-    expect(pkg.overrides["@node-datachannel/android-arm64"]).toBe(ANDROID_PUBLISHED);
-    const lock = readJson("../package-lock.json");
-    expect(lock.packages["node_modules/@node-datachannel/android-arm64"].version).toBe(
-      ANDROID_PUBLISHED,
-    );
+    expect(readOverrides()["@node-datachannel/android-arm64"]).toBe(ANDROID_PUBLISHED);
+    expect(lockedVersions("@node-datachannel/android-arm64")).toEqual([ANDROID_PUBLISHED]);
   });
 
   it("the lockfile carries every platform package the module declares", () => {
     const declared = Object.keys(
       readJson("../node_modules/node-datachannel/package.json").optionalDependencies ?? {},
     );
-    const lock = readJson("../package-lock.json");
     expect(declared.length).toBeGreaterThan(0);
     for (const name of declared) {
-      expect(lock.packages[`node_modules/${name}`], `${name} missing from the lockfile`)
-        .toBeDefined();
+      expect(lockedVersions(name), `${name} missing from the lockfile`).not.toHaveLength(0);
     }
   });
 });

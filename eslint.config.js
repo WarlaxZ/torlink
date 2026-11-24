@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
-// Flat config (ESLint 9+). Kept deliberately lean so `npm run lint` stays green
+// Flat config (ESLint 9+). Kept deliberately lean so `pnpm run lint` stays green
 // on the existing tree and is worth running: the recommended TS rules plus the
 // two classic React Hooks rules the codebase already annotates against. We do
 // not pull in eslint-plugin-react-hooks' newer React-Compiler rule set (via its

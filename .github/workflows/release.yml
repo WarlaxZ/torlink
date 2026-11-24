@@ -35,13 +35,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npm prune --omit=dev
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm prune --prod
       - name: Package self-contained runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -103,14 +104,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-          cache: npm
+          cache: pnpm
       # Trusted publishing needs npm >= 11.5.1; Node 22's bundled npm is older.
+      # npm still does the publishing; pnpm only installs the dependencies.
       - run: npm install -g npm@latest
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       # `prepublishOnly` builds dist/; publishConfig sets public access; OIDC
       # supplies auth and provenance — no NODE_AUTH_TOKEN needed.
       - run: npm publish

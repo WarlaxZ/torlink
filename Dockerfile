@@ -20,7 +20,7 @@ FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Build tools only in this stage: needed if npm cannot find a node-datachannel
+# Build tools only in this stage: needed if no node-datachannel
 # prebuild for this platform. They add ~250 MB, which is exactly why the runtime
 # stage below starts from a fresh base rather than inheriting this one.
 RUN apt-get update \
@@ -29,16 +29,17 @@ RUN apt-get update \
 
 # package.json and the lockfile first, so a source-only change does not
 # invalidate the dependency layer.
-COPY package.json package-lock.json ./
-# ensure-webrtc.cjs runs as `postinstall`, so it has to be present for `npm ci`.
+RUN npm install -g pnpm@12.4.1
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# ensure-webrtc.cjs runs as `postinstall`, so it has to be present for `pnpm install`.
 COPY scripts/ensure-webrtc.cjs ./scripts/ensure-webrtc.cjs
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build \
+RUN pnpm run build \
   # Drop devDependencies from the tree that the runtime stage copies. `prune`
   # does not re-run install scripts, so the native module built above survives.
-  && npm prune --omit=dev
+  && pnpm prune --prod
 
 FROM node:22-bookworm-slim AS runtime
 
