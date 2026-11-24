@@ -1,0 +1,21 @@
+# Flat node_modules (not pnpm's default symlinked layout): the release workflow
+# copies node_modules into the standalone torlnk-runtime bundles, and symlinks
+# do not survive that. Packages are still hardlinked from pnpm's shared store.
+nodeLinker: hoisted
+
+# Same pins as the old `overrides` block in package.json (npm's field; pnpm
+# reads these from here).
+overrides:
+  "@node-datachannel/android-arm64": 0.33.0
+  node-datachannel: ^0.33.1
+  uint8-util: 2.2.6
+
+# npm ran every dependency install script. Keep that: the WebRTC fallback is a
+# shipped code path (see ci.yml), and pnpm would otherwise skip them silently.
+allowBuilds:
+  bufferutil: true
+  esbuild: true
+  ip-set: true
+  node-datachannel: true
+  utf-8-validate: true
+  utp-native: true

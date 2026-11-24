@@ -30,22 +30,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Installs the pnpm version pinned by `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
+          cache: pnpm
 
       # Install scripts stay enabled on purpose: the postinstall WebRTC
       # fallback is itself a shipped code path, and a package-manager change
-      # to how install scripts run is what broke installs in v1.4.1.
-      - run: npm ci
+      # to how install scripts run (pnpm-workspace.yaml `allowBuilds` lists the ones that run) is what broke installs in v1.4.1.
+      - run: pnpm install --frozen-lockfile
 
-      - run: npm run typecheck
+      - run: pnpm run typecheck
 
-      - run: npm run lint
+      - run: pnpm run lint
 
-      - run: npm test
+      - run: pnpm test
 
       # Builds what `npm publish` would build, so a broken publish path is
       # caught here rather than at release time.
-      - run: npm run build
+      - run: pnpm run build

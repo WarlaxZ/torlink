@@ -1058,7 +1058,7 @@ Prefer an environment variable? Set `TORLINK_DNS` before launching (it takes pre
 setting):
 
 ```sh
-TORLINK_DNS=cloudflare npm start
+TORLINK_DNS=cloudflare pnpm start
 ```
 
 ### Running without the TUI
@@ -1213,24 +1213,24 @@ that were actually available.
 To run or work on torlink locally, with [Node 22+](https://nodejs.org):
 
 1. Clone the repository and open the folder.
-2. Install dependencies:
+2. Install dependencies with [pnpm](https://pnpm.io/installation) (`corepack enable` is the quickest way; the version is pinned in `package.json`):
    ```sh
-   npm install
+   pnpm install
    ```
 3. Run the development version:
    ```sh
-   npm run dev
+   pnpm run dev
    ```
    Or build it and run the bundled version:
    ```sh
-   npm run build
-   npm start
+   pnpm run build
+   pnpm start
    ```
 
 **Working on the web UI:** the dashboard is served from `dist/web`, **not** `src`. Edit anything under
 `src/web/static/`, reload, and you'll get silently stale assets — it reads exactly like a browser cache
-bug, so it's easy to lose twenty minutes in devtools before suspecting the build. Rerun `npm run build`
-after any change there. `npm run dev` only re-executes the server's TypeScript; it does not rebuild the
+bug, so it's easy to lose twenty minutes in devtools before suspecting the build. Rerun `pnpm run build`
+after any change there. `pnpm run dev` only re-executes the server's TypeScript; it does not rebuild the
 browser bundle.
 
 Before opening a PR, skim [CONTRIBUTING.md](CONTRIBUTING.md); it lays out the bar with examples from real

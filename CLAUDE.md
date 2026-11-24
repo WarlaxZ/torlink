@@ -35,7 +35,7 @@ reason. Two reasons that actually qualify:
 | Where | `src/ui/` | `src/web/` (server) + `src/web/static/` (bundle) |
 | A new list/pane | a `Section` + `Sidebar.tsx` nav entry + a component | a nav tab or pane section in `index.html` + wiring in `static/app.ts` |
 | A new key | **both** halves of `src/ui/keymap.ts` — `HELP_GROUPS` and `footerHints` | n/a — buttons, not keys |
-| A new `Store` field | matching entry in **two** places — `makeStore` (`scripts/render-previews-impl.tsx`), or `npm run previews` breaks, *and* `makeTestStore` (`src/ui/testHarness.ts`), or `npm run typecheck` breaks | n/a |
+| A new `Store` field | matching entry in **two** places — `makeStore` (`scripts/render-previews-impl.tsx`), or `pnpm run previews` breaks, *and* `makeTestStore` (`src/ui/testHarness.ts`), or `pnpm run typecheck` breaks | n/a |
 | Reaching data | direct — same process | a route in `src/web/routes.ts` + a type in `src/web/wire.ts` |
 | Docs | `README.md` — and check the web UI's own limitations list is still true | same |
 
@@ -57,8 +57,8 @@ Nothing in `src/web/static/app.ts` is reachable by a unit test. So:
   `dashboard.ts`, `streamFlow.ts`, `previewModel.ts`. Those get real tests.
 - **`app.ts` is DOM wiring only.** If you are writing a conditional in `app.ts` that decides *what to
   show* or *what to send*, it belongs in a pure module. This has been caught in review twice.
-- Wiring is verified by actually running it: `npm run dev -- serve --web`.
-- `npm run build` is the only check that `src/web/static/` imports no `node:*` — run it.
+- Wiring is verified by actually running it: `pnpm run dev serve --web`.
+- `pnpm run build` is the only check that `src/web/static/` imports no `node:*` — run it.
 
 ### Two rules that are load-bearing, not stylistic
 
@@ -141,7 +141,7 @@ travel to a fresh clone or to CI. In a fresh clone, check `git remote -v` before
 
 ## Before you say it's done
 
-`npm test`, `npm run typecheck`, `npm run lint`, `npm run build`. There is one known pre-existing
+`pnpm test`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run build`. There is one known pre-existing
 lint warning (`react-hooks/exhaustive-deps`, `src/ui/App.tsx`) — leave it; it predates this file.
 
 `CONTRIBUTING.md` carries the rest of the house style (fail soft, cross-platform, the calm theme,

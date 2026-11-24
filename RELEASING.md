@@ -36,15 +36,11 @@ That's done; you shouldn't need a manual publish again.
 
 ## Cutting a release
 
-1. **Bump the version.** Edit `version` in `package.json`, then sync the lockfile
-   so its `name`/`version` match (CI runs `npm ci`, which fails on a mismatch):
-
-   ```sh
-   npm install --package-lock-only
-   ```
+1. **Bump the version.** Edit `version` in `package.json`. There is no lockfile to
+   sync: `pnpm-lock.yaml` does not record the package's own name or version.
 
 2. **PR the bump** (`main` is protected). Use a `chore:` title, e.g.
-   `chore: bump version to 1.6.1`. Keep it to `package.json` + `package-lock.json`
+   `chore: bump version to 1.6.1`. Keep it to `package.json`
    unless the release also carries changelog/docs.
 
 3. **Merge** once CI (`ci.yml`: typecheck + test + lint) is green.
@@ -86,9 +82,10 @@ The tag is the single source of truth, which keeps every install path in step:
 - **`bin` path has no leading `./`.** npm 11 rejects `"./dist/cli.cjs"` and
   silently strips the entry, shipping a package with no `torlnk` command. Keep it
   `"dist/cli.cjs"`.
-- **Keep `package-lock.json` in sync** with `package.json`'s `name` and `version`.
-  A stale lock name breaks `npm ci` in the `publish-npm` job. `npm install
-  --package-lock-only` after any rename or bump.
+- **The lockfile is `pnpm-lock.yaml`.** CI and the release jobs run `pnpm install
+  --frozen-lockfile`, so after changing dependencies (or `overrides` in
+  `pnpm-workspace.yaml`) run `pnpm install` and commit the result. `npm publish`
+  itself still runs on npm, for Trusted Publishing.
 - **The npm name is constrained.** Don't rename to a bare word close to a popular
   package — npm's spam filter blocks it at publish time. Scoped (`@user/x`) or a
   distinctive unscoped name (like `torlnk-rd`) avoids it.
